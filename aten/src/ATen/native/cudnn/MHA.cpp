@@ -114,6 +114,36 @@ void run_cudnn_SDP_fp8_fprop(
       false, "PyTorch was not compiled with cuDNN FP8 Attention enabled!");
 }
 
+void run_cudnn_SDP_fp8_bprop(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float scale_s,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    const Tensor& descale_o,
+    const Tensor& descale_s,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV) {
+  TORCH_CHECK(
+      false, "PyTorch was not compiled with cuDNN FP8 Attention enabled!");
+}
+
 void run_cudnn_SDP_bprop_nestedtensor(
     int64_t b,
     int64_t h_q,
@@ -459,6 +489,19 @@ enum UIDS {
   FP8_SCALE_O,
   FP8_AMAX_S,
   FP8_AMAX_O,
+  // FP8 backward UIDs
+  FP8_DESCALE_O,
+  FP8_DESCALE_DO,
+  FP8_DESCALE_DP,
+  FP8_SCALE_DQ,
+  FP8_SCALE_DK,
+  FP8_SCALE_DV,
+  FP8_SCALE_DP,
+  FP8_AMAX_DQ,
+  FP8_AMAX_DK,
+  FP8_AMAX_DV,
+  FP8_AMAX_DP,
+  FP8_DO,
   FP8_STATS
 };
 
@@ -2055,6 +2098,217 @@ std::unique_ptr<fe::graph::Graph> build_graph_fp8(
   return mha_graph;
 }
 
+std::unique_ptr<fe::graph::Graph> build_graph_fp8_backward(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    const Tensor& dQ,
+    const Tensor& dK,
+    const Tensor& dV,
+    cudnnHandle_t& handle) {
+  auto mha_graph = std::make_unique<fe::graph::Graph>();
+  mha_graph->set_io_data_type(fe::DataType_t::FP8_E4M3)
+      .set_intermediate_data_type(fe::DataType_t::FLOAT)
+      .set_compute_data_type(fe::DataType_t::FLOAT);
+
+  auto Q_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_uid(Q)
+                                  .set_name("Q")
+                                  .set_dim(q.sizes().vec())
+                                  .set_stride(q.strides().vec()));
+  auto K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_uid(K)
+                                  .set_name("K")
+                                  .set_dim(k.sizes().vec())
+                                  .set_stride(k.strides().vec()));
+  auto V_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_uid(V)
+                                  .set_name("V")
+                                  .set_dim(v.sizes().vec())
+                                  .set_stride(v.strides().vec()));
+  auto O_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                  .set_uid(O)
+                                  .set_name("O")
+                                  .set_dim(o.sizes().vec())
+                                  .set_stride(o.strides().vec()));
+  auto DO_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                   .set_uid(FP8_DO)
+                                   .set_name("dO")
+                                   .set_dim(dO.sizes().vec())
+                                   .set_stride(dO.strides().vec()));
+  auto Stats_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_uid(FP8_STATS)
+                                      .set_name("Stats")
+                                      .set_dim(softmaxstats.sizes().vec())
+                                      .set_stride(softmaxstats.strides().vec())
+                                      .set_data_type(fe::DataType_t::FLOAT));
+
+  auto scalar_dim = std::vector<int64_t>({1, 1, 1, 1});
+  auto scalar_stride = std::vector<int64_t>({1, 1, 1, 1});
+
+  auto descale_q_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_Q)
+                            .set_name("Descale_Q")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_k_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_K)
+                            .set_name("Descale_K")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_v_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_V)
+                            .set_name("Descale_V")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_o_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_O)
+                            .set_name("Descale_O")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_do_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_DO)
+                            .set_name("Descale_dO")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_s_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_S)
+                            .set_name("Descale_S")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto descale_dp_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(FP8_DESCALE_DP)
+                            .set_name("Descale_dP")
+                            .set_dim(scalar_dim)
+                            .set_stride(scalar_stride)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto scale_s_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                        .set_uid(FP8_SCALE_S)
+                                        .set_name("Scale_S")
+                                        .set_dim(scalar_dim)
+                                        .set_stride(scalar_stride)
+                                        .set_data_type(fe::DataType_t::FLOAT));
+  auto scale_dq_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                         .set_uid(FP8_SCALE_DQ)
+                                         .set_name("Scale_dQ")
+                                         .set_dim(scalar_dim)
+                                         .set_stride(scalar_stride)
+                                         .set_data_type(fe::DataType_t::FLOAT));
+  auto scale_dk_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                         .set_uid(FP8_SCALE_DK)
+                                         .set_name("Scale_dK")
+                                         .set_dim(scalar_dim)
+                                         .set_stride(scalar_stride)
+                                         .set_data_type(fe::DataType_t::FLOAT));
+  auto scale_dv_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                         .set_uid(FP8_SCALE_DV)
+                                         .set_name("Scale_dV")
+                                         .set_dim(scalar_dim)
+                                         .set_stride(scalar_stride)
+                                         .set_data_type(fe::DataType_t::FLOAT));
+  auto scale_dp_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                         .set_uid(FP8_SCALE_DP)
+                                         .set_name("Scale_dP")
+                                         .set_dim(scalar_dim)
+                                         .set_stride(scalar_stride)
+                                         .set_data_type(fe::DataType_t::FLOAT));
+
+  auto sdpa_fp8_backward_options = fe::graph::SDPA_fp8_backward_attributes()
+                                       .set_name("CUDNN_SDPA_FP8_BACKWARD")
+                                       .set_causal_mask(is_causal)
+                                       .set_attn_scale(scaling_factor);
+
+  auto [Dq, Dk, Dv, Amax_dQ, Amax_dK, Amax_dV, Amax_dP] =
+      mha_graph->sdpa_fp8_backward(
+          Q_,
+          K_,
+          V_,
+          O_,
+          DO_,
+          Stats_,
+          descale_q_,
+          descale_k_,
+          descale_v_,
+          descale_o_,
+          descale_do_,
+          descale_s_,
+          descale_dp_,
+          scale_s_,
+          scale_dq_,
+          scale_dk_,
+          scale_dv_,
+          scale_dp_,
+          sdpa_fp8_backward_options);
+
+  Dq->set_uid(DQ)
+      .set_output(true)
+      .set_dim(dQ.sizes().vec())
+      .set_stride(dQ.strides().vec());
+  Dk->set_uid(DK)
+      .set_output(true)
+      .set_dim(dK.sizes().vec())
+      .set_stride(dK.strides().vec());
+  Dv->set_uid(DV)
+      .set_output(true)
+      .set_dim(dV.sizes().vec())
+      .set_stride(dV.strides().vec());
+  Amax_dQ->set_uid(FP8_AMAX_DQ)
+      .set_output(true)
+      .set_dim(scalar_dim)
+      .set_stride(scalar_stride)
+      .set_data_type(fe::DataType_t::FLOAT);
+  Amax_dK->set_uid(FP8_AMAX_DK)
+      .set_output(true)
+      .set_dim(scalar_dim)
+      .set_stride(scalar_stride)
+      .set_data_type(fe::DataType_t::FLOAT);
+  Amax_dV->set_uid(FP8_AMAX_DV)
+      .set_output(true)
+      .set_dim(scalar_dim)
+      .set_stride(scalar_stride)
+      .set_data_type(fe::DataType_t::FLOAT);
+  Amax_dP->set_uid(FP8_AMAX_DP)
+      .set_output(true)
+      .set_dim(scalar_dim)
+      .set_stride(scalar_stride)
+      .set_data_type(fe::DataType_t::FLOAT);
+
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+  AT_CUDNN_FRONTEND_CHECK(
+      mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
+
+  return mha_graph;
+}
+
 void run_cudnn_SDP_fp8_fprop(
     int64_t b,
     int64_t h_q,
@@ -2154,6 +2408,131 @@ void run_cudnn_SDP_fp8_fprop(
       mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
+void run_cudnn_SDP_fp8_bprop(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float scale_s,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    const Tensor& descale_o,
+    const Tensor& descale_s,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV) {
+  if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel()) {
+    return;
+  }
+
+  // All backward-specific scales are 1.0 since we dequantize to bf16 externally
+  float one = 1.0f;
+  auto ones_tensor = at::full({1, 1, 1, 1}, one, q.options().dtype(kFloat));
+  auto scale_s_tensor =
+      at::full({1, 1, 1, 1}, scale_s, q.options().dtype(kFloat));
+
+  // Amax outputs (required by cuDNN but unused)
+  auto amax_dq = at::empty({1, 1, 1, 1}, q.options().dtype(kFloat));
+  auto amax_dk = at::empty({1, 1, 1, 1}, q.options().dtype(kFloat));
+  auto amax_dv = at::empty({1, 1, 1, 1}, q.options().dtype(kFloat));
+  auto amax_dp = at::empty({1, 1, 1, 1}, q.options().dtype(kFloat));
+
+  // Descale_dO = 1.0, Descale_dP = 1.0 (since we use Scale=1.0 for these)
+  // Scale_dQ/dK/dV/dP = 1.0 (output directly in FP8 natural range, cast to bf16
+  // after)
+
+  cudnnHandle_t handle = getCudnnHandle();
+
+  MHACacheKeyWrapper key(
+      b,
+      h_q,
+      s_q,
+      s_kv,
+      d_qk,
+      d_v,
+      q,
+      k,
+      v,
+      std::nullopt,
+      0.0,
+      is_causal,
+      true,
+      false);
+  auto& cache = getMHAGraphBackwardCache_();
+  auto [cache_it, not_found] = cache.try_emplace(key, nullptr);
+  if (not_found) {
+    cache_it->second = build_graph_fp8_backward(
+        b,
+        h_q,
+        h_k,
+        h_v,
+        s_q,
+        s_kv,
+        d_qk,
+        d_v,
+        scaling_factor,
+        is_causal,
+        q,
+        k,
+        v,
+        o,
+        dO,
+        softmaxstats,
+        dQ,
+        dK,
+        dV,
+        handle);
+  }
+  const fe::graph::Graph& mha_graph = *cache_it->second;
+
+  std::unordered_map<int64_t, void*> variant_pack = {
+      {Q, q.mutable_data_ptr()},
+      {K, k.mutable_data_ptr()},
+      {V, v.mutable_data_ptr()},
+      {O, o.mutable_data_ptr()},
+      {FP8_DO, dO.mutable_data_ptr()},
+      {FP8_STATS, softmaxstats.mutable_data_ptr()},
+      {FP8_DESCALE_Q, descale_q.mutable_data_ptr()},
+      {FP8_DESCALE_K, descale_k.mutable_data_ptr()},
+      {FP8_DESCALE_V, descale_v.mutable_data_ptr()},
+      {FP8_DESCALE_O, descale_o.mutable_data_ptr()},
+      {FP8_DESCALE_DO, ones_tensor.mutable_data_ptr()},
+      {FP8_DESCALE_S, descale_s.mutable_data_ptr()},
+      {FP8_DESCALE_DP, ones_tensor.mutable_data_ptr()},
+      {FP8_SCALE_S, scale_s_tensor.mutable_data_ptr()},
+      {FP8_SCALE_DQ, ones_tensor.mutable_data_ptr()},
+      {FP8_SCALE_DK, ones_tensor.mutable_data_ptr()},
+      {FP8_SCALE_DV, ones_tensor.mutable_data_ptr()},
+      {FP8_SCALE_DP, ones_tensor.mutable_data_ptr()},
+      {DQ, dQ.mutable_data_ptr()},
+      {DK, dK.mutable_data_ptr()},
+      {DV, dV.mutable_data_ptr()},
+      {FP8_AMAX_DQ, amax_dq.mutable_data_ptr()},
+      {FP8_AMAX_DK, amax_dk.mutable_data_ptr()},
+      {FP8_AMAX_DV, amax_dv.mutable_data_ptr()},
+      {FP8_AMAX_DP, amax_dp.mutable_data_ptr()}};
+
+  auto workspace_size = mha_graph.get_workspace_size();
+  auto workspace_ptr =
+      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  TORCH_CHECK(!workspace_size || workspace_ptr.get());
+  TORCH_CHECK(
+      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+}
+
 #else // CUDNN_FRONTEND_VERSION < 12200
 
 void run_cudnn_SDP_fp8_fprop(
@@ -2178,6 +2557,38 @@ void run_cudnn_SDP_fp8_fprop(
     Tensor& softmaxstats,
     Tensor& amax_s,
     Tensor& amax_o) {
+  TORCH_CHECK(
+      false,
+      "cuDNN FP8 Attention requires cuDNN Frontend v1.22.0 or later. "
+      "Please update the cudnn_frontend submodule.");
+}
+
+void run_cudnn_SDP_fp8_bprop(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float scale_s,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    const Tensor& descale_o,
+    const Tensor& descale_s,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV) {
   TORCH_CHECK(
       false,
       "cuDNN FP8 Attention requires cuDNN Frontend v1.22.0 or later. "

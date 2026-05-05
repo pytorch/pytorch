@@ -34,6 +34,8 @@
 #include <ATen/ops/_flash_attention_backward_native.h>
 #include <ATen/ops/_efficient_attention_backward.h>
 #include <ATen/ops/_efficient_attention_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention_backward_quantized_per_tensor_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #endif
 
@@ -1220,6 +1222,74 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
             dropout_p,
             is_causal,
             scale);
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+_scaled_dot_product_cudnn_attention_backward_quantized_per_tensor_cuda(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& fp8_o,
+    const Tensor& softmax_stats,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    const Tensor& descale_o,
+    const Tensor& descale_s,
+    double scale_s,
+    bool is_causal,
+    std::optional<double> scale) {
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads_q = query.size(1);
+  const int64_t num_heads_k = key.size(1);
+  const int64_t num_heads_v = value.size(1);
+  const int64_t max_seqlen_q = query.size(2);
+  const int64_t max_seqlen_kv = key.size(2);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+
+  float softmax_scale = static_cast<float>(
+      sdp::calculate_scale(query, scale).as_float_unchecked());
+
+  // Quantize grad_out (bf16) to FP8 for cuDNN backward (Scale_dO = 1.0)
+  auto fp8_dO = grad_out.to(kFloat8_e4m3fn);
+
+  // Allocate FP8 gradient outputs
+  auto dQ = at::empty_like(query);
+  auto dK = at::empty_like(key);
+  auto dV = at::empty_like(value);
+
+  run_cudnn_SDP_fp8_bprop(
+      batch_size,
+      num_heads_q,
+      num_heads_k,
+      num_heads_v,
+      max_seqlen_q,
+      max_seqlen_kv,
+      head_dim_qk,
+      head_dim_v,
+      softmax_scale,
+      is_causal,
+      static_cast<float>(scale_s),
+      query,
+      key,
+      value,
+      fp8_o,
+      fp8_dO,
+      softmax_stats,
+      descale_q,
+      descale_k,
+      descale_v,
+      descale_o,
+      descale_s,
+      dQ,
+      dK,
+      dV);
+
+  // cuDNN produces FP8 gradients (Scale_dX = 1.0). Autograd will match
+  // them to the input dtype (also FP8), so return directly — no cast needed.
+  return std::make_tuple(std::move(dQ), std::move(dK), std::move(dV));
 }
 
 } // namespace at::native

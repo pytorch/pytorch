@@ -120,4 +120,31 @@ void run_cudnn_SDP_fp8_fprop(
     Tensor& amax_s,
     Tensor& amax_o);
 
+void run_cudnn_SDP_fp8_bprop(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float scale_s,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    const Tensor& descale_q,
+    const Tensor& descale_k,
+    const Tensor& descale_v,
+    const Tensor& descale_o,
+    const Tensor& descale_s,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV);
+
 } // namespace at::native
