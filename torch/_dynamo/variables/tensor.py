@@ -755,7 +755,6 @@ class TensorVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # Tensor.__getitem__ is a custom C slot, not CPython's mp_subscript.
-        # TODO(follow-up): add tests for negative index, bool index, invalid key type
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
@@ -1353,11 +1352,12 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
-            provided_vars = (
-                inputs.items
-                if isinstance(inputs, variables.BaseListVariable)
-                else [inputs]
-            )
+            if isinstance(inputs, variables.BaseListVariable):
+                provided_vars = inputs.items
+            elif isinstance(inputs, variables.ConstDictVariable):
+                provided_vars = list(inputs.items.values())
+            else:
+                provided_vars = [inputs]
             input_vars = self._collect_backward_inputs(
                 provided_vars, error_on_non_leaf=True
             )
