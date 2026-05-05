@@ -13932,6 +13932,19 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.autograd.grad(b, a)
 
+    def test_grad_unused_input_error_message(self, device):
+        for unused_idx in [0, 1]:
+            x = torch.randn(10, requires_grad=True, device=device)
+            y = torch.randn(10, requires_grad=True, device=device)
+            inputs = (x, y)
+
+            # If unused_idx is 0, use inputs[1]. If unused_idx is 1, use inputs[0].
+            out = inputs[1 - unused_idx].sum()
+
+            expected_msg = f"The differentiated Tensor at index {unused_idx} appears"
+            with self.assertRaisesRegex(RuntimeError, expected_msg):
+                torch.autograd.grad(out, inputs)
+
     def test_pow_real_negative_base_complex_exponent(self, device):
         # OpInfo doesn't naturally support input of mixed types, hence this test here.
         base = -torch.ones(2, device=device, dtype=torch.double)
