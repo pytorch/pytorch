@@ -903,7 +903,12 @@ def tuned_scaled_mm_v2(
     layout=None,
 ):
     """
-    Updated API
+    Performs an optimized matrix multiplication where scaling factors are
+    applied to the inputs per the supplied recipes, and optionally swizzled.
+
+    This is the _scaled_mm_v2 API, which takes scale recipes (ScalingType) and
+    swizzle patterns alongside the scale tensors, and supports multi-level
+    scaling via lists.
     """
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
@@ -953,7 +958,7 @@ def tuned_scaled_mm_v2(
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
@@ -973,8 +978,6 @@ def tuned_scaled_mm_v2(
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
-
-        scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
 
         # Note: No NVFP4 support at this point - can ignore swizzling, and take only the
         #       first scale types passed.
