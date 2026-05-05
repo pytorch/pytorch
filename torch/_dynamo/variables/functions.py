@@ -29,6 +29,7 @@ import inspect
 import itertools
 import logging
 import os
+import re
 import sys
 import traceback
 import types
@@ -297,7 +298,7 @@ def init_cellvars(
 ) -> None:
     """
     Update `result` to add mapping from local name to new cells created
-    directly by `code`, or update SideEffects in `parent` if the a local cell is
+    directly by `code`, or update SideEffects in `parent` if a local cell is
     already in `result` (cell argument).
     """
     side_effects = parent.output.side_effects
@@ -331,7 +332,10 @@ def _create_nested_fn(
         annotations = dict(pairwise(annotations))
 
     # TypeError: __annotations__ must be set to a dict object
-    assert annotations is None or isinstance(annotations, dict)
+    if not (annotations is None or isinstance(annotations, dict)):
+        raise AssertionError(
+            f"annotations must be None or a dict, got {type(annotations)}"
+        )
     func.__annotations__ = annotations  # type: ignore[assignment]
 
     return func
@@ -617,7 +621,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
         this function, create new bindings for initial locals.
         """
-        assert not self.is_constant
+        if self.is_constant:
+            raise AssertionError(
+                "bind_args should not be called on a constant function"
+            )
 
         fn: types.FunctionType = self.fn
 
@@ -630,7 +637,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
-        assert len(closure) == len(self.fn.__code__.co_freevars)
+        if len(closure) != len(self.fn.__code__.co_freevars):
+            raise AssertionError(
+                f"closure length {len(closure)} does not match "
+                f"co_freevars length {len(self.fn.__code__.co_freevars)}"
+            )
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
@@ -714,7 +725,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 error_on_graph_break = bound.arguments[
                     "error_on_graph_break"
                 ].as_python_constant()
-                assert isinstance(error_on_graph_break, bool)
+                if not isinstance(error_on_graph_break, bool):
+                    raise AssertionError(
+                        f"error_on_graph_break must be a bool, got {type(error_on_graph_break)}"
+                    )
                 return variables.ErrorOnGraphBreakVariable(error_on_graph_break)
             except Exception as e:
                 raise RuntimeError(
@@ -1065,7 +1079,8 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self, fn: types.BuiltinMethodType, is_constant: bool = False, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(fn, types.BuiltinMethodType)
+        if not isinstance(fn, types.BuiltinMethodType):
+            raise AssertionError(f"expected BuiltinMethodType, got {type(fn)}")
         self.fn = fn
 
     def python_type(self) -> type:
@@ -1158,7 +1173,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -1220,7 +1236,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> None:
         while True:
             try:
-                fn(self.next_variable(tx))
+                fn(self.tp_iternext_impl(tx))
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
@@ -1234,7 +1250,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> None:
         tracer = self.inline_tracer
         try:
-            tracer._raise_exception_variable(exc)
+            tracer._raise_exception_variable(exc, set_context=True)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -1253,9 +1269,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__next__":
-            return self.next_variable(tx)
-        elif name == "send":
+        if name == "send":
             # Sends a value into the generator function. Returns the next value
             # yielded by the generator, or raises StopIteration if the generator
             # exits without yielding another value
@@ -1266,7 +1280,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     raise_observed_exception(TypeError, tx)
             tracer = self.inline_tracer
             tracer.push_many(args)
-            return self.next_variable(tx)
+            return self.tp_iternext_impl(tx)
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
             # * If the generator function catches the exception and returns a
@@ -1321,7 +1335,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 # Raise RuntimeError if the generator yields any other value
-                if self.next_variable(tx):
+                if self.tp_iternext_impl(tx):
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
@@ -1331,7 +1345,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # See test_generator.py::test_close_capture_GeneratorExit_return
                 # https://discuss.python.org/t/let-generator-close-return-stopiteration-value/24786/26
                 # https://github.com/python/cpython/pull/104771
-                assert tracer.symbolic_result is not None
+                if tracer.symbolic_result is None:
+                    raise AssertionError(
+                        "expected symbolic_result to be set after StopIteration"
+                    ) from None
                 return tracer.symbolic_result
         elif name == "throw":
             # * Raises an exception at the point where the generator was paused, and
@@ -1352,7 +1369,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.next_variable(tx)
+            retval = self.tp_iternext_impl(tx)
 
             # The exception raised before is still active. We need to check the exception
             # table one more time to find the next target. But why? Let's walk
@@ -1555,10 +1572,13 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         # config.enable_trace_contextlib = True. In case the former is false,
         # Dynamo should still be able to trace through @contextmanager functions
         tracer = super()._build_inline_tracer(tx, args, kwargs)
-        assert isinstance(
+        if not isinstance(
             tracer,
             torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        )
+        ):
+            raise AssertionError(
+                f"expected InliningGeneratorInstructionTranslator, got {type(tracer)}"
+            )
         tracer.is_generator_from_ctx_manager = True
         return tracer
 
@@ -1815,9 +1835,16 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if kwargs.get("mutation_type") is None:
             kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
-        assert isinstance(fn_name.as_python_constant(), str)
-        assert isinstance(code.as_python_constant(), types.CodeType)
-        assert isinstance(f_globals, dict)
+        if not isinstance(fn_name.as_python_constant(), str):
+            raise AssertionError(
+                f"fn_name must be a str, got {type(fn_name.as_python_constant())}"
+            )
+        if not isinstance(code.as_python_constant(), types.CodeType):
+            raise AssertionError(
+                f"code must be a CodeType, got {type(code.as_python_constant())}"
+            )
+        if not isinstance(f_globals, dict):
+            raise AssertionError(f"f_globals must be a dict, got {type(f_globals)}")
         self.fn_name = fn_name
         self.code = code
         self.f_globals = f_globals
@@ -1919,7 +1946,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 annotations = dict(pairwise(annotations))
 
             # TypeError: __annotations__ must be set to a dict object
-            assert isinstance(annotations, dict)
+            if not isinstance(annotations, dict):
+                raise AssertionError(
+                    f"annotations must be a dict, got {type(annotations)}"
+                )
             func.__annotations__ = annotations
         return func
 
@@ -1999,7 +2029,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert name not in result
+            if name in result:
+                raise AssertionError(f"free variable {name!r} already in result")
             cell = self.closure.items[idx]  # type: ignore[attr-defined, union-attr]
             result[name] = cell
 
@@ -2112,6 +2143,19 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
+RE_CONSTANT_FOLD_FNS = {
+    re.search,
+    re.match,
+    re.fullmatch,
+    re.compile,
+    re.sub,
+    re.subn,
+    re.split,
+    re.findall,
+    re.escape,
+}
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -2179,6 +2223,17 @@ class SkipFunctionVariable(VariableTracker):
             return VariableTracker.build(
                 tx, self.value(*(a.as_python_constant() for a in args))
             )
+
+        if (
+            self.value in RE_CONSTANT_FOLD_FNS
+            and all(a.is_python_constant() for a in args)
+            and all(v.is_python_constant() for v in kwargs.values())
+        ):
+            result = self.value(
+                *(a.as_python_constant() for a in args),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            return VariableTracker.build(tx, result)
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
@@ -2533,8 +2588,10 @@ def _traceable_collective_remaps() -> dict[Any, Any]:
 def _traceable_collectives_source(
     tx: "InstructionTranslator", fn: Callable[..., Any]
 ) -> AttrSource:
-    assert torch.distributed.is_available(), "Illegal invocation."
-    assert fn in _traceable_collective_remaps().values()
+    if not torch.distributed.is_available():
+        raise AssertionError("Illegal invocation.")
+    if fn not in _traceable_collective_remaps().values():
+        raise AssertionError(f"{fn} is not a traceable collective remap")
 
     inner_name = fn.__name__
     path_source = tx.import_source("torch.distributed._functional_collectives")
@@ -2560,7 +2617,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(fn, **kwargs)  # type: ignore[arg-type]
-        assert isinstance(replacement_var, UserFunctionVariable)
+        if not isinstance(replacement_var, UserFunctionVariable):
+            raise AssertionError(
+                f"replacement_var must be a UserFunctionVariable, got {type(replacement_var)}"
+            )
         self.replacement_var = replacement_var
 
     @staticmethod
@@ -2670,7 +2730,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 if group_var is None:
                     group_var = item.var_getattr(tx, "group")
 
-            assert group_var is not None
+            if group_var is None:
+                raise AssertionError("group_var must be set from P2POp items")
             new_args: tuple[VariableTracker, ...] = ()
             new_kwargs: dict[str, VariableTracker] = {
                 "op_list": variables.ListVariable(ops),
@@ -2768,13 +2829,12 @@ class FunctoolsPartialVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.func = func
-        assert isinstance(args, list)
+        if not isinstance(args, list):
+            raise AssertionError(f"args must be a list, got {type(args)}")
         self.args = args
-        assert isinstance(keywords, dict)
+        if not isinstance(keywords, dict):
+            raise AssertionError(f"keywords must be a dict, got {type(keywords)}")
         self.keywords = keywords
-        # fake_value is used for id calculation. Creating this value and id'ng
-        # on it is sufficient for the tracing purposes.
-        self.fake_value = functools.partial(identity)
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
@@ -2908,14 +2968,18 @@ class PolyfilledFunctionVariable(VariableTracker):
 
         handler = self._get_polyfill_handlers().get(fn, fn)
         traceable_fn = None
-        assert callable(handler), f"Polyfill handler {handler} is not callable for {fn}"
+        if not callable(handler):
+            raise AssertionError(f"Polyfill handler {handler} is not callable for {fn}")
         for candidate_attr in (
             "__torch_dynamo_polyfill__",  # registered polyfill
             "__python_implementation__",  # self handler from third-party libraries
         ):
             candidate = getattr(handler, candidate_attr, None)
             if candidate:
-                assert callable(candidate)
+                if not callable(candidate):
+                    raise AssertionError(
+                        f"Polyfill candidate {candidate} is not callable"
+                    )
                 traceable_fn = candidate
                 break
         else:
@@ -3048,7 +3112,8 @@ class SysFunctionVariable(VariableTracker):
         if self.value is sys.exc_info:
             return self.exc_info(tx)
 
-        assert self.value is sys.exception
+        if self.value is not sys.exception:
+            raise AssertionError(f"expected sys.exception, got {self.value}")
         return self.exception(tx)
 
 
@@ -3123,7 +3188,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
-        assert tx is not None
+        if tx is None:
+            raise AssertionError("tx must not be None")
         # Route through VariableBuilder.__call__ so already-tracked mutable
         # objects (for example autotuner config lists) are reused instead of
         # being registered for mutation twice in the same trace.
@@ -3281,7 +3347,6 @@ class TritonKernelVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # Triton kernel[grid] — triton-specific, not a CPython slot.
-        # TODO(follow-up): add test for invalid key type
         return dynamo_triton_hopifier_singleton.call_getitem(self, [key])
 
     def call_method(
@@ -3316,7 +3381,10 @@ class TMADescriptorExperimentalVariable(VariableTracker):
         element_size: VariableTracker,
         **kwargs: Any,
     ) -> None:
-        assert isinstance(data_ptr, variables.DataPtrVariable)
+        if not isinstance(data_ptr, variables.DataPtrVariable):
+            raise AssertionError(
+                f"data_ptr must be a DataPtrVariable, got {type(data_ptr)}"
+            )
         super().__init__(**kwargs)
         self.data_ptr = data_ptr
         self.dims = dims
@@ -3353,7 +3421,8 @@ class TMADescriptorStableVariable(VariableTracker):
         block_shape: "ListVariable",
         **kwargs: Any,
     ) -> None:
-        assert tensor.is_tensor()
+        if not tensor.is_tensor():
+            raise AssertionError("tensor argument must be a tensor")
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
@@ -3385,7 +3454,8 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         rank: int,
         **kwargs: Any,
     ) -> None:
-        assert rank in (1, 2)
+        if rank not in (1, 2):
+            raise AssertionError(f"rank must be 1 or 2, got {rank}")
         super().__init__(**kwargs)
         self.rank = rank
 
@@ -3443,7 +3513,8 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
         # to make pyrefy happy
-        assert isinstance(ptr, variables.DataPtrVariable)
+        if not isinstance(ptr, variables.DataPtrVariable):
+            raise AssertionError(f"ptr must be a DataPtrVariable, got {type(ptr)}")
 
         return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
@@ -3659,7 +3730,10 @@ class TritonSetAllocatorVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        assert len(args) == 1 and not kwargs
+        if len(args) != 1:
+            raise AssertionError(f"expected exactly 1 arg, got {len(args)}")
+        if kwargs:
+            raise AssertionError("unexpected kwargs")
         alloc_fn = args[0].as_python_constant()
 
         # Emit an invoke_leaf_function node so it runs at runtime.
