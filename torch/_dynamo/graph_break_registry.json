@@ -1000,7 +1000,7 @@
       "Context": "",
       "Explanation": "Dynamo does not support tracing classes that are defined in the compiled region.",
       "Hints": [
-        "Move the class definition out of the compiled region.",
+        "Move the class definition out of the compiled region or set `torch._dynamo.config.enable_trace_load_build_class=True`.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2492,6 +2492,16 @@
       "Gb_type": "functools.wraps",
       "Context": "{fn}",
       "Explanation": "`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1319": [
+    {
+      "Gb_type": "Reconstruct user defined class without a source",
+      "Context": "Class: {var.python_type().__name__}",
+      "Explanation": "Cannot reconstruct an instance of {var.python_type().__name__} that escapes the compiled region. This happens when the class is defined dynamically (e.g., inside the compiled function) and the class object itself has no source that can be reconstructed. To fix this, move the class definition outside the compiled function or prevent the object from escaping the compiled region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -4441,6 +4451,16 @@
       "Gb_type": "missing_mp_subscript_impl",
       "Context": "mp_subscript_impl not defined for {type(self).__name__}",
       "Explanation": "'{self.python_type_name()}' subscript is not yet supported by Dynamo.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8977": [
+    {
+      "Gb_type": "Invalid call to __build_class__",
+      "Context": "Non-constant args to __build_class__: {args} {kwargs}",
+      "Explanation": "Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
