@@ -5443,7 +5443,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
         self.output.add_output_instructions(
             self.codegen_return_with_pops(inst, all_stack_locals_metadata[0].num_stack),
-            [f"__ret = {self.get_pycode_last_varname('stack')}"],
+            [f"__ret = {self.get_pycode_last_varname('stack')}"]
+            if config.generate_pycode
+            else None,
         )
         raise ReturnValueOp
 
