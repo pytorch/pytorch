@@ -613,12 +613,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (Sequence[Tensor] or dict[str, Tensor], optional): Inputs w.r.t. which
-                the gradient will be accumulated into ``.grad``. All other tensors will be
-                ignored. If not provided, the gradient is accumulated into all the leaf
-                Tensors that were used to compute the :attr:`tensors`. A dict of tensors
-                (e.g. ``dict(model.named_parameters())``) is also accepted.
-                Defaults to ``None``.
+            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other tensors will be ignored. If not
+                provided, the gradient is accumulated into all the leaf Tensors that were
+                used to compute the :attr:`tensors`. Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(

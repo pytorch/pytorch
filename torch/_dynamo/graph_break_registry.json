@@ -4376,16 +4376,6 @@
       "Hints": []
     }
   ],
-  "GB1724": [
-    {
-      "Gb_type": "autograd.grad with non-constant dict key",
-      "Context": "non-constant key in {arg_name}",
-      "Explanation": "autograd.grad/backward dict inputs must have constant keys.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",
