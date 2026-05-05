@@ -1161,6 +1161,12 @@ class TestOpSpecMesh(TestCase):
         with self.assertRaisesRegex(AssertionError, "Cannot determine mesh"):
             _ = op_spec.mesh
 
+    def test_op_strategy_str_handles_all_specs_none(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/182370."""
+        op_strategy = OpStrategy([OpSpec(output_specs=None, input_specs=(None,))])
+
+        self.assertEqual(str(op_strategy), "OpStrategy[(None) -> None]")
+
 
 class TestExpandToFullMeshOpStrategy(TestCase):
     """Tests for expand_to_full_mesh_op_strategy function.

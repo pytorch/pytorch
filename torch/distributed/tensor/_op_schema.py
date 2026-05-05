@@ -235,7 +235,10 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        mesh_shape = self.mesh_shape
+        try:
+            mesh_shape = self.mesh_shape
+        except AssertionError:
+            return f"OpStrategy[{strategy_list_str}]"
         return f"OpStrategy[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
