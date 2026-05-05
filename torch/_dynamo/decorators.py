@@ -67,7 +67,8 @@ def run(fn: Callable[_P, _R] | None = None) -> Any:
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
         fn = innermost_fn(fn)
-        assert callable(fn)
+        if not callable(fn):
+            raise AssertionError("fn must be callable")
         return RunOnlyContext()(fn)
     return RunOnlyContext()
 
@@ -87,14 +88,16 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
     if recursive:
         if fn is not None:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
             return DisableContext(msg=reason, wrapping=wrapping)(fn)
         return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
 
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
@@ -123,7 +126,8 @@ def skip(fn: Callable[_P, _R] | None = None) -> Callable[..., Any]:
     if fn is None:
         return skip
     fn = innermost_fn(fn)
-    assert callable(fn)
+    if not callable(fn):
+        raise AssertionError("fn must be callable")
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True  # type: ignore[attr-defined]
     return fn
@@ -189,7 +193,8 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
-    assert callable(fn), "allow_in_graph expects a callable"
+    if not callable(fn):
+        raise AssertionError("allow_in_graph expects a callable")
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         fn_id = id(fn)
         trace_rules._disallowed_callable_ids.remove(fn_id)
@@ -283,7 +288,8 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         >>> out.sum().backward()  # Gradients flow through traced_forward
 
     """
-    assert callable(traceable_fn), "nonstrict_trace expects a callable"
+    if not callable(traceable_fn):
+        raise AssertionError("nonstrict_trace expects a callable")
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
 
@@ -376,7 +382,8 @@ def _invoke_leaf_function_python(
         real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
     )
 
-    assert captured_out_spec[0] is not None
+    if captured_out_spec[0] is None:
+        raise AssertionError("captured_out_spec was not set by leaf function wrappers")
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
 
 
@@ -789,7 +796,8 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
     def inner(fn: Any) -> Any:
         if isinstance(fn, (list, tuple)):
             return [disallow_in_graph(x) for x in fn]
-        assert callable(fn), "disallow_in_graph expects a callable"
+        if not callable(fn):
+            raise AssertionError("disallow_in_graph expects a callable")
         if (
             throw_if_not_allowed
             and trace_rules.lookup_callable(fn)
@@ -862,7 +870,8 @@ def forbid_in_graph(fn: Any) -> Any:
     """
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
-    assert callable(fn), "forbid_in_graph applies only to callables"
+    if not callable(fn):
+        raise AssertionError("forbid_in_graph applies only to callables")
     # pyrefly: ignore [missing-attribute]
     fn._dynamo_forbidden = True
     return fn
@@ -1047,7 +1056,8 @@ def substitute_in_graph(
             else:
                 guard_type = GuardBuilder.ID_MATCH
             guards = self.install_guards(guard_type)
-            assert guards is not None
+            if guards is None:
+                raise AssertionError("install_guards returned None")
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
@@ -1075,10 +1085,12 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(
     func: Callable[..., Any], t: object, *args: Any, **kwargs: Any
 ) -> None:
-    assert is_traceable_wrapper_subclass(t)
+    if not is_traceable_wrapper_subclass(t):
+        raise AssertionError(f"Expected a traceable wrapper subclass, got {type(t)}")
 
     attrs, _ctx = t.__tensor_flatten__()
-    assert isinstance(t, torch.Tensor)
+    if not isinstance(t, torch.Tensor):
+        raise AssertionError(f"Expected a Tensor, got {type(t)}")
     for attr in attrs:
         match getattr(t, attr):
             case torch.Tensor() as inner:
@@ -1154,7 +1166,8 @@ def mark_unbacked(
     else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
-        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+        if is_traceable_wrapper_subclass(t):
+            raise AssertionError("not implemented yet")
 
     if isinstance(index, int):
         if strict:
@@ -1201,7 +1214,10 @@ def mark_unbacked(
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
 
@@ -1294,7 +1310,10 @@ def mark_dynamic(
 
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
@@ -1319,7 +1338,10 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         maybe_mark_dynamic(t, i)
 
@@ -1385,7 +1407,10 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
         for i in range(t.dim()):
             mark_static(t, i)
     else:
-        assert isinstance(index, (list, tuple))
+        if not isinstance(index, (list, tuple)):
+            raise AssertionError(
+                f"Expected index to be int, list, or tuple, got {type(index)}"
+            )
         for i in index:
             mark_static(t, i)
 
@@ -1522,7 +1547,8 @@ from . import config
 
 
 for name in _allowed_config_patches:
-    assert hasattr(config, name), "nonexistent config"
+    if not hasattr(config, name):
+        raise AssertionError(f"nonexistent config: {name}")
 del config
 
 
