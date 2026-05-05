@@ -476,10 +476,6 @@ class OverlapScheduler:
             enable_fusion_regions=enable_fusion_regions,
             log_estimations=True,
         )
-        if self.region_of:
-            # fuse_by_partitions replaces gm.graph, so we need to update our reference
-            self.graph = gm.graph
-
         # Build structures
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
@@ -1097,8 +1093,9 @@ class OverlapScheduler:
 
         # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
         # using these nodes for overlap prevents bucketing. potentially if chain time < latency
-        if runtime_estimate is None:
-            assert not is_compute_node(node), "should have estimate for compute nodes"
+        if runtime_estimate is None or (
+            runtime_estimate == 0 and not is_compute_node(node)
+        ):
             self._schedule(node)
             return
 
@@ -1648,20 +1645,21 @@ def gather_node_runtime_estimations(
             via trace_structured for tlparse.
 
     Returns (estimations, fusion_region_of) where estimations maps fx.Node to
-    runtime in ms, and fusion_region_of maps call_module nodes to FusionRegion
-    objects (empty dict if fusion regions are disabled).
+    runtime in ms. fusion_region_of is always empty (the no-collapse approach
+    corrects costs without graph mutation).
     """
-    # Build and collapse fusion regions first (mutates gm)
+    # Build fusion regions for cost correction (does NOT collapse/mutate gm)
     fusion_region_of: dict[fx.Node, Any] = {}
+    fused_costs: dict[fx.Node, float] = {}
     if enable_fusion_regions:
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
-            collapse_fusion_regions,
+            estimate_fused_node_costs,
         )
 
-        fusion_region_of = build_fusion_regions(gm)
-        if fusion_region_of:
-            fusion_region_of = collapse_fusion_regions(gm, fusion_region_of)
+        raw_regions = build_fusion_regions(gm)
+        if raw_regions:
+            fused_costs = estimate_fused_node_costs(raw_regions)
 
     estimations: dict[fx.Node, float] = {}
     nodes = list(gm.graph.nodes)
@@ -1706,9 +1704,9 @@ def gather_node_runtime_estimations(
                 if est > 0:
                     estimations[node] = est
 
-    # Fusion region costs (call_module nodes from collapse_fusion_regions)
-    for node, region in fusion_region_of.items():
-        estimations[node] = region.cost_ms  # pyrefly: ignore[missing-attribute]
+    # Apply fused costs: replace individual I/O estimates with fusion-aware ones
+    for node, fused_cost in fused_costs.items():
+        estimations[node] = fused_cost
 
     # Logging
     if log_estimations and compute_nodes:

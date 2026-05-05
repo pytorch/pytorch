@@ -208,6 +208,58 @@ def build_fusion_regions(
     return region_of
 
 
+def estimate_fused_node_costs(
+    region_of: dict[fx.Node, OrderedSet[fx.Node]],
+) -> dict[fx.Node, float]:
+    """Estimate per-node costs accounting for fusion (no graph collapse).
+
+    For each node in a fusion region, only count I/O that crosses the
+    region boundary (external reads/writes). Internal intermediates
+    won't be materialized by inductor, so they shouldn't count.
+
+    Nodes with only internal I/O get cost 0. Nodes with external I/O
+    get the bandwidth cost of just those external tensors.
+    """
+    from torch.utils._pytree import tree_flatten
+    from torch.utils._runtime_estimation import get_transfer_time
+
+    costs: dict[fx.Node, float] = {}
+    seen: OrderedSet[int] = OrderedSet()
+
+    for node, node_set in region_of.items():
+        rid = id(node_set)
+        if rid in seen:
+            continue
+        seen.add(rid)
+        region_set = OrderedSet(node_set)
+
+        for n in node_set:
+            # External inputs: values from nodes outside this region
+            ext_inputs = []
+            for inp in n.all_input_nodes:
+                if inp not in region_set:
+                    val = inp.meta.get("val")
+                    if val is not None:
+                        ext_inputs.append(val)
+
+            # External outputs: this node's value is used outside the region
+            ext_outputs = []
+            has_external_user = any(u not in region_set for u in n.users)
+            if has_external_user:
+                val = n.meta.get("val")
+                if val is not None:
+                    ext_outputs.append(val)
+
+            if not ext_inputs and not ext_outputs:
+                costs[n] = 0.0
+            else:
+                flat_in, _ = tree_flatten(ext_inputs)
+                flat_out, _ = tree_flatten(ext_outputs)
+                costs[n] = get_transfer_time(flat_in, flat_out) / 1e6
+
+    return costs
+
+
 def collapse_fusion_regions(
     gm: fx.GraphModule,
     region_of: dict[fx.Node, OrderedSet[fx.Node]],
