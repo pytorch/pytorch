@@ -1958,6 +1958,32 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # Register-tiled persistent reductions: tile the reduction dimension
+    # and retain shared source loads in registers across the epilogue.
+    register_tiled_persistent_reductions = (
+        os.environ.get("TORCHINDUCTOR_REGISTER_TILED_PERSISTENT_REDUCTIONS", "0") == "1"
+    )
+    register_tiled_persistent_reduction_min_numel: int = int(
+        os.environ.get(
+            "TORCHINDUCTOR_REGISTER_TILED_PERSISTENT_REDUCTION_MIN_NUMEL", "2048"
+        )
+    )
+    register_tiled_persistent_reduction_max_numel: int = int(
+        os.environ.get(
+            "TORCHINDUCTOR_REGISTER_TILED_PERSISTENT_REDUCTION_MAX_NUMEL", "16384"
+        )
+    )
+    register_tiled_persistent_reduction_max_tiles: int = int(
+        os.environ.get(
+            "TORCHINDUCTOR_REGISTER_TILED_PERSISTENT_REDUCTION_MAX_TILES", "8"
+        )
+    )
+    register_tiled_persistent_reduction_min_tiles: int = int(
+        os.environ.get(
+            "TORCHINDUCTOR_REGISTER_TILED_PERSISTENT_REDUCTION_MIN_TILES", "2"
+        )
+    )
+
     # Decompose sort-based ops (sort, mode, median) to generate Triton
     # kernels instead of falling back to ATen eager.  When enabled, sort
     # removes the default 512-element dimension limit and uses int32

@@ -246,6 +246,105 @@ class SIMDKernelFeatures:
             )
         return result
 
+    def get_reg_cached_persistent_reduction_config(
+        self,
+    ) -> PersistentReductionTileConfig | None:
+        """Check if this kernel qualifies for register-cached persistent reduction.
+
+        Requires exactly one reduction node and one pointwise (epilogue) node
+        that share at least one input buffer, with a reduction dimension large
+        enough to tile.
+        """
+        from .. import config
+        from ..runtime.hints import ReductionHint
+
+        if not config.triton.register_tiled_persistent_reductions:
+            return None
+        if torch.version.hip:
+            return None
+        if not self.is_reduction():
+            return None
+        if self.get_reduction_hint() != ReductionHint.INNER:
+            return None
+
+        nodes = [n for n in self.node_schedule if isinstance(n, SchedulerNode)]
+        reductions = [n for n in nodes if n.is_reduction()]
+        pointwise = [n for n in nodes if not n.is_reduction()]
+        if len(reductions) != 1 or len(pointwise) != 1:
+            return None
+
+        def mem_dep_names(node: SchedulerNode) -> OrderedSet[str]:
+            return OrderedSet(
+                d.name for d in node.read_writes.reads if isinstance(d, MemoryDep)
+            )
+
+        shared_read_names = mem_dep_names(reductions[0]) & mem_dep_names(pointwise[0])
+        if not shared_read_names:
+            return None
+
+        # Limit to at most 2 shared inputs to avoid excessive register pressure
+        # from retaining many values across the tile loop. Future work: retain
+        # the computed intermediate instead of raw inputs.
+        if len(shared_read_names) > 2:
+            return None
+
+        # Only beneficial for half-precision inputs where retained loads
+        # use half the registers compared to fp32 compute type.
+        shared_dtypes = OrderedSet(
+            [V.graph.get_dtype(name) for name in shared_read_names]
+        )
+        if not shared_dtypes.issubset(OrderedSet([torch.bfloat16, torch.float16])):
+            return None
+
+        rnumel = V.graph.sizevars.simplify(self.reduction_numel)
+        if not isinstance(rnumel, (sympy.Integer, int)):
+            return None
+        rnumel = int(rnumel)
+
+        if rnumel < config.triton.register_tiled_persistent_reduction_min_numel:
+            return None
+
+        if rnumel > config.triton.register_tiled_persistent_reduction_max_numel:
+            return None
+
+        min_tiles = config.triton.register_tiled_persistent_reduction_min_tiles
+        max_tiles = config.triton.register_tiled_persistent_reduction_max_tiles
+        if max_tiles < min_tiles:
+            return None
+
+        # R0_BLOCK must be a power of 2 (Triton requirement for block shapes)
+        num_tiles = next(
+            (
+                nt
+                for nt in range(max_tiles, min_tiles - 1, -1)
+                if rnumel % nt == 0 and (rnumel // nt & (rnumel // nt - 1)) == 0
+            ),
+            None,
+        )
+        if num_tiles is None:
+            return None
+
+        return PersistentReductionTileConfig(
+            num_tiles=num_tiles,
+            rnumel=rnumel,
+            shared_read_names=tuple(shared_read_names),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class PersistentReductionTileConfig:
+    """Tile configuration for register-tiled persistent reductions.
+
+    The reduction dimension is split into ``num_tiles`` tiles.
+    Inputs named in ``shared_read_names`` are cached in multiple tiled
+    registers instead of one large block, helping the downstream compiler
+    optimize register allocation for higher occupancy and performance.
+    """
+
+    num_tiles: int
+    rnumel: int
+    shared_read_names: tuple[str, ...]
+
 
 class MemoryEstimator:
     """

@@ -539,6 +539,22 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_persistent_reduction is not None
             else self.should_use_persistent_reduction()
         )
+        tile_config = (
+            features.get_reg_cached_persistent_reduction_config()
+            if not self.persistent_reduction and not self.cooperative_reduction
+            else None
+        )
+        if tile_config is not None:
+            self.persistent_reduction = True
+            self.num_persistent_tiles: int = tile_config.num_tiles
+            self.persistent_rnumel: int | None = tile_config.rnumel
+            self.persistent_shared_read_names: tuple[str, ...] = (
+                tile_config.shared_read_names
+            )
+        else:
+            self.num_persistent_tiles: int = 1
+            self.persistent_rnumel: int | None = None
+            self.persistent_shared_read_names: tuple[str, ...] = ()
         self.mix_order_reduction: bool = mix_order_reduction
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: str | None = None
@@ -764,7 +780,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return new_index
 
     def disable_reduction(self) -> contextlib.AbstractContextManager[None]:
-        should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
+        should_flush = (
+            self.range_trees[-1].is_loop
+            or self.cooperative_reduction
+            or self.num_persistent_tiles > 1
+        )
 
         @contextlib.contextmanager
         def ctx():
