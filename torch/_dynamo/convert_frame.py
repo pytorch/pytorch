@@ -387,9 +387,10 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert guards.check(), (
-                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
-                )
+                if not guards.check():
+                    raise AssertionError(
+                        f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                    )
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
@@ -503,7 +504,8 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
     def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         trace_id = CompileContext.current_trace_id()
-        assert trace_id, "Trace id is None"
+        if not trace_id:
+            raise AssertionError("Trace id is None")
         profile_path = Path(
             os.path.join(
                 tempfile.gettempdir(),
@@ -587,7 +589,8 @@ def get_compile_id(
         frame_state["_id"] = FRAME_COUNTER
         FRAME_COUNTER += 1
     frame_id = frame_state["_id"]
-    assert isinstance(frame_id, int)
+    if not isinstance(frame_id, int):
+        raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
     frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
     FRAME_COMPILE_COUNTER[frame_id] += 1
@@ -949,8 +952,10 @@ def trace_frame(
         run_tracer()
         tracer_output = DynamoTracerOutput(tracer)
         output = tracer_output.output_graph
-        assert output is not None
-        assert output.output_instructions
+        if output is None:
+            raise AssertionError("tracer output_graph must not be None")
+        if not output.output_instructions:
+            raise AssertionError("output_graph must have output_instructions")
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
@@ -986,7 +991,8 @@ class DynamoOutput:
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
-        assert output_graph is not None
+        if output_graph is None:
+            raise AssertionError("output_graph must not be None when building guards")
         return CheckFunctionManager(
             code,
             output_graph,
@@ -1003,7 +1009,10 @@ class DynamoOutput:
         kwdefaults: dict[str, Any] | None = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
-        assert output_graph is not None
+        if output_graph is None:
+            raise AssertionError(
+                "output_graph must not be None when producing graph capture output"
+            )
         return GraphCaptureOutput(
             OutputGraphCommon(
                 output_graph.dump_guards_state(),
@@ -1222,7 +1231,8 @@ class CaptureOutput:
         extra_globals: dict[str, Any] | None = None,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
-        assert self.backend_input is not None
+        if self.backend_input is None:
+            raise AssertionError("backend_input must not be None")
         backend_id = self.backend_input.backend_id
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
@@ -1309,7 +1319,10 @@ def _get_frame(
     closure = fn.__closure__ or ()
     freevars = fn.__code__.co_freevars
     if freevars or closure:
-        assert len(closure) == len(freevars)
+        if len(closure) != len(freevars):
+            raise AssertionError(
+                f"closure length ({len(closure)}) must match freevars length ({len(freevars)})"
+            )
         f_locals.update(
             {name: cell.cell_contents for name, cell in zip(freevars, closure)}
         )
@@ -1392,8 +1405,12 @@ def _fullgraph_capture_frame(
         tracing_context = TracingContext.get()
         fake_mode = tracing_context.fake_mode
         tensor_to_context = tracing_context.tensor_to_context
-        assert fake_mode is not None
-        assert isinstance(gm.meta["backend_id"], str)
+        if fake_mode is None:
+            raise AssertionError("fake_mode must not be None")
+        if not isinstance(gm.meta["backend_id"], str):
+            raise AssertionError(
+                f"gm.meta['backend_id'] must be a str, got {type(gm.meta['backend_id'])}"
+            )
         backend_input = BackendInput(
             gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
@@ -1504,7 +1521,8 @@ def compile_frame(  # type: ignore[return]
             package=package,
         )
 
-        assert tracer_output is not None
+        if tracer_output is None:
+            raise AssertionError("tracer_output must not be None after transform")
         return tracer_output
 
     last_attempt_start_time = None
@@ -1514,7 +1532,10 @@ def compile_frame(  # type: ignore[return]
         try:
             with dynamo_timed(f"compile_attempt_{attempt}", log_pt2_compile_event=True):
                 bytecode, tracer_output = transform_code_object(code, transform)
-                assert tracer_output is not None
+                if tracer_output is None:
+                    raise AssertionError(
+                        "tracer_output must not be None after transform_code_object"
+                    )
                 return DynamoOutput(
                     tracer_output=tracer_output,
                     bytecode=bytecode,
@@ -1609,9 +1630,10 @@ def _compile(
             stack.enter_context(CompileTimeInstructionCounter.record())
             stack.enter_context(torch_function_mode_stack_state_mgr)
             result = _compile_inner(code, one_graph, hooks)
-            assert torch._C._len_torch_function_stack() == 0, (
-                "Torch function mode stack state changed while dynamo tracing, please report a bug"
-            )
+            if torch._C._len_torch_function_stack() != 0:
+                raise AssertionError(
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
             return result
 
         return (
@@ -1685,18 +1707,23 @@ def _compile(
         except exc.SkipFrame as e:
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
-            assert e._torch_dynamo_tracer_output is not None
+            if e._torch_dynamo_tracer_output is None:
+                raise AssertionError(
+                    "SkipFrame exception must have _torch_dynamo_tracer_output set"
+                ) from None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
-        assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
-            "compiler collective wasn't run before compilation completed"
-        )
+        if distributed_state is not None and distributed_state.all_states is None:  # type: ignore[has-type]
+            raise AssertionError(
+                "compiler collective wasn't run before compilation completed"
+            )
         out_code = dynamo_output.bytecode
         tracer_output = dynamo_output.tracer_output
         if dynamo_output.last_attempt_start_time is not None:
             last_attempt_start_time = dynamo_output.last_attempt_start_time
 
-        assert out_code is not None
+        if out_code is None:
+            raise AssertionError("out_code must not be None after compilation")
         log_bytecode(
             "MODIFIED BYTECODE",
             code.co_name,
@@ -1716,7 +1743,8 @@ def _compile(
                 payload_fn=lambda: dis.Bytecode(out_code).dis(),
             )
 
-        assert tracer_output.output_graph is not None
+        if tracer_output.output_graph is None:
+            raise AssertionError("tracer_output.output_graph must not be None")
         output = tracer_output.output_graph
         code_context.get_context(out_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
             tuple(output.get_replayed_side_effect_source_refs())
@@ -1756,27 +1784,35 @@ def _compile(
                 + bool(code.co_flags & inspect.CO_VARKEYWORDS)
             )
 
-        assert out_code is not None
+        if out_code is None:
+            raise AssertionError(
+                "out_code must not be None after bytecode hook processing"
+            )
 
         total_argcount_old = count_args(code)
         total_argcount_new = count_args(out_code)
-        msg = "arg mismatch: "
-        msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
-        msg += f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
-        assert (
+        if (
             code.co_varnames[:total_argcount_old]
-            == out_code.co_varnames[:total_argcount_new]
-        ), msg
+            != out_code.co_varnames[:total_argcount_new]
+        ):
+            msg = "arg mismatch: "
+            msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
+            msg += (
+                f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
+            )
+            raise AssertionError(msg)
 
-        msg = "free var mismatch: "
-        msg += f"old code object has free var {code.co_freevars}, "
-        msg += f"new code object has free var {out_code.co_freevars}"
-        assert code.co_freevars == out_code.co_freevars, msg
+        if code.co_freevars != out_code.co_freevars:
+            msg = "free var mismatch: "
+            msg += f"old code object has free var {code.co_freevars}, "
+            msg += f"new code object has free var {out_code.co_freevars}"
+            raise AssertionError(msg)
 
-        msg = "cell var mismatch: "
-        msg += f"old code object has cell var {code.co_cellvars}, "
-        msg += f"new code object has cell var {out_code.co_cellvars}"
-        assert code.co_cellvars == out_code.co_cellvars, msg
+        if code.co_cellvars != out_code.co_cellvars:
+            msg = "cell var mismatch: "
+            msg += f"old code object has cell var {code.co_cellvars}, "
+            msg += f"new code object has cell var {out_code.co_cellvars}"
+            raise AssertionError(msg)
 
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
@@ -1787,7 +1823,8 @@ def _compile(
         if output.export and output.is_empty_graph():
             return ConvertFrameReturn(), tracer_output
 
-        assert output.guards is not None
+        if output.guards is None:
+            raise AssertionError("output.guards must not be None")
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         # Temporarily restore the mode stack so guard expressions that
@@ -1808,7 +1845,8 @@ def _compile(
             )
 
         if package is not None:
-            assert check_fn.guards_state is not None
+            if check_fn.guards_state is None:
+                raise AssertionError("check_fn.guards_state must not be None")
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
@@ -2227,7 +2265,8 @@ class ConvertFrame:
             error_on_graph_break = (
                 self._inner_convert._box.error_on_graph_break is not None
             )
-            assert error_on_graph_break is not None
+            if error_on_graph_break is None:
+                raise AssertionError("error_on_graph_break must not be None") from None
             if self._inner_convert._box.error_on_graph_break:
                 # NOTE we _might_ have to wrap the current in a custom exception
                 # in order to correctly bubble up to the top-level compile wrapper in
@@ -2406,7 +2445,8 @@ class CatchErrorsWrapper:
         cache_entry: CacheEntry | None,
         frame_state: dict[str, int | FrameStateSizeEntry],
     ) -> ConvertFrameReturn:
-        assert frame_state is not None
+        if frame_state is None:
+            raise AssertionError("frame_state must not be None")
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code, frame=frame)
@@ -2487,11 +2527,12 @@ class CatchErrorsWrapper:
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=self._torchdynamo_orig_backend._torchdynamo_orig_backend,  # type: ignore[attr-defined]
                     )
-                    assert hasattr(
+                    if not hasattr(
                         self._torchdynamo_orig_backend, "_clone_with_backend"
-                    ), (
-                        "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    )
+                    ):
+                        raise AssertionError(
+                            "DDPOptimizer only supports callback fns that know how to clone themselves."
+                        )
                     hijacked_callback = (
                         self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,

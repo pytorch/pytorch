@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -69,6 +70,7 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
+skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
 
 requires_vectorization = unittest.skipUnless(
     cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
@@ -138,6 +140,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
             return torch.linalg.qr(x)[:1]
@@ -227,6 +230,8 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    @skipIfNoLapack
+    @skip_if_cpp_wrapper("conj issue, to be fixed")
     def test_complex_cholesky_mh_view_fallback(self):
         torch.manual_seed(0)
 
@@ -3111,9 +3116,6 @@ class CPUReproTests(TestCase):
         eps = torch.tensor(0.9, dtype=torch.float64)
         self.common(fn, (input, eps))
 
-    # todo(@boyuan): Effective user count change inlines more ops and leads to
-    # higher compilation time.
-    @unittest.skip("timeout")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
@@ -3476,7 +3478,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                1,
             )
             # Check the number of global buffer allocation
             torch._dynamo.reset()
@@ -3525,7 +3527,15 @@ class CPUReproTests(TestCase):
             self.common(fn, (x,), atol=atol, rtol=rtol)
             self.assertEqual(
                 len(metrics.cpp_outer_loop_fused_inner_counts),
-                0,
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3551,7 +3561,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,  # 2 global bufs share 1 local buf
+                1,  # 2 global bufs share 1 local buf
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3585,7 +3595,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                2,
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
@@ -3611,7 +3621,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
-                0,
+                1,
             )
 
     @requires_vectorization
@@ -4960,7 +4970,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # 4 kernels for max, exp, sum and div
-        check_metrics_vec_kernel_count(3)
+        check_metrics_vec_kernel_count(4)
         FileCheck().check_count(
             "Vectorized<int>::loadu(tmpbuf.data())", 0, exactly=True
         ).run(code)
@@ -5485,7 +5495,7 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         self.common(fn, ())
-        check_metrics_vec_kernel_count(0)
+        check_metrics_vec_kernel_count(1)
 
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
@@ -5910,8 +5920,10 @@ class CPUReproTests(TestCase):
         x = torch.randn(1000, 1000)
         opt_fn = torch.compile(fn)
         _, code = run_and_get_cpp_code(opt_fn, x)
-        FileCheck().check(
+        FileCheck().check_count(
             ".exp()",
+            1,
+            exactly=True,
         ).run(code)
 
     def test_convert_fp32_int64_oob_vec(self):
