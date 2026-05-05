@@ -30,7 +30,7 @@ class DeviceInfo:
     tops_sparsity_factor: int = 1
 
 
-# Indexing is based on `torch.cuda.get_device_name()`
+# Indexing is based on `torch.cuda.get_device_name()`, normalized to upper-case.
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
     # Source:
@@ -185,6 +185,10 @@ _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
 
+# Enforce the upper-case-key invariant so entries cannot silently miss
+# `lookup_device_info` (which upper-cases the query before lookup).
+_device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
 
 def lookup_device_info(name: str) -> DeviceInfo | None:
     """
@@ -193,8 +197,9 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     to the recorded device. Therefore, _device_mapping statically contains the information for lots of devices.
     If one is missing, please run DeviceInfo.get_device_info() and add it to _device_mapping.
       name (str): name of the device to lookup. Should map onto torch.cuda.get_device_name().
+      Will be upper-cased before lookup.
     """
-    return _device_mapping.get(name)
+    return _device_mapping.get(name.upper())
 
 
 def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
