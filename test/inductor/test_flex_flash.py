@@ -1107,6 +1107,56 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_shared_captured_buffers(self, device, dtype):
+        """Captured closure buffers shared with other graph ops must not be
+        freed before the FlexAttention kernel runs."""
+        B, H, Q_LEN, KV_LEN, D = 2, 4, 256, 512, 128
+
+        def model(q, k, v, rule_masks_per_query, prefix_mask, backend=None):
+            masks = rule_masks_per_query & prefix_mask.unsqueeze(0)
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                return masks[q_idx, b, kv_idx]
+
+            block_mask = create_block_mask(
+                mask_mod,
+                B=B,
+                H=None,
+                Q_LEN=Q_LEN,
+                KV_LEN=KV_LEN,
+                device=device,
+            )
+            kernel_options = {"BACKEND": backend} if backend else {}
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options=kernel_options,
+            )
+
+        q = torch.randn(B, H, Q_LEN, D, device=device, dtype=dtype)
+        k = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype)
+        v = torch.randn(B, H, KV_LEN, D, device=device, dtype=dtype)
+        rule_masks = torch.randint(
+            0, 2, (Q_LEN, B, KV_LEN), dtype=torch.bool, device=device
+        )
+        prefix = torch.randint(0, 2, (B, KV_LEN), dtype=torch.bool, device=device)
+
+        ref = model(q.float(), k.float(), v.float(), rule_masks, prefix)
+        torch._dynamo.reset()
+        triton_out = torch.compile(model, dynamic=False)(
+            q, k, v, rule_masks, prefix, "TRITON"
+        )
+        torch._dynamo.reset()
+        flash_out = torch.compile(model, dynamic=False)(
+            q, k, v, rule_masks, prefix, "FLASH"
+        )
+        torch.testing.assert_close(triton_out, ref.to(dtype), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(flash_out, ref.to(dtype), atol=1e-2, rtol=1e-2)
+
+    @xfailIfSM120OrLater
+    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
         compiled_fn = torch.compile(flex_attention)
