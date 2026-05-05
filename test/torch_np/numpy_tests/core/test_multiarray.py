@@ -3500,6 +3500,10 @@ class TestMinMax(TestCase):
         assert_equal(np.amax(1, axis=None), 1)
         assert_equal(np.amin(1, axis=None), 1)
 
+    @skipif(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     def test_axis(self):
         assert_raises(np.AxisError, np.amax, [1, 2, 3], 1000)
         assert_equal(np.amax([[1, 2, 3]], axis=1), 3)
@@ -6081,7 +6085,7 @@ class TestArrayCreationCopyArgument(TestCase):
             with pytest.raises(ValueError):
                 np.array(pyscalar, dtype=np.int64, copy=np._CopyMode.NEVER)
 
-    @xfail  # TODO: handle `_CopyMode` properly in torch._numpy
+    @xpassIfTorchDynamo_np  # TODO: handle `_CopyMode` properly in torch._numpy
     def test_compatible_cast(self):
         # Some types are compatible even though they are different, no
         # copy is necessary for them. This is mostly true for some integers

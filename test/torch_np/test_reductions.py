@@ -351,6 +351,10 @@ class TestGenericReductions(TestCase):
     To use: subclass, define self.func and self.allowed_axes.
     """
 
+    @skipIf(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     @parametrize_func
     def test_bad_axis(self, func):
         # Basic check of functionality
@@ -511,6 +515,10 @@ class TestGenericReductions(TestCase):
 class TestGenericCumSumProd(TestCase):
     """Run a set of generic tests to verify that cumsum/cumprod are sane."""
 
+    @skipIf(
+        TEST_WITH_TORCHDYNAMO and numpy.__version__[0] == "2",
+        reason="numpy 2.x removed top-level np.AxisError",
+    )
     @parametrize("func", [np.cumsum, np.cumprod])
     def test_bad_axis(self, func):
         # Basic check of functionality
