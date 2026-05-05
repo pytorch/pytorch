@@ -467,7 +467,10 @@ class CompileEventLogger:
                 )
             chromium_log.add_event_data(event_name, **metadata)
         else:
-            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            if log_level != CompileEventLogLevel.COMPILATION_METRIC:
+                raise AssertionError(
+                    f"Expected log_level to be COMPILATION_METRIC, got {log_level}"
+                )
             top_event = chromium_log.get_outermost_event()
 
             if event_name != top_event:
@@ -513,7 +516,10 @@ class CompileEventLogger:
         ):
             chromium_log.increment(event_name, key, value)
         else:
-            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            if log_level != CompileEventLogLevel.COMPILATION_METRIC:
+                raise AssertionError(
+                    f"Expected log_level to be COMPILATION_METRIC, got {log_level}"
+                )
             top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
@@ -561,7 +567,10 @@ class CompileEventLogger:
         ):
             chromium_log.add_to_set(event_name, key, value)
         else:
-            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            if log_level != CompileEventLogLevel.COMPILATION_METRIC:
+                raise AssertionError(
+                    f"Expected log_level to be COMPILATION_METRIC, got {log_level}"
+                )
             top_event = chromium_log.get_outermost_event()
             if event_name != top_event:
                 raise RuntimeError(
@@ -803,7 +812,10 @@ def dynamo_timed(
     is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
     if dynamo_compile_column_us:
         # We're standardizing on microseconds for dynamo_compile timings.
-        assert dynamo_compile_column_us.endswith("_us")
+        if not dynamo_compile_column_us.endswith("_us"):
+            raise AssertionError(
+                f"dynamo_compile_column_us must end with '_us', got {dynamo_compile_column_us!r}"
+            )
 
         # Track nested dynamo_timed calls that update CompilationMetrics so we can
         # bump a total duration only for the outermost metric.
@@ -1431,7 +1443,12 @@ def make_cell(val: Any = None) -> types.CellType:
     def f() -> Any:
         return x
 
-    assert f.__closure__ is not None and len(f.__closure__) == 1
+    if f.__closure__ is None:
+        raise AssertionError("Expected f to have a closure, but f.__closure__ is None")
+    if len(f.__closure__) != 1:
+        raise AssertionError(
+            f"Expected f.__closure__ to have exactly 1 element, got {len(f.__closure__)}"
+        )
     return f.__closure__[0]
 
 
@@ -2330,7 +2347,8 @@ class CleanupHook:
 
     @staticmethod
     def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
-        assert name not in scope
+        if name in scope:
+            raise AssertionError(f"Name {name!r} already exists in scope")
         CleanupManager.count += 1
         scope[name] = val
         return CleanupHook(scope, name)
@@ -2480,7 +2498,10 @@ def clone_inputs(example_inputs: Any) -> Any:
             if isinstance(value, tuple):
                 res[key] = clone_inputs(value)
             else:
-                assert isinstance(value, torch.Tensor), type(value)
+                if not isinstance(value, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected value to be a torch.Tensor, got {type(value)}"
+                    )
                 res[key] = clone_input(value)
         return res
 
@@ -2617,7 +2638,8 @@ def namedtuple_fields(cls: type) -> tuple[str, ...]:
     if cls is slice:
         return ("start", "stop", "step")
 
-    assert issubclass(cls, tuple)
+    if not issubclass(cls, tuple):
+        raise AssertionError(f"Expected cls to be a subclass of tuple, got {cls}")
     if hasattr(cls, "_fields"):
         # normal namedtuples
         return cls._fields
@@ -2627,13 +2649,19 @@ def namedtuple_fields(cls: type) -> tuple[str, ...]:
         index: int
 
     # frustrating ones e.g. torch.return_types.max
-    assert cls.__module__ == "torch.return_types"
+    if cls.__module__ != "torch.return_types":
+        raise AssertionError(
+            f"Expected cls.__module__ to be 'torch.return_types', got {cls.__module__!r}"
+        )
     obj = cls(map(Marker, range(cls.n_fields)))  # type: ignore[attr-defined]
     fields: dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
             fields[name] = getattr(obj, name).index
-    assert len(fields) == cls.n_fields  # type: ignore[attr-defined]
+    if len(fields) != cls.n_fields:  # type: ignore[attr-defined]
+        raise AssertionError(
+            f"Expected {cls.n_fields} fields, got {len(fields)}"  # type: ignore[attr-defined]
+        )
     return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
@@ -2685,7 +2713,8 @@ def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bo
 
 @lru_cache(32)
 def rot_n_helper(n: int) -> Callable[..., Any]:
-    assert n > 1
+    if n <= 1:
+        raise AssertionError(f"Expected n > 1, got {n}")
     vars = [f"v{i}" for i in range(n)]
     rotated = reversed(vars[-1:] + vars[:-1])
     fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
@@ -2922,13 +2951,15 @@ V = TypeVar("V")
 
 def builtin_dict_keys(d: dict[K, V]) -> KeysView[K]:
     # Avoids overridden keys method of the dictionary
-    assert isinstance(d, dict)
+    if not isinstance(d, dict):
+        raise AssertionError(f"Expected d to be a dict, got {type(d)}")
     return dict.keys(d)
 
 
 def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
     # Get items without calling the user defined __getitem__ or keys method.
-    assert isinstance(obj, dict)
+    if not isinstance(obj, dict):
+        raise AssertionError(f"Expected obj to be a dict, got {type(obj)}")
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
@@ -3053,7 +3084,8 @@ def set_example_value(node: torch.fx.Node, example_value: Any) -> None:
     # the program was traced).
     node.meta["example_value"] = example_value
     fake_mode = TracingContext.get().fake_mode
-    assert fake_mode is not None
+    if fake_mode is None:
+        raise AssertionError("fake_mode must not be None")
     shape_env = fake_mode.shape_env
     if (
         symbol_to_path
@@ -3169,7 +3201,8 @@ def const_repr(x: Any, *, local: Any) -> str:
         if isinstance(x, list):
             return f"[{elems_repr}]"
         else:
-            assert isinstance(x, tuple)
+            if not isinstance(x, tuple):
+                raise AssertionError(f"Expected x to be a tuple, got {type(x)}")
             if len(x) == 1:
                 return f"({elems_repr},)"
             else:
@@ -3302,9 +3335,8 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        if not isinstance(res, (list, tuple, collections.deque)):
+            raise AssertionError(f"type mismatch {type(ref)} {type(res)}")
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -3348,10 +3380,12 @@ def same(
             iou_threshold=iou_threshold,
         )
     elif isinstance(ref, dict):
-        assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        if not isinstance(res, dict):
+            raise AssertionError(f"Expected res to be a dict, got {type(res)}")
+        if set(ref.keys()) != set(res.keys()):
+            raise AssertionError(
+                f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+            )
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -3375,12 +3409,16 @@ def same(
                 return False
         return True
     elif isinstance(ref, set):
-        assert isinstance(res, set)
-        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
+        if not isinstance(res, set):
+            raise AssertionError(f"Expected res to be a set, got {type(res)}")
+        if set(ref) != set(res):
+            raise AssertionError(f"elements mismatch {set(ref)} == {set(res)}")
         return True
     elif isinstance(ref, (torch.Tensor, float)):
-        assert not isinstance(ref, torch._subclasses.FakeTensor)
-        assert not isinstance(res, torch._subclasses.FakeTensor)
+        if isinstance(ref, torch._subclasses.FakeTensor):
+            raise AssertionError("ref should not be a FakeTensor")
+        if isinstance(res, torch._subclasses.FakeTensor):
+            raise AssertionError("res should not be a FakeTensor")
 
         def to_tensor(t: Any) -> torch.Tensor:
             return t if isinstance(t, torch.Tensor) else torch.tensor(t)
@@ -3388,10 +3426,12 @@ def same(
         ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
 
         if ref.is_sparse:
-            assert res.is_sparse
+            if not res.is_sparse:
+                raise AssertionError("Expected res to be sparse since ref is sparse")
             ref = ref.to_dense()
             res = res.to_dense()
-        assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
+        if not isinstance(res, torch.Tensor):
+            raise AssertionError(f"type mismatch {type(ref)} {type(res)}")
         if exact_dtype:
             if ref.dtype != res.dtype:
                 log_error("dtype mismatch %s, %s", ref.dtype, res.dtype)
@@ -3594,7 +3634,8 @@ def same(
         "Foo",
         "Variable",
     ):
-        assert type(ref) is type(res)
+        if type(ref) is not type(res):
+            raise AssertionError(f"type mismatch {type(ref)} {type(res)}")
         return all(
             same(
                 getattr(ref, key),
@@ -3687,7 +3728,10 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
-    assert maybe_get_fake_mode(e) is tx.fake_mode
+    if maybe_get_fake_mode(e) is not tx.fake_mode:
+        raise AssertionError(
+            f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
+        )
     return e
 
 
@@ -3701,9 +3745,15 @@ def get_fake_values_from_nodes(
             return get_fake_value(n, tx, allow_non_graph_fake)
 
         elif n.op == "get_attr" and "example_value" not in n.meta:
-            assert n.target in tx.output.nn_modules
+            if n.target not in tx.output.nn_modules:
+                raise AssertionError(
+                    f"Expected n.target {n.target!r} to be in tx.output.nn_modules"
+                )
             gm = tx.output.nn_modules[n.target]  # type: ignore[index]
-            assert isinstance(gm, torch.fx.GraphModule)
+            if not isinstance(gm, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"Expected gm to be a torch.fx.GraphModule, got {type(gm)}"
+                )
             return gm
 
         out = n.meta["example_value"]
@@ -3729,7 +3779,8 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
         return msg
 
     pattern = r"\(s(\d+)\)"
-    assert fake_mode.shape_env is not None
+    if fake_mode.shape_env is None:
+        raise AssertionError("fake_mode.shape_env must not be None")
     shape_env = fake_mode.shape_env
     backed_var_to_val = shape_env.backed_var_to_val
 
@@ -3816,7 +3867,8 @@ def _get_fake_value_impl(
 
     nnmodule = None
     fake_mode = tx.fake_mode
-    assert fake_mode is not None
+    if fake_mode is None:
+        raise AssertionError("fake_mode must not be None")
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
         args = (deepcopy_to_fake_tensor(args[0], fake_mode),) + tuple(args[1:])
@@ -4047,12 +4099,16 @@ def run_node(
                     )
                 return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
             elif op == "call_module":
-                assert nnmodule is not None
+                if nnmodule is None:
+                    raise AssertionError("nnmodule must not be None for call_module op")
                 return nnmodule(*args, **kwargs)
             elif op == "get_attr":
                 return tracer.output_graph.get_submodule(node.target)
             elif op == "placeholder":
-                assert "example_value" in node.meta
+                if "example_value" not in node.meta:
+                    raise AssertionError(
+                        "Expected 'example_value' in node.meta for placeholder op"
+                    )
                 return node.meta["example_value"]
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
@@ -4147,13 +4203,13 @@ def assert_no_fake_params_or_buffers(gm: torch.nn.Module) -> None:
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        if is_fake(buffer):
+            raise AssertionError(
+                f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+            )
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        if is_fake(param):
+            raise AssertionError(f"Unexpected fake param {name} {stack_or_hint(param)}")
 
 
 def fqn(obj: Any) -> str:
@@ -4383,7 +4439,8 @@ def to_numpy_helper(value: Any) -> Any:
 
 def numpy_to_tensor(value: Any) -> Any:
     """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
-    assert np is not None
+    if np is None:
+        raise AssertionError("numpy must be available (np is None)")
     if isinstance(value, np.ndarray):
         return torch.as_tensor(value)
     if isinstance(value, tnp.ndarray):
@@ -4446,7 +4503,8 @@ class numpy_operator_wrapper(Generic[_P, R]):
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
-        assert not kwargs
+        if kwargs:
+            raise AssertionError(f"Expected no kwargs, got {kwargs}")
 
         # pyrefly: ignore [bad-assignment]
         args = (
@@ -4581,7 +4639,8 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         - for indexing, the location of the brackets.
     `segment` is expected to be a valid Python expression
     """
-    assert sys.version_info >= (3, 11)
+    if sys.version_info < (3, 11):
+        raise AssertionError(f"Python >= 3.11 required, got {sys.version_info}")
 
     import ast
 
@@ -4593,7 +4652,8 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
-    assert tree is not None
+    if tree is None:
+        raise AssertionError("ast.parse returned None unexpectedly")
 
     if len(tree.body) != 1:
         return None
@@ -4610,14 +4670,28 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         while lineno < len(lines) and col >= len(lines[lineno]):
             col = 0
             lineno += 1
-        assert lineno < len(lines) and col < len(lines[lineno])
+        if lineno >= len(lines):
+            raise AssertionError(
+                f"lineno {lineno} out of range (len(lines)={len(lines)})"
+            )
+        if col >= len(lines[lineno]):
+            raise AssertionError(
+                f"col {col} out of range (len(lines[{lineno}])={len(lines[lineno])})"
+            )
         return lineno, col
 
     # Get the next valid character index in `lines`.
     def increment(lineno: int, col: int) -> tuple[int, int]:
         col += 1
         lineno, col = next_valid_char(lineno, col)
-        assert lineno < len(lines) and col < len(lines[lineno])
+        if lineno >= len(lines):
+            raise AssertionError(
+                f"lineno {lineno} out of range (len(lines)={len(lines)})"
+            )
+        if col >= len(lines[lineno]):
+            raise AssertionError(
+                f"col {col} out of range (len(lines[{lineno}])={len(lines[lineno])})"
+            )
         return lineno, col
 
     # Get the next valid character at least on the next line
@@ -4625,7 +4699,14 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         col = 0
         lineno += 1
         lineno, col = next_valid_char(lineno, col)
-        assert lineno < len(lines) and col < len(lines[lineno])
+        if lineno >= len(lines):
+            raise AssertionError(
+                f"lineno {lineno} out of range (len(lines)={len(lines)})"
+            )
+        if col >= len(lines[lineno]):
+            raise AssertionError(
+                f"col {col} out of range (len(lines[{lineno}])={len(lines[lineno])})"
+            )
         return lineno, col
 
     statement = tree.body[0]
@@ -4638,7 +4719,8 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
             # -2 since end_lineno is 1-indexed and because we added an extra
             # bracket to `segment` when calling ast.parse
             cur_lineno = cast(int, expr.left.end_lineno) - 2
-            assert expr.left.end_col_offset is not None
+            if expr.left.end_col_offset is None:
+                raise AssertionError("expr.left.end_col_offset must not be None")
             cur_col = normalize(cur_lineno, expr.left.end_col_offset)
             cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
 
@@ -4671,14 +4753,16 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
             # subscript^^^^^^^^^^^^^^^^^^^^
             # find left bracket (first '[' after value)
             left_lineno = cast(int, expr.value.end_lineno) - 2
-            assert expr.value.end_col_offset is not None
+            if expr.value.end_col_offset is None:
+                raise AssertionError("expr.value.end_col_offset must not be None")
             left_col = normalize(left_lineno, expr.value.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "[":
                 left_lineno, left_col = increment(left_lineno, left_col)
             # find right bracket (final character of expression)
             right_lineno = cast(int, expr.end_lineno) - 2
-            assert expr.end_col_offset is not None
+            if expr.end_col_offset is None:
+                raise AssertionError("expr.end_col_offset must not be None")
             right_col = normalize(right_lineno, expr.end_col_offset)
             return _Anchors(left_lineno, left_col, right_lineno, right_col)
         elif isinstance(expr, ast.Call):
@@ -4687,14 +4771,16 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
             # call^^^^^^^^^^^^^^^^^^^^^^^^
             # find left bracket (first '(' after func)
             left_lineno = cast(int, expr.func.end_lineno) - 2
-            assert expr.func.end_col_offset is not None
+            if expr.func.end_col_offset is None:
+                raise AssertionError("expr.func.end_col_offset must not be None")
             left_col = normalize(left_lineno, expr.func.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "(":
                 left_lineno, left_col = increment(left_lineno, left_col)
             # find right bracket (final character of expression)
             right_lineno = cast(int, expr.end_lineno) - 2
-            assert expr.end_col_offset is not None
+            if expr.end_col_offset is None:
+                raise AssertionError("expr.end_col_offset must not be None")
             right_col = normalize(right_lineno, expr.end_col_offset)
             return _Anchors(left_lineno, left_col, right_lineno, right_col)
 
@@ -4833,7 +4919,10 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
-    assert hasattr(inst, "positions") and inst.positions is not None
+    if not hasattr(inst, "positions"):
+        raise AssertionError("inst must have a 'positions' attribute")
+    if inst.positions is None:
+        raise AssertionError("inst.positions must not be None")
     return format_source_range(
         code.co_filename,
         inst.positions.lineno,
@@ -5032,8 +5121,14 @@ def flatten_graph_inputs(
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
-        assert inputs_idx_to_clear == [0]
-        assert isinstance(inputs[0], list)
+        if inputs_idx_to_clear != [0]:
+            raise AssertionError(
+                f"Expected inputs_idx_to_clear == [0], got {inputs_idx_to_clear}"
+            )
+        if not isinstance(inputs[0], list):
+            raise AssertionError(
+                f"Expected inputs[0] to be a list, got {type(inputs[0])}"
+            )
         boxed_inputs_count = len(inputs[0])
 
         def flatten_fn(args: Any) -> Any:
@@ -5124,7 +5219,12 @@ def get_torch_function_mode_stack() -> list[Any]:
 
 
 def get_torch_function_mode_stack_at(ind: int) -> Any:
-    assert ind < _len_torch_function_stack() and ind >= 0
+    if ind < 0:
+        raise AssertionError(f"Expected ind >= 0, got {ind}")
+    if ind >= _len_torch_function_stack():
+        raise AssertionError(
+            f"Expected ind < _len_torch_function_stack() ({_len_torch_function_stack()}), got {ind}"
+        )
     return torch._C._get_function_stack_at(ind)
 
 
@@ -5289,9 +5389,8 @@ def get_optimize_ddp_mode() -> str:
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    if mode not in _ddp_optimization_mode:
+        raise AssertionError(f"Invalid dynamo config optimize_ddp value {mode=}")
     return mode
 
 
@@ -5414,7 +5513,8 @@ def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
 def _make_inlined(
     tx: InstructionTranslator, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
-    assert callable(f), "Expect f to be a python callable."
+    if not callable(f):
+        raise AssertionError("Expect f to be a python callable.")
 
     def inline_call(
         *args: VariableTracker, **kwargs: VariableTracker
