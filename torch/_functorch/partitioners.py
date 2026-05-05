@@ -1210,6 +1210,10 @@ def _extract_fwd_bwd_modules(
             ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
         )
 
+    for node in bwd_graph.nodes:
+        if node.op in ("call_function", "get_attr"):
+            node.meta["autograd_backward"] = True
+
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     if (
