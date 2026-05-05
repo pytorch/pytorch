@@ -25,9 +25,10 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         return self.rank + 1
 
     def _skip_if_product_overflows(self, op):
-        if op == dist.ReduceOp.PRODUCT and self.world_size > 34:
+        if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
             self.skipTest(
-                f"world_size={self.world_size} causes float32 overflow for PRODUCT"
+                f"world_size={self.world_size} > 12: PRODUCT is world_size! "
+                "and only up to 12! is exactly representable in float32"
             )
 
     def _expected_reduce_result(self, op):
