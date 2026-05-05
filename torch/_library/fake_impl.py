@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 
 class FakeImplHolder:
-    """A holder where one can register an fake impl to."""
+    """A holder where one can register a fake impl to."""
 
     def __init__(self, qualname: str):
         self.qualname: str = qualname
@@ -38,7 +38,7 @@ class FakeImplHolder:
     def register(
         self, func: Callable, source: str, lib, *, allow_override=False
     ) -> RegistrationHandle:
-        """Register an fake impl.
+        """Register a fake impl.
 
         Returns a RegistrationHandle that one can use to de-register this
         fake impl.
@@ -48,13 +48,13 @@ class FakeImplHolder:
             if self.kernel is not None:
                 raise RuntimeError(
                     f"register_fake(...): the operator {self.qualname} "
-                    f"already has an fake impl registered at "
+                    f"already has a fake impl registered at "
                     f"{self.kernel.source}."
                 )
             if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
                 raise RuntimeError(
                     f"register_fake(...): the operator {self.qualname} "
-                    f"already has an DispatchKey::Meta implementation via a "
+                    f"already has a DispatchKey::Meta implementation via a "
                     f"pre-existing torch.library or TORCH_LIBRARY registration. "
                     f"Please either remove that registration or don't call "
                     f"register_fake."
@@ -68,7 +68,7 @@ class FakeImplHolder:
                     f"already has an implementation for this device type via a "
                     f"pre-existing registration to "
                     f"DispatchKey::CompositeImplicitAutograd."
-                    f"CompositeImplicitAutograd operators do not need an fake "
+                    f"CompositeImplicitAutograd operators do not need a fake "
                     f"impl; "
                     f"instead, the operator will decompose into its constituents "
                     f"and those "
@@ -194,7 +194,7 @@ class FakeImplCtx:
             >>> @torch.library.register_fake("mymodule::custom_nonzero")
             >>> def _(x):
             >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an fake impl,
+            >>>     # Since we cannot peek at the data in a fake impl,
             >>>     # we use the ctx object to construct a new symint that
             >>>     # represents the data-dependent size.
             >>>     ctx = torch.library.get_ctx()
