@@ -2896,6 +2896,13 @@ set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
     method for method in frozenset.__dict__.values() if callable(method)
 }
+base_exception_methods = {
+    method for method in BaseException.__dict__.values() if callable(method)
+}
+exception_methods = {
+    method for method in Exception.__dict__.values() if callable(method)
+}
+
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -3479,8 +3486,8 @@ def same(
 
                 def get_multiplier() -> float:
                     # In some particular cases, we expect high difference in results.
-                    # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
-                    # In case of it the res_error is at least one order of magnitude higher.
+                    # At the moment one of these cases is inductor freezing bfloat16 convolution const folding.
+                    # In this case, the res_error is at least one order of magnitude higher.
                     if force_max_multiplier:
                         return 10.0
                     # In the case of using AMP (Automatic Mixed Precision), certain models have
