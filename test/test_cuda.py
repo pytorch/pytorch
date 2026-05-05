@@ -386,6 +386,10 @@ print(t.is_pinned())
         with self.assertRaisesRegex(ValueError, "Invalid memory size"):
             torch.cuda.memory.caching_allocator_alloc(-1024)
 
+    def test_caching_allocator_alloc_overflow(self):
+        with self.assertRaises(OverflowError):
+            torch.cuda.memory.caching_allocator_alloc(2**63, device=0)
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
