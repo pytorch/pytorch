@@ -125,8 +125,11 @@ class TensorSpec:
         return iter(self._specs)
 
     def __repr__(self) -> str:
-        entries = ", ".join(repr(spec) for spec in self._specs)
-        return f"TensorSpec([{entries}])"
+        lines = ["TensorSpec("]
+        for i, spec in enumerate(self._specs):
+            lines.append(f"  {i}: {spec!r}")
+        lines.append(")")
+        return "\n".join(lines)
 
 
 class ParamsSpec:
@@ -161,14 +164,20 @@ class ParamsSpec:
         self._varkw: dict[str, IntermediateSpec] | None = None
 
     def __repr__(self) -> str:
-        parts: list[str] = []
-        if self._named_args:
-            parts.append(f"named_args={self._named_args!r}")
+        lines = ["ParamsSpec("]
+        for k, v in self._named_args.items():
+            v_repr = repr(v)
+            if "\n" in v_repr:
+                indented = "\n".join("    " + line for line in v_repr.splitlines())
+                lines.append(f"  {k}:\n{indented}")
+            else:
+                lines.append(f"  {k}: {v_repr}")
         if self._varargs is not None:
-            parts.append(f"varargs={self._varargs!r}")
+            lines.append(f"  *args: {self._varargs!r}")
         if self._varkw is not None:
-            parts.append(f"varkw={self._varkw!r}")
-        return f"ParamsSpec({', '.join(parts)})"
+            lines.append(f"  **kwargs: {self._varkw!r}")
+        lines.append(")")
+        return "\n".join(lines)
 
 
 class ShapesSpec:
@@ -203,7 +212,13 @@ class ShapesSpec:
         return self._params
 
     def __repr__(self) -> str:
-        return f"ShapesSpec(params={self._params!r})"
+        lines = ["ShapesSpec("]
+        if self._params is not None:
+            param_repr = repr(self._params)
+            indented = "\n".join("  " + line for line in param_repr.splitlines())
+            lines.append(f"  params:\n{indented}")
+        lines.append(")")
+        return "\n".join(lines)
 
 
 def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> LeafSpec:

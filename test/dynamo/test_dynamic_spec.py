@@ -193,10 +193,15 @@ class TestTensorSpecConstruction(TestCase):
 
     def test_repr(self):
         ts = TensorSpec([ShapeVar("batch"), None, 10])
-        r = repr(ts)
-        self.assertIn("ShapeVar(", r)
-        self.assertIn("None", r)
-        self.assertIn("10", r)
+        self.assertEqual(
+            repr(ts),
+            """\
+TensorSpec(
+  0: ShapeVar(name='batch', min=0)
+  1: None
+  2: 10
+)""",
+        )
 
 
 class TestParamsSpecConstruction(TestCase):
@@ -211,8 +216,21 @@ class TestParamsSpecConstruction(TestCase):
         self.assertIsNotNone(ss.params)
 
     def test_shapes_spec_repr(self):
-        ss = ShapesSpec(params=ParamsSpec({"x": None}))
-        self.assertIn("ShapesSpec", repr(ss))
+        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
+        self.assertEqual(
+            repr(ss),
+            """\
+ShapesSpec(
+  params:
+  ParamsSpec(
+    x:
+      TensorSpec(
+        0: ShapeVar(name='batch', min=0)
+        1: None
+      )
+  )
+)""",
+        )
 
 
 class TestShapeVarCompile(TestCase):
