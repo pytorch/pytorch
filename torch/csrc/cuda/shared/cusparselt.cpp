@@ -12,8 +12,8 @@ size_t getVersionInt() {
 #include <hipsparselt/hipsparselt-version.h>
 size_t getVersionInt() {
  int version = 0;
- version = hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100
-               + hipsparseltVersionPatch;
+ version = hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100 +
+      hipsparseltVersionPatch;
  return version;
 }
 #endif
