@@ -1205,7 +1205,19 @@ class CachingAutotuner(KernelInterface):
                             **cloned_kwargs,
                             stream=stream,
                         )
-                    except Exception:
+                    except TypeError as e:
+                        if "got multiple values for argument" in str(e):
+                            kernel_arg_names = list(
+                                self.triton_meta.get("signature", {}).keys()
+                            )
+                            num_expected = len(kernel_arg_names)
+                            num_received = len(cloned_args) + len(cloned_kwargs)
+                            raise TypeError(
+                                f"{kernel_name}() got {num_received} argument(s) "
+                                f"(expected {num_expected}). "
+                                f"This may be caused by passing extraneous arguments "
+                                f"to the kernel."
+                            ) from e
                         log.error(
                             "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                             kernel_name,
@@ -1223,7 +1235,19 @@ class CachingAutotuner(KernelInterface):
                         **cloned_kwargs,
                         stream=stream,
                     )
-                except Exception:
+                except TypeError as e:
+                    if "got multiple values for argument" in str(e):
+                        kernel_arg_names = list(
+                            self.triton_meta.get("signature", {}).keys()
+                        )
+                        num_expected = len(kernel_arg_names)
+                        num_received = len(cloned_args) + len(cloned_kwargs)
+                        raise TypeError(
+                            f"{kernel_name}() got {num_received} argument(s) "
+                            f"(expected {num_expected}). "
+                            f"This may be caused by passing extraneous arguments "
+                            f"to the kernel."
+                        ) from e
                     log.error(
                         "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                         kernel_name,
