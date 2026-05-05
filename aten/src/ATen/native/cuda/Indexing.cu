@@ -39,6 +39,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IntegerDivider.cuh>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
@@ -998,6 +999,10 @@ static size_t getSliceSize(const Tensor & dst,
   return dstSliceSize;
 }
 
+inline bool indexFuncVectorizedDisabled() {
+  return c10::utils::check_env("TORCH_DISABLE_INDEX_ADD_VECTORIZED") == true;
+}
+
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
@@ -1054,10 +1059,10 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 // indexFuncSmallIndex kernel is a better choice to reduce memory
 // accesses.
 //
-// When VecSize > 1, each thread processes VecSize consecutive elements,
-// amortizing the divmod and index lookup cost.  Boundary cases (where
-// VecSize elements would cross a slice boundary) are handled inline so
-// the dispatch site does not need to check sliceSize alignment or stride.
+// When VecSize > 1, each warp processes C10_WARP_SIZE * VecSize consecutive
+// elements from one index point, amortizing the divmod and index lookup while
+// preserving contiguous per-warp memory accesses. Boundary cases are handled
+// inline so the dispatch site does not need to check sliceSize alignment.
 // When VecSize == 1 (default), this is the original scalar kernel.
 //
 // Uses IntDivider for fast integer divmod (multiply+shift instead of
@@ -1105,27 +1110,30 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     op(dst.data, dstOffset, dstNumel, &val);
   };
 
-  if constexpr (VecSize > 1) {
-    // Round up to include tail elements in the vectorized loop.
-    const IndexType totalVecs = at::ceil_div(totalSize, (IndexType)VecSize);
-    for (IndexType vecIdx = blockIdx.x * blockDim.x + threadIdx.x;
-         vecIdx < totalVecs;
-         vecIdx += gridDim.x * blockDim.x) {
-      IndexType baseLinear = vecIdx * VecSize;
-      auto dm = innerSizeDivider.divmod(baseLinear);
-      IndexType srcIndex = dm.div;
-      IndexType elementBase = dm.mod;
+  if constexpr (VecSize > 1 && IndexIsMajor) {
+    constexpr int64_t warp_size = C10_WARP_SIZE;
+    constexpr int64_t elements_per_warp = warp_size * VecSize;
+    const IndexType numSlices = at::ceil_div(totalSize, innerSize);
+    const IndexType tilesPerSlice = at::ceil_div(innerSize, (IndexType)elements_per_warp);
+    const IndexType totalTiles = numSlices * tilesPerSlice;
+    const IndexType warpsPerBlock = at::ceil_div((IndexType)blockDim.x, (IndexType)warp_size);
+    const IndexType warpInBlock = threadIdx.x / warp_size;
+    const IndexType lane = threadIdx.x % warp_size;
 
-      if (elementBase + VecSize <= innerSize && baseLinear + VecSize <= totalSize) {
-        // Fast path: all VecSize elements are in the same slice and within bounds.
-        // Hoist index lookup outside the unrolled loop.
-        IndexType dstIndex =
-            indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-        CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
+    for (IndexType tileIdx = blockIdx.x * warpsPerBlock + warpInBlock;
+         tileIdx < totalTiles;
+         tileIdx += gridDim.x * warpsPerBlock) {
+      const IndexType srcIndex = tileIdx / tilesPerSlice;
+      const IndexType tileInSlice = tileIdx - srcIndex * tilesPerSlice;
+      const IndexType elementBase = tileInSlice * elements_per_warp + lane;
+      const IndexType dstIndex =
+          indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+      CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
 
-        #pragma unroll
-        for (int v = 0; v < VecSize; ++v) {
-          IndexType elementInSlice = elementBase + v;
+      #pragma unroll
+      for (int v = 0; v < VecSize; ++v) {
+        const IndexType elementInSlice = elementBase + v * warp_size;
+        if (elementInSlice < innerSize) {
           IndexType dstOffset =
               cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
           dstOffset += dstIndex * dst.strides[dstAddDim];
@@ -1136,15 +1144,6 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 
           T val = src.data[srcOffset] * alpha;
           op(dst.data, dstOffset, dstNumel, &val);
-        }
-      } else {
-        // Slow path: elements cross a slice boundary or are in the tail.
-        #pragma unroll
-        for (int v = 0; v < VecSize; ++v) {
-          IndexType li = baseLinear + v;
-          if (li < totalSize) {
-            processElement(li);
-          }
         }
       }
     }
@@ -1250,14 +1249,28 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     const TYPE innerSizeVal =                                                \
         static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);            \
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
-        selfInfo, sourceInfo, indexInfo,                                     \
-        selfAddDim, sourceAddDim, sourceTotalSize,                          \
-        innerSizeVal, selfAddDimSize, selfNumel,                            \
-        reduce_add, alpha_value, innerSizeDivider);                         \
+    if ((IDX_IS_MAJOR) &&                                                    \
+        innerSizeVal >= static_cast<TYPE>(at::cuda::warp_size()) &&          \
+        largeIndexBlock.x % at::cuda::warp_size() == 0 &&                    \
+        !indexFuncVectorizedDisabled()) {                                    \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                   \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                     \
+                          IDX_IS_MAJOR, 4>                                   \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                    \
+          selfInfo, sourceInfo, indexInfo,                                   \
+          selfAddDim, sourceAddDim, sourceTotalSize,                         \
+          innerSizeVal, selfAddDimSize, selfNumel,                           \
+          reduce_add, alpha_value, innerSizeDivider);                        \
+    } else {                                                                 \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                   \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                     \
+                          IDX_IS_MAJOR, 1>                                   \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                    \
+          selfInfo, sourceInfo, indexInfo,                                   \
+          selfAddDim, sourceAddDim, sourceTotalSize,                         \
+          innerSizeVal, selfAddDimSize, selfNumel,                           \
+          reduce_add, alpha_value, innerSizeDivider);                        \
+    }                                                                        \
   }                                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -1431,14 +1444,28 @@ void index_reduce_func_cuda_impl(
     const TYPE innerSizeVal =                                                             \
         static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);                         \
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
-        selfInfo, sourceInfo, indexInfo,                                                   \
-        selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
-        innerSizeVal, selfReduceDimSize, selfNumel,                                       \
-        reduce_func, alpha_value, innerSizeDivider);                                      \
+    if ((IDX_IS_MAJOR) &&                                                                 \
+        innerSizeVal >= static_cast<TYPE>(at::cuda::warp_size()) &&                       \
+        largeIndexBlock.x % at::cuda::warp_size() == 0 &&                                  \
+        !indexFuncVectorizedDisabled()) {                                                 \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                                  \
+                          IDX_IS_MAJOR, 4>                                                \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                 \
+          selfInfo, sourceInfo, indexInfo,                                                \
+          selfReduceDim, sourceReduceDim, sourceTotalSize,                                \
+          innerSizeVal, selfReduceDimSize, selfNumel,                                     \
+          reduce_func, alpha_value, innerSizeDivider);                                    \
+    } else {                                                                              \
+      indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                \
+                          SELF_DIM, SOURCE_DIM, IDX_DIM,                                  \
+                          IDX_IS_MAJOR, 1>                                                \
+        <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                 \
+          selfInfo, sourceInfo, indexInfo,                                                \
+          selfReduceDim, sourceReduceDim, sourceTotalSize,                                \
+          innerSizeVal, selfReduceDimSize, selfNumel,                                     \
+          reduce_func, alpha_value, innerSizeDivider);                                    \
+    }                                                                                     \
   }                                                                                       \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
