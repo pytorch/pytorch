@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfHpu,
     skipIfHpu_BUGGY,
     TEST_CUDA,
     TEST_HPU,
