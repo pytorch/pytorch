@@ -947,7 +947,20 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
-                assert var.mutation_type.cls_source is not None
+                if var.mutation_type.cls_source is None:
+                    unimplemented(
+                        gb_type="Reconstruct user defined class without a source",
+                        context=f"Class: {var.python_type().__name__}",
+                        explanation=(
+                            f"Cannot reconstruct an instance of {var.python_type().__name__} "
+                            "that escapes the compiled region. This happens when the class is "
+                            "defined dynamically (e.g., inside the compiled function) and the "
+                            "class object itself has no source that can be reconstructed. "
+                            "To fix this, move the class definition outside the compiled function "
+                            "or prevent the object from escaping the compiled region."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 cg(var.mutation_type.cls_source)
 
                 # Generate the args to the __new__ method
