@@ -6,12 +6,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
-from torch._dynamo.decorators import mark_static, mark_unbacked, maybe_mark_dynamic
+from torch._dynamo.decorators import mark_unbacked
 from torch._dynamo.dynamic_spec import (
-    IntSpec,
-    IntSpecType,
+    IntVar,
     ParamsSpec,
     ShapesSpec,
+    ShapeVar,
     TensorSpec,
 )
 from torch._dynamo.test_case import run_tests, TestCase
@@ -19,11 +19,6 @@ from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
-)
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    skipIfTorchDynamo,
 )
 
 
@@ -37,30 +32,21 @@ def _tensor_placeholder_shape(gm):
     raise AssertionError("no tensor placeholder found")
 
 
-# Applies per-dim IntSpec to a tensor through ``mark_*`` on each call.
-# ``shape_spec`` must be a ``TensorSpec`` (or ``None`` to skip).
-def _apply_intspec_to_tensor(tensor, shape_spec):
+def _apply_spec_to_tensor(tensor, shape_spec):
+    """Apply per-dim spec to a tensor through ``mark_*`` on each dim.
+    This is only for testing purposes. Will be removed in next PR.
+    """
     if not isinstance(shape_spec, TensorSpec):
         return
     for idx, spec in enumerate(shape_spec):
-        if spec is None:
-            continue
-        if spec._type is IntSpecType.STATIC:
-            mark_static(tensor, idx)
-        elif spec._type is IntSpecType.BACKED:
-            maybe_mark_dynamic(tensor, idx)
-        elif spec._type is IntSpecType.UNBACKED:
+        if isinstance(spec, IntVar):
             mark_unbacked(tensor, idx)
 
 
-def _compile_with_dynamic_shapes(fn, dynamic_shapes, **compile_kwargs):
-    """Compile ``fn`` and apply ``dynamic_shapes`` specs on every call.
+def _compile_with_dynamic_shapes(fn, dynamic_spec, **compile_kwargs):
+    """Compile ``fn`` and apply ``dynamic_spec`` specs on every call."""
 
-    On each call, the wrapper inspects ``dynamic_shapes`` and calls the
-    appropriate ``mark_static`` / ``maybe_mark_dynamic`` / ``mark_unbacked``
-    on each tensor argument before forwarding to the compiled function.
-    """
-
+    compile_kwargs.setdefault("dynamic", False)
     compiled = torch.compile(fn, **compile_kwargs)
     sig = inspect.signature(fn)
 
@@ -68,549 +54,177 @@ def _compile_with_dynamic_shapes(fn, dynamic_shapes, **compile_kwargs):
     def wrapper(*args, **kwargs):
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
-        for name, shape_spec in dynamic_shapes.items():
+        for name, shape_spec in dynamic_spec.items():
             if name in bound.arguments:
                 arg = bound.arguments[name]
                 if isinstance(arg, torch.Tensor):
-                    _apply_intspec_to_tensor(arg, shape_spec)
+                    _apply_spec_to_tensor(arg, shape_spec)
         return compiled(*bound.args, **bound.kwargs)
 
     return wrapper
 
 
-class TestIntSpecConstruction(TestCase):
-    """Construction via the classmethod factories.
+class TestShapeVarConstruction(TestCase):
+    """Construction of ShapeVar."""
 
-    Field reads use the private slots (``s._name``, ``s._min``, etc.) since
-    the fluent setters are write-only.
-    """
+    def test_basic(self):
+        s = ShapeVar("batch")
+        self.assertEqual(s.name, "batch")
+        self.assertEqual(s.min, 0)
+        self.assertIsNone(s.max)
+        self.assertIsNone(s.optimization_hint)
 
-    def test_static(self):
-        s = IntSpec.static("x", value=10)
-        self.assertEqual(s._name, "x")
-        self.assertEqual(s._type, IntSpecType.STATIC)
-        self.assertEqual(s._value, 10)
+    def test_with_max(self):
+        s = ShapeVar("batch", max=64)
+        self.assertEqual(s.max, 64)
 
-    def test_static_no_value(self):
-        s = IntSpec.static()
-        self.assertEqual(s._type, IntSpecType.STATIC)
-        self.assertIsNone(s._value)
-        # ``name=None`` auto-fills with a stable per-instance handle.
-        self.assertTrue(s._name.startswith("_intspec_static_"))
+    def test_with_optimization_hint(self):
+        s = ShapeVar("seq", max=2048, optimization_hint=512)
+        self.assertEqual(s.max, 2048)
+        self.assertEqual(s.optimization_hint, 512)
+
+    def test_anonymous_name(self):
+        s = ShapeVar()
+        self.assertTrue(s.name.startswith("_intvar_"))
 
     def test_anonymous_specs_have_distinct_names(self):
-        # Two anonymous specs of the same mode get different auto-names so
-        # they can be distinguished in error messages / logs.
-        a = IntSpec.static()
-        b = IntSpec.static()
-        self.assertNotEqual(a._name, b._name)
+        a = ShapeVar()
+        b = ShapeVar()
+        self.assertNotEqual(a.name, b.name)
 
-    def test_backed(self):
-        s = IntSpec.backed("batch", min=1, max=64, guarding_hint=32)
-        self.assertEqual(s._name, "batch")
-        self.assertEqual(s._type, IntSpecType.BACKED)
-        self.assertEqual(s._min, 1)
-        self.assertEqual(s._max, 64)
-        self.assertEqual(s._guarding_hint, 32)
-
-    def test_unbacked(self):
-        s = IntSpec.unbacked("seq", min=1, max=2048, optimization_hint=512)
-        self.assertEqual(s._type, IntSpecType.UNBACKED)
-        self.assertEqual(s._min, 1)
-        self.assertEqual(s._max, 2048)
-        self.assertEqual(s._optimization_hint, 512)
-
-    def test_type_required_on_init(self):
-        with self.assertRaises(TypeError) as cm:
-            IntSpec("x")  # no type kwarg
-        # Python-generated message; format pinned for 3.10+.
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec.__init__() missing 1 required positional argument: 'type'",
-        )
-
-    def test_type_not_none(self):
-        with self.assertRaises(TypeError) as cm:
-            IntSpec("x", type=None)  # type: ignore[arg-type]
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec type must be an IntSpecType, got None",
-        )
-
-    def test_type_as_positional_arg(self):
-        s = IntSpec("batch", IntSpecType.BACKED, min=1, max=64)
-        self.assertEqual(s._name, "batch")
-        self.assertEqual(s._type, IntSpecType.BACKED)
-        self.assertEqual(s._min, 1)
-        self.assertEqual(s._max, 64)
-
-    def test_static_with_positional_int_rejected(self):
-        # ``IntSpec.static(10)`` would silently bind 10 to ``name``. Must
-        # fail with a clear redirect to the kwarg form.
-        with self.assertRaises(TypeError) as cm:
-            IntSpec.static(10)  # type: ignore[arg-type]
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec.name must be str or None, got int; "
-            "if you meant to pass a value/hint, use a keyword argument "
-            "(e.g. IntSpec.static(value=10))",
-        )
-
-    def test_backed_with_positional_int_rejected(self):
-        with self.assertRaises(TypeError) as cm:
-            IntSpec.backed(5)  # type: ignore[arg-type]
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec.name must be str or None, got int; "
-            "if you meant to pass a value/hint, use a keyword argument "
-            "(e.g. IntSpec.backed(guarding_hint=5))",
-        )
-
-    def test_unbacked_with_positional_int_rejected(self):
-        with self.assertRaises(TypeError) as cm:
-            IntSpec.unbacked(5)  # type: ignore[arg-type]
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec.name must be str or None, got int; "
-            "if you meant to pass a value/hint, use a keyword argument "
-            "(e.g. IntSpec.unbacked(optimization_hint=5))",
-        )
-
-    def test_name_wrong_type_on_init(self):
-        with self.assertRaises(TypeError) as cm:
-            IntSpec(10, IntSpecType.STATIC)  # type: ignore[arg-type]
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec.name must be str or None, got int; "
-            "if you meant to pass a value/hint, use a keyword argument "
-            "(e.g. IntSpec.static(value=10))",
-        )
+    def test_is_instance_of_intvar(self):
+        s = ShapeVar("batch")
+        self.assertIsInstance(s, IntVar)
 
     def test_repr(self):
-        # Anonymous: name is auto-generated; check shape via prefix since
-        # the trailing id-hex is process-dependent.
-        anon = repr(IntSpec.static())
-        self.assertTrue(anon.startswith("IntSpec(name='_intspec_static_"))
-        self.assertIn("type=STATIC", anon)
-        # Named + value.
+        s = ShapeVar("batch", max=64, optimization_hint=32)
         self.assertEqual(
-            repr(IntSpec.static("x", value=10)),
-            "IntSpec(name='x', type=STATIC, value=10)",
-        )
-        # BACKED with full set of fields.
-        self.assertEqual(
-            repr(IntSpec.backed("batch", min=1, max=64, guarding_hint=32)),
-            "IntSpec(name='batch', type=BACKED, min=1, max=64, guarding_hint=32)",
-        )
-        # UNBACKED with full set of fields.
-        self.assertEqual(
-            repr(IntSpec.unbacked("seq", min=1, max=2048, optimization_hint=512)),
-            "IntSpec(name='seq', type=UNBACKED, min=1, max=2048, optimization_hint=512)",
+            repr(s), "ShapeVar(name='batch', min=0, max=64, optimization_hint=32)"
         )
 
+    def test_repr_minimal(self):
+        s = ShapeVar("x")
+        self.assertEqual(repr(s), "ShapeVar(name='x', min=0)")
 
-class TestIntSpecTypeImmutable(TestCase):
-    """Only ``type`` is pinned. All other fields can be reassigned via the
-    fluent setters. This class verifies the type-pin guard, slot discipline
-    (no new attrs, cannot delete), and that the mutable fields can in fact
-    be updated."""
+    def test_implicit_min_is_zero(self):
+        s = ShapeVar("x")
+        self.assertEqual(s.min, 0)
 
-    def test_type_reassign_via_private_slot_rejected(self):
-        # The backing ``_type`` slot is locked: our ``__setattr__``
-        # guard catches reassignment. Reads through ``_type`` are fine.
-        s = IntSpec.backed("x")
-        with self.assertRaises(AttributeError) as cm:
-            s._type = IntSpecType.STATIC
+    def test_custom_min(self):
+        s = ShapeVar("x", min=1)
+        self.assertEqual(s.min, 1)
+
+
+class TestIntVarConstruction(TestCase):
+    """Construction of IntVar."""
+
+    def test_basic(self):
+        s = IntVar("offset")
+        self.assertEqual(s.name, "offset")
+        self.assertIsNone(s.min)
+        self.assertIsNone(s.max)
+        self.assertIsNone(s.optimization_hint)
+
+    def test_with_range(self):
+        s = IntVar("offset", min=-100, max=100)
+        self.assertEqual(s.min, -100)
+        self.assertEqual(s.max, 100)
+
+    def test_with_optimization_hint(self):
+        s = IntVar("size", min=1, max=2048, optimization_hint=512)
+        self.assertEqual(s.optimization_hint, 512)
+
+    def test_anonymous_name(self):
+        s = IntVar()
+        self.assertTrue(s.name.startswith("_intvar_"))
+
+    def test_anonymous_specs_have_distinct_names(self):
+        a = IntVar()
+        b = IntVar()
+        self.assertNotEqual(a.name, b.name)
+
+    def test_allows_negative_range(self):
+        s = IntVar("offset", min=-50, max=-10)
+        self.assertEqual(s.min, -50)
+        self.assertEqual(s.max, -10)
+
+    def test_repr(self):
+        s = IntVar("offset", min=-100, max=100, optimization_hint=0)
         self.assertEqual(
-            str(cm.exception),
-            "IntSpec type is immutable; cannot reassign",
-        )
-        self.assertIs(s._type, IntSpecType.BACKED)
-
-    def test_no_fluent_type_reset(self):
-        # IntSpec has no instance method that reassigns type. The mode-named
-        # factories are classmethods: calling one "on an instance" returns a
-        # fresh IntSpec and does not mutate the original.
-        s = IntSpec.static("x")
-        new = IntSpec.backed("x")
-        self.assertIs(s._type, IntSpecType.STATIC)
-        self.assertIs(new._type, IntSpecType.BACKED)
-        self.assertIsNot(s, new)
-
-    def test_cannot_add_new_attribute(self):
-        # __slots__ rejects unknown attributes at the slot layer; message
-        # is Python-built and version-dependent, so we only assert the type.
-        s = IntSpec.static("x")
-        with self.assertRaises(AttributeError):
-            s.brand_new_field = 1  # type: ignore[attr-defined]
-
-    def test_cannot_assign_to_method_name(self):
-        # ``value`` / ``min`` / ``max`` / ``guarding_hint`` /
-        # ``optimization_hint`` are method names backed by ``_value`` /
-        # ``_min`` / etc. slots. Direct attribute assignment under those
-        # public names has no matching slot and is rejected.
-        s = IntSpec.static("x", value=10)
-        for attr in ("value", "min", "max", "guarding_hint", "optimization_hint"):
-            with self.assertRaises(AttributeError):
-                setattr(s, attr, 20)
-
-    def test_cannot_delete_attribute(self):
-        s = IntSpec.backed("x", guarding_hint=32)
-        with self.assertRaises(AttributeError) as cm:
-            del s._guarding_hint
-        self.assertEqual(
-            str(cm.exception),
-            "IntSpec attribute '_guarding_hint' cannot be deleted",
+            repr(s), "IntVar(name='offset', min=-100, max=100, optimization_hint=0)"
         )
 
-
-class TestIntSpecFluent(TestCase):
-    """Fluent setters (``name`` / ``min`` / ``max`` / ``value`` /
-    ``guarding_hint`` / ``optimization_hint``) mutate the receiver in place
-    and return ``self`` for chaining. Each chain is equivalent to the
-    kwargs-only factory form."""
-
-    def test_setter_returns_self_for_chaining(self):
-        base = IntSpec.unbacked("seq")
-        chained = base.min(1).max(2048)
-        # Mutated in place, same object back.
-        self.assertIs(base, chained)
-        self.assertEqual(base._min, 1)
-        self.assertEqual(base._max, 2048)
-
-    def test_fluent_preserves_existing_fields(self):
-        s = IntSpec.backed("batch", min=1, guarding_hint=32).max(64)
-        self.assertEqual(s._min, 1)
-        self.assertEqual(s._max, 64)
-        self.assertEqual(s._guarding_hint, 32)
-
-    def test_failed_setter_rolls_back_per_mode(self):
-        # Per-mode rejection (guarding_hint on STATIC) must roll the slot
-        # back so the spec stays in a consistent state.
-        s = IntSpec.static("x", value=10)
-        with self.assertRaises(ValueError):
-            s.guarding_hint(99)
-        self.assertIsNone(s._guarding_hint)
-        self.assertEqual(s._value, 10)
-
-    def test_failed_setter_rolls_back_min_max(self):
-        # Cross-field check (min <= max) also rolls back.
-        s = IntSpec.backed("x", min=10, max=20)
-        with self.assertRaises(ValueError):
-            s.max(5)
-        self.assertEqual(s._max, 20)
-
-
-@instantiate_parametrized_tests
-class TestIntSpecRejectionRules(TestCase):
-    """Per-mode field-rejection rules, exercised via both entry points.
-
-    Each rule fires inside :meth:`IntSpec._validate`, reached from two
-    user-visible paths:
-
-    - ``init``: direct kwargs at the raw constructor, e.g.
-      ``IntSpec("x", IntSpecType.STATIC, guarding_hint=10)``.
-    - ``fluent``: fluent setter chained off a factory, e.g.
-      ``IntSpec.static("x").guarding_hint(10)``.
-
-    Both paths produce the same error message because the constructor
-    and the fluent setter both call ``_validate`` (the fluent setter via
-    ``_try_set``). Parametrizing the entry-point axis keeps a single
-    source of truth per rule.
-    """
-
-    @parametrize("entry", ["init", "fluent"])
-    @parametrize(
-        "IntSpecFactory,mode",
-        [
-            (IntSpec.backed, IntSpecType.BACKED),
-            (IntSpec.unbacked, IntSpecType.UNBACKED),
-        ],
-    )
-    def test_value_rejected_on_non_static(self, IntSpecFactory, mode, entry):
-        if entry == "init":
-            ctor = lambda: IntSpec("x", mode, value=42)  # noqa: E731
-        else:
-            ctor = lambda: IntSpecFactory("x").value(42)  # noqa: E731
-        with self.assertRaises(ValueError) as cm:
-            ctor()
-        self.assertEqual(str(cm.exception), "value is only valid for STATIC IntSpec")
-
-    @parametrize("entry", ["init", "fluent"])
-    @parametrize(
-        "IntSpecFactory,mode",
-        [
-            (IntSpec.static, IntSpecType.STATIC),
-            (IntSpec.unbacked, IntSpecType.UNBACKED),
-        ],
-    )
-    def test_guarding_hint_rejected_on_non_backed(self, IntSpecFactory, mode, entry):
-        if entry == "init":
-            ctor = lambda: IntSpec("x", mode, guarding_hint=10)  # noqa: E731
-        else:
-            ctor = lambda: IntSpecFactory("x").guarding_hint(10)  # noqa: E731
-        with self.assertRaises(ValueError) as cm:
-            ctor()
-        self.assertEqual(
-            str(cm.exception), "guarding_hint is only valid for BACKED IntSpec"
-        )
-
-    @parametrize("entry", ["init", "fluent"])
-    @parametrize(
-        "IntSpecFactory,mode",
-        [
-            (IntSpec.static, IntSpecType.STATIC),
-            (IntSpec.backed, IntSpecType.BACKED),
-        ],
-    )
-    def test_optimization_hint_rejected_on_non_unbacked(
-        self, IntSpecFactory, mode, entry
-    ):
-        if entry == "init":
-            ctor = lambda: IntSpec("x", mode, optimization_hint=10)  # noqa: E731
-        else:
-            ctor = lambda: IntSpecFactory("x").optimization_hint(10)  # noqa: E731
-        with self.assertRaises(ValueError) as cm:
-            ctor()
-        self.assertEqual(
-            str(cm.exception),
-            "optimization_hint is only valid for UNBACKED IntSpec",
-        )
-
-    @parametrize("entry", ["init", "fluent"])
-    @parametrize("field", ["min", "max"])
-    def test_min_max_rejected_on_static(self, field, entry):
-        if entry == "init":
-            ctor = lambda: IntSpec("x", IntSpecType.STATIC, **{field: 1})  # noqa: E731
-        else:
-            ctor = lambda: getattr(IntSpec.static("x"), field)(1)  # noqa: E731
-        with self.assertRaises(ValueError) as cm:
-            ctor()
-        self.assertEqual(
-            str(cm.exception),
-            "min/max are only valid for BACKED/UNBACKED IntSpec, not STATIC",
-        )
-
-    @parametrize("IntSpecFactory", [IntSpec.backed, IntSpec.unbacked])
-    def test_IntSpec_min_greater_than_max_rejected(self, IntSpecFactory):
-        with self.assertRaises(ValueError) as cm:
-            IntSpecFactory("x", min=100, max=1)
-        self.assertEqual(
-            str(cm.exception),
-            "min must be <= max, got min=100, max=1",
-        )
-
-    # Each case: (field, bad_value, factory_name, expected_type_name).
-    # ``factory_name`` is the factory whose mode allows the field — we
-    # exercise the type check on the valid mode since mode-rejection is
-    # already covered by the four tests above.
-    _TYPE_CASES = [
-        ("value", "10", "static", "str"),
-        ("min", 1.5, "backed", "float"),
-        ("max", "64", "backed", "str"),
-        ("guarding_hint", True, "backed", "bool"),
-        ("optimization_hint", 1.0, "unbacked", "float"),
-    ]
-
-    @parametrize("entry", ["init", "fluent"])
-    @parametrize("field,bad,factory_name,type_name", _TYPE_CASES)
-    def test_field_type_rejected(self, field, bad, factory_name, type_name, entry):
-        factory = getattr(IntSpec, factory_name)
-        if entry == "init":
-            ctor = lambda: factory("x", **{field: bad})  # noqa: E731
-        else:
-            ctor = lambda: getattr(factory("x"), field)(bad)  # noqa: E731
-        with self.assertRaises(TypeError) as cm:
-            ctor()
-        self.assertEqual(
-            str(cm.exception),
-            f"IntSpec.{field} must be int or None, got {type_name}",
-        )
+    def test_repr_minimal(self):
+        s = IntVar("x")
+        self.assertEqual(repr(s), "IntVar(name='x')")
 
 
 class TestTensorSpecConstruction(TestCase):
     """Construction and list-like interface."""
 
-    def test_basic(self):
-        ts = TensorSpec(3)
-        self.assertEqual(ts._dim, 3)
-        for spec in ts:
-            self.assertIsNone(spec)
-
-    def test_zero_dim(self):
-        ts = TensorSpec(0)
-        self.assertEqual(ts._dim, 0)
-
     def test_list_construction(self):
-        static_spec = IntSpec.static(value=10)
-        backed_spec = IntSpec.backed(min=1)
-        ts = TensorSpec([static_spec, None, backed_spec])
-        self.assertEqual(
-            repr(ts),
-            f"TensorSpec([{repr(static_spec)}, None, {repr(backed_spec)}])",
-        )
+        ts = TensorSpec([ShapeVar("batch"), None, 10])
+        self.assertIsInstance(ts[0], ShapeVar)
+        self.assertIsNone(ts[1])
+        self.assertEqual(ts[2], 10)
 
-    def test_dict_construction(self):
-        backed_spec = IntSpec.backed("h")
-        static_spec = IntSpec.static()
-        ts = TensorSpec({0: backed_spec, 2: static_spec})
-        self.assertEqual(
-            repr(ts), f"TensorSpec([{repr(backed_spec)}, None, {repr(static_spec)}])"
-        )
-
-    def test_unsupported_input_type_rejected(self):
-        with self.assertRaisesRegex(TypeError, "expects int / list / tuple / dict"):
-            TensorSpec("not a spec")  # type: ignore[arg-type]
-
-    def test_getitem_setitem(self):
-        ts = TensorSpec(2)
-        spec = IntSpec.backed("batch", min=1)
-        ts[0] = spec
-        self.assertIs(ts[0], spec)
+    def test_tuple_construction(self):
+        ts = TensorSpec((ShapeVar("batch"), None))
+        self.assertEqual(len(ts), 2)
+        self.assertIsInstance(ts[0], ShapeVar)
         self.assertIsNone(ts[1])
 
+    def test_len(self):
+        ts = TensorSpec([None, None, None])
+        self.assertEqual(len(ts), 3)
+
     def test_iter(self):
-        ts = TensorSpec(2)
-        spec = IntSpec.static(value=5)
-        ts[0] = spec
+        sv = ShapeVar("batch")
+        ts = TensorSpec([sv, None])
         items = list(ts)
         self.assertEqual(len(items), 2)
-        self.assertIs(items[0], spec)
+        self.assertIs(items[0], sv)
         self.assertIsNone(items[1])
 
     def test_index_out_of_range(self):
-        ts = TensorSpec(2)
+        ts = TensorSpec([None, None])
         with self.assertRaises(IndexError):
             ts[5]
 
-    def test_sparse_set(self):
-        ts = TensorSpec(4)
-        ts.dim(1, IntSpec.backed("h"))
-        ts.dim(3, IntSpec.backed("w"))
-        self.assertIsNone(ts[0])
-        self.assertIsNotNone(ts[1])
-        self.assertIsNone(ts[2])
-        self.assertIsNotNone(ts[3])
+    def test_repr(self):
+        ts = TensorSpec([ShapeVar("batch"), None, 10])
+        r = repr(ts)
+        self.assertIn("ShapeVar(", r)
+        self.assertIn("None", r)
+        self.assertIn("10", r)
 
 
-class TestTensorSpecCompile(TestCase):
-    """TensorSpec + compile integration via torch.compile(shapes_spec=...)."""
+class TestParamsSpecConstruction(TestCase):
+    """Construction of ParamsSpec and ShapesSpec."""
 
-    def test_tensorspec_list_init_recompile_progression(self):
-        """TensorSpec built from a list: dim 0 BACKED absorbs shape changes;
-        dim 1 STATIC forces recompile per distinct value.
+    def test_basic_params_spec(self):
+        ps = ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
+        self.assertIn("x", ps._named_args)
 
-        Final graph has a backed SymInt at dim 0 and a concrete int at dim 1.
-        """
-        backend = EagerAndRecordGraphs()
-        ts = TensorSpec([IntSpec.backed("batch"), IntSpec.static()])
-        fn = torch.compile(
-            lambda x: x + 1,
-            backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
-        )
+    def test_shapes_spec(self):
+        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
+        self.assertIsNotNone(ss.params)
 
-        fn(torch.randn(4, 3))
-        self.assertEqual(len(backend.graphs), 1)
-
-        # Vary dim 0 (BACKED absorbs it → no new compile).
-        fn(torch.randn(8, 3))
-        fn(torch.randn(16, 3))
-        self.assertEqual(len(backend.graphs), 1)
-
-        # Vary dim 1 (STATIC pins it → each distinct value recompiles).
-        fn(torch.randn(16, 5))
-        self.assertEqual(len(backend.graphs), 2)
-        fn(torch.randn(16, 7))
-        self.assertEqual(len(backend.graphs), 3)
-
-        shape = _tensor_placeholder_shape(backend.graphs[-1])
-        self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
-        self.assertIsInstance(shape[1], int)
-        self.assertEqual(shape[1], 7)
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
-    def test_tensorspec_none_entry_inherits_automatic_dynamic(self):
-        """A ``None`` entry doesn't mark the dim — it falls through to the
-        existing default policy: dynamo's automatic-dynamic
-        (``torch._dynamo.config.automatic_dynamic_shapes``, default True).
-        That means specialize on first call, promote to backed on first
-        variation.
-        """
-        backend = EagerAndRecordGraphs()
-        fn = torch.compile(
-            lambda x: x + 1,
-            backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([IntSpec.backed("batch"), None])})
-            ),
-        )
-
-        fn(torch.randn(4, 3))  # specialize dim 1=3; BACKED dim 0
-        self.assertEqual(len(backend.graphs), 1)
-
-        fn(torch.randn(8, 3))  # dim 0 absorbed; dim 1 same → cache hit
-        self.assertEqual(len(backend.graphs), 1)
-
-        fn(torch.randn(8, 5))  # dim 1 promotes to backed → recompile
-        self.assertEqual(len(backend.graphs), 2)
-
-        fn(torch.randn(16, 7))  # dim 0 + dim 1 both backed → cache hit
-        self.assertEqual(len(backend.graphs), 2)
+    def test_shapes_spec_repr(self):
+        ss = ShapesSpec(params=ParamsSpec({"x": None}))
+        self.assertIn("ShapesSpec", repr(ss))
 
 
-class TestIntSpecCompile(TestCase):
-    """IntSpec + torch.compile integration via shapes_spec parameter."""
-
-    def test_static_graph_has_concrete_shape(self):
-        """STATIC dim appears as a concrete int in the captured graph; each
-        distinct shape yields a new graph."""
-        backend = EagerAndRecordGraphs()
-        fn = torch.compile(
-            lambda x: x + 1,
-            backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.static()})})
-            ),
-        )
-        fn(torch.randn(4, 3))
-        fn(torch.randn(8, 3))
-        fn(torch.randn(12, 3))
-        fn(torch.randn(4, 3))  # cache hit
-
-        self.assertEqual(len(backend.graphs), 3)
-        for gm in backend.graphs:
-            shape = _tensor_placeholder_shape(gm)
-            self.assertIsInstance(shape[0], int)
-
-    def test_backed_graph_has_backed_symbol(self):
-        """BACKED dim appears as a backed SymInt in the final graph."""
-        backend = EagerAndRecordGraphs()
-        fn = torch.compile(
-            lambda x: x.sum(0),
-            backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
-            ),
-        )
-        for n in [4, 8, 16, 32, 64]:
-            fn(torch.randn(n, 3))
-
-        self.assertEqual(len(backend.graphs), 1)
-        shape = _tensor_placeholder_shape(backend.graphs[0])
-        self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+class TestShapeVarCompile(TestCase):
+    """ShapeVar + torch.compile integration."""
 
     def test_unbacked_graph_has_unbacked_symbol(self):
-        """UNBACKED dim appears as an unbacked SymInt; single compile covers all shapes."""
+        """ShapeVar dim appears as an unbacked SymInt; single compile covers all shapes."""
         backend = EagerAndRecordGraphs()
-        fn = torch.compile(
+        fn = _compile_with_dynamic_shapes(
             lambda x: x.sum(0),
+            {"x": TensorSpec([ShapeVar("batch"), None])},
             backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked("batch")})})
-            ),
         )
         for n in [4, 8, 16, 32]:
             fn(torch.randn(n, 3))
@@ -623,20 +237,18 @@ class TestIntSpecCompile(TestCase):
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_raises_dde_on_branching(self):
         """A function that branches on size(0) must raise a data-dependent
-        error when that dim is marked UNBACKED."""
+        error when that dim is marked with ShapeVar (unbacked)."""
 
         def fn(x):
             if x.size(0) > 5:
                 return x + 1
             return x - 1
 
-        compiled = torch.compile(
+        compiled = _compile_with_dynamic_shapes(
             fn,
+            {"x": TensorSpec([ShapeVar(), None])},
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked()})})
-            ),
         )
         with self.assertRaises(GuardOnDataDependentSymNode) as cm:
             compiled(torch.randn(10, 3))
@@ -648,306 +260,29 @@ class TestIntSpecCompile(TestCase):
             msg=f"expected unbacked symbol (u-prefix), got {sym!r}",
         )
 
-    def test_backed_branching_bounded_recompiles(self):
-        """BACKED + branching on size(0) > 8 should produce exactly 2 compiles."""
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(
-            lambda x: x.sum(0 if x.size()[0] > 8 else 1),
-            backend=cnt,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
-            ),
-        )
-        for n in [4, 8, 16, 32, 64]:
-            fn(torch.randn(n, 3))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_backed_zero_one_specialization(self):
-        """BACKED symbols are specialized at 0 and 1 unconditionally."""
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_none_entry_is_static(self):
+        """A ``None`` entry doesn't mark the dim — it stays static.
+        Each distinct shape at dim 1 triggers a recompile."""
+        backend = EagerAndRecordGraphs()
+        ts = TensorSpec([ShapeVar("batch"), None])
+        fn = _compile_with_dynamic_shapes(
             lambda x: x + 1,
-            backend=cnt,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
-            ),
+            {"x": ts},
+            backend=backend,
         )
-        for n in [0, 1, 2, 4, 8]:
-            fn(torch.randn(n, 3))
-        self.assertEqual(cnt.frame_count, 3)
 
-    def test_backed_equality_branching(self):
-        """BACKED + Python branch on ``==``: point specialization."""
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(
-            lambda x: x + 1 if x.size()[0] == 3 else x - 1,
-            backend=cnt,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
-            ),
-        )
-        for n in [3, 4, 5, 6]:
-            fn(torch.randn(n, 3))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_static_precedence_over_dynamic_true(self):
-        """IntSpec.static() must win over compile(dynamic=True)."""
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(
-            lambda x: x + 1,
-            backend=cnt,
-            dynamic=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.static()})})
-            ),
-        )
         fn(torch.randn(4, 3))
-        fn(torch.randn(8, 3))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_backed_precedence_over_dynamic_false(self):
-        """IntSpec.backed() must win over compile(dynamic=False)."""
-        cnt = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(
-            lambda x: x.sum(0),
-            backend=cnt,
-            dynamic=False,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.backed("batch")})})
-            ),
-        )
-        for n in [4, 8, 16, 32, 64]:
-            fn(torch.randn(n, 3))
-        self.assertEqual(cnt.frame_count, 1)
-
-
-@skipIfTorchDynamo()
-class TestIntSpecMinMax(TestCase):
-    """Tests for min/max constraints via torch._check."""
-
-    @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
-    def test_unbacked_with_min_no_dde(self):
-        """UNBACKED dim with min=1: branching on `x.size(0) > 0` should NOT
-        raise DDE since torch._check proves it's always True."""
-        fn = torch.compile(
-            lambda x: x + 1 if x.size(0) > 0 else x - 1,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked(min=1)})})
-            ),
-        )
-        # Should NOT raise DDE — min=1 proves size(0) > 0
-        result = fn(torch.randn(5, 3))
-        self.assertEqual(result.shape, (5, 3))
-
-    @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
-    def test_unbacked_with_max_no_dde(self):
-        """UNBACKED dim with max=10: branching on `x.size(0) <= 10` should NOT
-        raise DDE since torch._check proves it's always True."""
-        fn = torch.compile(
-            lambda x: x + 1 if x.size(0) <= 10 else x - 1,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked(max=10)})})
-            ),
-        )
-        # Should NOT raise DDE — max=10 proves size(0) <= 10
-        result = fn(torch.randn(5, 3))
-        self.assertEqual(result.shape, (5, 3))
-
-    @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
-    def test_unbacked_without_bounds_raises_dde(self):
-        """UNBACKED dim WITHOUT min: branching on `x.size(0) > 0` SHOULD raise DDE."""
-
-        fn = torch.compile(
-            lambda x: x + 1 if x.size(0) > 0 else x - 1,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec({0: IntSpec.unbacked()})})
-            ),
-        )
-        with self.assertRaises(GuardOnDataDependentSymNode):
-            fn(torch.randn(5, 3))
-
-    def test_backed_with_min_max_statically_known(self):
-        """BACKED dim with min=8, max=64: statically_known_true can prove bounds."""
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-        def fn(x):
-            size = x.size(0)
-            assert statically_known_true(size >= 8)  # noqa: S101
-            assert statically_known_true(size <= 64)  # noqa: S101
-            return x.sum(0)
-
-        ts = TensorSpec({0: IntSpec.backed(min=8, max=64)})
-        compiled = torch.compile(
-            fn,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
-        )
-        result = compiled(torch.randn(16, 3))
-        self.assertEqual(result.shape, (3,))
-
-    def test_backed_scalar_int_with_min_max_statically_known(self):
-        """BACKED scalar int arg with min=1, max=100: statically_known_true proves bounds."""
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-        def fn(x, n):
-            assert statically_known_true(n >= 1)  # noqa: S101
-            assert statically_known_true(n <= 100)  # noqa: S101
-            return x + n
-
-        N = IntSpec.backed(min=1, max=100)
-        compiled = torch.compile(
-            fn,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
-        )
-        result = compiled(torch.randn(4), 42)
-        self.assertEqual(result.shape, (4,))
-
-    @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
-    def test_unbacked_scalar_int_with_min_no_dde(self):
-        """UNBACKED scalar int with min=1: branching on `n > 0` should NOT raise DDE."""
-
-        def fn(x, n):
-            if n > 0:
-                return x + n
-            return x - n
-
-        N = IntSpec.unbacked(min=1)
-        compiled = torch.compile(
-            fn,
-            backend="eager",
-            fullgraph=True,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
-        )
-        result = compiled(torch.randn(4), 5)
-        self.assertEqual(result.shape, (4,))
-
-    def test_backed_tensor_dim_hint_override(self):
-        """BACKED dim with guarding_hint=32: the symbol's hint in shape_env
-        should be 32 regardless of the actual input size."""
-        backend = EagerAndRecordGraphs()
-        ts = TensorSpec([IntSpec.backed(guarding_hint=32), None])
-        fn = torch.compile(
-            lambda x: x.sum(0),
-            backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
-        )
-        fn(torch.randn(8, 3))
-        # The graph's placeholder should have the override in var_to_hint_override
-        shape = _tensor_placeholder_shape(backend.graphs[0])
-        self.assertIsInstance(shape[0], torch.SymInt)
-        expr = shape[0].node.expr
-        shape_env = shape[0].node.shape_env
-        self.assertIn(expr, shape_env.var_to_hint_override)
-        self.assertEqual(shape_env.var_to_hint_override[expr], 32)
-
-    def test_unbacked_tensor_dim_optimization_hint(self):
-        """UNBACKED dim with optimization_hint=64: var_to_hint_override should
-        record the optimization hint."""
-        backend = EagerAndRecordGraphs()
-        ts = TensorSpec({0: IntSpec.unbacked(optimization_hint=64)})
-        fn = torch.compile(
-            lambda x: x.sum(0),
-            backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
-        )
-        fn(torch.randn(8, 3))
-        shape = _tensor_placeholder_shape(backend.graphs[0])
-        self.assertIsInstance(shape[0], torch.SymInt)
-        # For unbacked, the hint override should be set
-        expr = shape[0].node.expr
-        shape_env = shape[0].node.shape_env
-        self.assertIn(expr, shape_env.var_to_hint_override)
-        self.assertEqual(shape_env.var_to_hint_override[expr], 64)
-
-    def test_backed_scalar_int_hint_override(self):
-        """BACKED scalar int with guarding_hint=100: the symbol's hint should be 100."""
-        backend = EagerAndRecordGraphs()
-        N = IntSpec.backed(guarding_hint=100)
-
-        def fn(x, n):
-            return x + n
-
-        compiled = torch.compile(
-            fn,
-            backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
-        )
-        compiled(torch.randn(4), 42)
-        # Find the scalar int placeholder in the graph
-        for node in backend.graphs[0].graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.SymInt):
-                    self.assertEqual(ev.node.hint, 100)
-                    break
-
-    def test_unbacked_scalar_int_hint_override(self):
-        """UNBACKED scalar int with optimization_hint=256: var_to_hint_override should record it."""
-        backend = EagerAndRecordGraphs()
-        N = IntSpec.unbacked(optimization_hint=256)
-
-        def fn(x, n):
-            return x + n
-
-        compiled = torch.compile(
-            fn,
-            backend=backend,
-            shapes_spec=ShapesSpec(params=ParamsSpec({"n": N})),
-        )
-        compiled(torch.randn(4), 42)
-        for node in backend.graphs[0].graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.SymInt):
-                    expr = ev.node.expr
-                    shape_env = ev.node.shape_env
-                    self.assertIn(expr, shape_env.var_to_hint_override)
-                    self.assertEqual(shape_env.var_to_hint_override[expr], 256)
-                    break
-
-
-@skipIfTorchDynamo()
-class TestParameterSpecCompile(TestCase):
-    """End-to-end: ``nn.Parameter`` as a top-level arg honors the spec.
-
-    Parameters are normally force-marked static in ``wrap_tensor`` and
-    routed to ``register_attr_or_module`` (graph attribute), bypassing
-    ``_automatic_dynamic`` where the spec is consulted. The integration
-    consults ``lookup_spec_from_dynamo_source`` first and bypasses the
-    static-mark / graph-attribute paths when a ``TensorSpec`` is
-    provided, letting the Parameter flow through the dynamic-shape
-    path.
-    """
-
-    def test_parameter_top_level_dim_backed(self):
-        def fn(p):
-            return p + 1
-
-        backend = EagerAndRecordGraphs()
-        compiled = torch.compile(
-            fn,
-            backend=backend,
-            shapes_spec=ShapesSpec(
-                params=ParamsSpec({"p": TensorSpec([IntSpec.backed("h"), None])})
-            ),
-        )
-
-        compiled(torch.nn.Parameter(torch.randn(4, 3)))
         self.assertEqual(len(backend.graphs), 1)
 
-        # Spec drove ``_automatic_dynamic`` — dim 0 is a backed SymInt.
-        shape = _tensor_placeholder_shape(backend.graphs[-1])
-        self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertEqual(len(free_unbacked_symbols(shape[0])), 0)
+        fn(torch.randn(8, 3))  # dim 0 unbacked → no recompile; dim 1 same
+        self.assertEqual(len(backend.graphs), 1)
+
+        fn(torch.randn(8, 5))  # dim 1 changed → recompile (static)
+        self.assertEqual(len(backend.graphs), 2)
+
+        fn(torch.randn(16, 5))  # dim 0 unbacked → no recompile; dim 1 same
+        self.assertEqual(len(backend.graphs), 2)
 
 
 if __name__ == "__main__":

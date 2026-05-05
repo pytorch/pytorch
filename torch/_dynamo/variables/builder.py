@@ -46,8 +46,7 @@ import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.dynamic_spec import (
-    IntSpec,
-    IntSpecType,
+    IntVar,
     lookup_spec_from_dynamo_source,
     TensorSpec,
 )
@@ -2255,39 +2254,22 @@ class VariableBuilder:
         if type(value) is int:
             assert isinstance(value, int)
 
-            # Check for user-provided IntSpec from shapes_spec.
+            # Check for user-provided IntVar from shapes_spec.
             int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
-            if isinstance(int_spec, IntSpec):
-                if int_spec._type is IntSpecType.STATIC:
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return ConstantVariable.create(value=value, source=self.source)
-                elif int_spec._type in (IntSpecType.BACKED, IntSpecType.UNBACKED):
-                    dynamism = (
-                        DimDynamic.DYNAMIC
-                        if int_spec._type is IntSpecType.BACKED
-                        else DimDynamic.UNBACKED
-                    )
-                    # For backed: guarding_hint replaces the example value as
-                    # the symbol's hint ("assume my first input has this size")
-                    hint = (
-                        int_spec._guarding_hint
-                        if int_spec._type is IntSpecType.BACKED
-                        else int_spec._optimization_hint
-                    )
-                    hint_value = hint if hint is not None else value
-                    result = self.wrap_symint(hint_value, dynamism=dynamism)
-                    sym_val = result.sym_num  # type: ignore[attr-defined]
-                    if int_spec._min is not None:
-                        torch._check(sym_val >= int_spec._min)
-                    if int_spec._max is not None:
-                        torch._check(sym_val <= int_spec._max)
-                    # Override hint for both backed and unbacked:
-                    # - unbacked: sets the optimization_hint for guardless optimizations
-                    # - both: changes the FX cache key (different hint = cache miss)
-                    if hint is not None:
-                        expr = sym_val.node.expr
-                        sym_val.node.shape_env.var_to_hint_override[expr] = hint
-                    return result
+            if isinstance(int_spec, IntVar):
+                # All IntVar specs are unbacked.
+                hint = int_spec.optimization_hint
+                hint_value = hint if hint is not None else value
+                result = self.wrap_symint(hint_value, dynamism=DimDynamic.UNBACKED)
+                sym_val = result.sym_num  # type: ignore[attr-defined]
+                if int_spec.min is not None:
+                    torch._check(sym_val >= int_spec.min)
+                if int_spec.max is not None:
+                    torch._check(sym_val <= int_spec.max)
+                if hint is not None:
+                    expr = sym_val.node.expr
+                    sym_val.node.shape_env.var_to_hint_override[expr] = hint
+                return result
 
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
@@ -2414,7 +2396,7 @@ class VariableBuilder:
         # consulted). Skip those paths so the spec drives shape
         # decisions. Checking ``is not None`` rather than
         # ``isinstance(..., TensorSpec)`` so that a mis-typed user spec
-        # (e.g. ``IntSpec`` on a tensor) still bypasses the fast path
+        # (e.g. ``IntVar`` on a tensor) still bypasses the fast path
         # rather than being silently ignored.
         _has_spec = (
             lookup_spec_from_dynamo_source(source, config._shapes_spec) is not None
@@ -4040,7 +4022,7 @@ def _automatic_dynamic(
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
-        # If user provided a TensorSpec with an IntSpec for this dim, use it
+        # If user provided a TensorSpec with a spec for this dim, use it
         # and skip the existing heuristics.
         if tensor_spec is not None and tensor_spec[i] is not None:
             if any(
@@ -4057,13 +4039,12 @@ def _automatic_dynamic(
                     f"annotation. Use one or the other, not both."
                 )
             dim_spec = tensor_spec[i]
-            if dim_spec._type is IntSpecType.STATIC:  # type: ignore[union-attr]
+            if isinstance(dim_spec, int):
+                # Explicit static value
                 dynamic_sizes.append(DimDynamic.STATIC)
                 constraint_sizes.append(None)
-            elif dim_spec._type is IntSpecType.BACKED:
-                dynamic_sizes.append(DimDynamic.DYNAMIC)
-                constraint_sizes.append(RelaxedUnspecConstraint(warn_only=True))
-            elif dim_spec._type is IntSpecType.UNBACKED:
+            elif isinstance(dim_spec, IntVar):
+                # All IntVar/ShapeVar specs are unbacked
                 dynamic_sizes.append(DimDynamic.UNBACKED)
                 constraint_sizes.append(None)
             else:
@@ -4288,22 +4269,19 @@ def _wrap_to_fake_tensor_and_record_impl(
         if isinstance(fake_e, FakeTensor) and _tensor_spec is not None:
             for dim_i in range(fake_e.dim()):
                 dim_spec = _tensor_spec[dim_i]
-                if dim_spec is None or dim_spec._type is IntSpecType.STATIC:
+                if dim_spec is None or isinstance(dim_spec, int):
+                    continue
+                if not isinstance(dim_spec, IntVar):
                     continue
                 size_sym = fake_e.size(dim_i)
                 if not isinstance(size_sym, torch.SymInt):
                     continue
-                if dim_spec._min is not None:
-                    torch._check(size_sym >= dim_spec._min)
-                if dim_spec._max is not None:
-                    torch._check(size_sym <= dim_spec._max)
-                # Set var_to_hint_override for both backed and unbacked
-                # (included in FX cache key)
-                hint = (
-                    dim_spec._guarding_hint
-                    if dim_spec._type is IntSpecType.BACKED
-                    else dim_spec._optimization_hint
-                )
+                if dim_spec.min is not None:
+                    torch._check(size_sym >= dim_spec.min)
+                if dim_spec.max is not None:
+                    torch._check(size_sym <= dim_spec.max)
+                # Set var_to_hint_override (included in FX cache key)
+                hint = dim_spec.optimization_hint
                 if hint is not None:
                     expr = size_sym.node.expr
                     size_sym.node.shape_env.var_to_hint_override[expr] = hint
