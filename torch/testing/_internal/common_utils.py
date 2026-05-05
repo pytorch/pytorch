@@ -6180,35 +6180,31 @@ def recover_orig_fp32_precision(fn):
     return recover()(fn)
 
 
-def with_highest_f32_precision(f):
-    """Run the wrapped test under torch.set_float32_matmul_precision("highest"),
-    forcing full IEEE FP32 for matmul on both CUDA (TF32 off) and CPU
-    (mkldnn bf32/tf32 off). Save/restore across the call.
+def with_ieee_matmul_precision(f):
+    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
+    the duration of the wrapped test. Save/restore across the call.
 
-    Use for tests whose intent is FP32 numerical correctness of an
-    algorithm (e.g. a factorization) and should not be contaminated by
-    reduced-precision matmul noise injected by an ambient
-    allow_tf32/fp32_precision setting elsewhere in the process.
+    "ieee" is the default, so this decorator is defensive: it insulates
+    tests whose intent is FP32 numerical correctness of an algorithm
+    (e.g. a factorization) from any non-default matmul fp32_precision
+    left set in the process by the build, by global configuration, or
+    by a sibling test that didn't restore it.
 
-    Note: this affects matmul only, not convolution. Tests that also
-    need reduced-precision conv disabled should additionally disable
-    the relevant cudnn/mkldnn conv.fp32_precision knobs.
+    Affects matmul only, not convolution. Tests that also need
+    reduced-precision conv disabled must additionally control the
+    relevant cudnn/mkldnn conv.fp32_precision knobs.
     """
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
-        old_cuda_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
-        old_cuda_fp32 = torch.backends.cuda.matmul.fp32_precision
-        old_mkldnn_fp32 = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        old_cuda = torch.backends.cuda.matmul.fp32_precision
+        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
         try:
-            # set_float32_matmul_precision only affects CUDA; set mkldnn
-            # explicitly so the decorator also forces IEEE on CPU.
-            torch.set_float32_matmul_precision("highest")
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
             torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
             return f(*args, **kwargs)
         finally:
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_fp32  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda_fp32
-            torch.backends.cuda.matmul.allow_tf32 = old_cuda_allow_tf32
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda
     return wrapped
 
 def skipIfPythonVersionMismatch(predicate):

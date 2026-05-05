@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, with_highest_f32_precision
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, with_ieee_matmul_precision
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -8798,7 +8798,7 @@ class TestNNDeviceType(NNTestCase):
     # correctness vs scipy's CPU affine_transform reference, not matmul
     # precision — disable reduced-precision matmul on both CPU and GPU.
     # See https://github.com/jeffdaily/tf32_analysis.
-    @with_highest_f32_precision
+    @with_ieee_matmul_precision
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9053,7 +9053,7 @@ class TestNNDeviceType(NNTestCase):
     # See test_affine_2d_rotate90: reduced-precision matmul noise in
     # affine_grid (K=3) is amplified by grid_sample's bilinear interp.
     # https://github.com/jeffdaily/tf32_analysis
-    @with_highest_f32_precision
+    @with_ieee_matmul_precision
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9107,7 +9107,7 @@ class TestNNDeviceType(NNTestCase):
     # See test_affine_2d_rotate90: reduced-precision matmul noise in
     # affine_grid (K=3) is amplified by grid_sample's trilinear interp.
     # https://github.com/jeffdaily/tf32_analysis
-    @with_highest_f32_precision
+    @with_ieee_matmul_precision
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -10054,7 +10054,7 @@ class TestNNDeviceType(NNTestCase):
     # TF32 drift in the backward GEMMs (measured ~3e-3) exceeds that by
     # ~50x but is unrelated to what the test verifies. See
     # https://github.com/jeffdaily/tf32_analysis.
-    @with_highest_f32_precision
+    @with_ieee_matmul_precision
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):

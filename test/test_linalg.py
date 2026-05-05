@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, with_highest_f32_precision, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     runOnRocmArch, with_ieee_matmul_precision, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -787,7 +787,7 @@ class TestLinalg(TestCase):
     # enabling TF32 (or CPU mkldnn reduced-f32) on the reconstruct mm injects
     # condition-amplified noise unrelated to what's being verified.
     # See https://github.com/jeffdaily/tf32_analysis.
-    @with_highest_f32_precision
+    @with_ieee_matmul_precision
     def test_old_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -7805,12 +7805,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
-    # K=8 random GEMM under E8M10 rounding has a theoretical floor of
-    # ~sqrt(8) * 2^-10 * |A|_inf ~= 8e-3 for randn operands; the prior 0.005
-    # tolerance was unattainable by any TF32 implementation (NVIDIA included).
+    # K=8 random GEMM under E8M10 rounding has a worst-case bound of
+    # ~sqrt(8) * 2^-10 * |A|_inf ~= 8e-3 for randn operands. NVIDIA TF32
+    # (round-to-nearest) stays well under the prior 0.005 tolerance in
+    # practice; CDNA3 XF32 uses round-down accumulation that saturates the
+    # bound, so relax only on ROCm to preserve CUDA rigor.
     # See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.05)
-    @reduced_f32_on_and_off(0.05)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @reduced_f32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -9747,12 +9749,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    # K=8 random GEMM under E8M10 rounding has a theoretical floor of
-    # ~sqrt(8) * 2^-10 * |A|_inf ~= 8e-3 for randn operands; the prior 0.001
-    # tolerance was unattainable by any TF32 implementation (NVIDIA included).
+    # Random batched matmul under E8M10 rounding has a worst-case bound of
+    # ~sqrt(K) * 2^-10 * |A|_inf ~= 8e-3 for randn operands at K=8. NVIDIA
+    # TF32 (round-to-nearest) stays well under the prior 0.001 tolerance in
+    # practice; CDNA3 XF32 uses round-down accumulation that saturates the
+    # bound, so relax only on ROCm to preserve CUDA rigor.
     # See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.02)
-    @reduced_f32_on_and_off(0.02)
+    @tf32_on_and_off(0.02 if TEST_WITH_ROCM else 0.001)
+    @reduced_f32_on_and_off(0.02 if TEST_WITH_ROCM else 0.001)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
