@@ -18464,6 +18464,7 @@ def forward(self, x):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
+        super().setUp()
         load_torchbind_test_lib()
 
     def test_lift_custom_obj(self):
