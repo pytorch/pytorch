@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_ARM64,
     IS_CI,
-    IS_CPU_CAPABILITY_SVE256,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
@@ -1140,8 +1139,6 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
-    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/177243
     @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
@@ -5478,6 +5475,21 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
 
         self.check_model(m, inputs)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_assert_size_stride_guarded_by_env_check(self):
+        # Verify that assert_size_stride calls in AOTI-generated code are
+        # guarded by _check_aoti_runtime_check_inputs_env() so they only
+        # fire when AOTI_RUNTIME_CHECK_INPUTS is set.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.qr(x)[0]
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        FileCheck().check(
+            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
+        ).run(code)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
