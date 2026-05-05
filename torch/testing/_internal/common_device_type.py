@@ -1441,7 +1441,7 @@ def _has_sufficient_memory(device, size):
     if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device_type != "cpu":
+    if device_type != "cpu" and device_type != "mps":
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
@@ -2195,6 +2195,7 @@ IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED = torch.mps.is_available()
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
     or (
@@ -2202,8 +2203,9 @@ flex_attention_supported_platform = unittest.skipUnless(
         and not torch.xpu.is_available()
         and not torch.cuda.is_available()
     )
-    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
-    "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
+    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
 )
 if (
     torch.version.hip
