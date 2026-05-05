@@ -4189,6 +4189,16 @@
       ]
     }
   ],
+  "GB7510": [
+    {
+      "Gb_type": "nb_positive_impl not implemented",
+      "Context": "{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_positive C slot but the corresponding VariableTracker doesn't implement nb_positive_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0306": [
     {
       "Gb_type": "unsupported HigherOrderOperator",
