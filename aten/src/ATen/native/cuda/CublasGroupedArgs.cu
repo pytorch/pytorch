@@ -170,8 +170,8 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   // Leading dimensions (constant across groups, from inner-dim strides)
   // cuBLAS-A = mat2, cuBLAS-B = mat1
-  const int64_t lda_val = transa == 't' ? mat2.stride(-1) : mat2.stride(-2);
-  const int64_t ldb_val = transb == 't' ? mat1.stride(-1) : mat1.stride(-2);
+  const int64_t lda_val = transa != 'n' ? mat2.stride(-1) : mat2.stride(-2);
+  const int64_t ldb_val = transb != 'n' ? mat1.stride(-1) : mat1.stride(-2);
   const int64_t ldd_val = c.stride(-2);
 
   // Determine per-case which dimensions are variable (delta-based)
