@@ -13,7 +13,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, run_and_get_kernels
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
@@ -532,6 +532,20 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
+
+    def test_benchmark_compiled_module_device_arg(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181954."""
+
+        @torch.compile
+        def f(x):
+            return x + 1
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        _, (src,) = run_and_get_code(f, x)
+
+        FileCheck().check(
+            f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
+        ).run(src)
 
 
 if __name__ == "__main__":
