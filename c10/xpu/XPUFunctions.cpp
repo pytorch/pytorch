@@ -173,7 +173,7 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
       : default_value;
 
 #define ASSIGN_DEVICE_ASPECT(member) \
-  device_prop->member = raw_device.has(sycl::aspect::member);
+  device_prop->member = raw_device.has(sycl::aspect::ext_oneapi_##member);
 
 #define ASSIGN_DEVICE_HAS_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
