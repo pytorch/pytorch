@@ -168,7 +168,7 @@ class TestGpuWrapper(InductorTestCase):
         def capture(pending_kernels, kernel_name, stream, args):
             result = original(pending_kernels, kernel_name, stream, args)
             if "triton_for_fused" in kernel_name:
-                captured[kernel_name] = result.xblock
+                captured[kernel_name] = result.xblocks
             return result
 
         with patch.object(tlc, "run_triton_kernel_with_autotune", side_effect=capture):
@@ -189,17 +189,18 @@ class TestGpuWrapper(InductorTestCase):
             fn(params, grads)
 
         self.assertTrue(len(captured) > 0, "No combo kernels were lazy-compiled")
-        for name, xblock in captured.items():
+        for name, xblocks in captured.items():
             # When per_subkernel_blocks=False, default_config has a single XBLOCK
             # that must be picked up correctly (not the hardcoded fallback of 128).
             # When per_subkernel_blocks=True, default_config uses per-subkernel
-            # XBLOCK_N keys instead, so result.xblock is not used for grid
-            # computation; just verify compilation succeeded.
+            # XBLOCK_N keys, so xblocks has one entry per subkernel; just verify
+            # compilation succeeded.
             if not per_subkernel_blocks:
                 self.assertEqual(
-                    xblock,
-                    DEFAULT_COMBO_BLOCK_SIZE_1D,
-                    f"{name} got XBLOCK={xblock}, expected {DEFAULT_COMBO_BLOCK_SIZE_1D}",
+                    xblocks,
+                    [DEFAULT_COMBO_BLOCK_SIZE_1D],
+                    f"{name} got xblocks={xblocks}, "
+                    f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
                 )
 
     def test_cudagraph_no_partition(self):

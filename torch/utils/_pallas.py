@@ -85,7 +85,7 @@ def has_jax_tpu_backend() -> bool:
 def has_torch_tpu() -> bool:
     """Check if torch_tpu is installed and available."""
     try:
-        import torch_tpu.api  # noqa: F401  # type: ignore[import]
+        import torch_tpu.api  # type: ignore[import]
 
         # Verify hardware/runtime access
         torch_tpu.api.tpu_device()

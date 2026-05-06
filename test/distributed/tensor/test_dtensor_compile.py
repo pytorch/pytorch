@@ -2406,6 +2406,62 @@ class outer_fn(torch.nn.Module):
         compiled_step = torch.compile(opt.step, backend="aot_eager")
         compiled_step()
 
+    def test_pad_tensor_no_guard_on_symbolic_pad_size(self):
+        """pad_tensor must not create a guard that concretizes symbolic pad sizes.
+
+        When tracing with make_fx in symbolic mode, pad_size may be a SymInt
+        (e.g., for uneven DTensor sharding where local shard sizes vary by
+        rank). guard_or_false(pad_size == 0) must not be evaluated during
+        tracing, otherwise it creates a guard that collapses the SymInt to its
+        hint value, making the graph rank-specific instead of rank-independent.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
+        from torch.distributed.tensor._collective_utils import pad_tensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env, static_shapes=False)
+
+        with unset_fake_temporarily():
+            real = torch.empty(400, 15, device="meta")
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC, DimDynamic.DYNAMIC]
+        )
+        x = fake_mode.from_tensor(real, symbolic_context=sym_ctx)
+        with fake_mode:
+            x = x.to("cpu")
+
+        # Verify the symbol is alive before tracing
+        self.assertTrue(isinstance(x.shape[1], torch.SymInt))
+        self.assertFalse(x.shape[1].node.expr.is_number)
+
+        def fn(t):
+            pad_size = 15 - t.size(1)
+            return pad_tensor(t, 1, pad_size)
+
+        with fake_mode:
+            gm = make_fx(fn, tracing_mode="symbolic")(x)
+
+        # The symbol must survive — not be guarded to a concrete value
+        self.assertFalse(
+            x.shape[1].node.expr.is_number,
+            f"pad_tensor created a guard that concretized the symbolic dim: "
+            f"expr={x.shape[1].node.expr}",
+        )
+
+        # The traced graph should have a symbolic pad size, not concrete 0
+        placeholder = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        val = placeholder.meta["val"]
+        self.assertTrue(
+            isinstance(val.shape[1], torch.SymInt),
+            "Placeholder dim should be symbolic",
+        )
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
@@ -2869,6 +2925,76 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 2,
                 f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
+
+
+class TestDTensorACCompile(DTensorTestBase):
+    """Regression test for DTensor + AC + compile interaction.
+
+    When a DTensor with independent inner/outer symbolic shapes is lifted
+    as a freevar into a checkpoint HOP subgraph, ``_lift_basic_symbols``
+    recurses into the inner tensor with ``source=None`` and tries to lift
+    an unbound inner symbol to the root tracer, crashing with::
+
+        AssertionError: Source of '<sym>' is None when lifting it
+        to input of top-level.
+    """
+
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_tp_ac_compile_dtensor_inner_symbol(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Embedding produces a DTensor whose inner/outer sizes get
+        # independent symbols (outer = global seq_len, inner = local
+        # seq_len). This is the pattern from TP with variable-length seqs.
+        class EmbedBlock(nn.Module):
+            def __init__(self, vocab, dim, device):
+                super().__init__()
+                self.embed = nn.Embedding(vocab, dim, device=device)
+                self.block = MLPModule(device)
+
+            def forward(self, ids):
+                return self.block(self.embed(ids))
+
+        model = EmbedBlock(32, 10, self.device_type)
+
+        parallelize_module(
+            model,
+            mesh,
+            {
+                "embed": RowwiseParallel(
+                    output_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net1": ColwiseParallel(
+                    input_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net2": RowwiseParallel(use_local_output=False),
+            },
+        )
+        model.block = checkpoint_wrapper(
+            model.block,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+        )
+        torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
+
+        model.block.compile(backend="aot_eager", fullgraph=True)
+
+        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        out1 = model(ids1)
+        out1.sum().backward()
+        model.zero_grad()
+
+        # Different seq_len triggers dynamic-shape recompilation where
+        # the DTensor inner symbol gets lifted through the AC HOP.
+        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        out2 = model(ids2)
+        out2.sum().backward()
 
 
 if __name__ == "__main__":

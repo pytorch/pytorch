@@ -131,7 +131,7 @@ def _enable_symm_mem(group_name):
             enable_symm_mem_for_group(group_name)
         return True
     except (TypeError, RuntimeError, KeyError) as e:
-        log.debug("LC: cannot enable symm_mem for group %s: %s", group_name, e)  # noqa: G200
+        log.debug("LC: cannot enable symm_mem for group %s: %s", group_name, e)
         return False
 
 

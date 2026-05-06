@@ -656,7 +656,7 @@ void add_projection_weights(
       nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
   auto elem_size = dataSize(getCudnnDataType(weight_buf));
   auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-      static_cast<const char*>(weight_buf.data_ptr());
+      static_cast<const char*>(weight_buf.const_data_ptr());
   TORCH_INTERNAL_ASSERT(
       offset_bytes % elem_size == 0,
       "offset_bytes = ",
@@ -795,7 +795,7 @@ get_parameters(
             min_dim);
         auto elem_size = dataSize(getCudnnDataType(weight_buf));
         auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-            static_cast<const char*>(weight_buf.data_ptr());
+            static_cast<const char*>(weight_buf.const_data_ptr());
         TORCH_INTERNAL_ASSERT(
             offset_bytes % elem_size == 0,
             "offset_bytes = ",
