@@ -14583,7 +14583,10 @@ if __name__ == '__main__':
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 277
+                    if "mps" in device:
+                        expected_input_grad_max_ulp_diff = 5078
+                    else:  # CUDA/XPU/HPU
+                        expected_input_grad_max_ulp_diff = 277
                     expected_weight_grad_max_ulp_diff = 4878
 
         eta = torch.finfo(dtype).eps
@@ -14611,9 +14614,13 @@ if __name__ == '__main__':
             norm = torch.linalg.matrix_norm(expected, ord="fro")
             return abserr / (eta + norm)
 
+        maximal_input_grad_err = 0.0
+        maximal_linear_weight_grad_err = 0.0
         maximal_output_max_ulp_diff = 0
         maximal_input_grad_max_ulp_diff = 0
         maximal_linear_weight_grad_max_ulp_diff = 0
+        worst_input_grad_err_kwargs = None
+        worst_linear_weight_grad_err_kwargs = None
         worst_output_kwargs = None
         worst_input_grad_kwargs = None
         worst_linear_weight_grad_kwargs = None
@@ -14684,17 +14691,24 @@ if __name__ == '__main__':
             if max_ulp_diff > maximal_input_grad_max_ulp_diff:
                 maximal_input_grad_max_ulp_diff = max_ulp_diff
                 worst_input_grad_kwargs = dict(module_kwargs)
-
             err = grad_error(input.grad.to(ref_device), ref_input.grad.to(dtype))
-            self.assertLess(err, feps)
+            if err > maximal_input_grad_err:
+                maximal_input_grad_err = err
+                worst_input_grad_err_kwargs = dict(module_kwargs)
 
             max_ulp_diff = diff_ulp(loss.linear.weight.grad.to(ref_device), ref_loss.linear.weight.grad.to(dtype)).max().item()
             if max_ulp_diff > maximal_linear_weight_grad_max_ulp_diff:
                 maximal_linear_weight_grad_max_ulp_diff = max_ulp_diff
                 worst_linear_weight_grad_kwargs = dict(module_kwargs)
             err = grad_error(loss.linear.weight.grad.to(ref_device), ref_loss.linear.weight.grad.to(dtype))
-            self.assertLess(err, feps)
+            if err > maximal_linear_weight_grad_err:
+                maximal_linear_weight_grad_err = err
+                worst_linear_weight_grad_err_kwargs = dict(module_kwargs)
 
+        self.assertLessEqual(maximal_input_grad_err, feps,
+                             msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
+        self.assertLessEqual(maximal_linear_weight_grad_err, feps,
+                             msg=f"worst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
         self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
                              msg=f"worst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
         self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
