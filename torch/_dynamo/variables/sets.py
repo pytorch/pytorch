@@ -737,8 +737,9 @@ class OrderedSetVariable(SetVariable):
 
     def nb_subtract_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
-    ):
-        return super().call_method(tx, "difference", [other], {})
+    ) -> VariableTracker:
+        self_, other_ = (other, self) if reverse else (self, other)
+        return self_.call_method(tx, "difference", [other_], {})
 
 
 class FrozensetVariable(SetVariable):
