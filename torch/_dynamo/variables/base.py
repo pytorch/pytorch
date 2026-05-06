@@ -452,6 +452,54 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # fall through to length check, then truthy default.
         return None
 
+    def is_hashable(self) -> bool:
+        """Whether the underlying Python object is hashable.
+
+        Defaults to True — in CPython, all objects are hashable unless the type
+        explicitly sets __hash__ = None (PyObject_HashNotImplemented).
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L7288
+
+        Subclasses override to return False for unhashable types (list, dict,
+        set, etc.).  This is a fast, side-effect-free check used by
+        HashableTracker and __contains__ before attempting to hash.
+        """
+        return True
+
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
+
+        PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
+        Assigned on object: https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L7288
+
+        Returns (hash_value, is_fake).  is_fake=True means the hash depends on
+        a sourceless object's identity and must not escape into output bytecode.
+
+        VT subclasses override this for types with their own C tp_hash.
+        UserDefinedObjectVariable.hash_impl handles the MRO walk for custom
+        Python __hash__, builtin-inherited C hash, and unknown C tp_hash.
+        """
+        # object.__hash__ = Py_HashPointer(obj) — identity hash.
+        if self.source:
+            real_val = tx.output.resolve_source_value(self.source)
+            if type(real_val).__hash__ is not object.__hash__:
+                unimplemented(
+                    gb_type="Missing hash_impl override",
+                    context=f"hash_impl {self}",
+                    explanation=f"{type(self).__name__} wraps "
+                    f"{type(real_val).__name__} which has a non-default "
+                    f"tp_hash. Add a hash_impl override to "
+                    f"{type(self).__name__}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+            # object.__hash__ = id(obj), so the hash is identity-based.
+            # Return is_fake=True so the hash is only usable internally
+            # (dict keys, set membership) and doesn't escape into bytecode
+            # — avoids installing an ID_MATCH guard just for hashing.
+            # TODO when LazyConstants are fully landed, we can use them here instead.
+            return hash(real_val), True
+        # Sourceless: no real object to hash — fake id.
+        return id(self), True
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -728,6 +776,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name == "__hash__" and not args and not kwargs:
+            from .object_protocol import generic_hash
+
+            return generic_hash(tx, self)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1032,51 +1084,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self) -> bool:
-        """
-        Unlike the variable tracker's own __hash__, this method checks whether
-        the underlying Python object referenced by this variable tracker is hashable.
-        """
-        try:
-            type_self = self.python_type()
-        except NotImplementedError:
-            type_self = type(self)
-
-        unimplemented(
-            gb_type="Dynamo cannot determine whether the underlying object is hashable",
-            context=f"is_python_hashable {self}",
-            explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {type_self}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def get_python_hash(self) -> int:
-        """
-        Unlike the variable tracker’s own __hash__, this method is used by
-        ConstDictVariableTracker to compute the hash of the underlying key object.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the hash of an object",
-            context=f"get_python_hash {self}",
-            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def get_id(self, tx: InstructionTranslator) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.
 
         The base implementation uses source resolution for sourceful VTs.
         Subclasses override for special cases (e.g. NNModuleVariable uses
         get_submodule, ConstantVariable handles singletons).
+
+        Returns None for sourceless VTs — callers use FakeIdVariable in
+        that case (see generic_id in object_protocol.py).
         """
         if self.source:
             return id(tx.output.resolve_source_value(self.source))
