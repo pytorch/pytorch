@@ -6,9 +6,9 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/RangeUtils.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
-#include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -34,36 +34,12 @@ constexpr int num_threads() {
   return C10_WARP_SIZE * 2;
 }
 #endif
-
-template <typename index_t>
-constexpr int elementwise_thread_work_size() {
-#if defined(USE_ROCM)
-  if constexpr (std::is_same_v<index_t, int64_t>) {
-    // HIP launch API docs specify that gridDim.x * blockDim.x must be
-    // less than 2^32. Process two elements per thread for 64-bit indexing
-    // so large range factories stay below that launch limit.
-    return 2;
-  }
-#endif
-  return 1;
-}
-
-template <typename index_t>
-constexpr int64_t elementwise_block_work_size() {
-  return static_cast<int64_t>(elementwise_thread_work_size<index_t>()) * num_threads();
-}
-
-template <typename index_t>
-int64_t elementwise_grid_size(int64_t N) {
-  constexpr auto block_work_size = elementwise_block_work_size<index_t>();
-  return (N + block_work_size - 1) / block_work_size;
-}
+constexpr int thread_work_size = 1;
+constexpr int block_work_size = thread_work_size * num_threads();
 
 template<typename index_t, typename func_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
-  constexpr int thread_work_size = elementwise_thread_work_size<index_t>();
-  constexpr index_t block_work_size = thread_work_size * num_threads();
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
@@ -73,6 +49,25 @@ __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename func
   }
 }
 
+#if defined(USE_ROCM)
+// HIP does not support launches with gridDim.x * blockDim.x >= 2^32:
+// depending on the ROCm version the launch returns
+// hipErrorInvalidConfiguration or is accepted silently with the kernel
+// never executing, leaving zero-initialized output. A grid-stride kernel
+// with a fixed grid sized to device occupancy avoids the limit.
+template<typename index_t, typename func_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void elementwise_kernel_with_index_grid_stride(
+    index_t N, func_t f,
+    typename function_traits<func_t>::result_type *data) {
+  index_t idx = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const index_t stride = static_cast<index_t>(gridDim.x) * blockDim.x;
+  for (; idx < N; idx += stride) {
+    data[idx] = f(idx);
+  }
+}
+#endif
+
 template<typename func_t>
 void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   int64_t N = output.numel();
@@ -81,15 +76,31 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   }
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
+  auto* data = output.mutable_data_ptr<scalar_t>();
+#if defined(USE_ROCM)
+  constexpr int blocks_per_sm = 4;
+  const int sm_count =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int64_t orig_grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = std::min<int64_t>(
+      orig_grid, static_cast<int64_t>(sm_count) * blocks_per_sm);
+  grid = std::max<int64_t>(grid, 1);
   if (N <= std::numeric_limits<int>::max()) {
-    int64_t grid = elementwise_grid_size<int>(N);
-    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    elementwise_kernel_with_index_grid_stride<int><<<grid, num_threads(), 0, stream>>>(
+        static_cast<int>(N), f, data);
   } else {
-    int64_t grid = elementwise_grid_size<int64_t>(N);
-    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    elementwise_kernel_with_index_grid_stride<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
   }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  const int64_t grid = (N + block_work_size - 1) / block_work_size;
+  if (N <= std::numeric_limits<int>::max()) {
+    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(static_cast<int>(N), f, data);
+  } else {
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
 }
 
 }  // namespace
