@@ -941,6 +941,31 @@ _op_identifier = Union[
 ]
 
 
+def _resolve_op_for_registration(
+    op: _op_identifier, registration_name: str
+) -> str | CustomOpDef:
+    if not isinstance(op, (str, OpOverload, CustomOpDef)):
+        raise ValueError(
+            f"{registration_name}({op}): got unexpected type for op: {type(op)}"
+        )
+    if isinstance(op, OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    return op
+
+
+def _library_for_registration(namespace: str, lib: Library | None) -> Library:
+    if lib is not None:
+        return lib
+    use_lib = Library(namespace, "FRAGMENT")
+    _keep_alive.append(use_lib)
+    return use_lib
+
+
 def register_kernel(
     op: _op_identifier,
     device_types: device_types_t,
@@ -991,19 +1016,9 @@ def register_kernel(
 
     """
 
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_kernel({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_kernel(device_types, func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_kernel")
+    if isinstance(op, CustomOpDef):
+        return op.register_kernel(device_types, func)
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
 
@@ -1052,30 +1067,17 @@ def register_autocast(
         >>> assert y.dtype == torch.float16
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_autocast({op}): got unexpected type for op: {type(op)}"
-        )
+    op = _resolve_op_for_registration(op, "register_autocast")
     if device_type not in ["cpu", "cuda"]:
         raise ValueError(f"Unknown device type: {device_type}")
 
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_autocast(device_type, cast_inputs)
-
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    if isinstance(op, CustomOpDef):
+        return op.register_autocast(device_type, cast_inputs)
     qualname = op
     _op = torch._library.utils.lookup_op(qualname)
 
     namespace, opname = torch._library.utils.parse_namespace(qualname)
-    if lib is None:
-        lib = Library(namespace, "FRAGMENT")
-        _keep_alive.append(lib)
+    use_lib = _library_for_registration(namespace, lib)
 
     def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
         def inner(kernel):
@@ -1102,10 +1104,10 @@ def register_autocast(
         return _autocast_py_impl(*args, **kwargs)
 
     if device_type == "cuda":
-        return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
+        return use_lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
     else:
         # device_type is "cpu"
-        return lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+        return use_lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
 
 
 def register_fake(
@@ -1209,30 +1211,18 @@ def register_fake(
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(f"register_fake({op}): got unexpected type for op: {type(op)}")
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
+    op = _resolve_op_for_registration(op, "register_fake")
+    if isinstance(op, CustomOpDef):
         if func is None:
-            return opdef.register_fake
+            return op.register_fake
         else:
-            return opdef.register_fake(func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+            return op.register_fake(func)
 
     stacklevel = _stacklevel
 
     def register(func):
         namespace, op_name = torch._library.utils.parse_namespace(op)
-        if lib is None:
-            use_lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(use_lib)
-        else:
-            use_lib = lib
+        use_lib = _library_for_registration(namespace, lib)
         use_lib._register_fake(
             op_name, func, _stacklevel=stacklevel + 1, allow_override=allow_override
         )
@@ -1375,21 +1365,11 @@ def register_autograd(
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_autograd({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        opdef.register_autograd(backward, setup_context=setup_context)
+    op = _resolve_op_for_registration(op, "register_autograd")
+    if isinstance(op, CustomOpDef):
+        op.register_autograd(backward, setup_context=setup_context)
         return
 
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
@@ -1409,10 +1389,8 @@ def register_autograd(
     info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
-    if lib is None:
-        lib = Library(namespace, "FRAGMENT")
-        _keep_alive.append(lib)
-    lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
+    use_lib = _library_for_registration(namespace, lib)
+    use_lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
 
 
 def register_torch_dispatch(
@@ -1467,27 +1445,13 @@ def register_torch_dispatch(
         >>> assert torch.allclose(y, x + 1)
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_torch_dispatch({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_torch_dispatch(torch_dispatch_class, func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_torch_dispatch")
+    if isinstance(op, CustomOpDef):
+        return op.register_torch_dispatch(torch_dispatch_class, func)
 
     def register(func):
         namespace, op_name = torch._library.utils.parse_namespace(op)
-        if lib is None:
-            use_lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(use_lib)
-        else:
-            use_lib = lib
+        use_lib = _library_for_registration(namespace, lib)
         use_lib._register_torch_dispatch_rule(op_name, torch_dispatch_class, func)
         return func
 
@@ -1582,20 +1546,12 @@ def register_vmap(
         keep this in mind.
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(f"register_vmap({op}): got unexpected type for op: {type(op)}")
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_vmap(func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_vmap")
+    if isinstance(op, CustomOpDef):
+        return op.register_vmap(func)
     qualname = op
-    op = torch._library.utils.lookup_op(qualname)
-    schema = op._schema
+    op_overload = torch._library.utils.lookup_op(qualname)
+    schema = op_overload._schema
     if _library.utils.has_kwarg_only_tensors(schema):
         raise NotImplementedError(
             f"register_vmap with kwarg-only Tensor args. In the original "
@@ -1604,12 +1560,12 @@ def register_vmap(
         )
 
     def register(func):
-        nonlocal op, lib
+        nonlocal lib
 
         namespace, opname = torch._library.utils.parse_namespace(qualname)
+        use_lib = _library_for_registration(namespace, lib)
         if lib is None:
-            lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(lib)
+            lib = use_lib
 
         from torch._functorch.autograd_function import custom_function_call_vmap_helper
         from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
@@ -1620,12 +1576,12 @@ def register_vmap(
                 # pyrefly: ignore[bad-argument-type]
                 interpreter,
                 func,
-                op,
+                op_overload,
                 *args,
                 **kwargs,
             )
 
-        lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
+        use_lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
 
     if func is None:
         return register
