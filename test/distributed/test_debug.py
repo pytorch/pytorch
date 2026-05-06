@@ -31,6 +31,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 try:
+    import aiohttp  # noqa: F401
+
     from torch.distributed.debug._frontend import fetch_aiohttp
 
     HAS_AIOHTTP = True
@@ -417,37 +419,37 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
-    @patch("torch.distributed.debug._debug_handlers.fetch_all")
-    def test_stacks_handler_partial_dump(self, mock_fetch_all) -> None:
-        from torch.distributed.debug._debug_handlers import StacksHandler
+    def test_stacks_handler_partial_dump(self) -> None:
+        from torch.distributed.debug import _debug_handlers
 
-        mock_fetch_all.return_value = (
-            [
-                "http://h0:1/handler/dump_traceback?",  # @lint-ignore
-                "http://h1:1/handler/dump_traceback?",  # @lint-ignore
-            ],
-            [Response(200, "stack0"), Response(503, "Worker unavailable")],
-        )
-        handler = StacksHandler()
-        content = handler.dump()
+        with patch.object(_debug_handlers, "fetch_all") as mock_fetch_all:
+            mock_fetch_all.return_value = (
+                [
+                    "http://h0:1/handler/dump_traceback?",  # @lint-ignore
+                    "http://h1:1/handler/dump_traceback?",  # @lint-ignore
+                ],
+                [Response(200, "stack0"), Response(503, "Worker unavailable")],
+            )
+            handler = _debug_handlers.StacksHandler()
+            content = handler.dump()
         self.assertIn("PARTIAL DATA", content)
         self.assertIn("1/2", content)
         self.assertIn("stack0", content)
         self.assertIn("Error: 503", content)
 
-    @patch("torch.distributed.debug._debug_handlers.fetch_all")
-    def test_stacks_handler_all_success(self, mock_fetch_all) -> None:
-        from torch.distributed.debug._debug_handlers import StacksHandler
+    def test_stacks_handler_all_success(self) -> None:
+        from torch.distributed.debug import _debug_handlers
 
-        mock_fetch_all.return_value = (
-            [
-                "http://h0:1/handler/dump_traceback?",  # @lint-ignore
-                "http://h1:1/handler/dump_traceback?",  # @lint-ignore
-            ],
-            [Response(200, "stack0"), Response(200, "stack1")],
-        )
-        handler = StacksHandler()
-        content = handler.dump()
+        with patch.object(_debug_handlers, "fetch_all") as mock_fetch_all:
+            mock_fetch_all.return_value = (
+                [
+                    "http://h0:1/handler/dump_traceback?",  # @lint-ignore
+                    "http://h1:1/handler/dump_traceback?",  # @lint-ignore
+                ],
+                [Response(200, "stack0"), Response(200, "stack1")],
+            )
+            handler = _debug_handlers.StacksHandler()
+            content = handler.dump()
         self.assertNotIn("PARTIAL", content)
         self.assertIn("stack0", content)
         self.assertIn("stack1", content)
