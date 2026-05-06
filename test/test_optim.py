@@ -2030,7 +2030,7 @@ class TestOptimRenewed(TestCase):
     def test_step_post_hook(self, device, dtype, optim_info):
         def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
-            data += 2
+            data.append("post")
 
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
@@ -2044,25 +2044,30 @@ class TestOptimRenewed(TestCase):
         )
         for optim_input in all_optim_inputs:
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 2
+            data = []
+
+            def mark_step():
+                data.append("step")
+
+            optim._optimizer_step_code = mark_step
             hook_handle = optim.register_step_post_hook(post_hook)
 
             optim.step(closure)
             optim.step(closure)
-            # check if post hooks were registered
-            self.assertEqual(data, 6)
+            # check if post hooks were registered and fired after step
+            self.assertEqual(data, ["step", "post", "step", "post"])
 
             # remove handles, take step and verify that hook is no longer registered
             hook_handle.remove()
 
             optim.step(closure)
-            self.assertEqual(data, 6)
+            self.assertEqual(data, ["step", "post", "step", "post", "step"])
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
         def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
-            data += 2
+            data.append("pre")
 
         # Create a random 2D tensor for compatibility with Muon.
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
@@ -2077,19 +2082,94 @@ class TestOptimRenewed(TestCase):
         )
         for optim_input in all_optim_inputs:
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
-            data = 5
+            data = []
+
+            def mark_step():
+                data.append("step")
+
+            optim._optimizer_step_code = mark_step
             hook_handle = optim.register_step_pre_hook(pre_hook)
 
             optim.step(closure)
             optim.step(closure)
-            # check if pre hooks were registered
-            self.assertEqual(data, 9)
+            # check if pre hooks were registered and fired before step
+            self.assertEqual(data, ["pre", "step", "pre", "step"])
 
             # remove handles, take step and verify that hook is no longer registered
             hook_handle.remove()
 
             optim.step(closure)
-            self.assertEqual(data, 9)
+            self.assertEqual(data, ["pre", "step", "pre", "step", "step"])
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_global_step_post_hook(self, device, dtype, optim_info):
+        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal data
+            data.append("post")
+
+        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        for optim_input in all_optim_inputs:
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = []
+
+            def mark_step():
+                data.append("step")
+
+            optim._optimizer_step_code = mark_step
+            hook_handle = register_optimizer_step_post_hook(post_hook)
+            try:
+                optim.step(closure)
+                optim.step(closure)
+                self.assertEqual(data, ["step", "post", "step", "post"])
+            finally:
+                hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, ["step", "post", "step", "post", "step"])
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_global_step_pre_hook(self, device, dtype, optim_info):
+        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
+            nonlocal data
+            data.append("pre")
+
+        params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        for optim_input in all_optim_inputs:
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = []
+
+            def mark_step():
+                data.append("step")
+
+            optim._optimizer_step_code = mark_step
+            hook_handle = register_optimizer_step_pre_hook(pre_hook)
+            try:
+                optim.step(closure)
+                optim.step(closure)
+                self.assertEqual(data, ["pre", "step", "pre", "step"])
+            finally:
+                hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, ["pre", "step", "pre", "step", "step"])
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
@@ -2132,6 +2212,15 @@ class TestOptimRenewed(TestCase):
             optim2 = SGD(params)
             data = []
 
+            def mark_first_step():
+                data.append("first_step")
+
+            def mark_second_step():
+                data.append("second_step")
+
+            optim._optimizer_step_code = mark_first_step
+            optim2._optimizer_step_code = mark_second_step
+
             # register global hooks to both optimizers
             global_pre_handle = register_optimizer_step_pre_hook(global_pre_hook)
             global_post_handle = register_optimizer_step_post_hook(global_post_hook)
@@ -2142,24 +2231,67 @@ class TestOptimRenewed(TestCase):
             second_pre_handle = optim2.register_step_pre_hook(local_pre_hook)
             second_post_handle = optim2.register_step_post_hook(local_post_hook)
 
-            optim.step(closure)
-            self.assertListEqual(data, [0, 1, 2, 5])
-            optim2.step(closure)
-            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5])
-            optim.step(closure)
-            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+            try:
+                optim.step(closure)
+                self.assertListEqual(data, [0, 1, "first_step", 2, 5])
+                optim2.step(closure)
+                self.assertListEqual(
+                    data, [0, 1, "first_step", 2, 5, 0, 1, "second_step", 2, 5]
+                )
+                optim.step(closure)
+                self.assertListEqual(
+                    data,
+                    [
+                        0,
+                        1,
+                        "first_step",
+                        2,
+                        5,
+                        0,
+                        1,
+                        "second_step",
+                        2,
+                        5,
+                        0,
+                        1,
+                        "first_step",
+                        2,
+                        5,
+                    ],
+                )
+            finally:
+                # remove all hooks
+                global_pre_handle.remove()
+                global_post_handle.remove()
+                first_pre_handle.remove()
+                first_post_handle.remove()
+                second_pre_handle.remove()
+                second_post_handle.remove()
 
-            # remove all hooks
-            global_pre_handle.remove()
-            global_post_handle.remove()
-            first_pre_handle.remove()
-            first_post_handle.remove()
-            second_pre_handle.remove()
-            second_post_handle.remove()
-
             optim.step(closure)
             optim2.step(closure)
-            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+            self.assertListEqual(
+                data,
+                [
+                    0,
+                    1,
+                    "first_step",
+                    2,
+                    5,
+                    0,
+                    1,
+                    "second_step",
+                    2,
+                    5,
+                    0,
+                    1,
+                    "first_step",
+                    2,
+                    5,
+                    "first_step",
+                    "second_step",
+                ],
+            )
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_deepcopy_copies_all_public_attrs(self, device, dtype, optim_info):
