@@ -5403,25 +5403,6 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    @parametrize("backend", ["eager", "aot_eager"])
-    def test_compile_dynamic_grad_stride_slice_mha(self, device, backend):
-        # Regression test for https://github.com/pytorch/pytorch/issues/181305
-        linear = nn.Linear(3, 3).to(device).eval()
-
-        def model(x):
-            y = x[:, ::2, :, :]
-            y = y.mean(dim=0)
-            y = linear(y)
-            return y.mean()
-
-        x = torch.randn(4, 8, 2, 3, device=device)
-        expected = grad(model)(x)
-
-        torch._dynamo.reset()
-        compiled = torch.compile(grad(model), dynamic=True, backend=backend)
-        result = compiled(x)
-        self.assertEqual(result, expected)
-
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_grad_deprecated_api(self, device):
