@@ -1535,7 +1535,7 @@ def validate_sharding_rule_sample_backward(
     )
     dt_tensors = [
         distribute_tensor(c, device_mesh, (p,))
-        for c, p in zip(_clone_with_grad(full_tensors), input_placements)
+        for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)
     ]
     dt_args, dt_kwargs = _replace_tensors(full_args, full_kwargs, dt_tensors)
     try:
@@ -1551,7 +1551,7 @@ def validate_sharding_rule_sample_backward(
         raise
 
     # Compare gradients
-    for ref_t, dt_t in zip(ref_tensors, dt_tensors):
+    for ref_t, dt_t in zip(ref_tensors, dt_tensors, strict=True):
         if not ref_t.is_floating_point() or ref_t.grad is None:
             continue
         if dt_t.grad is None:
