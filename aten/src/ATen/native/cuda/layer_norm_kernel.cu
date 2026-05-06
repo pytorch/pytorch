@@ -262,14 +262,15 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
-    const T * block_row = X + i1 * N;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
+    const T * block_row = X + row_offset;
     WelfordDataLN wd = compute_stats<T, rms_norm>(block_row, N, s_data);
 
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
     const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
     const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
-    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + row_offset);
 
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
@@ -367,6 +368,7 @@ __device__ __inline__ void compute_gI(
   const int N,
   T_ACC * buf){
     const auto i1 = blockIdx.x;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC mean_val = 0;
     if constexpr (!rms_norm){
       mean_val = mean[i1];
@@ -375,9 +377,9 @@ __device__ __inline__ void compute_gI(
     T_ACC stats_x1{0}, stats_x2{0};
     constexpr int unroll = 4;
     auto l = unroll * threadIdx.x;
-    const T * X_i = X + i1 * N;
-    const T * dY_i = dY + i1 * N;
-    T * dX_i = dX + i1 * N;
+    const T * X_i = X + row_offset;
+    const T * dY_i = dY + row_offset;
+    T * dX_i = dX + row_offset;
     //vectorized reads don't improve perf, so use regular unrolling
 
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
@@ -476,14 +478,15 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
 
   const auto bIdx = blockIdx.x;
+  const int64_t row_offset = static_cast<int64_t>(bIdx) * static_cast<int64_t>(N);
   T_ACC mean_val = 0;
   if constexpr (!rms_norm){
     mean_val = mean[bIdx];
   }
   const T_ACC rstd_val = rstd[bIdx];
-  const T* X_i = X + bIdx * N;
-  const T* dY_i = dY + bIdx * N;
-  T* dX_i = dX + bIdx * N;
+  const T* X_i = X + row_offset;
+  const T* dY_i = dY + row_offset;
+  T* dX_i = dX + row_offset;
 
   using vec_t = aligned_vector<T, vec_size>;
   const vec_t* const X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
@@ -1206,7 +1209,7 @@ void cuLoadWriteStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T curr_input = static_cast<T>(input[load_idx]);
@@ -1253,7 +1256,7 @@ void cuLoadAddStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
@@ -1409,6 +1412,7 @@ void cuComputeGradInput(
     T* grad_input)
 {
   for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
     T_ACC c_mean = 0;
@@ -1416,8 +1420,8 @@ void cuComputeGradInput(
       c_mean = mean[i1];
     }
     const T_ACC c_rstd = rstd[i1];
-    const T* k_input = input + i1*N;
-    const T* k_dout = dout + i1*N;
+    const T* k_input = input + row_offset;
+    const T* k_dout = dout + row_offset;
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (gamma != NULL) {
@@ -1495,7 +1499,7 @@ void cuComputeGradInput(
     // all threads now have the two sums over l
     T_ACC fH = (T_ACC)N;
     T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
-    T* k_grad_input = grad_input + i1*N;
+    T* k_grad_input = grad_input + row_offset;
     if (gamma != NULL) {
       for (int l = thrx;  l < N;  l+=numx) {
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
