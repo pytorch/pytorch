@@ -1759,267 +1759,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(inp), opt_fn(inp))
         self.assertGreater(len(counters["graph_break"]), 0)
 
-    @parametrize("gb", (True, False))
-    def test_functorch_low_level(self, gb):
-        def f(x, gb):
-            level = torch._C._functorch._grad_increment_nesting()
-            torch._C._functorch.set_inplace_requires_grad_allowed(True)
-            torch._functorch.eager_transforms._set_tensor_requires_grad(x)
-            if gb:
-                torch._dynamo.graph_break()
-            torch._C._functorch.set_inplace_requires_grad_allowed(False)
-            torch._C._functorch._grad_decrement_nesting()
-            return x + level
-
-        prev_inplace = torch._C._functorch.get_inplace_requires_grad_allowed()
-        prev_level = torch._C._functorch.maybe_current_level()
-        opt_f = torch.compile(f, fullgraph=not gb, backend="eager")
-        x = torch.randn(3, 3, requires_grad=False)
-        opt_y = opt_f(x, gb)
-        self.assertTrue(x.requires_grad)
-        y = f(x, gb)
-        self.assertEqual(y, opt_y)
-        self.assertEqual(torch._C._functorch.maybe_current_level(), prev_level)
-        self.assertEqual(
-            torch._C._functorch.get_inplace_requires_grad_allowed(), prev_inplace
-        )
-
-    @parametrize("gb", (True, False))
-    def test_functorch_low_level_jvp(self, gb):
-        def f(x, gb):
-            level = torch._functorch.predispatch._jvp_increment_nesting()
-            if gb:
-                torch._dynamo.graph_break()
-            depth = torch._C._functorch.get_dynamic_layer_stack_depth()
-            torch._functorch.predispatch._jvp_decrement_nesting()
-            return x + level + depth
-
-        prev_level = torch._C._functorch.maybe_current_level()
-        opt_f = torch.compile(f, fullgraph=not gb, backend="eager")
-        x = torch.randn(3, 3)
-        opt_y = opt_f(x, gb)
-        y = f(x, gb)
-        self.assertEqual(y, opt_y)
-        self.assertEqual(torch._C._functorch.maybe_current_level(), prev_level)
-
-    def test_retrace_grad(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin().sum()
-
-        def wrapper_fn(x):
-            return torch.func.grad(fn)(x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y = wrapper_fn(x)
-        opt_y = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_functorch_get_dynamic_layer_stack_depth(self):
-        def f(x=None):
-            l = torch._C._functorch.get_dynamic_layer_stack_depth()
-            if x is not None:
-                return x + l
-            else:
-                return l
-
-        prev_dynamic_layer_stack_depth = (
-            torch._C._functorch.get_dynamic_layer_stack_depth()
-        )
-        opt_f = torch.compile(f, backend="eager", fullgraph=True)
-        N = 3
-        x = torch.randn(3, 3)
-        try:
-            for _ in range(N):
-                out = f()
-                opt_out = opt_f()
-                self.assertEqual(out, opt_out)
-
-                out = f(x)
-                opt_out = opt_f(x)
-                self.assertEqual(out, opt_out)
-                torch._C._functorch._grad_increment_nesting()
-        finally:
-            torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                prev_dynamic_layer_stack_depth
-            )
-
-    def test_retrace_hessian(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin().sum()
-
-        def wrapper_fn(x):
-            return torch.func.hessian(fn)(x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y = wrapper_fn(x)
-        opt_y = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_retrace_vmap(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin()
-
-        def wrapper_fn(x):
-            return torch.func.vmap(fn)(x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y = wrapper_fn(x)
-        opt_y = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_retrace_vjp(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin()
-
-        def wrapper_fn(x):
-            return torch.func.vjp(fn, x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y, _ = wrapper_fn(x)
-        opt_y, _ = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_retrace_jvp(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin()
-
-        def wrapper_fn(x):
-            return torch.func.jvp(fn, (x,), (x,))
-
-        x = torch.randn([])
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y, _ = wrapper_fn(x)
-        opt_y, _ = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_retrace_jacrev(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin()
-
-        def wrapper_fn(x):
-            return torch.func.jacrev(fn)(x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y = wrapper_fn(x)
-        opt_y = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
-    def test_retrace_jacfwd(self):
-        # Recompile trick doesn't work with dynamic shapes
-        if check_dynamic_shape_capture():
-            return
-
-        def fn(x):
-            return x.sin()
-
-        def wrapper_fn(x):
-            return torch.func.jacfwd(fn)(x)
-
-        x = torch.randn(3, 3)
-        eager = EagerAndRecordGraphs()
-        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
-        y = wrapper_fn(x)
-        opt_y = opt_f(x)
-        self.assertEqual(y, opt_y)
-        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
-
-        d = {}
-        exec(first_graph, globals(), d)
-        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
-        retraced_out = retraced()(x)[0]
-        self.assertEqual(y, retraced_out)
-        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
-        self.assertEqual(first_graph, retraced_graph)
-
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -4073,6 +3812,90 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
+
+    @parametrize("gb", (True, False))
+    def test_functorch_low_level(self, gb):
+        def f(x, gb):
+            level = torch._C._functorch._grad_increment_nesting()
+            torch._C._functorch.set_inplace_requires_grad_allowed(True)
+            torch._functorch.eager_transforms._set_tensor_requires_grad(x)
+            if gb:
+                torch._dynamo.graph_break()
+            torch._C._functorch.set_inplace_requires_grad_allowed(False)
+            torch._C._functorch._grad_decrement_nesting()
+            return x + level
+
+        prev_inplace = torch._C._functorch.get_inplace_requires_grad_allowed()
+        prev_level = torch._C._functorch.maybe_current_level()
+        opt_f = torch.compile(f, fullgraph=not gb, backend="eager")
+        x = torch.randn(3, 3, requires_grad=False)
+        opt_y = opt_f(x, gb)
+        self.assertTrue(x.requires_grad)
+        y = f(x, gb)
+        self.assertEqual(y, opt_y)
+        self.assertEqual(torch._C._functorch.maybe_current_level(), prev_level)
+        self.assertEqual(
+            torch._C._functorch.get_inplace_requires_grad_allowed(), prev_inplace
+        )
+
+    def test_retrace_grad(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(wrapper_fn, backend=eager, fullgraph=True)
+        y = wrapper_fn(x)
+        opt_y = opt_f(x)
+        self.assertEqual(y, opt_y)
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertExpectedInline(
+            first_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3]"):
+        l_x_ = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
+
+        diff_args: "f32[3, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
+
+        _set_tensor_requires_grad: "f32[3, 3]" = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args);  _set_tensor_requires_grad = None
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
+
+        sin: "f32[3, 3]" = diff_args.sin()
+        output: "f32[]" = sin.sum();  sin = None
+
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
+        grad_input: "f32[3, 3]" = _autograd_grad[0];  _autograd_grad = None
+
+        grad_input_1: "f32[3, 3]" = torch._functorch.predispatch._unwrap_for_grad(grad_input, 1);  grad_input = None
+        output_1: "f32[]" = torch._functorch.predispatch._unwrap_for_grad(output, 1);  output = output_1 = None
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+        return (grad_input_1,)
+""",
+        )
+
+        d = {}
+        exec(first_graph, globals(), d)
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(y, retraced_out)
+        retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertEqual(first_graph, retraced_graph)
 
 
 instantiate_parametrized_tests(CtxManagerTests)
