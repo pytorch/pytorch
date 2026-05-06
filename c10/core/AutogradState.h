@@ -87,8 +87,8 @@ struct C10_API AutogradState {
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
   bool multithreading_enabled_ : 1;
-  bool view_replay_enabled_ : 1 = false;
-  bool grad_layout_enforcement_enabled_ : 1 = true;
+  bool view_replay_enabled_;
+  bool grad_layout_enforcement_enabled_;
 };
 
 } // namespace c10
