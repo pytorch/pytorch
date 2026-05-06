@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import unittest
+from unittest.mock import patch
 
 import sympy
 
@@ -15,7 +16,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -309,6 +310,44 @@ class TestCodegenTriton(InductorTestCase):
             arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
             sig = triton_utils.signature_of(arg, size_dtype=None)
             self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
+    @patch(
+        "torch._inductor.codegen.triton_utils.device_supports_fp64",
+        return_value=False,
+    )
+    def test_no_fp64_in_kernel_when_device_unsupported(self, mock1, mock2):
+        """Compile a kernel with dynamic shape division to verify fp64 is
+        downgraded to fp32 in the generated Triton kernel body when the device
+        does not support fp64.
+
+        ``x / x.shape[0]`` with dynamic shapes keeps the shape as a sympy
+        symbol, so the int-to-float cast goes through TritonPrinter._print_ToFloat
+        which respects device_supports_fp64().
+        """
+        import re
+
+        def div_by_shape(x):
+            return x / x.shape[0]
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        compiled = torch.compile(div_by_shape, dynamic=True)
+        _, kernels = run_and_get_kernels(compiled, x, remove_quote=True)
+        # Extract only the function body (after ``def triton_...:``) to avoid
+        # matching metadata like ``'has_fp64': True`` in DeviceProperties.
+        matched_kernel_body = False
+        for kernel in kernels:
+            m = re.search(r"def triton_\w+\([^)]*\):\n(.*)", kernel, re.DOTALL)
+            if m:
+                matched_kernel_body = True
+                body = m.group(1)
+                self.assertNotIn("tl.float64", body)
+                self.assertIn("tl.float32", body)
+        self.assertTrue(
+            matched_kernel_body,
+            "Expected at least one generated Triton kernel body to match",
+        )
 
 
 if __name__ == "__main__":

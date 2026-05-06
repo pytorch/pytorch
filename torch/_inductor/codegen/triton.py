@@ -70,6 +70,7 @@ from ..stream_utils import get_raw_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
+    device_supports_fp64,
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -832,6 +833,17 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # pyrefly: ignore [missing-attribute]
         return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
 
+    @staticmethod
+    def _get_scalar_float_type() -> str:
+        """Return the Triton float type for scalar shape math.
+
+        Uses tl.float64 by default but falls back to tl.float32 on devices
+        that lack fp64 support (e.g. Intel Arc consumer GPUs).
+        """
+        if not device_supports_fp64(V.graph.current_device):
+            return "tl.float32"
+        return "tl.float64"
+
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
             # sympy considers 0.0 to be integer, but triton doesn't.
@@ -841,14 +853,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
-            ret = f"tl.full([], {expr}, tl.float64)"
+            float_type = self._get_scalar_float_type()
+            ret = f"tl.full([], {expr}, {float_type})"
         return ret
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         # pyrefly: ignore [bad-argument-type]
         s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
-        return f"{s}.to(tl.float64)"
+        float_type = self._get_scalar_float_type()
+        return f"{s}.to({float_type})"
 
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
         quot, div = expr.args
@@ -912,25 +926,27 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # pyrefly: ignore [missing-attribute]
         exp = self._print(expr.args[1])
         # libdevice.pow requires both arguments to have the same type.
-        # Always cast to float64 for consistency. This is scalar shape math,
-        # not tensor ops, so the performance impact is negligible.
-        return f"libdevice.pow(({base}).to(tl.float64), ({exp}).to(tl.float64))"
+        # Cast to float64 for precision. Falls back to float32 on devices
+        # without fp64 support. This is scalar shape math, not tensor ops.
+        float_type = self._get_scalar_float_type()
+        return f"libdevice.pow(({base}).to({float_type}), ({exp}).to({float_type}))"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        float_type = self._get_scalar_float_type()
         if expr.args[0].is_Integer:
-            base = f"tl.full([], {float(expr.args[0])}, tl.float64)"
+            base = f"tl.full([], {float(expr.args[0])}, {float_type})"
         else:
             # pyrefly: ignore [missing-attribute]
-            base = f"({self._print(expr.args[0])}).to(tl.float64)"
+            base = f"({self._print(expr.args[0])}).to({float_type})"
         exp_val = expr.args[1]
         if exp_val.is_Integer:
-            exp = f"tl.full([], {float(exp_val)}, tl.float64)"
+            exp = f"tl.full([], {float(exp_val)}, {float_type})"
         else:
             # pyrefly: ignore [missing-attribute]
-            exp = f"({self._print(exp_val)}).to(tl.float64)"
+            exp = f"({self._print(exp_val)}).to({float_type})"
         # libdevice.pow requires both arguments to have the same type.
-        # Always cast to float64 for consistency. This is scalar shape math,
-        # not tensor ops, so the performance impact is negligible.
+        # Cast to float64 for precision. Falls back to float32 on devices
+        # without fp64 support. This is scalar shape math, not tensor ops.
         return f"libdevice.pow({base}, {exp})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
@@ -1971,6 +1987,12 @@ class TritonOverrides(OpOverrides):
                 if low_precision_fp(result_dtype) or any_needs_upcast
                 else torch.float64
             )
+        if pow_dtype == torch.float64 and not device_supports_fp64(
+            V.graph.current_device
+        ):
+            pow_dtype = torch.float32
+            if result_dtype == torch.float64:
+                result_dtype = torch.float32
 
         cast_a = cls._cast_libdevice_arg(a, pow_dtype)
         cast_b = cls._cast_libdevice_arg(b, pow_dtype)
