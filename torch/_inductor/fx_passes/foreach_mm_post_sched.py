@@ -16,14 +16,21 @@ import logging
 import torch
 import torch.fx as fx
 
+
 log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
-_COMM_OP_NAMES = frozenset([
-    "all_reduce", "all_gather", "reduce_scatter", "wait_tensor",
-    "all_gather_into_tensor", "reduce_scatter_tensor",
-])
+_COMM_OP_NAMES = frozenset(
+    [
+        "all_reduce",
+        "all_gather",
+        "reduce_scatter",
+        "wait_tensor",
+        "all_gather_into_tensor",
+        "reduce_scatter_tensor",
+    ]
+)
 
 
 def _is_mm_control_deps(node: fx.Node) -> bool:
@@ -41,7 +48,7 @@ def _is_mm_control_deps(node: fx.Node) -> bool:
         sg_name = str(sg_name)
     if not sg_name.startswith("subgraph_mm"):
         return False
-    rest = sg_name[len("subgraph_mm"):]
+    rest = sg_name[len("subgraph_mm") :]
     return rest == "" or rest[0] in ("_", " ")
 
 

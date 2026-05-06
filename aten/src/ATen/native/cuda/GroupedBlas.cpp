@@ -38,7 +38,6 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_foreach_add.h>
-#include <ATen/ops/_foreach_addmm_native.h>
 #include <ATen/ops/_foreach_mm.h>
 #include <ATen/ops/_foreach_mm_native.h>
 #include <ATen/ops/_foreach_mul.h>
@@ -798,41 +797,5 @@ std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
   return outputs;
 }
 
-std::vector<at::Tensor> foreach_tensor_addmm_kernel_cuda(
-    at::TensorList self_list,
-    at::TensorList mat1_list,
-    at::TensorList mat2_list,
-    const at::Scalar& beta,
-    const at::Scalar& alpha) {
-  const int64_t group_count = self_list.size();
-  TORCH_CHECK(group_count > 0, "_foreach_addmm requires non-empty tensor lists");
-  TORCH_CHECK(
-      group_count == static_cast<int64_t>(mat1_list.size()) &&
-      group_count == static_cast<int64_t>(mat2_list.size()),
-      "_foreach_addmm: all lists must have the same number of tensors");
-
-  // Decompose: result = beta * self + alpha * (mat1 @ mat2)
-  // Use _foreach_mm for the batched matmul, then elementwise for bias.
-  auto mm_results = at::_foreach_mm(mat1_list, mat2_list);
-
-  double alpha_val = alpha.toDouble();
-  double beta_val = beta.toDouble();
-
-  if (alpha_val != 1.0) {
-    at::_foreach_mul_(mm_results, alpha);
-  }
-
-  if (beta_val == 0.0) {
-    return mm_results;
-  }
-
-  if (beta_val == 1.0) {
-    return at::_foreach_add(mm_results, self_list);
-  }
-
-  // General case: beta * self + mm_results
-  auto scaled_self = at::_foreach_mul(self_list, beta);
-  return at::_foreach_add(scaled_self, mm_results);
-}
 
 } // namespace at::native

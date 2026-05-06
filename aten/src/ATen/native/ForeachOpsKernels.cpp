@@ -58,9 +58,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
-#include <ATen/ops/_foreach_addmm_native.h>
 #include <ATen/ops/_foreach_mm_native.h>
-#include <ATen/ops/addmm.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/linalg__powsum.h>
@@ -575,21 +573,5 @@ std::vector<Tensor> foreach_tensor_mm_list_kernel_slow(
   return result;
 }
 
-std::vector<Tensor> foreach_tensor_addmm_kernel_slow(
-    TensorList self,
-    TensorList mat1,
-    TensorList mat2,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  TORCH_CHECK(
-      self.size() == mat1.size() && self.size() == mat2.size(),
-      "_foreach_addmm: all lists must have the same number of tensors");
-  std::vector<Tensor> result;
-  result.reserve(self.size());
-  for (const auto i : c10::irange(self.size())) {
-    result.emplace_back(at::addmm(self[i], mat1[i], mat2[i], beta, alpha));
-  }
-  return result;
-}
 
 } // namespace at::native

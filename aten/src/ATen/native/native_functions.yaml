@@ -11883,9 +11883,6 @@
     CompositeExplicitAutograd: foreach_tensor_mm_list_kernel_slow
     CUDA: foreach_tensor_mm_list_kernel_cuda
 
-- func: _foreach_addmm(Tensor[] self, Tensor[] mat1, Tensor[] mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor[]
-  device_check: NoCheck
-  variants: function
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_addmm_kernel_slow
     CUDA: foreach_tensor_addmm_kernel_cuda
