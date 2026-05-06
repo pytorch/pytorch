@@ -127,7 +127,8 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
     else:
         num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
+    if not isinstance(bh, (int, sympy.Integer)):
+        raise AssertionError("B and H must be concrete integers")
     split_k = num_SM // bh * 2  # Each SM should at least get one block.
     # TODO: workload evening at runtime for splits fully masked out.
     # Before we have runtime workload evening, assign 2 splits per SM.
@@ -169,9 +170,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
 
     B = Bq
     kernel_options = dict(kernel_options)

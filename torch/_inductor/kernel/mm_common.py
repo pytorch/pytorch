@@ -84,7 +84,8 @@ def mm_args(
             [*b, m, n],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
     from ..lowering import expand
 
     others = [realize_inputs(expand(x, layout.size)) for x in others]
@@ -252,7 +253,8 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     sizes = [mat1.get_size(), mat2.get_size(), layout.size]
     strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
     for size, stride in zip(sizes, strides):
-        assert len(size) == len(stride) == 3, "Expect 3D tensors"
+        if not (len(size) == len(stride) == 3):
+            raise AssertionError("Expect 3D tensors")
         if stride[0] != 0 and stride[0] != sympy_product(size[1:]):
             return False
 

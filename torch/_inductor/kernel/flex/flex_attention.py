@@ -307,15 +307,14 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)), (
-        "Query length must be greater than 0"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)), (
-        "Key length must be greater than 0"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
+    if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
+        raise AssertionError("Query length must be greater than 0")
+    if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)):
+        raise AssertionError("Key length must be greater than 0")
 
     B = Bq
 
@@ -588,10 +587,10 @@ def process_joint_outputs(
     Returns:
         JointOutputResult containing processed buffers and gradients
     """
-    assert isinstance(all_joint_outputs, list)
-    assert all_joint_outputs[0] is not None, (
-        "joint_subgraph_buffer is None - this is a bug!"
-    )
+    if not isinstance(all_joint_outputs, list):
+        raise AssertionError(f"Expected list, got {type(all_joint_outputs)}")
+    if all_joint_outputs[0] is None:
+        raise AssertionError("joint_subgraph_buffer is None - this is a bug!")
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
@@ -603,8 +602,10 @@ def process_joint_outputs(
     def get_out(buf):
         if buf is None:
             return None
-        assert isinstance(buf, ComputedBuffer)
-        assert buf.name is not None
+        if not isinstance(buf, ComputedBuffer):
+            raise AssertionError(f"Expected ComputedBuffer, got {type(buf)}")
+        if buf.name is None:
+            raise AssertionError("ComputedBuffer name must not be None")
         return TensorBox.create(V.graph.get_buffer(buf.name))
 
     grads_out = [get_out(x) for x in other_grads]
@@ -693,9 +694,10 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Add check for mixed dtypes
@@ -1047,11 +1049,12 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        assert V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)), (
-            f"Bq and Bkv must broadcastable. "
-            f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
-            f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
-        )
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)):
+            raise AssertionError(
+                f"Bq and Bkv must broadcastable. "
+                f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
+                f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
+            )
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 

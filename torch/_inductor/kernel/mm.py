@@ -767,7 +767,8 @@ def tuned_sparse_semi_structured_mm(
             [n, 1],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
 
     choices = (
         [

@@ -322,7 +322,11 @@ class PersistentCache(CacheBase):
         if (not check_cache(local_cache)) and (benchmark is not None):
             # re-benchmark everything to try to get consistent numbers from the same machine
             timings = benchmark(choices)
-            assert all(choice in timings for choice in choices)
+            if not all(choice in timings for choice in choices):
+                missing = [c for c in choices if c not in timings]
+                raise AssertionError(
+                    f"Benchmark results missing for choices: {missing}"
+                )
             local_cache.setdefault(op, {})
             local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
             for choice, timing in timings.items():
@@ -443,9 +447,8 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(content, (str, bytes)), (
-        "Only strings and byte arrays can be saved in the cache"
-    )
+    if not isinstance(content, (str, bytes)):
+        raise AssertionError("Only strings and byte arrays can be saved in the cache")
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -733,9 +736,11 @@ def build_code_hash(
 ) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
-        assert spec is not None
+        if spec is None:
+            raise AssertionError(f"Failed to find spec for module {lib.name}")
         module = spec.origin
-        assert module is not None
+        if module is None:
+            raise AssertionError(f"Module spec for {lib.name} has no origin")
         with open(module, "rb") as f:
             hasher.update(spec.name.encode("utf-8"))
             hasher.update(f.read())
@@ -758,7 +763,8 @@ def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
         return _cache[0]
 
     def set_val(val: bytes) -> None:
-        assert len(_cache) == 0
+        if len(_cache) != 0:
+            raise AssertionError(f"Cache already populated with {len(_cache)} entries")
         _cache.append(val)
 
     def clear() -> None:
@@ -1269,7 +1275,10 @@ class FxGraphHashDetails:
     ) -> Any | None:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
+        if not isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass)):
+            raise AssertionError(
+                f"Expected CustomGraphPass or CustomGraphModulePass, got {type(custom_pass)}"
+            )
         return custom_pass.uuid()
 
     def _get_custom_partitioner_fn_detail(
@@ -1277,7 +1286,10 @@ class FxGraphHashDetails:
     ) -> Any | None:
         if not custom_partitioner_fn:
             return None
-        assert isinstance(custom_partitioner_fn, CustomPartitionerFn)
+        if not isinstance(custom_partitioner_fn, CustomPartitionerFn):
+            raise AssertionError(
+                f"Expected CustomPartitionerFn, got {type(custom_partitioner_fn)}"
+            )
         return custom_partitioner_fn.uuid()
 
 
@@ -1377,9 +1389,15 @@ class GuardedCache(Generic[T]):
         if remote_cache:
             try:
                 if (cache_data := remote_cache.get(key)) is not None:
-                    assert isinstance(cache_data, dict)
+                    if not isinstance(cache_data, dict):
+                        raise AssertionError(
+                            f"Expected dict from remote cache, got {type(cache_data)}"
+                        )
                     data = cache_data["data"]
-                    assert isinstance(data, (str, bytes))
+                    if not isinstance(data, (str, bytes)):
+                        raise AssertionError(
+                            f"Expected str or bytes for cache data, got {type(data)}"
+                        )
                     content = base64.b64decode(data)
                     yield pickle.loads(content), content, False
             except Exception:
@@ -1422,7 +1440,10 @@ class GuardedCache(Generic[T]):
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
         ):
-            assert hasattr(candidate, "guards_expr")
+            if not hasattr(candidate, "guards_expr"):
+                raise AssertionError(
+                    f"Cache candidate {type(candidate)} missing 'guards_expr' attribute"
+                )
             if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -1711,7 +1732,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         `shape_env.evaluate_guards_expression` returns True.
         """
         shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
+        if shape_env is None:
+            raise AssertionError("ShapeEnv is not set for guard evaluation")
 
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [guarding_hint_or_throw(s) for s in symints]
@@ -1753,7 +1775,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
             check = bool(evaluate_guards(graph.guards_expr, symints))
-            assert check is True
+            if check is not True:
+                raise AssertionError(f"Post-load guard evaluation failed for key {key}")
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -1785,9 +1808,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(compiled_graph, CompiledFxGraph), (
-            f"serialization for {type(compiled_graph)} NYI"
-        )
+        if not isinstance(compiled_graph, CompiledFxGraph):
+            raise AssertionError(f"serialization for {type(compiled_graph)} NYI")
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -1795,7 +1817,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # Tensor shapes are already captured in the hash for the cache key. Any
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
+        if shape_env is None:
+            raise AssertionError("ShapeEnv is not set for cache serialization")
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
@@ -2007,10 +2030,12 @@ class CudaKernelParamCache:
     ) -> None:
         basename = None
         if config.aot_inductor.package_cpp_only:
-            assert config.triton.unique_kernel_names, (
-                "package_cpp_only requires triton kernel names to be unique"
-            )
-            assert params["mangled_name"], "Missing kernel name"
+            if not config.triton.unique_kernel_names:
+                raise AssertionError(
+                    "package_cpp_only requires triton kernel names to be unique"
+                )
+            if not params["mangled_name"]:
+                raise AssertionError("Missing kernel name")
             basename = params["mangled_name"]
 
         _, bin_path = write(
@@ -2031,9 +2056,10 @@ class CudaKernelParamCache:
                 XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
-            assert bin_type in bin_type_to_ext, (
-                "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
-            )
+            if bin_type not in bin_type_to_ext:
+                raise AssertionError(
+                    "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
+                )
             base_path, _ = os.path.splitext(bin_path)
             bin_path = base_path + bin_type_to_ext[bin_type]
 
@@ -2048,8 +2074,10 @@ class CudaKernelParamCache:
         ):
             # Allow ROCm single-arch to skip (asm=None OK), require for everything else
             if torch.version.hip is None or (asm and asm_type):
-                assert asm, "Missing kernel assembly code"
-                assert asm_type, "Missing kernel assembly type"
+                if not asm:
+                    raise AssertionError("Missing kernel assembly code")
+                if not asm_type:
+                    raise AssertionError("Missing kernel assembly type")
 
                 # Cache directory mapping: asm_type → hash_type
                 # Problem: LLVM IR extension ".ll" isn't a recognized cache category
@@ -2472,7 +2500,10 @@ end
                         if sys.byteorder == "little"
                         else hdr.find(b"\x12\x34\x56\x78\x99\xab\xcd\xef")
                     )
-                    assert start_idx != -1
+                    if start_idx == -1:
+                        raise AssertionError(
+                            "Magic number not found in constants header"
+                        )
                     f.seek(start_idx)
                     pos = 0
                     while pos < len(consts):
@@ -2514,9 +2545,8 @@ end
                 )
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(v, (str)), (
-                    "Metadata must only contain strings"
-                )
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise AssertionError("Metadata must only contain strings")
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
@@ -2737,7 +2767,10 @@ end
                 magic_number = 0
                 if use_external_weights:
                     aot_constants = struct.pack("q", consts_size)
-                    assert external_weights_path is not None
+                    if external_weights_path is None:
+                        raise AssertionError(
+                            "external_weights_path must be set when use_external_weights is True"
+                        )
                     # For external weights, write weights to separate file and embed minimal placeholder
                     with open(external_weights_path, "wb") as f_weights:
                         f_weights.write(serialized_weights)
@@ -2764,7 +2797,8 @@ end
                     constant, torch._library.fake_class_registry.FakeScriptObject
                 ):
                     constant = constant.real_obj
-                assert isinstance(constant, torch._C.ScriptObject)
+                if not isinstance(constant, torch._C.ScriptObject):
+                    raise AssertionError(f"Expected ScriptObject, got {type(constant)}")
                 custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
 
                 log.debug("saving script object %s as %s", name, custom_obj_name)
@@ -2798,9 +2832,10 @@ end
             gpu_codecache.aot_kernels_o.clear()
 
             if gpu_kernels_o:
-                assert not config.aot_inductor.emit_multi_arch_kernel, (
-                    "TODO: add emit_multi_arch_kernel support for cutlass kernels"
-                )
+                if config.aot_inductor.emit_multi_arch_kernel:
+                    raise AssertionError(
+                        "TODO: add emit_multi_arch_kernel support for cutlass kernels"
+                    )
 
             cubins_o = []
             asm_files = []
@@ -3110,16 +3145,16 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
 
     converted_args = [convert_arg(arg) for arg in args]
 
-    assert op.startswith("torch.ops."), (
-        op + " can not be called through custom_op_wrapper"
-    )
+    if not op.startswith("torch.ops."):
+        raise AssertionError(op + " can not be called through custom_op_wrapper")
     func = None
     for i, s in enumerate(op.split(".")):
         if i == 0:
             func = importlib.import_module(s)
         func = getattr(func, s)
 
-    assert callable(func), op + " can not be loaded through custom_op_wrapper"
+    if not callable(func):
+        raise AssertionError(op + " can not be loaded through custom_op_wrapper")
 
     # convert any kwarg-only arguments to kwargs
     kwargs = dict()
@@ -3138,10 +3173,12 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
         for r in result:
-            assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
+            if not isinstance(r, torch.Tensor):
+                raise AssertionError(op + " returns a list of non-tensors")
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
 
-    assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
+    if not isinstance(result, torch.Tensor):
+        raise AssertionError(op + " returns a non-tensor")
     return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
@@ -3158,9 +3195,10 @@ def _precompile_header(
     hashable_cmd_line: str,
     **compile_command: Any,
 ) -> str:
-    assert not _IS_WINDOWS, (
-        "CppBuilder does not currently support precompiling on Windows!"
-    )
+    if _IS_WINDOWS:
+        raise AssertionError(
+            "CppBuilder does not currently support precompiling on Windows!"
+        )
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This
@@ -3420,9 +3458,15 @@ class CppCodeCache:
                     if future is not None:
                         future.result()
                     result = worker_fn()
-                    assert result is None
+                    if result is not None:
+                        raise AssertionError(
+                            f"worker_fn expected to return None, got {type(result)}"
+                        )
                     lib = cls._load_library(binary_path, key)
-                    assert lib is not None
+                    if lib is None:
+                        raise AssertionError(
+                            f"Failed to load library from {binary_path}"
+                        )
                 return lib
 
             if submit_fn is not None:
@@ -3573,11 +3617,15 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         except KeyError:
             pass
         spec = importlib.util.spec_from_file_location(module_name, path)
-        assert spec is not None
+        if spec is None:
+            raise AssertionError(
+                f"Failed to create module spec for {module_name} from {path}"
+            )
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         CppPythonBindingsCodeCache._loaded_module_names.add(module_name)
-        assert spec.loader is not None
+        if spec.loader is None:
+            raise AssertionError(f"Module spec for {module_name} has no loader")
         spec.loader.exec_module(module)
         return module
 
@@ -3633,7 +3681,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             nonlocal result
             if result is None:
                 result = get_result()
-                assert isinstance(result, ModuleType)
+                if not isinstance(result, ModuleType):
+                    raise AssertionError(f"Expected ModuleType, got {type(result)}")
             return getattr(result, cls.entry_function)
 
         return future
@@ -3796,9 +3845,15 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> list[str]:
-        assert arg.shape is not None
-        assert arg.stride is not None and len(arg.shape) == len(arg.stride)
-        assert arg.offset is not None
+        if arg.shape is None:
+            raise AssertionError(f"arg.shape is None for {name}")
+        if arg.stride is None or len(arg.shape) != len(arg.stride):
+            raise AssertionError(
+                f"arg.stride is None or shape/stride length mismatch for {name}: "
+                f"shape={arg.shape}, stride={arg.stride}"
+            )
+        if arg.offset is None:
+            raise AssertionError(f"arg.offset is None for {name}")
         data_ptr = f"{arg.alias_of or arg.name} + {arg.offset}"
         if cuda:
             device = f"reinterpret_cast<uint64_t>({data_ptr})"
@@ -3833,8 +3888,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     def _codegen_glue(cls, meta: HalideMeta, headerfile: object) -> str:
         is_cuda = meta.is_cuda()
-        assert is_cuda is ("user_context" in meta.target)
-        assert "no_runtime" in meta.target
+        if is_cuda is not ("user_context" in meta.target):
+            raise AssertionError(
+                f"is_cuda={is_cuda} inconsistent with meta.target={meta.target}"
+            )
+        if "no_runtime" not in meta.target:
+            raise AssertionError(f"'no_runtime' not found in meta.target={meta.target}")
         buffers = []
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
@@ -3843,7 +3902,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
-                assert "*" not in arg.ctype
+                if "*" in arg.ctype:
+                    raise AssertionError(
+                        f"Unexpected pointer type in non-buffer arg: {arg.ctype}"
+                    )
                 # pyrefly: ignore [bad-argument-type]
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
@@ -4022,7 +4084,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         libname = "libStandaloneHalideRuntime.so"
         target = "host-cuda" if device_type == "cuda" else "host"
         if cls._standalone_runtime_path:
-            assert not os.path.exists(cls._standalone_runtime_path)
+            if os.path.exists(cls._standalone_runtime_path):
+                raise AssertionError(
+                    f"Standalone runtime path already exists: {cls._standalone_runtime_path}"
+                )
             # We hit this case in unittests when we run with fresh_cache()
             # Generating a fresh runtime over and over causes errors because we initialize
             # cuda hundreds of times in the same process and run out of file descriptors.
@@ -4067,7 +4132,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         shlex.split(halide_cmd_gen.get_command_line())
                     )
                     touch(done_file)
-        assert os.path.exists(so_file)
+        if not os.path.exists(so_file):
+            raise AssertionError(f"Halide runtime .so not found at {so_file}")
         cls._standalone_runtime_path = so_file
         return so_file
 
@@ -4091,14 +4157,21 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
             if os.path.basename(python).startswith("python"):
                 code = Path(script).read_text()
                 main = "    hl.main()"
-                assert code.count(main) == 1
+                if code.count(main) != 1:
+                    raise AssertionError(
+                        f"Expected exactly 1 occurrence of {main!r} in code, "
+                        f"found {code.count(main)}"
+                    ) from e
 
                 class Out:
                     def __repr__(self) -> str:
                         return "out"
 
                 ci = cmd.index("-o")
-                assert isinstance(ci, int)
+                if not isinstance(ci, int):
+                    raise AssertionError(
+                        f"Expected int index from cmd.index, got {type(ci)}"
+                    ) from e
                 # pyrefly: ignore [unsupported-operation]
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
@@ -4190,7 +4263,8 @@ class PyCodeCache:
         if purge:
             for mod in cls.modules:
                 try:
-                    assert mod.__file__
+                    if not mod.__file__:
+                        raise AssertionError(f"Module {mod} has no __file__ attribute")
                     os.remove(mod.__file__)
                 except FileNotFoundError:
                     pass
@@ -4858,7 +4932,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
-        assert self.reload_kernel_from_src is not None
+        if self.reload_kernel_from_src is None:
+            raise AssertionError(
+                "reload_kernel_from_src must be set before calling result()"
+            )
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             self.static_autotuner.recheck_autotune_cache(
                 reload_kernel_from_src=self.reload_kernel_from_src

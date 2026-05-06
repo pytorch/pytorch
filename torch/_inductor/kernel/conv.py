@@ -463,7 +463,8 @@ def convolution(
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
         groups = V.graph.sizevars.guard_int(groups)
-    assert isinstance(groups, int)
+    if not isinstance(groups, int):
+        raise AssertionError(f"Expected int for groups, got {type(groups)}")
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
@@ -730,7 +731,8 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target is torch.ops.aten.convolution.default
+    if fx_node.target is not torch.ops.aten.convolution.default:
+        raise AssertionError(f"Expected aten.convolution.default, got {fx_node.target}")
     if V.graph.layout_opt:
         return args, kwargs
     else:

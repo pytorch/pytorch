@@ -162,7 +162,8 @@ def lower_cpu(
                 break
 
         # Get the mask node
-        assert output_node is not None
+        if output_node is None:
+            raise AssertionError("output_node must not be None")
         mask_node = output_node.args[0]
 
         size_node = [cur_qSplitSize, cur_kvSplitSize]
@@ -296,16 +297,18 @@ def lower_cpu(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    assert V.graph.sizevars.evaluate_expr(
+    if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), (
-        "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    )
-    assert V.graph.sizevars.evaluate_expr(
+    ):
+        raise AssertionError(
+            "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+        )
+    if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), (
-        "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
-    )
+    ):
+        raise AssertionError(
+            "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+        )
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
