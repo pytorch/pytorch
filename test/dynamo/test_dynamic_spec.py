@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import itertools
+
 import torch
 import torch._dynamo
 import torch._dynamo.testing
@@ -17,6 +19,11 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
 )
+
+
+def _reset_uid_counter():
+    """Reset the global IntVar uid counter so uids start at 0 per test."""
+    IntVar._uid_counter = itertools.count()
 
 
 def _tensor_placeholder_shape(gm):
@@ -42,6 +49,10 @@ def _tensor_placeholders(gm):
 class TestShapeVarConstruction(TestCase):
     """Construction of ShapeVar."""
 
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
     def test_basic(self):
         s = ShapeVar("batch")
         self.assertEqual(s.name, "batch")
@@ -60,12 +71,23 @@ class TestShapeVarConstruction(TestCase):
 
     def test_anonymous_name(self):
         s = ShapeVar()
-        self.assertTrue(s.name.startswith("_intvar_"))
+        self.assertEqual(s.name, "anon")
 
-    def test_anonymous_specs_have_distinct_names(self):
+    def test_anonymous_repr_uses_id(self):
+        s = ShapeVar()
+        self.assertEqual(repr(s), "ShapeVar(anon#0, min=0)")
+
+    def test_anonymous_specs_have_distinct_reprs(self):
         a = ShapeVar()
         b = ShapeVar()
-        self.assertNotEqual(a.name, b.name)
+        # Both have name=None but distinct ids -> distinct reprs.
+        self.assertNotEqual(repr(a), repr(b))
+
+    def test_same_named_specs_have_distinct_reprs(self):
+        a = ShapeVar("batch")
+        b = ShapeVar("batch")
+        # Same name, distinct ids -> distinct reprs.
+        self.assertNotEqual(repr(a), repr(b))
 
     def test_is_instance_of_intvar(self):
         s = ShapeVar("batch")
@@ -74,12 +96,13 @@ class TestShapeVarConstruction(TestCase):
     def test_repr(self):
         s = ShapeVar("batch", max=64, optimization_hint=32)
         self.assertEqual(
-            repr(s), "ShapeVar(batch, min=0, max=64, optimization_hint=32)"
+            repr(s),
+            "ShapeVar(batch#0, min=0, max=64, optimization_hint=32)",
         )
 
     def test_repr_minimal(self):
         s = ShapeVar("x")
-        self.assertEqual(repr(s), "ShapeVar(x, min=0)")
+        self.assertEqual(repr(s), "ShapeVar(x#0, min=0)")
 
     def test_implicit_min_is_zero(self):
         s = ShapeVar("x")
@@ -92,6 +115,10 @@ class TestShapeVarConstruction(TestCase):
 
 class TestIntVarConstruction(TestCase):
     """Construction of IntVar."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
 
     def test_basic(self):
         s = IntVar("offset")
@@ -111,12 +138,16 @@ class TestIntVarConstruction(TestCase):
 
     def test_anonymous_name(self):
         s = IntVar()
-        self.assertTrue(s.name.startswith("_intvar_"))
+        self.assertEqual(s.name, "anon")
 
-    def test_anonymous_specs_have_distinct_names(self):
+    def test_anonymous_repr_uses_id(self):
+        s = IntVar()
+        self.assertEqual(repr(s), "IntVar(anon#0)")
+
+    def test_anonymous_specs_have_distinct_reprs(self):
         a = IntVar()
         b = IntVar()
-        self.assertNotEqual(a.name, b.name)
+        self.assertNotEqual(repr(a), repr(b))
 
     def test_allows_negative_range(self):
         s = IntVar("offset", min=-50, max=-10)
@@ -126,16 +157,21 @@ class TestIntVarConstruction(TestCase):
     def test_repr(self):
         s = IntVar("offset", min=-100, max=100, optimization_hint=0)
         self.assertEqual(
-            repr(s), "IntVar(offset, min=-100, max=100, optimization_hint=0)"
+            repr(s),
+            "IntVar(offset#0, min=-100, max=100, optimization_hint=0)",
         )
 
     def test_repr_minimal(self):
         s = IntVar("x")
-        self.assertEqual(repr(s), "IntVar(x)")
+        self.assertEqual(repr(s), "IntVar(x#0)")
 
 
 class TestTensorSpecConstruction(TestCase):
     """Construction and list-like interface."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
 
     def test_list_construction(self):
         ts = TensorSpec([ShapeVar("batch"), None, 10])
@@ -167,12 +203,13 @@ class TestTensorSpecConstruction(TestCase):
             ts[5]
 
     def test_repr(self):
-        ts = TensorSpec([ShapeVar("batch"), None, 10])
+        sv = ShapeVar("batch")
+        ts = TensorSpec([sv, None, 10])
         self.assertEqual(
             repr(ts),
             """\
 Tensor:
-  0: ShapeVar(batch, min=0)
+  0: ShapeVar(batch#0, min=0)
   1: None
   2: 10""",
         )
@@ -180,6 +217,10 @@ Tensor:
 
 class TestParamsSpecConstruction(TestCase):
     """Construction of ParamsSpec and ShapesSpec."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
 
     def test_basic_params_spec(self):
         ps = ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
@@ -190,7 +231,8 @@ class TestParamsSpecConstruction(TestCase):
         self.assertIsNotNone(ss.params)
 
     def test_shapes_spec_repr(self):
-        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
+        sv = ShapeVar("batch")
+        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([sv, None])}))
         self.assertEqual(
             repr(ss),
             """\
@@ -198,7 +240,7 @@ shapes_spec:
   params:
     x:
       Tensor:
-        0: ShapeVar(batch, min=0)
+        0: ShapeVar(batch#0, min=0)
         1: None""",
         )
 
@@ -429,7 +471,9 @@ class TestShapeVarCompile(TestCase):
             backend="eager",
             fullgraph=True,
             shapes_spec=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([ShapeVar(min=10, max=100), None])})
+                params=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch", min=10, max=100), None])}
+                )
             ),
         )
         # min=10 > 5 → branch resolves statically, no DDE.
