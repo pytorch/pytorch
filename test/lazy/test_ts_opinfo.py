@@ -201,7 +201,7 @@ class TestLazyOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     def test_dispatched_to_lazy(self, device, dtype, op):
-        def get_name(op):  # noqa: F841
+        def get_name(op):
             l = [op.name]
             if op.variant_test_name != "":
                 l.append(op.variant_test_name)
@@ -239,7 +239,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )  # noqa: B950
+    )
     def test_correctness(self, device, dtype, op):
         test_device = get_test_device()
 
@@ -284,7 +284,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )  # noqa: B950
+    )
     def test_correctness_with_reusing_ir(self, device, dtype, op):
         torch._lazy.config.set_reuse_ir(True)
         test_device = get_test_device()

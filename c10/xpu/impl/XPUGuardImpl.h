@@ -50,7 +50,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
         (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
         (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
-        (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool);
+        (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool) |
+        (1ULL << kIndex_Float8_e5m2) | (1ULL << kIndex_Float8_e4m3fn) |
+        (1ULL << kIndex_Float8_e5m2fnuz) | (1ULL << kIndex_Float8_e4m3fnuz) |
+        (1ULL << kIndex_Float8_e8m0fnu) | (1ULL << kIndex_UInt16) |
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt64);
     // BFloat16 may be emulated. We always assume BFloat16 is available;
     // users can call is_bf16_supported() to check for native hardware support.
     cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
@@ -212,6 +216,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void synchronizeStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
     xpu_stream.synchronize();
+  }
+
+  bool isStreamCapturing(const Stream& stream) const override {
+    const XPUStream xpu_stream{stream};
+    return xpu_stream.is_capturing();
   }
 
   void synchronizeEvent(void* event) const override {

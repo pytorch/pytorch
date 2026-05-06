@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import re
+import warnings
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 
@@ -184,7 +185,8 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
     The router parses a configuration string with rules in the format:
         "filter1:backend1;filter2:backend2;..."
 
-    Rules are evaluated in order, and the first matching rule wins.
+    If a graph ID matches multiple rules with different backends, a ValueError
+    is raised.
 
     Examples:
         "0-5:eager;>5:inductor"     - IDs 0-5 use eager, rest use inductor
@@ -196,6 +198,7 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
     """
 
     def __init__(self, config_str: str) -> None:
+        self._backend_names: dict[int, str] = {}
         super().__init__(config_str, "backend")
 
     def _parse_value_str(self, value_str: str) -> Any | None:
@@ -208,7 +211,20 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
         # Register the backend so its reset() is called during torch._dynamo.reset()
         assert backend is not None, "Invalid override backend: " + value_str
         cached_backends.setdefault(id(backend), backend)
+        self._backend_names[id(backend)] = value_str
         return backend
+
+    def _match_rules(self, graph_id: int) -> Any | None:
+        """Match rules with conflict detection for overlapping filters."""
+        matches = {id(backend): backend for f, backend in self._rules if graph_id in f}
+        if len(matches) > 1:
+            names = [self._backend_names[bid] for bid in matches]
+            raise ValueError(
+                f"Conflicting backend override for graph {graph_id}: matched {names}"
+            )
+        if matches:
+            return next(iter(matches.values()))
+        return None
 
     def __repr__(self) -> str:
         if not self._rules:
@@ -294,7 +310,7 @@ def _get_override_for_compile_id(
     compile_id: CompileId | None,
     config_str: str,
     create_router: Callable[[str], _GraphRouterBase[T]],
-    log_msg: str,
+    label: str,
 ) -> T | None:
     """
     Get the override value for a given CompileId.
@@ -311,7 +327,7 @@ def _get_override_for_compile_id(
     router = create_router(config_str)
     value = router.get_value_for_graph(graph_id)
     if value is not None:
-        log.info(log_msg, compile_id, graph_id, value)
+        log.info("Overriding %s: %s", label, value)
     return value
 
 
@@ -322,9 +338,84 @@ def _create_backend_router(config_str: str) -> GraphBackendRouter:
 
 
 @functools.lru_cache
-def _create_config_router(config_str: str) -> GraphConfigRouter:
-    """Create and cache GraphConfigRouter instances based on config string."""
+def _validate_backend_names(config_str: str) -> str | None:
+    """Return an error message if any backend name is invalid, else None."""
+    if not config_str or not config_str.strip():
+        return None
+    from .backends.registry import lookup_backend
+
+    for rule_str in config_str.split(";"):
+        rule_str = rule_str.strip()
+        if not rule_str or ":" not in rule_str:
+            continue
+        backend_name = rule_str[rule_str.find(":") + 1 :].strip()
+        if not backend_name:
+            continue
+        try:
+            lookup_backend(backend_name)
+        except Exception:
+            return (
+                f"TORCH_COMPILE_OVERRIDE_BACKENDS: "
+                f"'{backend_name}' is not a valid backend, "
+                f"see `torch._dynamo.list_backends()` for available backends"
+            )
+    return None
+
+
+@functools.lru_cache
+def _validate_inductor_config_keys(config_str: str) -> str | None:
+    """Return an error message if any config key is invalid, else None."""
+    router = GraphConfigRouter(config_str)
+    from torch._inductor import config
+
+    for _, config_dict in router._rules:
+        for key in config_dict:
+            if not hasattr(config, key):
+                return (
+                    f"TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS: "
+                    f"'{key}' is not a valid torch._inductor.config option"
+                )
+    return None
+
+
+@functools.lru_cache
+def _validate_dynamo_config_keys(config_str: str) -> str | None:
+    """Return an error message if any config key is invalid, else None."""
+    router = GraphConfigRouter(config_str)
+    from torch._dynamo import config
+
+    for _, config_dict in router._rules:
+        for key in config_dict:
+            if not hasattr(config, key):
+                return (
+                    f"TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS: "
+                    f"'{key}' is not a valid torch._dynamo.config option"
+                )
+    return None
+
+
+@functools.lru_cache
+def _create_inductor_config_router(config_str: str) -> GraphConfigRouter:
+    """Create and cache GraphConfigRouter for inductor config overrides."""
     return GraphConfigRouter(config_str)
+
+
+@functools.lru_cache
+def _create_dynamo_config_router(config_str: str) -> GraphConfigRouter:
+    """Create and cache GraphConfigRouter for dynamo config overrides.
+
+    Warns that dynamo config overrides are keyed by frame ID and some configs
+    can affect graph breaks, which may shift frame IDs.
+    """
+    router = GraphConfigRouter(config_str)
+    if not router.is_empty():
+        warnings.warn(
+            "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS is set. Dynamo config overrides are "
+            "keyed by frame ID. Some dynamo configs can affect graph breaks, "
+            "which may alter the number of frames and shift frame IDs, causing "
+            "overrides to target the wrong graphs.",
+        )
+    return router
 
 
 def get_backend_override_for_compile_id(
@@ -340,7 +431,7 @@ def get_backend_override_for_compile_id(
         compile_id,
         config_str,
         _create_backend_router,
-        "Graph %s (frame_id=%d) overridden to use backend: %s",
+        "torch.compile backend",
     )
 
 
@@ -356,8 +447,25 @@ def get_inductor_config_override_for_compile_id(
     return _get_override_for_compile_id(
         compile_id,
         config_str,
-        _create_config_router,  # type: ignore[arg-type]
-        "Graph %s (frame_id=%d) overridden with inductor config: %s",
+        _create_inductor_config_router,  # type: ignore[arg-type]
+        "inductor config",
+    )
+
+
+def get_dynamo_config_override_for_compile_id(
+    compile_id: CompileId | None,
+    config_str: str,
+) -> dict[str, Any] | None:
+    """
+    Get the dynamo config override for a given CompileId.
+
+    Returns a dict of config patches to apply, or None if no override applies.
+    """
+    return _get_override_for_compile_id(
+        compile_id,
+        config_str,
+        _create_dynamo_config_router,  # type: ignore[arg-type]
+        "dynamo config",
     )
 
 

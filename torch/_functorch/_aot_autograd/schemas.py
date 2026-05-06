@@ -186,14 +186,18 @@ class MemoryFormatMeta:
     memory_format: torch.memory_format | None = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> MemoryFormatMeta | None:
+    def from_tensor(
+        t: torch.Tensor, force_use_memory_format: bool = False
+    ) -> MemoryFormatMeta | None:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
+        # 3. force_use_memory_format=True (e.g., local_map where shapes change)
         use_memory_format: bool = (
-            not torch._functorch.config.guess_tangent_strides_as_outputs
+            force_use_memory_format
+            or not torch._functorch.config.guess_tangent_strides_as_outputs
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
@@ -378,7 +382,7 @@ class SubclassCreationMeta:
         # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
         # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
         # is designed to safely ignore this dummy value.
-        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299
         self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
         self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
 
@@ -455,9 +459,6 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
     subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
-    # TODO: we should kill this
-    # (need to default it to not break internal)
-    is_train: bool = False
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -492,6 +493,11 @@ class ViewAndMutationMeta:
 
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
+
+    # Input indices that held AsyncCollectiveTensors at compile time.
+    # Used to emit direct trigger_wait() calls at runtime instead of
+    # scanning every arg on every graph invocation.
+    act_input_indices: list[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -1217,7 +1223,7 @@ class CompilerWrapper:
     us factor these into compositional stages so we can handle each transformation incrementally
     instead of having to do it all at once.
 
-    Since there is a calling convention change, there are two parts to the wrpaper:
+    Since there is a calling convention change, there are two parts to the wrapper:
 
     1. The prologue, which is about compile-time behavior: given this original function, what
        is the new function with modified calling convention that we should trace with AOTAutograd

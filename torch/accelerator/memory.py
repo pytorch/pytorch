@@ -8,6 +8,7 @@ from ._utils import _device_t, _get_device_index
 
 __all__ = [
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -29,6 +30,16 @@ def empty_cache() -> None:
     if not torch._C._accelerator_isAllocatorInitialized():
         return
     torch._C._accelerator_emptyCache()
+
+
+def empty_host_cache() -> None:
+    r"""Release all unoccupied cached host (pinned) memory currently held by the host caching
+    allocator so that it can be used by other applications.
+
+    .. note:: This function is a no-op if the memory allocator for the current
+        :ref:`accelerator <accelerators>` has not been initialized.
+    """
+    torch._C._accelerator_emptyHostCache()
 
 
 def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
@@ -235,3 +246,27 @@ def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
     device_index = _get_device_index(device_index, optional=True)
     # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getMemoryInfo(device_index)
+
+
+def _snapshot(device=None, augment_with_fx_traces: bool = False):
+    r"""Return a snapshot of the current :ref:`accelerator<accelerators>` memory allocator state.
+
+    Requires :func:`_record_memory_history` on the appropriate device module
+    (e.g., :func:`torch.cuda.memory._record_memory_history`) to have been called.
+
+    Args:
+        device: the device to snapshot. If not given, uses the current device.
+        augment_with_fx_traces (bool, optional): if True, augment stack traces
+            with FX graph information. Default: ``False``.
+
+    Returns:
+        dict: a dictionary containing memory allocator state information.
+    """
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type == "xpu":
+        return torch.xpu.memory._snapshot(
+            device, augment_with_fx_traces=augment_with_fx_traces
+        )
+    return torch.cuda.memory._snapshot(
+        device, augment_with_fx_traces=augment_with_fx_traces
+    )

@@ -188,7 +188,11 @@ class C10_API intrusive_ptr_target {
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);
-  static_assert(std::atomic<uint64_t>::is_always_lock_free);
+  // is_always_lock_free check lives in intrusive_ptr.cpp so it's only
+  // evaluated by the host compiler. CUDA-like device compilers parsing this
+  // header may target hardware without 64-bit atomics; see
+  // https://github.com/pytorch/pytorch/issues/171775 (introduced by
+  // https://github.com/pytorch/pytorch/pull/163394).
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;

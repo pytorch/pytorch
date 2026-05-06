@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -232,6 +233,11 @@ if TEST_WITH_ROCM:
 
 inductor_skips["xpu"] = {}
 
+# torch-xpu-ops: #2956
+inductor_skips["xpu"]["lu"] = {f32}
+inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+inductor_skips["xpu"]["masked.cumprod"] = {f16}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -295,27 +301,6 @@ inductor_expected_failures_single_sample["xpu"] = {
         i32,
         i64,
     },  # align with cuda.
-    ("linalg.pinv", "singular"): {f64},
-    # could not create a primitive
-    "addmv": {f64},
-    "fft.fft": {f16},
-    "fft.fft2": {f16},
-    "fft.fftn": {f16},
-    "fft.hfft": {f16},
-    "fft.hfft2": {f16},
-    "fft.hfftn": {f16},
-    "fft.rfft": {f16},
-    "fft.rfft2": {f16},
-    "fft.rfftn": {f16},
-    "fft.ifft": {f16},
-    "fft.ifft2": {f16},
-    "fft.ifftn": {f16},
-    "fft.ihfft": {f16},
-    "fft.ihfft2": {f16},
-    "fft.ihfftn": {f16},
-    "fft.irfft": {f16},
-    "fft.irfft2": {f16},
-    "fft.irfftn": {f16},
 }
 
 
@@ -714,6 +699,13 @@ if TEST_WITH_ROCM:
         {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
     )
 
+# Ops whose backward uses exact comparisons (e.g. eq) on values that were
+# cast to a lower-precision dtype.  Without emulate_precision_casts the
+# rounding that would happen at a buffer store is skipped when the cast is
+# inlined, causing the comparison to fail and producing NaN gradients.
+inductor_emulate_precision_casts = {
+    ("linalg.norm", f16),
+}
 
 # Test with one sample only for following ops
 inductor_one_sample = defaultdict(dict)
@@ -991,8 +983,33 @@ inductor_one_sample["xpu"] = {
 
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
+    "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "lu",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
     "ormqr",
+    "pca_lowrank",
     "rot90",
     "sum",
     "tensordot",
@@ -1222,6 +1239,7 @@ class TestInductorOpInfo(TestCase):
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
+    @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1259,16 +1277,19 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-        elif dtype in inductor_expected_failures_single_sample[device_type].get(
-            op_name, set()
+        elif (
+            device_type == "cpu"
+            and IS_LINUX
+            and dtype
+            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
@@ -1392,7 +1413,12 @@ class TestInductorOpInfo(TestCase):
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
-                    with context_fn():
+                    precision_ctx = (
+                        torch._inductor.config.patch("emulate_precision_casts", True)
+                        if (op_name, dtype) in inductor_emulate_precision_casts
+                        else contextlib.nullcontext()
+                    )
+                    with context_fn(), precision_ctx:
                         # Base kwargs
                         adjusted_kwargs = {
                             "check_lowp": False,

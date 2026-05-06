@@ -20,6 +20,7 @@ from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -51,6 +52,15 @@ importlib.import_module("filelock")
 
 max_block: int = TRITON_MAX_BLOCK["X"]
 
+
+def _get_no_split_threshold() -> int:
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        if props.major is not None and props.major >= 10:
+            return 524288
+    return 8192
+
+
 # Config shortcuts
 tiled_reduction_config = {
     "triton.prefer_nd_tiling": True,
@@ -67,26 +77,31 @@ def xfail_if_use_tensor_descriptor(fn):
 
 
 TMA_XFAIL = test_torchinductor.TestFailure(GPU_TYPE, is_skip=False)
-TMA_TEST_XFAIL = dict.fromkeys(
-    (
-        "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
-        "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
-        "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-    ),
-    TMA_XFAIL,
-)
+_TMA_XFAIL_TESTS = [
+    "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+    "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+    "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
+    "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
+    "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
+    "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
+    "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
+    "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
+    "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
+]
+# On SM100+, reduction tests use single persistent kernels, so some TMA xfails no longer apply.
+if SM100OrLater:
+    _TMA_XFAIL_TESTS = [
+        t
+        for t in _TMA_XFAIL_TESTS
+        if "num_triton_kernels_2" not in t or "view_size4" in t
+    ]
+TMA_TEST_XFAIL = dict.fromkeys(_TMA_XFAIL_TESTS, TMA_XFAIL)
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -479,22 +494,22 @@ class CommonTemplate:
                 load_lines,
                 """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), boundary_check=[0, 1])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[:, None]""",  # noqa: B950
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[:, None]""",
             )
             self.assertExpectedInline(
                 store_lines,
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), tl.broadcast_to(tmp2, [YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), tl.broadcast_to(tmp2, [YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1])""",
             )
         else:
             self.assertExpectedInline(
                 load_lines,
                 """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
-    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[(7 + XBLOCK) // 8], order=[0], offsets=[xoffset // 8]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [(7 + XBLOCK) // 8, ((1) * ((1) <= ((7 + XBLOCK) // 8)) + ((7 + XBLOCK) // 8) * (((7 + XBLOCK) // 8) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
+    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[(7 + XBLOCK) // 8], order=[0], offsets=[xoffset // 8]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [(7 + XBLOCK) // 8, ((1) * ((1) <= ((7 + XBLOCK) // 8)) + ((7 + XBLOCK) // 8) * (((7 + XBLOCK) // 8) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",
             )
             self.assertExpectedInline(
                 store_lines,
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tl.broadcast_to(tmp2, [XBLOCK]).to(tl.float32), boundary_check=[0])""",  # noqa: B950
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tl.broadcast_to(tmp2, [XBLOCK]).to(tl.float32), boundary_check=[0])""",
             )
 
     @parametrize("prefer_nd_tiling", [False, True])
@@ -536,6 +551,14 @@ class CommonTemplate:
         if view_size == (128, 128) and torch.version.hip is not None:
             view_size = (256, 256)
 
+        # On SM100+, larger max_block means reductions that previously needed 2
+        # kernels now fit in a single persistent kernel with fewer block pointers.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            if num_block_pointers is not None:
+                num_block_pointers = max(num_block_pointers - 2, 0)
+
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
@@ -552,11 +575,6 @@ class CommonTemplate:
         device = torch.device(self.device)
 
         view = self._discontiguous_tensor(view_size, self.device)
-
-        if num_triton_kernels == 2 and config.triton.cooperative_reductions:
-            # fewer kernels with cooperative reductions
-            num_triton_kernels = 1
-            num_block_pointers -= 2
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -817,6 +835,12 @@ class CommonTemplate:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            num_block_pointers = 1
+
         # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
         # may result in off-by-one differences in the number of block pointers.
         # Allow a small tolerance here to avoid backend-specific flakiness.
@@ -863,7 +887,8 @@ class CommonTemplate:
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
-                ((128, 128), 7, 2, False), decorators=[xfail_if_use_tensor_descriptor]
+                ((128, 128), 7, 2, False),
+                decorators=[] if SM100OrLater else [xfail_if_use_tensor_descriptor],
             ),  # Looped Welford reduction
         ],
     )
@@ -884,6 +909,16 @@ class CommonTemplate:
         """
         if torch.version.hip is not None and expected_num_triton_kernels == 2:
             size = (256, 256)
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(size)
+        if (
+            expected_num_triton_kernels == 2
+            and reduction_numel <= _get_no_split_threshold()
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 1
+
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
@@ -914,11 +949,26 @@ class CommonTemplate:
         view = self._discontiguous_tensor((259, 311), self.device)
 
         # We expect many block pointers for this one.
+        cooperative_reductions = (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        )
+        expected_num_block_pointers = 0 if cooperative_reductions else 6
+        expected_num_triton_kernels = 1 if cooperative_reductions else 2
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        if (
+            expected_num_triton_kernels == 2
+            and view.numel() <= _get_no_split_threshold()
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 0
+
         result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
-            expected_num_block_pointers=6,
-            expected_num_triton_kernels=2,
+            expected_num_block_pointers=expected_num_block_pointers,
+            expected_num_triton_kernels=expected_num_triton_kernels,
             config_patches={"triton.prefer_nd_tiling": True},
         )
 
@@ -1292,12 +1342,12 @@ class CommonTemplate:
             load_lines,
             """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",
         )
 
         self.assertExpectedInline(
             store_lines,
-            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",
         )
 
         # Check the indices. These are used for non-block pointers.
@@ -1306,7 +1356,7 @@ class CommonTemplate:
             """\
     zindex = zoffset + tl.arange(0, ZBLOCK)[:, None, None]
     yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
-    xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
+    xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",
         )
 
     def test_expand_clone_broadcast(self):
@@ -1372,7 +1422,7 @@ class CommonTemplate:
     #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
-    # This is now fixed by ensuring that that wild symbols only match integers
+    # This is now fixed by ensuring that wild symbols only match integers
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
