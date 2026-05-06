@@ -45,11 +45,15 @@ CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     "ATEN_STATIC_CUDA": "0",
     "USE_CUDA_STATIC_LINK": "0",
     "USE_CUPTI_SO": "1",
-    "USE_CUSPARSELT": "1",
-    "USE_CUFILE": "1",
     "USE_SYSTEM_NCCL": "1",
     "NCCL_INCLUDE_DIR": "/usr/local/cuda/include/",
     "NCCL_LIB_DIR": "/usr/local/cuda/lib64/",
+}
+
+# Defaulted-to-1 like the original `${VAR:-1}` -- callers can override.
+CUDA_BUILD_ENV_DEFAULTS: dict[str, str] = {
+    "USE_CUSPARSELT": "1",
+    "USE_CUFILE": "1",
 }
 
 
@@ -82,6 +86,9 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
     if cuda_version.startswith("13."):
         nvcc_flags += " -compress-mode=size"
     env = {
+        # Defaulted vars first so STATIC values still take precedence,
+        # but caller-provided values for the defaults still win below.
+        **{k: v for k, v in CUDA_BUILD_ENV_DEFAULTS.items() if not os.environ.get(k)},
         **CUDA_BUILD_ENV_STATIC,
         "TORCH_NVCC_FLAGS": nvcc_flags,
         "TORCH_CUDA_ARCH_LIST": torch_cuda_arch_list(cuda_version, arch),
