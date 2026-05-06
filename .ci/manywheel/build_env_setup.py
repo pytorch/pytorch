@@ -32,6 +32,10 @@ from pathlib import Path
 # unresolved __cudaRegisterLinkedBinary_* RDC stubs when test executables
 # link against libtorch_cuda.so).
 CUDA_BUILD_ENV_STATIC: dict[str, str] = {
+    # USE_CUDA=1 is also what repair_wheel.py reads to decide CUDA RPATHs
+    # and to bundle NVPL on aarch64 -- keep it explicit even though CMake
+    # would auto-detect.
+    "USE_CUDA": "1",
     "NCCL_ROOT_DIR": "/usr/local/cuda",
     "CUDNN_ROOT_DIR": "/usr/local/cuda",
     "TH_BINARY_BUILD": "1",
