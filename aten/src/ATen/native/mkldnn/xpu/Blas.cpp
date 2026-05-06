@@ -576,13 +576,17 @@ Tensor& _int_mm_out_xpu(
       mat2.size(0));
 
   TORCH_CHECK(
-      self.dtype() == at::kChar,
-      "Expected self dtype to be of type int8 but got ",
-      self.dtype());
+      self.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      self.scalar_type());
   TORCH_CHECK(
-      mat2.dtype() == at::kChar,
-      "Expected mat2 dtype to be of type int8 but got ",
-      mat2.dtype());
+      mat2.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      mat2.scalar_type());
   TORCH_CHECK(
       result.dtype() == at::kInt,
       "Expected result dtype to be of type kInt but got ",
