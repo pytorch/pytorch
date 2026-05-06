@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
@@ -911,7 +912,9 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         finally:
             handle.destroy()
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not TEST_CUDA, "triton")
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_export_invoke_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             recorded_list = []

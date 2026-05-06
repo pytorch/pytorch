@@ -1430,6 +1430,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1437,7 +1438,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.AvgPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveAvgPool3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
@@ -1494,7 +1494,7 @@ def use_deterministic_algorithms(
         will use some heuristics to pick the most promising configs rather
         than do autotuning.
       - Skip autotuning for reduction in coordinate descent tuning.
-      - Don't benchmarking for the computation/communication reordering pass
+      - Don't benchmark for the computation/communication reordering pass
       - Disable the feature that dynamically scale down RBLOCK triton config for higher
         occupancy.
 
@@ -2602,12 +2602,13 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: builtins.bool | None = None,
-    backend: str | _Callable = "inductor",
+    backend: str | _Callable | None = None,
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
+    isolate_recompiles: builtins.bool = False,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2700,6 +2701,25 @@ def compile(
        name (str or None): Optional identifier for the compiled region. When supported by downstream
         tooling, this is surfaced on wrapped compiled-region higher-order operators and other debug metadata.
        disable (bool): Turn torch.compile() into a no-op for testing
+       recompile_limit (int or None): Maximum number of recompilations allowed for this
+        ``torch.compile()`` call before falling back to eager. If None (default), uses
+        the global ``torch._dynamo.config.recompile_limit`` (default 8). With
+        ``fullgraph=True``, exceeding the limit raises ``FailOnRecompileLimitHit``.
+       isolate_recompiles (bool): If True, this ``torch.compile()`` call tracks
+        recompilations independently. By default, all ``torch.compile()`` calls on the
+        same function share a single set of compiled entries, so one call's
+        recompilations count against every other call's limit. With
+        ``isolate_recompiles=True``, each call gets its own isolated set of entries.
+        Lookups for an isolated compile call will still fall back to entries from
+        non-isolated compile calls (BC-friendly reuse), but new compilations are
+        stored separately. ``recompile_limit`` is checked per-region;
+        ``accumulated_recompile_limit`` is a global cap across all regions.
+        Default-strategy behavior is asymmetric: SKIP decisions (from
+        ``skip_code``, ``@torch._dynamo.skip``, FX-generated code, etc.) are
+        inherited by isolated regions — those remain skipped. RUN_ONLY persisted
+        by a non-isolated region hitting its recompile limit does NOT bleed
+        into isolated regions — each region manages its own RUN_ONLY state.
+        Default False.
 
     Example::
 
@@ -2723,6 +2743,11 @@ def compile(
             "Please use Python 3.13.3+."
         )
 
+    if backend is None:
+        from torch._dynamo.backends.registry import get_default_backend
+
+        backend = get_default_backend()
+
     # Decorator mode
     if model is None:
 
@@ -2738,6 +2763,8 @@ def compile(
                 options=options,
                 name=name,
                 disable=disable,
+                recompile_limit=recompile_limit,
+                isolate_recompiles=isolate_recompiles,
             )
 
         return fn
@@ -2795,6 +2822,7 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
+        isolate_recompiles=isolate_recompiles,
     )(model)  # type: ignore[return-value]
 
 
