@@ -85,6 +85,15 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
+
   // Bypass OneDNN optimization path for float64 due to lack of full double
   // precision support.
   if (mat1.scalar_type() == at::kDouble) {
