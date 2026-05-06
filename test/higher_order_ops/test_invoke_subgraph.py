@@ -2,6 +2,7 @@
 # flake8: noqa: E731
 
 import contextlib
+import copy
 import unittest
 import unittest.mock as mock
 
@@ -3261,6 +3262,65 @@ class TestInvokeSubgraphReuse(TestCase):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
         self.assertEqual(count(), 1)
+
+    def test_transformer_encoder_layers_auto_reuse(self):
+        torch.manual_seed(0)
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model=4,
+            nhead=2,
+            dim_feedforward=8,
+            dropout=0.0,
+            batch_first=True,
+        )
+        encoder = torch.nn.TransformerEncoder(layer, num_layers=3)
+        encoder.eval()
+        with torch.no_grad():
+            encoder.layers[1].linear1.weight.add_(0.25)
+            encoder.layers[2].linear2.bias.add_(0.5)
+
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        ref = encoder(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(encoder, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(count(), 1)
+
+    def test_transformer_encoder_layers_auto_reuse_backward(self):
+        torch.manual_seed(0)
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model=4,
+            nhead=2,
+            dim_feedforward=8,
+            dropout=0.0,
+            batch_first=True,
+        )
+        encoder = torch.nn.TransformerEncoder(layer, num_layers=3)
+        with torch.no_grad():
+            encoder.layers[1].linear1.weight.add_(0.25)
+            encoder.layers[2].linear2.bias.add_(0.5)
+
+        compiled_encoder = copy.deepcopy(encoder)
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = encoder(x)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(compiled_encoder, backend="aot_eager", fullgraph=True)(
+                x_clone
+            )
+
+        self.assertEqual(count(), 1)
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        for ref_param, res_param in zip(
+            encoder.parameters(), compiled_encoder.parameters()
+        ):
+            self.assertEqual(ref_param.grad, res_param.grad)
 
     def test_subgraph_reuse_different_shapes(self):
         @nested_compile_region

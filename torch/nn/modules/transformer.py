@@ -55,6 +55,55 @@ def _get_seq_len(src: Tensor, batch_first: bool) -> int | None:
             return src_size[seq_len_pos]
 
 
+def _transformer_encoder_layer_forward(
+    mod: Module,
+    src: Tensor,
+    src_mask: Tensor | None,
+    is_causal: bool | None,
+    src_key_padding_mask: Tensor | None,
+) -> Tensor:
+    return mod(
+        src,
+        src_mask=src_mask,
+        is_causal=is_causal,
+        src_key_padding_mask=src_key_padding_mask,
+    )
+
+
+def _call_transformer_encoder_layer(
+    mod: Module,
+    src: Tensor,
+    src_mask: Tensor | None,
+    is_causal: bool | None,
+    src_key_padding_mask: Tensor | None,
+) -> Tensor:
+    if (
+        not torch.jit.is_scripting()
+        and torch.compiler.is_dynamo_compiling()
+        and not torch.compiler.is_exporting()
+    ):
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+        # Keep mod as an explicit argument so the reuse cache can remap
+        # captured parameter sources across self.layers[0], self.layers[1], ...
+        return invoke_subgraph_placeholder(
+            _transformer_encoder_layer_forward,
+            mod,
+            src,
+            src_mask,
+            is_causal,
+            src_key_padding_mask,
+        )
+
+    return _transformer_encoder_layer_forward(
+        mod,
+        src,
+        src_mask,
+        is_causal,
+        src_key_padding_mask,
+    )
+
+
 class Transformer(Module):
     r"""A basic transformer layer.
 
@@ -535,12 +584,21 @@ class TransformerEncoder(Module):
         is_causal = _detect_is_causal_mask(mask, is_causal, seq_len)
 
         for mod in self.layers:
-            output = mod(
-                output,
-                src_mask=mask,
-                is_causal=is_causal,
-                src_key_padding_mask=src_key_padding_mask_for_layers,
-            )
+            if torch.jit.is_scripting():
+                output = mod(
+                    output,
+                    src_mask=mask,
+                    is_causal=is_causal,
+                    src_key_padding_mask=src_key_padding_mask_for_layers,
+                )
+            else:
+                output = _call_transformer_encoder_layer(
+                    mod,
+                    output,
+                    mask,
+                    is_causal,
+                    src_key_padding_mask_for_layers,
+                )
 
         if convert_to_nested:
             output = output.to_padded_tensor(0.0, src.size())
