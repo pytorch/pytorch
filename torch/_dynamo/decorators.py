@@ -1799,3 +1799,52 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+def allow_c_hash(tp: type) -> type:
+    """Register a C extension type's ``__hash__`` as safe to call at trace time.
+
+    By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
+    on a C extension type with a custom ``tp_hash`` slot (e.g., types defined
+    in C extension modules).  This function tells Dynamo that the type's
+    ``__hash__`` is safe to evaluate during tracing, avoiding the graph break.
+
+    The hash function must satisfy these requirements:
+
+    - **Pure**: depends only on the object's value, with no observable side
+      effects (no I/O, no mutation of global state).
+    - **Deterministic**: returns the same result for the same object across
+      calls within a process.
+    - **Immutable objects**: the object's hash-relevant state must not change
+      after construction — if the object is mutated in a way that changes its
+      hash, Dynamo's cached hash value will be stale.
+
+    Builtin types (``int``, ``str``, etc.) and Python-level ``__hash__``
+    methods are already handled and do not need registration.  This API is
+    only needed for C extension types whose ``tp_hash`` slot Dynamo cannot
+    trace into.
+
+    Args:
+        tp: The C extension type whose ``__hash__`` should be allowed.
+
+    Returns:
+        The type, unchanged (so it can be used as a decorator).
+
+    Example::
+
+        import torch._dynamo
+        from my_extension import MyType
+
+        torch._dynamo.allow_c_hash(MyType)
+    """
+    from .variables.user_defined import _safe_c_tp_hash_funcs
+
+    if not isinstance(tp, type):
+        raise TypeError(f"allow_c_hash expects a type, got {type(tp).__name__}")
+    hash_fn = tp.__hash__
+    if hash_fn is object.__hash__:
+        raise ValueError(
+            f"{tp.__name__} uses the default object.__hash__ and does not need registration"
+        )
+    _safe_c_tp_hash_funcs().add(hash_fn)
+    return tp

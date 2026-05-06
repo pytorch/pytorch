@@ -984,12 +984,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.fn)
-
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
 
@@ -1616,6 +1610,22 @@ class UserMethodVariable(UserFunctionVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
+
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # CPython method_hash: hash(self) ^ hash(func)
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/classobject.c#L304
+        if self.source:
+            real_val = tx.output.resolve_source_value(self.source)
+            return hash(real_val), False
+        # Sourceless: compute method_hash from components.
+        from .object_protocol import generic_hash_impl
+
+        self_hash, self_fake = generic_hash_impl(tx, self.obj)
+        func_hash = hash(self.fn)
+        h = self_hash ^ func_hash
+        if h == -1:
+            h = -2
+        return h, self_fake
 
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
@@ -2413,12 +2423,6 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
     def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, VariableTracker)
@@ -2909,19 +2913,6 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original_cache_hash is not None:
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
-
-    def is_python_hashable(self) -> bool:
-        return (
-            self.func.is_python_hashable()
-            and all(arg.is_python_hashable() for arg in self.args)
-            and all(value.is_python_hashable() for value in self.keywords.values())
-        )
-
-    def get_python_hash(self) -> int:
-        func_hash = self.func.get_python_hash()
-        args_hash = (arg.get_python_hash() for arg in self.args)
-        values_hash = (value.get_python_hash() for value in self.keywords.values())
-        return hash((func_hash, *args_hash, *values_hash))
 
     def is_python_equal(self, other: object) -> bool:
         return (

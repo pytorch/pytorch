@@ -2314,12 +2314,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def as_python_constant(self) -> HigherOrderOperator:
         return self.value
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
     def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, VariableTracker)

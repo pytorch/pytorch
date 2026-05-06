@@ -2985,30 +2985,30 @@ def _codegen_backward_prologue(
     )
     num_flat_bw_args_with_grads = len(all_surviving)
 
-    lines: list[str] = [
+    L: list[str] = [
         "def _backward_prologue("
         "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
     ]
-    globals_dict: dict[str, object] = {
+    G: dict[str, object] = {
         "_raise_if_functorch_active_": _raise_if_functorch_active,
         "torch": torch,
     }
 
-    lines.append("    _raise_if_functorch_active_()")
+    L.append("    _raise_if_functorch_active_()")
 
     if deterministic is not None and not deterministic:
-        lines.append("    _gd = torch.are_deterministic_algorithms_enabled()")
-        lines.append("    torch._check(not _gd, lambda: (")
-        lines.append("        'This compiled backward function is being run with '")
-        lines.append("        'torch.use_deterministic_algorithms(True), '")
-        lines.append(
+        L.append("    _gd = torch.are_deterministic_algorithms_enabled()")
+        L.append("    torch._check(not _gd, lambda: (")
+        L.append("        'This compiled backward function is being run with '")
+        L.append("        'torch.use_deterministic_algorithms(True), '")
+        L.append(
             "        'but it was previously generated during the forward function"
             " while '"
         )
-        lines.append("        'torch.use_deterministic_algorithms(False) was set.'))")
+        L.append("        'torch.use_deterministic_algorithms(False) was set.'))")
 
-    lines.append(f"    if len(flat_args) != {expected_grad_outs}:")
-    lines.append(
+    L.append(f"    if len(flat_args) != {expected_grad_outs}:")
+    L.append(
         f"        raise AssertionError("
         f"f'expected {expected_grad_outs} grad_outs, "
         f"got {{len(flat_args)}}')"
@@ -3016,14 +3016,14 @@ def _codegen_backward_prologue(
 
     if all_surviving:
         items = ", ".join(f"flat_args[{i}]" for i in all_surviving)
-        lines.append(f"    _bw_grads = [{items}]")
+        L.append(f"    _bw_grads = [{items}]")
     else:
-        lines.append("    _bw_grads = []")
+        L.append("    _bw_grads = []")
 
-    lines.append("    if isinstance(flat_args, list):")
-    lines.append("        flat_args.clear()")
+    L.append("    if isinstance(flat_args, list):")
+    L.append("        flat_args.clear()")
 
-    lines.append("    _n_saved = len(ctx_saved_tensors)")
+    L.append("    _n_saved = len(ctx_saved_tensors)")
 
     parts = [
         "*ctx_symints",
@@ -3034,66 +3034,62 @@ def _codegen_backward_prologue(
     if num_backward_tokens > 0:
         parts.append(f"*([None] * {num_backward_tokens})")
     if is_rng_op_functionalized:
-        globals_dict["_get_rng_state_"] = CUDARngStateHelper.get_torch_state_as_tuple
+        G["_get_rng_state_"] = CUDARngStateHelper.get_torch_state_as_tuple
         parts.append("*_get_rng_state_()")
-    lines.append(f"    all_args = [{', '.join(parts)}]")
-    lines.append("    del ctx_saved_tensors")
+    L.append(f"    all_args = [{', '.join(parts)}]")
+    L.append("    del ctx_saved_tensors")
 
-    lines.append("    _ts = len(ctx_symints) + _n_saved + len(ctx_opaque_objects)")
-    lines.append(f"    _te = _ts + {num_flat_bw_args_with_grads}")
+    L.append("    _ts = len(ctx_symints) + _n_saved + len(ctx_opaque_objects)")
+    L.append(f"    _te = _ts + {num_flat_bw_args_with_grads}")
 
-    globals_dict["_process_tangent_"] = AOTDispatchAutograd.process_runtime_tangent
-    globals_dict["_tangent_metas_"] = fw_metadata.subclass_tangent_meta
-    globals_dict["_tangent_descs_"] = fw_metadata.traced_tangents_descs
-    globals_dict["_compile_id_"] = fw_metadata.compile_id_str
-    globals_dict["_stack_traces_"] = fw_metadata.tangent_source_stack_traces or ()
+    G["_process_tangent_"] = AOTDispatchAutograd.process_runtime_tangent
+    G["_tangent_metas_"] = fw_metadata.subclass_tangent_meta
+    G["_tangent_descs_"] = fw_metadata.traced_tangents_descs
+    G["_compile_id_"] = fw_metadata.compile_id_str
+    G["_stack_traces_"] = fw_metadata.tangent_source_stack_traces or ()
 
     if has_subclass:
-        globals_dict["_chain_"] = itertools.chain.from_iterable
+        G["_chain_"] = itertools.chain.from_iterable
 
-        lines.append("    _tangents = all_args[_ts:_te]")
-        lines.append(
-            f"    if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:"
-        )
-        lines.append(
+        L.append("    _tangents = all_args[_ts:_te]")
+        L.append(f"    if len(_tangents) != {len(fw_metadata.subclass_tangent_meta)}:")
+        L.append(
             "        raise RuntimeError("
             "'The grad inputs should be same number as forward output tangents')"
         )
-        lines.append("    _fpt = list(_chain_(")
-        lines.append("        _process_tangent_(t, m, idx, desc, _compile_id_,")
-        lines.append("            _stack_traces_[idx] if _stack_traces_ else None)[1]")
-        lines.append("        for idx, (t, m, desc) in enumerate(")
-        lines.append("            zip(_tangents, _tangent_metas_, _tangent_descs_))))")
+        L.append("    _fpt = list(_chain_(")
+        L.append("        _process_tangent_(t, m, idx, desc, _compile_id_,")
+        L.append("            _stack_traces_[idx] if _stack_traces_ else None)[1]")
+        L.append("        for idx, (t, m, desc) in enumerate(")
+        L.append("            zip(_tangents, _tangent_metas_, _tangent_descs_))))")
 
         if codegen_unwrap_fn is not None:
-            globals_dict["_unwrap_"] = codegen_unwrap_fn
+            G["_unwrap_"] = codegen_unwrap_fn
         else:
-            globals_dict["_unwrap_"] = _unwrap_no_symints
-        lines.append(
+            G["_unwrap_"] = _unwrap_no_symints
+        L.append(
             "    all_args = _unwrap_(all_args[:_ts]) + _fpt + _unwrap_(all_args[_te:])"
         )
     elif num_flat_bw_args_with_grads > 0:
-        lines.append(f"    for j in range({num_flat_bw_args_with_grads}):")
-        lines.append("        _i = _ts + j")
-        lines.append("        all_args[_i] = _process_tangent_(all_args[_i],")
-        lines.append(
-            "            _tangent_metas_[j], j, _tangent_descs_[j], _compile_id_,"
-        )
-        lines.append("            _stack_traces_[j] if _stack_traces_ else None)[0]")
+        L.append(f"    for j in range({num_flat_bw_args_with_grads}):")
+        L.append("        _i = _ts + j")
+        L.append("        all_args[_i] = _process_tangent_(all_args[_i],")
+        L.append("            _tangent_metas_[j], j, _tangent_descs_[j], _compile_id_,")
+        L.append("            _stack_traces_[j] if _stack_traces_ else None)[0]")
 
     if has_mutations_in_bw:
-        lines.append("    if torch.is_grad_enabled():")
-        lines.append("        raise RuntimeError(")
-        lines.append(
+        L.append("    if torch.is_grad_enabled():")
+        L.append("        raise RuntimeError(")
+        L.append(
             "            'aot_autograd does not support input mutations with "
             "requires_grad in backward for create_graph=True')"
         )
 
-    lines.append("    return all_args")
+    L.append("    return all_args")
 
-    source = "\n".join(lines)
+    source = "\n".join(L)
     return _compile_and_exec_source(
-        source, globals_dict, "_backward_prologue", "backward_prologue"
+        source, G, "_backward_prologue", "backward_prologue"
     )
 
 
