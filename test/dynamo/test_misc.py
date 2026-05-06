@@ -10221,6 +10221,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_deterministic_algorithms_warn_only_mutated(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        value = None
+        warn_only = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            nonlocal warn_only
+            value = torch.are_deterministic_algorithms_enabled()
+            warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            check_state()
+            res = x.scatter_add(
+                0,
+                torch.tensor([0, 1, 0]),
+                torch.tensor([1.0, 2.0, 3.0]),
+            )
+            torch.use_deterministic_algorithms(False, warn_only=True)
+            return res
+
+        def run_fn():
+            torch.use_deterministic_algorithms(False, warn_only=False)
+            result = fn(torch.zeros(2))
+            self.assertEqual(result, torch.tensor([4.0, 2.0]))
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if warn_only is not True:
+                raise AssertionError(f"Expected warn_only is True, got {warn_only}")
+            if torch.are_deterministic_algorithms_enabled() is not False:
+                raise AssertionError(
+                    "Expected deterministic algorithms disabled after fn()"
+                )
+            if torch.is_deterministic_algorithms_warn_only_enabled() is not True:
+                raise AssertionError("Expected warn_only enabled after fn()")
+
+        try:
+            run_fn()
+            value, warn_only = None, None
+            run_fn()
+            if cnt.frame_count != 1:
+                raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
+    def test_deterministic_algorithms_warn_only_compile_time_value(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x, warn_only):
+            torch.use_deterministic_algorithms(True, warn_only=warn_only)
+            return x + 1
+
+        try:
+            for expected_warn_only in (True, False):
+                torch.use_deterministic_algorithms(False, warn_only=False)
+                result = fn(torch.ones(2), expected_warn_only)
+                self.assertEqual(result, torch.full((2,), 2.0))
+                self.assertTrue(torch.are_deterministic_algorithms_enabled())
+                self.assertEqual(
+                    torch.is_deterministic_algorithms_warn_only_enabled(),
+                    expected_warn_only,
+                )
+
+            self.assertEqual(len(backend.graphs), 2)
+            warn_only_values = []
+            for gm in backend.graphs:
+                set_deterministic_nodes = [
+                    node
+                    for node in gm.graph.nodes
+                    if node.op == "call_function"
+                    and node.target is torch._C._set_deterministic_algorithms
+                ]
+                self.assertEqual(len(set_deterministic_nodes), 1)
+                self.assertEqual(set_deterministic_nodes[0].args, (True,))
+                warn_only_values.append(set_deterministic_nodes[0].kwargs["warn_only"])
+            self.assertEqual(warn_only_values, [True, False])
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self): ...
