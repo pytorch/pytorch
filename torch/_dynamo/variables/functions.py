@@ -4176,3 +4176,247 @@ class ClassMethodVariable(VariableTracker):
             source_fn=func_source,
             source=bound_source,
         )
+
+
+class MemberDescriptorVariable(VariableTracker):
+    """C struct field descriptor (member_descriptor on a type).
+
+    CPython exposes C struct fields defined via PyMemberDef as
+    member_descriptor objects (PyMemberDescr_Type).  These are data
+    descriptors used by __slots__ and C extension types to provide
+    direct access to struct members.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L793
+
+    member_get reads the field via PyMember_GetOne.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.MemberDescriptorType,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, types.MemberDescriptorType)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        cls_name = self.descriptor.__objclass__.__name__
+        return f"MemberDescriptorVariable({cls_name}.{self.descriptor.__name__})"
+
+    def python_type(self) -> type:
+        return types.MemberDescriptorType
+
+    def as_python_constant(self) -> types.MemberDescriptorType:
+        return self.descriptor
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        # descr_members: __objclass__ and __name__ are PyMemberDef on all
+        # descriptor types.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
+        if name == "__objclass__":
+            return VariableTracker.build(tx, self.descriptor.__objclass__)
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().var_getattr(tx, name)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors member_get which calls PyMember_GetOne to read the
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        try:
+            resolved = self.descriptor.__get__(obj.value)  # type: ignore[attr-defined]
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(obj.value).__name__}' object has no attribute '{self.descriptor.__name__}'"  # type: ignore[attr-defined]
+                ],
+            )
+        result_source = obj.source and AttrSource(obj.source, self.descriptor.__name__)
+        return VariableTracker.build(tx, resolved, result_source)
+
+
+class GetSetDescriptorVariable(VariableTracker):
+    """C getter/setter descriptor (getset_descriptor on a type).
+
+    CPython exposes C getter/setter pairs defined via PyGetSetDef as
+    getset_descriptor objects (PyGetSetDescr_Type).  These are data
+    descriptors used for computed attributes backed by C functions
+    (e.g. object.__class__, type.__dict__).
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L830
+
+    getset_get calls the C getter function.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
+    """
+
+    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.desc = desc
+
+    def __repr__(self) -> str:
+        cls_name = self.desc.__objclass__.__name__
+        return f"GetSetDescriptorVariable({cls_name}.{self.desc.__name__})"
+
+    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
+        return self.desc
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__get__" and self.source:
+            source = AttrSource(self.source, "__get__")
+            return VariableTracker.build(tx, self.desc.__get__, source)
+        elif name in ("__objclass__", "__name__"):
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, getattr(self.desc, name), source)
+        else:
+            return super().var_getattr(tx, name)
+
+    def is_python_constant(self) -> bool:
+        return True
+
+    def as_python_constant(self) -> types.GetSetDescriptorType:
+        return self.desc
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors getset_get which calls the C getter function.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
+        attr_name = self.desc.__name__
+        # Try to eagerly call the C getter when we can obtain the
+        # concrete Python object (UDOV.value, or as_python_constant
+        # for classes/constants). Fall back to var_getattr for
+        # proxy-based VTs like TensorVariable.
+        obj_value = getattr(obj, "value", None)
+        if obj_value is None:
+            try:
+                obj_value = obj.as_python_constant()
+            except NotImplementedError:
+                return obj.var_getattr(tx, attr_name)
+        try:
+            resolved = self.desc.__get__(obj_value)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
+                ],
+            )
+        result_source = obj.source and AttrSource(obj.source, attr_name)
+        return VariableTracker.build(tx, resolved, result_source)
+
+
+class PropertyVariable(VariableTracker):
+    """Python property descriptor.
+
+    The property type is a data descriptor with tp_descr_get =
+    property_descr_get which calls fget(obj) to compute the value.
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L2046
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: property,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, property)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        fget_name = getattr(self.descriptor.fget, "__name__", "?")
+        return f"PropertyVariable({fget_name})"
+
+    def python_type(self) -> type:
+        return property
+
+    def as_python_constant(self) -> property:
+        return self.descriptor
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors property_descr_get which calls fget(obj).
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
+        fget_source = AttrSource(self.source, "fget") if self.source else None
+        fget_vt = VariableTracker.build(
+            tx, self.descriptor.fget, source=fget_source, realize=True
+        )
+        return fget_vt.call_function(tx, [obj], {})
+
+
+class TupleGetterVariable(VariableTracker):
+    """_tuplegetter descriptor used by namedtuple for field access.
+
+    _tuplegetter is a C data descriptor that stores an index and returns
+    self[index] on instance access. When accessed on the class (obj=None),
+    it returns the descriptor itself.
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2365
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: "_collections._tuplegetter",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        assert isinstance(descriptor, _collections._tuplegetter)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        _, (idx, doc) = self.descriptor.__reduce__()
+        return f"TupleGetterVariable(index={idx}, doc={doc!r})"
+
+    def python_type(self) -> type:
+        return _collections._tuplegetter
+
+    def as_python_constant(self) -> "_collections._tuplegetter":
+        return self.descriptor
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__doc__":
+            return VariableTracker.build(tx, self.descriptor.__doc__)
+        return super().var_getattr(tx, name)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+        if obj is None:
+            return self
+        _, (idx, _) = self.descriptor.__reduce__()
+        return obj.call_method(
+            tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
+        )
