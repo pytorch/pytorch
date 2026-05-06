@@ -83,6 +83,12 @@ runner_mapping:
   linux.arm64.m7g.metal: l-barm64g4-62-226                       # m7g.metal
 
 
+  # ---- x86 GPU — H100 (p5 family) ----
+
+  linux.aws.h100: l-x86iamx-22-225-h100                             # 1 GPU
+  linux.aws.h100.4: l-x86iamx-88-900-h100-4                         # 4 GPUs
+  linux.aws.h100.8: l-bx86iamx-176-1800-h100-8                      # 8 GPUs (bare metal)
+
   # ---- x86 GPU — B200 (p6 family) ----
 
   linux.dgx.b200: l-x86iamx-22-225-b200                             # p6-b200.48xlarge (1 GPU)

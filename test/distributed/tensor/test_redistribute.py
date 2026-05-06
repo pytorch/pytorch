@@ -430,9 +430,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
         comm_mode = CommDebugMode()
 
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
         # test it successfully zero out the contents on other ranks
@@ -451,9 +460,18 @@ class RedistributeTest(DTensorContinuousTestBase):
         replica_tensor = distribute_tensor(
             local_tensor, device_mesh, [replica_spec, replica_spec]
         )
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec, partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec, partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
@@ -835,9 +853,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
             # Apply R->P transition with the specified reduce_op
             partial_spec = Partial(reduce_op)
+            dt = replica_tensor.dtype
             with comm_mode:
                 partial_tensor = Redistribute.apply(
-                    replica_tensor, device_mesh, [partial_spec]
+                    replica_tensor,
+                    device_mesh,
+                    [partial_spec],
+                    False,
+                    {
+                        "op_dtype": dt,
+                        "out_dtype": dt,
+                        "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                    },
                 )
 
             self.assertEqual(partial_tensor.size(), local_tensor.size())
@@ -3066,6 +3093,88 @@ DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
     base_class=LocalDTensorContinuousTestBase,
 )
+
+
+class _CollectiveDtypeTracer(torch.utils._python_dispatch.TorchDispatchMode):
+    """Records the dtype of the first tensor argument for each _c10d_functional op."""
+
+    def __init__(self):
+        super().__init__()
+        self.events: list[tuple[str, torch.dtype]] = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        name = str(func)
+        if "_c10d_functional" in name and args and isinstance(args[0], torch.Tensor):
+            self.events.append((name, args[0].dtype))
+        return func(*args, **kwargs)
+
+    def dtypes_for(self, op_substr: str) -> list[torch.dtype]:
+        return [dt for name, dt in self.events if op_substr in name]
+
+
+class RedistributeBackwardDtypeTest(TestCase):
+    """Verify ``DTensor.redistribute(..., backward_dtype=...)`` actually runs the
+    backward collective at the requested dtype.
+
+    A fake process group lets us run this single-process; a TorchDispatchMode
+    tracer captures the dtype of each ``_c10d_functional`` collective.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        dist.destroy_process_group()
+        super().tearDownClass()
+
+    def test_backward_dtype_runs_backward_collective_at_that_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.bfloat16,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.bfloat16])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
+    def test_forward_and_backward_dtype_differ(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.float32,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()
