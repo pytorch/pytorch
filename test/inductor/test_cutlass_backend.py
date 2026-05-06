@@ -757,8 +757,12 @@ class TestCutlassBackend(TestCase):
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).to(GPU_TYPE).to(dtype),
-                    torch.randn(M, K).to(GPU_TYPE).to(dtype),
-                    torch.randn(N, K).to(GPU_TYPE).to(dtype).t(),
+                    random_matrix_with_scaled_reduction_dim(
+                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    ),
+                    random_matrix_with_scaled_reduction_dim(
+                        N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    ).t(),
                 )
                 for (M, N, K) in shapes
             ]
@@ -785,7 +789,9 @@ class TestCutlassBackend(TestCase):
                 ),
                 dynamo_config.patch({"error_on_recompile": dynamic}),
             ):
-                expected = [model(*input) for input in inputs]
+                expected = [
+                    model(*[t.float() for t in input]).to(dtype) for input in inputs
+                ]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
                         model, inputs, dynamic_shapes=dynamic_shapes
@@ -794,22 +800,7 @@ class TestCutlassBackend(TestCase):
                     compiled_model = torch.compile(model, dynamic=dynamic)
                     actual = [compiled_model(*input) for input in inputs]
 
-                assert_close_kwargs = {}
-                if dynamic and SM90OrLater:
-                    # SM90+ CUTLASS addmm currently differs from eager by a small
-                    # output-precision quantum on this test across multiple
-                    # parametrizations. Keep the relaxation scoped to this test
-                    # and stay tighter for float16 than bfloat16.
-                    assert_close_kwargs = {
-                        "rtol": 1.6e-2 if dtype == torch.bfloat16 else 1e-3,
-                        "atol": 1e-2 if dtype == torch.bfloat16 else 2e-3,
-                    }
-                else:
-                    assert_close_kwargs = {
-                        "rtol": 2e-3,
-                        "atol": 1e-3,
-                    }
-                torch.testing.assert_close(actual, expected, **assert_close_kwargs)
+                torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -847,8 +838,12 @@ class TestCutlassBackend(TestCase):
         try:
             M, K, N = 256, 3520, 2048
             bias = torch.randn(N, device=GPU_TYPE, dtype=torch.bfloat16)
-            x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
-            w = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+            x = random_matrix_with_scaled_reduction_dim(
+                M, K, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-1
+            )
+            w = random_matrix_with_scaled_reduction_dim(
+                K, N, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-2
+            )
 
             with config.patch(
                 {
@@ -857,7 +852,9 @@ class TestCutlassBackend(TestCase):
                     "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ):
-                expected = torch.addmm(bias, x, w)
+                expected = torch.addmm(bias.float(), x.float(), w.float()).to(
+                    torch.bfloat16
+                )
                 actual = torch.compile(torch.addmm)(bias, x, w)
                 torch.testing.assert_close(actual, expected)
 
@@ -906,19 +903,21 @@ class TestCutlassBackend(TestCase):
         inputs = []
         for B, M, N, K in shapes:
             if use_expand:
-                # Create A using unsqueeze and expand
                 A = (
-                    torch.randn(M, K)
-                    .to(GPU_TYPE)
-                    .to(dtype)
+                    random_matrix_with_scaled_reduction_dim(
+                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    )
                     .unsqueeze(0)
                     .expand(B, -1, -1)
                 )
             else:
-                # Original method
-                A = torch.randn(B, M, K).to(GPU_TYPE).to(dtype)
+                A = random_matrix_with_scaled_reduction_dim(
+                    M, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                )
 
-            B_tensor = torch.randn(B, N, K).to(GPU_TYPE).to(dtype).permute(0, 2, 1)
+            B_tensor = random_matrix_with_scaled_reduction_dim(
+                N, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+            ).permute(0, 2, 1)
             inputs.append((A, B_tensor))
         dynamic_shapes = (
             {
