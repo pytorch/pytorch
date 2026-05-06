@@ -84,7 +84,8 @@ class GenerationTracker:
 
     @staticmethod
     def mark_class_dynamic(cls: type[torch.nn.Module]) -> None:
-        assert issubclass(cls, torch.nn.Module)
+        if not issubclass(cls, torch.nn.Module):
+            raise AssertionError(f"Expected a torch.nn.Module subclass, got {cls}")
         GenerationTracker.dynamic_classes[cls] = True
 
     @classmethod

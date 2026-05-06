@@ -702,11 +702,11 @@ class TS2FXGraphConverter:
         # special handle python list append: "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)"
 
         # inplace append to the list!! This is kinda crazy, as we are inplace mutating the list
-        # This makes the converter "non-functional", and the result depends on the order of the nodes being converter
-        # In a sense, the converter now becomes an stateful interpreter
+        # This makes the converter "non-functional", and the result depends on the order of the nodes being converted
+        # In a sense, the converter now becomes a stateful interpreter
         warnings.warn(
-            "Converting aten::append.t, which is a inplace mutation of the list. "
-            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!",
+            "Converting aten::append.t, which is an inplace mutation of the list. "
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converted!",
             stacklevel=2,
         )
 
