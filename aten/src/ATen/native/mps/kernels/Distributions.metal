@@ -148,16 +148,14 @@ kernel void normal(
 //
 // Per Salmon, Moraes, Dror, Shaw, "Parallel Random Numbers: As Easy as 1, 2, 3"
 // (Random123, SC '11), the 128 bits a single Philox-4x32-10 round emits can be
-// consumed as 4 x uint32, 2 x uint64, 8 x uint16, or 16 x uint8 - the per-bit
-// uniformity is preserved at every projection (BigCrush + Diehard pass at all
-// four widths). We follow that recommendation and pack `16 / sizeof(T)`
-// outputs per thread:
-//  - `T = int64 / uint64` (8 B): 2 outputs per round, two `uint32`s combined.
-//  - `T = int32 / uint32 / float` (4 B): 4 outputs, one `uint32` each.
-//  - `T = int16 / half / bfloat` (2 B): 8 outputs, two `uint16` halves of each
-//    `uint32`.
-//  - `T = int8 / uint8 / bool` (1 B): 16 outputs, four byte slices of each
-//    `uint32`.
+// consumed as 4 x uint32 or 2 x uint64 with full per-bit uniformity at either
+// projection. We deliberately keep the layout dtype-stable for narrow types: 4
+// outputs per thread for `sizeof(T) <= 4`, 2 outputs for `sizeof(T) == 8`. Each
+// narrow output takes one full `uint32` (low bits cast to T or `% range`),
+// which costs some throughput vs. byte/short packing but keeps `randint_like`
+// values identical across float/half/int dtypes - inductor's `fallback_random`
+// equivalence tests upcast to float for the reference and compare against the
+// half compiled output, and any dtype-dependent Philox stride breaks them.
 template <typename T>
 kernel void random_int(
     device T* output [[buffer(0)]],
@@ -166,7 +164,7 @@ kernel void random_int(
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   constexpr uint kBytes = sizeof(T);
-  constexpr uint kElts = 16u / kBytes;
+  constexpr uint kElts = (kBytes == 8) ? 2u : 4u;
 
   uint base_idx = tid * kElts;
   uint4 raw =
@@ -182,18 +180,10 @@ kernel void random_int(
           static_cast<ulong>(raw[2 * i + 1]);
       out = (range == 0) ? static_cast<long>(v)
                          : static_cast<long>(v % static_cast<ulong>(range));
-    } else if IF_CONSTEXPR (kBytes == 4) {
+    } else {
       uint v = raw[i];
       out = (range == 0) ? static_cast<long>(static_cast<int>(v))
                          : static_cast<long>(v % static_cast<uint>(range));
-    } else if IF_CONSTEXPR (kBytes == 2) {
-      ushort v = static_cast<ushort>(raw[i / 2] >> ((i & 1u) * 16u));
-      out = (range == 0) ? static_cast<long>(static_cast<short>(v))
-                         : static_cast<long>(v % static_cast<ushort>(range));
-    } else { // kBytes == 1
-      uchar v = static_cast<uchar>(raw[i / 4] >> ((i & 3u) * 8u));
-      out = (range == 0) ? static_cast<long>(static_cast<char>(v))
-                         : static_cast<long>(v % static_cast<uchar>(range));
     }
     output[base_idx + i] = static_cast<T>(out + add);
   }

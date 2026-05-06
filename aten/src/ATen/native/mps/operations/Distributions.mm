@@ -383,13 +383,14 @@ static void geometric_kernel_mps(TensorIteratorBase& iter, double p, std::option
 // kernel-side sentinel for "full T-bit-width range" (used both for the int64
 // `[int64_min, int64_max]` case where range = 2^64 doesn't fit in any signed
 // type and for `random_(self)` callers that want each output to span the full
-// dtype). `elements_per_thread = 16 / sizeof(T)` follows the per-Philox-round
-// packing the kernel uses internally.
+// dtype). The kernel keeps a dtype-stable layout for narrow types - 4 outputs
+// per thread for `sizeof(T) <= 4`, 2 for `sizeof(T) == 8` - so `randint_like`
+// produces value-identical results across float/half/int dtypes.
 static void random_int_dispatch(TensorIteratorBase& iter,
                                 int64_t base,
                                 int64_t range_param,
                                 std::optional<Generator> gen) {
-  const int64_t elts_per_thread = static_cast<int64_t>(16 / iter.element_size(0));
+  const int64_t elts_per_thread = (iter.element_size(0) == 8) ? 2 : 4;
   distribution_kernel_mps_impl(iter,
                                std::array<long, 2>{base, range_param},
                                "random_int",
