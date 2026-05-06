@@ -24,6 +24,7 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
+    allow_c_hash,
     allow_in_graph,
     assume_constant_result,
     disable,
@@ -80,6 +81,7 @@ from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
+    "allow_c_hash",
     "allow_in_graph",
     "assume_constant_result",
     "bytecode_debugger",
