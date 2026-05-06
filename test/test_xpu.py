@@ -176,6 +176,11 @@ class TestXpu(TestCase):
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
+        if int(torch.version.xpu) >= 20260000:
+            self.assertEqual(
+                device_properties.is_integrated_gpu,
+                device_capability["is_integrated_gpu"],
+            )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
