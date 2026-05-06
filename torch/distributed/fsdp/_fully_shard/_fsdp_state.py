@@ -310,7 +310,7 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
-            return output
+            return self._cast_output_dtype(output)
         for fsdp_param_group in self._fsdp_param_groups:
             output = fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
