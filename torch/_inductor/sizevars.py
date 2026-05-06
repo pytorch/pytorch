@@ -77,6 +77,17 @@ def statically_known_true(
     if expr in (True, False):
         return bool(expr)
 
+    # Hint fast-path: if the current concrete hints make `expr` evaluate to
+    # False, it cannot be universally True, so bail out without running the
+    # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
+    # us conclude universal truth, so we still fall through in that case.)
+    try:
+        hinted = expr.xreplace(shape_env.backed_var_to_val)
+        if hinted is sympy.S.false:
+            return False
+    except Exception:
+        pass
+
     try:
         simplified = shape_env._maybe_evaluate_static(
             expr,
