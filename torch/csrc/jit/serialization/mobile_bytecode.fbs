@@ -217,7 +217,7 @@ table Module {
 
   // Size of ivalue that comes from the mobile module.
   // Because the ivalues array above can also have ivalues that cames from
-  // the jit::Module that got it's source attached to flatbuffer file.
+  // the jit::Module that got its source attached to flatbuffer file.
   // this should be smaller than ivalues.size()
   mobile_ivalue_size:uint;
 }

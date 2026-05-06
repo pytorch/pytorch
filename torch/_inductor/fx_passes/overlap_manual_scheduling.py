@@ -168,7 +168,13 @@ class ManualOverlapScheduler(OverlapScheduler):
             insert_overlap_deps=insert_overlap_deps,
             compute_overlap_multipler=0.0,
             max_coll_distance=0,
-            custom_runtime_estimation=None,
+            # ManualOverlapScheduler doesn't use runtime estimates (it
+            # hardcodes estimated_time_ms=0 in _identify_collectives and
+            # schedules purely from module_bucket_plans). Providing a
+            # no-op estimator avoids the analytical NCCL path, which
+            # crashes in compile-on-one-rank graphs where group_name is
+            # an FX Node and the distributed runtime may not be available.
+            custom_runtime_estimation=lambda node, size: 0.0,
             collective_estimator="analytical",
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
