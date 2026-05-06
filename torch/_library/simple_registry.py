@@ -34,55 +34,15 @@ class SimpleLibraryRegistry:
 
     def __init__(self) -> None:
         self._data: dict[str, SimpleOperatorEntry] = {}
-        # Raw C++ symm_mem registrations, applied lazily to avoid circular imports.
-        self._cpp_symm_mem_args: dict[str, list[str]] = {}
 
     def find(self, qualname: str) -> "SimpleOperatorEntry":
         res = self._data.get(qualname, None)
         if res is None:
             self._data[qualname] = res = SimpleOperatorEntry(qualname)
-        self._apply_cpp_symm_mem(qualname, res)
         return res
 
     def get(self, qualname: str) -> "SimpleOperatorEntry | None":
-        res = self._data.get(qualname, None)
-        if res is None and qualname in self._cpp_symm_mem_args:
-            return self.find(qualname)
-        if res is not None:
-            self._apply_cpp_symm_mem(qualname, res)
-        return res
-
-    def _apply_cpp_symm_mem(self, qualname: str, entry: "SimpleOperatorEntry") -> None:
-        if entry.symm_mem_args._symm_mem_args is not None:
-            return
-
-        cpp_args = self._cpp_symm_mem_args.pop(qualname, None)
-
-        # If not found in cache, check C++ registry directly (for late-loaded extensions)
-        if cpp_args is None:
-            try:
-                import torch._C
-
-                cpp_registry = (
-                    torch._C._get_cpp_symm_mem_args_registry()  # pyrefly: ignore [missing-attribute]
-                )
-                cpp_args = cpp_registry.get(qualname, None)
-            except ImportError:
-                pass
-
-        if cpp_args is not None:
-            entry.symm_mem_args._symm_mem_args = OrderedSet(cpp_args)
-
-    def _load_cpp_symm_mem_registrations(self) -> None:
-        """Load C++ symm_mem registrations as raw data (applied lazily via find/get)."""
-        try:
-            import torch._C
-
-            self._cpp_symm_mem_args = dict(
-                torch._C._get_cpp_symm_mem_args_registry()  # pyrefly: ignore [missing-attribute]
-            )
-        except ImportError:
-            pass
+        return self._data.get(qualname, None)
 
 
 singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()
@@ -216,7 +176,3 @@ def find_torch_dispatch_rule(
     return singleton.find(op.__qualname__).torch_dispatch_rules.find(
         torch_dispatch_class
     )
-
-
-# load C++ registrations into the singleton registry after all classes are defined
-singleton._load_cpp_symm_mem_registrations()

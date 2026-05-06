@@ -2601,10 +2601,6 @@ Call this whenever a new thread is created in order to propagate values from
     return at::caching::is_cached_tensor(t);
   });
 
-  py_module.def("_get_cpp_symm_mem_args_registry", []() {
-    return torch::getCppSymmMemArgsRegistry();
-  });
-
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
