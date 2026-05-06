@@ -18,6 +18,66 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.api
+```
+
+```{eval-rst}
+.. autofunction:: get_env_variable_or_raise
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.distributed
+```
+
+```{eval-rst}
+.. autofunction:: get_free_port
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.log_level
+```
+
+```{eval-rst}
+.. autofunction:: get_log_level
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.logging
+```
+
+```{eval-rst}
+.. autofunction:: get_logger
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: register_rendezvous_handler
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters_or_parameter_groups
+```
+
+```{eval-rst}
+.. autofunction:: get_params_to_average
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed
+```
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
