@@ -1964,6 +1964,22 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
+    elif config.triton.cudagraphs_elide_input_output_copies:
+        from torch._inductor.cudagraph_digraphs import (
+            cudagraphify_impl as params_cudagraphify_impl,
+        )
+
+        cudagraphify_fn = functools.partial(
+            params_cudagraphify_impl,
+            device_index=device_index,
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=constants,
+            placeholders=placeholders,
+            mutated_input_idxs=mutated_input_idxs,
+            compile_id=torch._guards.CompileContext.current_compile_id(),
+        )
     else:
         cudagraphify_fn = cudagraphify_impl
 
@@ -1982,7 +1998,7 @@ def cudagraphify(
 
 def static_input(x: torch.Tensor) -> torch.Tensor:
     """
-    Copy and input while preserving strides
+    Copy an input while preserving strides
     """
     return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
 
@@ -2625,11 +2641,19 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
+    if (
+        config.triton.cudagraphs_elide_input_output_copies
+        and not config.triton.cudagraph_trees
+    ):
+        static_input_idxs = []
+    else:
+        static_input_idxs = get_static_input_idxs(fixed)
+
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
         result = inner_compile(
             gm,
             example_inputs,
-            static_input_idxs=get_static_input_idxs(fixed),
+            static_input_idxs=static_input_idxs,
             cudagraphs=compiler_config_extra.cudagraphs,
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
@@ -2676,6 +2700,10 @@ def compile_fx_backward(
         else:
             model_outputs_node.meta["user_visible_output_idxs"] = []
 
+        elide_cudagraph_copies = (
+            config.triton.cudagraphs_elide_input_output_copies
+            and not config.triton.cudagraph_trees
+        )
         fixed = count_tangents(gm)
 
         # Check if cudagraphs should be overridden for backward via annotation
@@ -2686,7 +2714,11 @@ def compile_fx_backward(
         # When the forward was partitioned, saved activations from inline
         # code between partitions are NOT at fixed addresses. Only mark
         # primals (params/buffers) as static.
-        if compiler_config_extra.forward_is_partitioned.value:
+        if elide_cudagraph_copies:
+            # TODO: Can we use get_static_bw_input_idxs(gm) here? I
+            # think it excludes all tangents...
+            static_input_idxs = []
+        elif compiler_config_extra.forward_is_partitioned.value:
             static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             static_input_idxs = list(range(fixed))
