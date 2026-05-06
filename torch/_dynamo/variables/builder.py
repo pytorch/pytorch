@@ -4053,6 +4053,20 @@ def _automatic_dynamic(
             shape_env_to_source_to_symbol_cache,
         )
 
+    # Fast path: when the tensor must be static (and not in the dynamic-source
+    # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
+    # Only safe when shapes_spec is None.
+    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+        return StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
+            view_base_context=view_base_context,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        )
+
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []

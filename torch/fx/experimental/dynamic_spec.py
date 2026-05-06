@@ -270,8 +270,6 @@ def lookup_spec_from_dynamo_source(
 
     Only supports LocalSource with is_input=True (direct function args).
     Returns TensorSpec, IntVar, int, or None.
-
-    Duck-typed on `source` to avoid a hard dependency on dynamo's Source class.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None

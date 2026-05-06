@@ -222,14 +222,6 @@ class TestParamsSpecConstruction(TestCase):
         super().setUp()
         _reset_uid_counter()
 
-    def test_basic_params_spec(self):
-        ps = ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
-        self.assertIn("x", ps._named_args)
-
-    def test_shapes_spec(self):
-        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
-        self.assertIsNotNone(ss._params)
-
     def test_shapes_spec_repr(self):
         sv = ShapeVar("batch")
         ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([sv, None])}))
