@@ -1488,14 +1488,15 @@ def make_lazy_class(cls):
         name = f"__{basename}__"
 
         def inner_wrapper(name):
-            use_operator = basename not in ("bool", "int")
+            use_builtin = basename in ("bool", "int")
+            builtin_fn = {"bool": bool, "int": int}.get(basename)
 
             def wrapped(self, *args, **kwargs):
                 if self._cb is not None:
                     self._value = self._cb()
                     self._cb = None
-                if not use_operator:
-                    return getattr(self._value, name)(*args, **kwargs)
+                if use_builtin:
+                    return builtin_fn(self._value)
                 else:
                     return getattr(operator, name)(self._value, *args, **kwargs)
             return wrapped
