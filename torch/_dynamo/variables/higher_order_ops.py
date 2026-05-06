@@ -3522,9 +3522,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # never go through the freevar lift path. Build the outer p_args
             # from fn_args_vt directly, then append any closure captures that
             # were auto-lifted during body tracing.
-            forced_args = tuple(
-                a.as_proxy() for a in fn_args_vt if a.is_tensor()
-            )
+            forced_args = tuple(a.as_proxy() for a in fn_args_vt if a.is_tensor())
             lifted_args = forced_args + tuple(body_lifted_freevars)
         else:
             # With "automatic", all args flow through the freevar lift path.
@@ -5814,9 +5812,11 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             )
         if expected_input_nodes != actual_input_nodes[1:]:
             raise AssertionError(
-                "local_map: outer HOP args did not match user call-site order. "
-                f"expected={expected_input_nodes}, actual={actual_input_nodes[1:]}. "
-                "automatic_with_forced_inputs should have preserved order."
+                "local_map: unexpected argument ordering. Outer HOP args did "
+                "not match user call-site order "
+                f"(expected={expected_input_nodes}, actual={actual_input_nodes[1:]}). "
+                "automatic_with_forced_inputs should have preserved order; "
+                "please file an issue at https://github.com/pytorch/pytorch/issues."
             )
         if len(p_kwargs) != 0:
             raise AssertionError("Expected p_kwargs to be empty")
