@@ -92,6 +92,19 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   return server;
 }
 
+template <typename... Args>
+void warnOrDebug(
+    bool warn,
+    fmt::format_string<Args...> formatStr,
+    Args&&... args) {
+  auto msg = fmt::format(formatStr, std::forward<Args>(args)...);
+  if (warn) {
+    C10D_WARNING("{}", msg);
+  } else {
+    C10D_DEBUG("{}", msg);
+  }
+}
+
 class TCPClient {
  public:
   static std::unique_ptr<TCPClient> connect(
@@ -103,7 +116,11 @@ class TCPClient {
     try {
       tcputil::sendBytes(socket_.handle(), data, length);
     } catch (const std::exception& e) {
-      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      warnOrDebug(
+          !demoteWarnLogsToDebug_,
+          "sendBytes failed on {}: {}",
+          socket_.repr(),
+          e.what());
       throw;
     }
   }
@@ -112,7 +129,11 @@ class TCPClient {
     try {
       return tcputil::recvVector<std::uint8_t>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      warnOrDebug(
+          !demoteWarnLogsToDebug_,
+          "recvVector failed on {}: {}",
+          socket_.repr(),
+          e.what());
       throw;
     }
   }
@@ -122,7 +143,11 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      warnOrDebug(
+          !demoteWarnLogsToDebug_,
+          "recvValue failed on {}: {}",
+          socket_.repr(),
+          e.what());
       throw;
     }
   }
@@ -135,12 +160,19 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING(
-          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+      warnOrDebug(
+          !demoteWarnLogsToDebug_,
+          "recvValueWithTimeout failed on {}: {}",
+          socket_.repr(),
+          e.what());
       throw;
     }
   }
   void setTimeout(std::chrono::milliseconds value);
+
+  void setDemoteWarnLogsToDebug(bool demote) {
+    demoteWarnLogsToDebug_ = demote;
+  }
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
 
@@ -150,6 +182,27 @@ class TCPClient {
 
  private:
   Socket socket_;
+  bool demoteWarnLogsToDebug_{false};
+};
+
+class ScopedDemoteWarnLogsToDebug {
+ public:
+  ScopedDemoteWarnLogsToDebug(TCPClient& client, bool demote)
+      : client_(client) {
+    client_.setDemoteWarnLogsToDebug(demote);
+  }
+  ~ScopedDemoteWarnLogsToDebug() {
+    client_.setDemoteWarnLogsToDebug(false);
+  }
+  ScopedDemoteWarnLogsToDebug(const ScopedDemoteWarnLogsToDebug&) = delete;
+  ScopedDemoteWarnLogsToDebug& operator=(const ScopedDemoteWarnLogsToDebug&) =
+      delete;
+  ScopedDemoteWarnLogsToDebug(ScopedDemoteWarnLogsToDebug&&) = delete;
+  ScopedDemoteWarnLogsToDebug& operator=(ScopedDemoteWarnLogsToDebug&&) =
+      delete;
+
+ private:
+  TCPClient& client_;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
@@ -308,18 +361,26 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   auto deadline = std::chrono::steady_clock::now() + opts.timeout;
   auto backoff = std::make_shared<ExponentialBackoffWithJitter>();
 
+  constexpr int kConnectRetryWarnInterval = 10;
+
   auto retry = 0;
   do {
+    const bool shouldWarn =
+        (retry != 0) && (retry % kConnectRetryWarnInterval == 0);
     try {
       client_ = detail::TCPClient::connect(addr_, opts, backoff);
       // TCP connection established
       C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
-      // client's first query for validation
-      validate();
+      {
+        detail::ScopedDemoteWarnLogsToDebug guard(*client_, !shouldWarn);
 
-      // ping to verify network connectivity
-      ping();
+        // client's first query for validation
+        validate();
+
+        // ping to verify network connectivity
+        ping();
+      }
 
       // success
       break;
@@ -337,7 +398,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
       auto delayDuration = backoff->nextBackoff();
 
-      C10D_WARNING(
+      detail::warnOrDebug(
+          shouldWarn,
           "TCP client failed to connect/validate to host {}:{} - retrying (try={}, timeout={}ms, delay={}ms): {}",
           addr_.host,
           addr_.port,
