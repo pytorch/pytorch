@@ -968,7 +968,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       // which kernel variant to use based on the normalized axis N size
-      const int N_READS = 4;
+      constexpr int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);
       id<MTLComputePipelineState> layerNormKernel = nil;
       if (axis_size <= 1024 * N_READS) {
@@ -1067,244 +1067,88 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   }
   if (M > 0) {
     using namespace at::native::mps;
-
-    // Derive from MPSCachedGraph
-    struct CachedGraph : public MPSCachedGraph {
-      CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor* gradOutputTensor_ = nil;
-      MPSGraphTensor* inputTensor_ = nil;
-      MPSGraphTensor* weightTensor_ = nil;
-      MPSGraphTensor* meanTensor_ = nil;
-      MPSGraphTensor* rstdTensor_ = nil;
-      MPSGraphTensor* gradInputTensor_ = nil;
-      MPSGraphTensor* gradWeightTensor_ = nil;
-      MPSGraphTensor* gradBiasTensor_ = nil;
-    };
-
-    auto stream = at::mps::getCurrentMPSStream();
-
+    constexpr int N_READS = 4;
+    const int iN = static_cast<int>(N);
+    const int iM = static_cast<int>(M);
     const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
 
-    if (grad_input.numel() == 0) {
+    // Flatten mean/rstd from stat_shape [...outer, 1,..1] to [M]
+    auto mean_flat = mean.contiguous().view({iM});
+    auto rstd_flat = rstd.contiguous().view({iM});
+
+    const auto metalType = mps::scalarToMetalTypeString(*X);
+    MPSStream* stream = getCurrentMPSStream();
+
+    if (grad_input.numel() == 0 && !grad_input_mask[1] && !grad_input_mask[2]) {
       return std::make_tuple(grad_input, grad_weight, grad_bias);
     }
 
-    // const auto memory_format = input.suggest_memory_format();
-
     @autoreleasepool {
-      MPSShape* input_shape = mps::getMPSShape(*X);
-      MPSShape* gamma_shape = mps::getMPSShape(normalized_shape);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
 
-      auto num_normalized_dims = [gamma_shape count];
-      auto num_channel_dims = [input_shape count] - num_normalized_dims;
-
-      NSMutableArray<NSNumber*>* gamma_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_channel_dims];
-
-      for (const auto i : c10::irange(num_channel_dims))
-        gamma_axes[i] = [NSNumber numberWithInt:static_cast<int>(i)];
-
-      // Axes along which to reduce to get "batch norm" gradient
-      // This will be applied on shape [1, M, -1]
-      NSMutableArray<NSNumber*>* bn_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_normalized_dims];
-      for (const auto i : c10::irange(num_normalized_dims))
-        bn_axes[i] = [NSNumber numberWithInt:static_cast<int>(1 + 1 + i)];
-
-      // Shape of input to do "batch norm" backward
-      // This is [1, M, -1]
-      NSMutableArray<NSNumber*>* bn_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
-      bn_shape[0] = [NSNumber numberWithInt:1];
-      bn_shape[1] = [NSNumber numberWithInt:M];
-      for (const auto i : c10::irange(num_normalized_dims))
-        bn_shape[i + 2] = input_shape[i + num_channel_dims];
-
-      // Shape of mean to do "batch norm" backward
-      // This is [1, M, [1,1,1..1]]
-      NSMutableArray<NSNumber*>* bn_mean_shape =
-          [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
-      bn_mean_shape[0] = [NSNumber numberWithInt:1];
-      bn_mean_shape[1] = [NSNumber numberWithInt:M];
-      for (const auto i : c10::irange(num_normalized_dims))
-        bn_mean_shape[i + 2] = [NSNumber numberWithInt:1];
-
-      // Shape of gamma to multiply with "batch norm" backward
-      // This is [1, 1, -1]
-      NSMutableArray<NSNumber*>* bn_gamma_shape =
-          [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
-      bn_gamma_shape[0] = [NSNumber numberWithInt:1];
-      bn_gamma_shape[1] = [NSNumber numberWithInt:1];
-      for (const auto i : c10::irange(num_normalized_dims))
-        bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
-
-      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}",
-                                    has_weight,
-                                    getArrayRefString(normalized_shape),
-                                    getArrayRefString((*X).sizes()),
-                                    c10::Join(",", grad_input_mask),
-                                    getMPSTypeString(*X));
-      auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-        MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *X);
-        MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *dOut);
-        MPSGraphTensor* weightTensor = nil;
-        if (has_weight)
-          weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, *gamma);
-
-        // Mean and inv std tensors to be saved and returned
-        MPSGraphTensor* meanTensor = mpsGraphRankedPlaceHolder(mpsGraph, mean);
-        MPSGraphTensor* rstdTensor = mpsGraphRankedPlaceHolder(mpsGraph, rstd);
-
-        MPSGraphTensor* gradInputTensor = nil;
-        MPSGraphTensor* gradWeightTensor = nil;
-        MPSGraphTensor* gradBiasTensor = nil;
-
-        if (grad_input_mask[1]) {
-          MPSGraphTensor* xMinusMean = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                              secondaryTensor:meanTensor
-                                                                         name:nil];
-          MPSGraphTensor* bnForwardTensor = [mpsGraph multiplicationWithPrimaryTensor:xMinusMean
-                                                                      secondaryTensor:rstdTensor
-                                                                                 name:nil];
-          MPSGraphTensor* gradBnMulTensor = [mpsGraph multiplicationWithPrimaryTensor:bnForwardTensor
-                                                                      secondaryTensor:gradOutputTensor
-                                                                                 name:nil];
-          gradWeightTensor = [mpsGraph reductionSumWithTensor:gradBnMulTensor axes:gamma_axes name:nil];
+      // --- dx kernel ---
+      if (grad_input_mask[0] && grad_input.numel() > 0) {
+        id<MTLComputePipelineState> dxKernel;
+        std::string wsfx = has_weight ? "_w" : "_nw";
+        if (iN <= 1024 * N_READS) {
+          dxKernel = mps::lib.getPipelineStateForFunc("layer_norm_bwd_dx_single_row_" + metalType + wsfx);
+        } else {
+          dxKernel = mps::lib.getPipelineStateForFunc("layer_norm_bwd_dx_looped_" + metalType + wsfx);
         }
-        if (grad_input_mask[2]) {
-          gradBiasTensor = [mpsGraph reductionSumWithTensor:gradOutputTensor axes:gamma_axes name:nil];
+        [computeEncoder setComputePipelineState:dxKernel];
+        mps::mtl_setArgs(computeEncoder, *dOut, *X, mean_flat, rstd_flat);
+        if (has_weight) {
+          mps::mtl_setArgs<4>(computeEncoder, *gamma);
         }
-        if (grad_input_mask[0]) {
-          // Reshape input to [1, M, -1]
-          // Reshape mean and rstd to [1, M, -1]
-          // Reshape gamma to [1, 1, -1] (-1 has N dims)
+        mps::mtl_setArgs<5>(computeEncoder, grad_input, (uint)iN);
+        MTLSize numThreadsDx = MTLSizeMake(std::min((iN + N_READS - 1) / N_READS, 1024), 1, 1);
+        MTLSize numGroupsDx = MTLSizeMake(iM, 1, 1);
+        [computeEncoder dispatchThreadgroups:numGroupsDx threadsPerThreadgroup:numThreadsDx];
+      }
 
-          MPSGraphTensor* bnInputTensor = [mpsGraph reshapeTensor:inputTensor withShape:bn_shape name:nil];
-          MPSGraphTensor* bnGradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensor withShape:bn_shape name:nil];
-          // Do this at the end
-          if (has_weight) {
-            MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightTensor withShape:bn_gamma_shape name:nil];
-            bnGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
-                                                           secondaryTensor:bnGammaTensor
-                                                                      name:nil];
-          }
-          MPSGraphTensor* bnMeanTensor = [mpsGraph reshapeTensor:meanTensor withShape:bn_mean_shape name:nil];
-          MPSGraphTensor* bnRstdTensor = [mpsGraph reshapeTensor:rstdTensor withShape:bn_mean_shape name:nil];
+      // --- dgamma / dbeta kernel ---
+      if (grad_input_mask[1] || grad_input_mask[2]) {
+        Tensor dw_buf = grad_input_mask[1] ? grad_weight : at::empty({(int64_t)N}, X->options().device(kMPS));
+        Tensor db_buf = grad_input_mask[2] ? grad_bias : at::empty({(int64_t)N}, X->options().device(kMPS));
 
-          MPSGraphTensor* mulTensor = [mpsGraph constantWithScalar:N shape:@[ @1 ] dataType:MPSDataTypeInt32];
+        if (iM == 1) {
+          id<MTLComputePipelineState> dwdbKernel = mps::lib.getPipelineStateForFunc("layer_norm_bwd_dw_db_m1_" + metalType);
+          [computeEncoder setComputePipelineState:dwdbKernel];
+          mps::mtl_setArgs(computeEncoder, *dOut, *X, mean_flat, rstd_flat, dw_buf, db_buf, (uint)iN);
+          uint dwdb_tpg = std::min(static_cast<uint>(iN), 1024u);
+          MTLSize numGroupsDwDb = MTLSizeMake((iN + dwdb_tpg - 1) / dwdb_tpg, 1, 1);
+          MTLSize numThreadsDwDb = MTLSizeMake(dwdb_tpg, 1, 1);
+          [computeEncoder dispatchThreadgroups:numGroupsDwDb threadsPerThreadgroup:numThreadsDwDb];
+        } else {
+          // Tiled two-phase dw_db: cache-friendly for all M>1 shapes
+          constexpr uint TILE_M = 64;
+          constexpr uint TILE_N = 32;
+          uint num_row_blocks = (iM + TILE_M - 1) / TILE_M;
+          uint num_col_blocks = (iN + TILE_N - 1) / TILE_N;
 
-          MPSGraphTensor* numberToReduceTensor = mulTensor;
+          // Phase 1: partial reduction per tile → temp buffer [num_row_blocks, N]
+          Tensor partial_dgam = at::empty({(int64_t)(num_row_blocks * iN)}, X->options().dtype(at::kFloat).device(kMPS));
+          Tensor partial_dbet = at::empty({(int64_t)(num_row_blocks * iN)}, X->options().dtype(at::kFloat).device(kMPS));
 
-          MPSGraphTensor* cast2Tensor = [mpsGraph castTensor:numberToReduceTensor
-                                                      toType:bnInputTensor.dataType
-                                                        name:@"cast2Tensor"];
+          id<MTLComputePipelineState> tiledKernel = mps::lib.getPipelineStateForFunc("layer_norm_bwd_dw_db_tiled_" + metalType);
+          [computeEncoder setComputePipelineState:tiledKernel];
+          mps::mtl_setArgs(computeEncoder, *dOut, *X, mean_flat, rstd_flat, partial_dgam, partial_dbet, (uint)iN, (uint)iM);
+          MTLSize tiledGroups = MTLSizeMake(num_row_blocks, num_col_blocks, 1);
+          MTLSize tiledThreads = MTLSizeMake(TILE_N, 1, 1);
+          [computeEncoder dispatchThreadgroups:tiledGroups threadsPerThreadgroup:tiledThreads];
 
-          MPSGraphTensor* sizeReciprocalTensor = [mpsGraph reciprocalWithTensor:cast2Tensor name:nil];
-
-          // TODO: Reduce redundant computation
-          MPSGraphTensor* xMinusMean = [mpsGraph subtractionWithPrimaryTensor:bnInputTensor
-                                                              secondaryTensor:bnMeanTensor
-                                                                         name:nil];
-
-          MPSGraphTensor* normalizedTensor = [mpsGraph multiplicationWithPrimaryTensor:xMinusMean
-                                                                       secondaryTensor:bnRstdTensor
-                                                                                  name:nil];
-
-          MPSGraphTensor* bnGradMulTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
-                                                                      secondaryTensor:normalizedTensor
-                                                                                 name:nil];
-
-          MPSGraphTensor* gammaGradient = [mpsGraph reductionSumWithTensor:bnGradMulTensor axes:bn_axes name:nil];
-
-          MPSGraphTensor* betaGradient = [mpsGraph reductionSumWithTensor:bnGradOutputTensor axes:bn_axes name:nil];
-
-          MPSGraphTensor* gradient1 = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
-                                                                secondaryTensor:bnRstdTensor
-                                                                           name:nil];
-
-          MPSGraphTensor* gradient2_1 = [mpsGraph multiplicationWithPrimaryTensor:sizeReciprocalTensor
-                                                                  secondaryTensor:xMinusMean
-                                                                             name:nil];
-
-          // reverseVariance is square of rstd
-          MPSGraphTensor* reverseVariance = [mpsGraph squareWithTensor:bnRstdTensor name:nil];
-          MPSGraphTensor* gradient2_2 = [mpsGraph multiplicationWithPrimaryTensor:gammaGradient
-                                                                  secondaryTensor:reverseVariance
-                                                                             name:nil];
-
-          MPSGraphTensor* gradient2 = [mpsGraph multiplicationWithPrimaryTensor:gradient2_1
-                                                                secondaryTensor:gradient2_2
-                                                                           name:nil];
-
-          MPSGraphTensor* gradient3_1 = [mpsGraph multiplicationWithPrimaryTensor:sizeReciprocalTensor
-                                                                  secondaryTensor:betaGradient
-                                                                             name:nil];
-
-          MPSGraphTensor* gradient3 = [mpsGraph multiplicationWithPrimaryTensor:gradient3_1
-                                                                secondaryTensor:bnRstdTensor
-                                                                           name:nil];
-
-          MPSGraphTensor* gradient4 = [mpsGraph subtractionWithPrimaryTensor:gradient1
-                                                             secondaryTensor:gradient2
-                                                                        name:nil];
-
-          MPSGraphTensor* gradient = [mpsGraph subtractionWithPrimaryTensor:gradient4
-                                                            secondaryTensor:gradient3
-                                                                       name:nil];
-
-          gradInputTensor = [mpsGraph reshapeTensor:gradient withShape:input_shape name:nil];
+          // Phase 2: reduce partials across row blocks → final dgamma, dbeta
+          id<MTLComputePipelineState> reduceKernel = mps::lib.getPipelineStateForFunc("layer_norm_bwd_dw_db_reduce_" + metalType);
+          [computeEncoder setComputePipelineState:reduceKernel];
+          mps::mtl_setArgs(computeEncoder, partial_dgam, partial_dbet, dw_buf, db_buf, (uint)iN, (uint)num_row_blocks);
+          uint red_tpg = std::min(static_cast<uint>(iN), 1024u);
+          MTLSize reduceGroups = MTLSizeMake((iN + red_tpg - 1) / red_tpg, 1, 1);
+          MTLSize reduceThreads = MTLSizeMake(red_tpg, 1, 1);
+          [computeEncoder dispatchThreadgroups:reduceGroups threadsPerThreadgroup:reduceThreads];
         }
-
-        if (grad_input_mask[1]) {
-          gradWeightTensor = [mpsGraph reshapeTensor:gradWeightTensor withShape:gamma_shape name:nil];
-        }
-        if (grad_input_mask[2]) {
-          gradBiasTensor = [mpsGraph reshapeTensor:gradBiasTensor withShape:gamma_shape name:nil];
-        }
-
-        newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-        newCachedGraph->inputTensor_ = inputTensor;
-        newCachedGraph->weightTensor_ = weightTensor;
-        newCachedGraph->meanTensor_ = meanTensor;
-        newCachedGraph->rstdTensor_ = rstdTensor;
-        newCachedGraph->gradInputTensor_ = gradInputTensor;
-        newCachedGraph->gradWeightTensor_ = gradWeightTensor;
-        newCachedGraph->gradBiasTensor_ = gradBiasTensor;
-      });
-
-      auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, *X);
-      auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, *dOut);
-      auto weightPlaceholder = Placeholder();
-      if (has_weight)
-        weightPlaceholder = Placeholder(cachedGraph->weightTensor_, *gamma);
-      auto saveMeanPlaceholder = Placeholder(cachedGraph->meanTensor_, mean);
-      auto saveVarPlaceholder = Placeholder(cachedGraph->rstdTensor_, rstd);
-
-      auto gradInputPlaceholder = Placeholder();
-      if (grad_input_mask[0])
-        gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-      auto gradWeightPlaceholder = Placeholder();
-      if (grad_input_mask[1])
-        gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
-      auto gradBiasPlaceholder = Placeholder();
-      ;
-      if (grad_input_mask[2])
-        gradBiasPlaceholder = Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
-
-      NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-      feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-      if (has_weight)
-        feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-      feeds[saveMeanPlaceholder.getMPSGraphTensor()] = saveMeanPlaceholder.getMPSGraphTensorData();
-      feeds[saveVarPlaceholder.getMPSGraphTensor()] = saveVarPlaceholder.getMPSGraphTensorData();
-
-      NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
-      if (grad_input_mask[0])
-        results[gradInputPlaceholder.getMPSGraphTensor()] = gradInputPlaceholder.getMPSGraphTensorData();
-      if (grad_input_mask[1])
-        results[gradWeightPlaceholder.getMPSGraphTensor()] = gradWeightPlaceholder.getMPSGraphTensorData();
-      if (grad_input_mask[2])
-        results[gradBiasPlaceholder.getMPSGraphTensor()] = gradBiasPlaceholder.getMPSGraphTensorData();
-
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      }
+    });
     }
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
