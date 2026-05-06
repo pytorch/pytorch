@@ -2396,6 +2396,31 @@ class TestBinaryUfuncs(TestCase):
         expected = torch.where(x < y, tx, ty)
         self.assertEqual(result_tangent, expected)
 
+    def test_maximum_minimum_out_dtype_mismatch(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181805
+        # When the out tensor has a narrower dtype than the inputs, the result
+        # should be computed in the input dtype first, then cast to the output
+        # dtype. Previously CUDA would cast inputs to the output dtype before
+        # the comparison, producing wrong results.
+        lhs = torch.tensor([100000], dtype=torch.int64, device=device)
+        rhs = torch.tensor([-1], dtype=torch.int64, device=device)
+        out = torch.empty(1, dtype=torch.uint8, device=device)
+
+        # Expected: compute first, then cast
+        # fmax(100000, -1) = 100000; 100000 % 256 = 160
+        torch.fmax(lhs, rhs, out=out)
+        self.assertEqual(out.item(), 160)
+
+        # fmin(100000, -1) = -1; -1 as uint8 = 255
+        torch.fmin(lhs, rhs, out=out)
+        self.assertEqual(out.item(), 255)
+
+        torch.maximum(lhs, rhs, out=out)
+        self.assertEqual(out.item(), 160)
+
+        torch.minimum(lhs, rhs, out=out)
+        self.assertEqual(out.item(), 255)
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
