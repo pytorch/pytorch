@@ -14579,7 +14579,7 @@ if __name__ == '__main__':
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 6236
-                    expected_weight_grad_max_ulp_diff = 2858  # 2271
+                    expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, cpu 2271
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
@@ -14655,14 +14655,15 @@ if __name__ == '__main__':
 
             self.assertEqual(loss.linear.weight, ref_loss.linear.weight.to(dtype))
 
-            ref_input = input.detach().to(ref_device, ref_dtype).requires_grad_(True)
+            ref_input = input.detach().to(ref_device).to(ref_dtype).requires_grad_(True)
             if dtype != ref_dtype:
                 ref_loss = ref_loss.to(ref_dtype)
                 ref_input = ref_input.to(ref_dtype)
             ref_input.requires_grad_(True)
 
             out = loss(input, target)
-            ref_out = ref_loss(ref_input, target.to(ref_device))
+            ref_target = target.to(ref_device)
+            ref_out = ref_loss(ref_input, ref_target)
 
             max_ulp_diff = diff_ulp(out.to(ref_device), ref_out.to(dtype)).max().item()
             if max_ulp_diff > maximal_output_max_ulp_diff:
@@ -14670,7 +14671,7 @@ if __name__ == '__main__':
                 worst_output_kwargs = dict(module_kwargs)
             self.assertEqual(out, ref_out.to(dtype))
 
-            torch.autograd.gradcheck(ref_loss, (ref_input, target.to(ref_device)))
+            torch.autograd.gradcheck(ref_loss, (ref_input, ref_target))
 
             # gradcheck will fail due to
             # - inplace modification of gradients

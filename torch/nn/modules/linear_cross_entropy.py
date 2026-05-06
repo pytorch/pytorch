@@ -4,6 +4,9 @@ from typing import Literal
 import torch
 
 
+__all__ = ["LinearCrossEntropyOptions"]
+
+
 @dataclasses.dataclass(slots=True, frozen=True)
 class LinearCrossEntropyOptions:
     """Configuration for the chunked implementation of

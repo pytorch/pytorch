@@ -9,7 +9,6 @@ from torch.nn.parameter import (  # usort: skip
     UninitializedParameter as UninitializedParameter,
 )
 from torch.nn.modules import *  # usort: skip # noqa: F403
-
 from torch.nn import (
     attention as attention,
     functional as functional,
