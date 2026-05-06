@@ -19,7 +19,8 @@ from torch.testing._internal.jit_utils import FileCheck, JitTestCase, warmup_bac
 @skipIfTorchDynamo()
 class TestProfiler(JitTestCase):
     def setUp(self):
-        super().setUp()
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup.
         self.prev_exec = torch._C._jit_set_profiling_executor(True)
         self.prev_profiling = torch._C._get_graph_executor_optimize(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)

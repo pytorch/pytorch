@@ -25,7 +25,9 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        super().setUp()
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that crash on torchbind static methods (can't downcast to
+        # GraphFunction).
         load_torchbind_test_lib()
 
     def test_torchbind(self):

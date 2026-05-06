@@ -86,7 +86,8 @@ class TestDtypeBase(JitTestCase):
     SCALAR = "SCALAR"  # To mark unary vs 0 dim tensor
 
     def setUp(self):
-        super().setUp()
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup.
         self.prev_symbolic_shapes_test_enabled = (
             torch._C._jit_symbolic_shapes_test_mode_enabled()
         )
