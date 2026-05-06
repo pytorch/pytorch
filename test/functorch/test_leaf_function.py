@@ -2,7 +2,9 @@
 
 """Tests for @leaf_function with make_fx, aot_function, and torch.compile."""
 
+import contextlib
 import copy
+import io
 import re
 from functools import partial
 from unittest.mock import patch
@@ -2509,6 +2511,8 @@ class TestLeafFunctionRegisterHook(TestCase):
         self.assertEqual(hook_grads[0], torch.full((3,), 2.0))
 
     def test_hook_with_non_tensor_args(self):
+        # Hook receives only grads of requires_grad tensors. Non-tensor args
+        # in the leaf signature do not flow into the hook.
         hook_grads = []
 
         @leaf_function
@@ -2529,6 +2533,57 @@ class TestLeafFunctionRegisterHook(TestCase):
 
         self.assertEqual(len(hook_grads), 1)
         self.assertEqual(hook_grads[0], torch.full((3,), 5.0))
+
+    def test_hook_closure_captures_external_state(self):
+        # Recommended pattern for threading non-tensor context into the hook:
+        # capture it via closure at hook-registration time. Verify the captured
+        # tag actually reaches printed output (mirrors the docstring example).
+        tag = "intermediate"
+
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_multi_grad_hook
+        def my_fn_hook(x_grad):
+            print(f"[{tag}][bwd] norm={x_grad.norm().item():.4f}")
+
+        buf = io.StringIO()
+        x = torch.randn(4, requires_grad=True)
+        with contextlib.redirect_stdout(buf):
+            my_fn(x)[0].sum().backward()
+
+        output = buf.getvalue()
+        self.assertIn("[intermediate][bwd]", output)
+        self.assertIn("norm=", output)
+
+    def test_hook_extra_signature_arg_raises_at_backward(self):
+        # Capability limit: hooks must accept exactly N grad tensors, where N
+        # is the number of requires_grad tensor inputs to the leaf function.
+        # Declaring extra positional args crashes when the hook fires.
+        @leaf_function
+        def my_fn(x, tag):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, tag):
+            return (torch.empty_like(x),)
+
+        @my_fn.register_multi_grad_hook
+        def my_fn_hook(x_grad, tag):  # extra `tag` arg — never supplied
+            pass
+
+        x = torch.randn(3, requires_grad=True)
+        out = my_fn(x, "label")[0]
+        with self.assertRaisesRegex(
+            TypeError,
+            r"missing 1 required positional argument.*'tag'",
+        ):
+            out.sum().backward()
 
     def test_hook_multiple_tensor_inputs(self):
         hook_calls = []
@@ -2555,6 +2610,8 @@ class TestLeafFunctionRegisterHook(TestCase):
         self.assertEqual(hook_calls[0][1], torch.full((3,), 3.0))
 
     def test_hook_only_fires_for_requires_grad_inputs(self):
+        # No-grad tensors are filtered out: hook receives grads only for the
+        # requires_grad inputs, in order.
         hook_calls = []
 
         @leaf_function
@@ -2684,6 +2741,97 @@ class TestLeafFunctionRegisterHook(TestCase):
         out = my_fn(x)[0]
         out.sum().backward()
         self.assertEqual(hook_count[0], 1)
+
+
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionGradDtype(TestCase):
+    def _make_pair(self, size, dtype, grad_dtype):
+        torch.manual_seed(42)
+        x_ref = torch.randn(size, dtype=dtype, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
+        if grad_dtype is not None:
+            x_ref.grad_dtype = grad_dtype
+            x_test.grad_dtype = grad_dtype
+        return x_ref, x_test
+
+    @staticmethod
+    def _precision_sensitive_fn(x, w):
+        return (x.float() * w.float()).sum() + (x.float() ** 3 / 7.0).sum()
+
+    def test_grad_bitwise_equal_with_grad_dtype(self):
+        @leaf_function
+        def fn(x, w):
+            return (self._precision_sensitive_fn(x, w),)
+
+        @fn.register_fake
+        def fn_fake(x, w):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        x_ref, x_test = self._make_pair(64, torch.bfloat16, torch.float32)
+        torch.manual_seed(7)
+        w = torch.randn(64, dtype=torch.bfloat16)
+
+        self._precision_sensitive_fn(x_ref, w).backward()
+        fn(x_test, w)[0].backward()
+
+        self.assertTrue(torch.equal(x_test.grad, x_ref.grad))
+
+    @parametrize(
+        "dtype,grad_dtype",
+        [
+            (torch.bfloat16, torch.float32),
+            (torch.float16, torch.float32),
+            (torch.float32, torch.bfloat16),
+            (torch.float32, torch.float16),
+        ],
+    )
+    def test_backward_engine_with_dtype_grad_dtype_mismatch(self, dtype, grad_dtype):
+        observed_inner = {}
+
+        @leaf_function
+        def fn(x, w):
+            observed_inner["dtype"] = x.dtype
+            observed_inner["grad_dtype"] = x.grad_dtype
+            return ((x.float() * w.float()).sum(),)
+
+        @fn.register_fake
+        def fn_fake(x, w):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        torch.manual_seed(0)
+        x = torch.randn(8, dtype=dtype, requires_grad=True)
+        x.grad_dtype = grad_dtype
+        w = torch.randn(8, dtype=dtype)
+        self.assertNotEqual(x.dtype, x.grad_dtype)
+
+        fn(x, w)[0].backward()
+
+        self.assertEqual(observed_inner["dtype"], dtype)
+        self.assertEqual(observed_inner["grad_dtype"], grad_dtype)
+        self.assertEqual(x.grad.dtype, grad_dtype)
+
+    def test_nonleaf_input_does_not_raise(self):
+        @leaf_function
+        def fn(x, b):
+            return (self._precision_sensitive_fn(x, b),)
+
+        @fn.register_fake
+        def fn_fake(x, b):
+            return (torch.empty((), dtype=torch.float32, device=x.device),)
+
+        x_ref, x_test = self._make_pair(64, torch.bfloat16, torch.float32)
+        torch.manual_seed(7)
+        b_leaf = torch.randn(64, dtype=torch.bfloat16)
+        b_ref = b_leaf * 2
+        b_test = b_leaf * 2
+
+        self._precision_sensitive_fn(x_ref, b_ref).backward()
+        fn(x_test, b_test)[0].backward()
+
+        self.assertTrue(torch.equal(x_test.grad, x_ref.grad))
+
+
+instantiate_parametrized_tests(TestLeafFunctionGradDtype)
 
 
 if __name__ == "__main__":
