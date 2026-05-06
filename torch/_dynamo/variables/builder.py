@@ -2408,6 +2408,7 @@ class VariableBuilder:
         # Those paths bypass _automatic_dynamic where the spec is applied.
         # Without this check, specifying TensorSpec on an nn.Parameter would
         # be silently ignored.
+        # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
         _tensor_spec = cast(
             TensorSpec | None,
             lookup_spec_from_dynamo_source(source, config._shapes_spec),
