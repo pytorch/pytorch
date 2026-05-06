@@ -147,7 +147,9 @@ void vectorized_scatter_add_kernel_launch(
 
   constexpr int64_t max_num_threads = 256;
   int64_t num_vectors = slice_size_in_bytes / Alignment;
-  int64_t threads_per_entry = std::min(num_vectors, max_num_threads);
+  int64_t threads_per_entry = std::min(
+      at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())),
+      max_num_threads);
   int64_t entries_per_block = max_num_threads / threads_per_entry;
   int64_t block_size = entries_per_block * threads_per_entry;
   int64_t grid_x = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);

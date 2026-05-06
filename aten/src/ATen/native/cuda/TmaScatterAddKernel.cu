@@ -24,12 +24,13 @@ __global__ void tma_scatter_add_kernel(
     const index_t* __restrict__ idx,
     int num_ind, int D, int64_t self_dim_size,
     int64_t self_stride, int64_t src_stride,
-    int threads_per_entry, int entries_per_block, int chunk_elems) {
+    int entries_per_block, int chunk_elems) {
 #if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     namespace ptx = ::cuda::ptx;
 
     extern __shared__ char smem_raw[];
 
+    constexpr int threads_per_entry = C10_WARP_SIZE;
     int entry_in_block = threadIdx.x / threads_per_entry;
     int lane = threadIdx.x - entry_in_block * threads_per_entry;
 
@@ -53,11 +54,9 @@ __global__ void tma_scatter_add_kernel(
 
     int mbar_phase[2] = {0, 0};
 
-    for (int base = blockIdx.x * entries_per_block; base < num_ind;
-         base += gridDim.x * entries_per_block) {
-
-        int entry_id = base + entry_in_block;
-        if (entry_id >= num_ind) continue;
+    {
+        int entry_id = blockIdx.x * entries_per_block + entry_in_block;
+        if (entry_id >= num_ind) return;
 
         int64_t ind = idx[entry_id];
         CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter add index out of bounds",
@@ -67,7 +66,8 @@ __global__ void tma_scatter_add_kernel(
         scalar_t* dst_entry = self_data + ind * self_stride;
 
         int phase = 0;
-        for (int off = 0; off < D; off += chunk_elems, phase++) {
+        for (int off = blockIdx.y * chunk_elems; off < D;
+             off += gridDim.y * chunk_elems, phase++) {
             int cur = phase & 1;
             int cur_elems = min(chunk_elems, D - off);
             uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
@@ -120,10 +120,19 @@ void tma_scatter_add_kernel_launch(
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
 #if !defined(USE_ROCM)
     constexpr int max_threads = 256;
-    constexpr int threads_per_entry = 32;
+    // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
+    // Correctness depends on this being exactly one warp.
+    constexpr int threads_per_entry = C10_WARP_SIZE;
     int chunk_elems = std::min(D, static_cast<int>(512 / sizeof(scalar_t)));
+    int num_chunks = at::ceil_div(D, chunk_elems);
 
-    int entries_per_block = std::min(max_threads / threads_per_entry, num_ind);
+    int entries_per_block = max_threads / threads_per_entry;
+    int grid_x = at::ceil_div(num_ind, entries_per_block);
+    // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
+    constexpr int min_chunks_per_block = 4;
+    uint32_t grid_y = std::min(
+        static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
+        static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
     int block_size = entries_per_block * threads_per_entry;
 
     int buf_elems = 2 * chunk_elems;
@@ -134,14 +143,13 @@ void tma_scatter_add_kernel_launch(
     int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
     int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
 
-    auto mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-    int grid = std::min(at::ceil_div(num_ind, entries_per_block), mpc * 8);
+    dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
 
     tma_scatter_add_kernel<scalar_t, index_t>
         <<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
         self_data, src_data, idx, num_ind, D, self_dim_size,
         self_stride, src_stride,
-        threads_per_entry, entries_per_block, chunk_elems);
+        entries_per_block, chunk_elems);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
     TORCH_CHECK(false, "TMA scatter_add not supported on ROCm");
