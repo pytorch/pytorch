@@ -142,7 +142,7 @@ async_compile = AsyncCompile()
 
 # Threshold for detecting inner reductions based on tiling score ratio.
 # If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
-INNER_REDUCTION_RATIO_THRESHOLD = 8
+INNER_REDUCTION_RATIO_THRESHOLD = 32
 
 
 def get_triton_reduction_function(reduction_type):
@@ -2993,7 +2993,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def should_use_persistent_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_persistent_reduction(
-            self.features, self.cooperative_reduction
+            self.features, self.cooperative_reduction, self.tiling_scores
         )
 
     def want_no_x_dim(self):

@@ -16983,6 +16983,21 @@ if RUN_GPU:
             code = run_and_get_triton_code(torch.compile(f), x, y)
             self.assertIn("ReductionHint.INNER", code)
 
+        def test_tiling_scores_upgrade_default_to_persistent_inner(self):
+            """Cat on inner dim gets DEFAULT hint but tiling scores recover INNER."""
+
+            def fn(a, b):
+                combined = torch.cat([a, b], dim=-1)  # [256, 512, 513]
+                return combined.max(dim=-1).values
+
+            a = torch.randn(256, 512, 512, device=GPU_TYPE)
+            b = torch.randn(256, 512, 1, device=GPU_TYPE)
+
+            code = run_and_get_triton_code(torch.compile(fn), a, b)
+            self.assertIn("persistent_reduction", code)
+            self.assertIn("ReductionHint.INNER", code)
+            self.assertEqual(fn(a, b), torch.compile(fn)(a, b))
+
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
