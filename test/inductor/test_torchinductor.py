@@ -2879,6 +2879,23 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    def test_float16_explicit_cast_with_reduction(self):
+        # Test that explicit float16 conversions are respected in fused reductions
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        c = (torch.arange(24) % 5 == 0).reshape(2, 3, 4)
+
+        def fn(x, c):
+            z = torch.where(c, torch.full_like(x, 0.5), torch.full_like(x, -0.5))
+            y = z.to(torch.float16) + x.to(torch.float16)
+            return y, y.float().sum()
+
+        eager_result, eager_sum = fn(x, c)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        compiled_result, compiled_sum = compiled_fn(x, c)
+
+        torch.testing.assert_close(compiled_result, eager_result, rtol=0, atol=0)
+        torch.testing.assert_close(compiled_sum, eager_sum, rtol=0, atol=0)
+
     @skip_if_halide
     def test_cummin(self):
         def fn(x):

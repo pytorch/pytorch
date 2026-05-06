@@ -1129,7 +1129,14 @@ class Pointwise(Loops):
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.dtype)
 
-        return self.inner_fn
+        inner_fn = self.inner_fn
+        buffer_dtype = self.dtype
+
+        def wrapped_loader(index):
+            value = inner_fn(index)
+            return ops.to_dtype(value, buffer_dtype, use_compute_types=False)
+
+        return wrapped_loader
 
     def __str__(self) -> str:
         return self._to_str(("ranges",))
