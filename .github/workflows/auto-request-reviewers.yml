@@ -161,8 +161,9 @@ jobs:
       - name: Run matcher over batch
         id: match
         run: |
-          RESULTS="$(BATCH="$(cat batch.json)" python3 .github/scripts/match_reviewers.py \
-            --merge-rules .github/merge_rules.yaml)"
+          RESULTS="$(python3 .github/scripts/match_reviewers.py \
+            --merge-rules .github/merge_rules.yaml \
+            --batch-file batch.json)"
           echo "results=$RESULTS" >> "$GITHUB_OUTPUT"
 
   # Write-only requester: no checkout, only consumes the JSON output from compute.

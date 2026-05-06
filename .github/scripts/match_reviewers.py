@@ -4,14 +4,13 @@
 Reuses patterns_to_regex from gitutils.py to ensure matching semantics are
 identical to trymerge.
 
-Two modes, selected by which env var is set. Result is written to stdout as
-JSON in both modes.
+Result is written to stdout as JSON.
 
-Batch mode (BATCH set):
-    BATCH: JSON list of {"number": int, "files": [str], "author": str}
+Batch mode (--batch-file PATH):
+    Reads a JSON list of {"number": int, "files": [str], "author": str}.
     Output: list of {"number", "reviewers", "teams"}.
 
-Single-PR mode (CHANGED_FILES + PR_AUTHOR set):
+Single-PR mode (CHANGED_FILES + PR_AUTHOR env vars):
     CHANGED_FILES: JSON array of file paths
     PR_AUTHOR:     PR author login
     Output: {"reviewers", "teams"}.
@@ -87,6 +86,7 @@ def match_reviewers(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--merge-rules", required=True, type=Path)
+    parser.add_argument("--batch-file", type=Path)
     args = parser.parse_args()
 
     import yaml
@@ -94,8 +94,9 @@ def main() -> None:
     with open(args.merge_rules) as f:
         rules = yaml.safe_load(f)
 
-    if "BATCH" in os.environ:
-        batch = json.loads(os.environ["BATCH"])
+    if args.batch_file is not None:
+        with open(args.batch_file) as f:
+            batch = json.load(f)
         out: list | dict = []
         for entry in batch:
             reviewers, teams = match_reviewers(rules, entry["files"], entry["author"])
