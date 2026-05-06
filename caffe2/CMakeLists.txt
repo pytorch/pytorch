@@ -256,29 +256,8 @@ set(GENERATED_CXX_TORCH
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
+  append_filelist("libtorch_generated_sources('{}', only_type_vars=True)" GENERATED_CXX_TORCH)
   list(APPEND GENERATED_CXX_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_5.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_6.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_7.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_8.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_9.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_5.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_6.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_7.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_8.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_9.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
     "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp"
   )
