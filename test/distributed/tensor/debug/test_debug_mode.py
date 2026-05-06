@@ -1077,6 +1077,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP

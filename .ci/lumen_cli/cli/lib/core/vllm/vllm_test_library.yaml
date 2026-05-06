@@ -46,6 +46,7 @@ vllm_lora_tp_test_distributed:
   id: vllm_lora_tp_test_distributed
   env_vars:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
+    PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
   num_gpus: 4
   steps:
     - pytest -v -s -x lora/test_chatglm3_tp.py

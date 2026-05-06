@@ -133,7 +133,7 @@ jobs:
             } >> "${GITHUB_ENV}"
           fi
       - name: Setup nightly specific variables
-        if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
+        if: ${{ github.event_name == 'pull_request' || github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         run: |
           {
             echo "DOCKER_IMAGE=pytorch-nightly";
