@@ -34,7 +34,7 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
-from torch._utils import _is_privateuse1_backend_available, render_call
+from torch._utils import render_call
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -44,7 +44,6 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
-    TraceableWrapperSubclass,
 )
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
@@ -58,6 +57,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
+    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -183,10 +183,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor | TraceableWrapperSubclass,
-    *,
-    out: list[Tensor | int | SymInt | OpaqueBase],
-) -> list[Tensor | int | SymInt | OpaqueBase]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
+) -> list[Tensor | int | SymInt | OpaqueType]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -459,25 +457,6 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
 
-        # Propagate grad_dtype here rather than in meta_converter because
-        # meta tensors don't carry autograd metadata.
-        # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
-        # FunctionalTensor view whose base was mutated (e.g. via set_())
-        # triggers lazy view replay through __torch_dispatch__, which
-        # errors without an active FunctionalTensorMode.
-        inner_t = (
-            torch._from_functional_tensor(t.elem)
-            if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor)
-            else t
-        )
-        if (
-            inner_t.requires_grad
-            and inner_t.is_leaf
-            and inner_t.grad_dtype != inner_t.dtype
-            and out.is_leaf
-        ):
-            out.grad_dtype = inner_t.grad_dtype
-
         from torch._dynamo.source import RandomValueSource
 
         value = None
@@ -706,9 +685,7 @@ class SymNumberMemoDescriptor:
         return r
 
     def __set__(
-        self,
-        obj: FakeTensor,
-        value: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | None,
+        self, obj: FakeTensor, value: torch.SymInt | torch.SymFloat | None
     ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
@@ -1414,7 +1391,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
-        # the fake_device of the tensor so that code such as `if x.is_cuda`
+        # the fake_device of the tensor so that code such as as `if x.is_cuda`
         # or torch.zeros([10, 10], device=x.device) continues to execute as if
         # the FakeTensor were real. However, within kernel execution, we return
         # the `Meta` device because all computation within the kernels should
@@ -1480,7 +1457,6 @@ class FakeTensorMode(TorchDispatchMode):
         return not (
             torch.cuda.is_available()
             or (hasattr(torch, "hpu") and torch.hpu.is_available())
-            or _is_privateuse1_backend_available()
         )
 
     @property
@@ -1818,7 +1794,7 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             FunctionalCallableWithEpilogue,
         )
-        from torch._higher_order_ops.utils import SubgraphCallableWrapper
+        from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, (list, tuple, dict)):
             result.append(type(args))
@@ -1855,8 +1831,12 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(id(arg))
                 id_hashed_objects.append(arg)
-            elif isinstance(arg, SubgraphCallableWrapper):
+            elif isinstance(arg, FunctionalizeCtxWrapper):
+                # Special case for AOT Dispatcher first pass, where the fake
+                # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
+                # functional wrapper is destroyed after fake tensor prop. We
+                # need to put the finalizer on the subgraph.
                 id_hashed_objects.append(arg.subgraph)
             elif isinstance(arg, FunctionalCallableWithEpilogue):
                 result.append(type(arg))
@@ -2374,7 +2354,7 @@ class FakeTensorMode(TorchDispatchMode):
                     "mismatched_fake_kernel",
                     metadata_fn=lambda: {
                         "op": str(func),
-                        "reason": f"mismatch between fake value {fake} and real value {real}",
+                        "reason": f"mismatch between fake value {fake} and real value {real}",  # noqa: F821
                     },
                 )
                 return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
@@ -2544,24 +2524,25 @@ class FakeTensorMode(TorchDispatchMode):
             and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
         ):
-            if not all(t.constant is not None for t in flat_arg_fake_tensors):
-                raise AssertionError(
-                    f"{func} should not have fake inputs without constants"
-                )
-            const_flat_args = [
-                a.constant if self.is_our_fake(a) else a for a in flat_args
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
-            out = func(*const_args, **const_kwargs)
-            if type(out) is Tensor and self.may_turn_const(out):
-                # NB: not in_kernel_invocation_manager because we're doing real
-                # compute here
-                # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
-                # dangerous) if this is actually a wrapper subclass tensor,
-                # therefore the exact type test above
-                with no_dispatch():
-                    out = out.clone()
-                return converter.from_real_tensor(self, out, make_constant=True)
+            raise AssertionError("lift function logic not implemented")
+            # if not all(t.constant is not None for t in flat_arg_fake_tensors):
+            #     raise AssertionError(
+            #         f"{func} should not have fake inputs without constants"
+            #     )
+            # const_flat_args = [
+            #     a.constant if self.is_our_fake(a) else a for a in flat_args
+            # ]
+            # const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
+            # out = func(*const_args, **const_kwargs)
+            # if type(out) is Tensor and self.may_turn_const(out):
+            #     # NB: not in_kernel_invocation_manager because we're doing real
+            #     # compute here
+            #     # NB: no_dispatch() here is VERY DANGEROUS (like, segfault
+            #     # dangerous) if this is actually a wrapper subclass tensor,
+            #     # therefore the exact type test above
+            #     with no_dispatch():
+            #         out = out.clone()
+            #     return converter.from_real_tensor(self, out, make_constant=True)
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
         # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
@@ -2570,13 +2551,14 @@ class FakeTensorMode(TorchDispatchMode):
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if is_lift_func:
-            if len(kwargs) != 0 or len(args) != 1:
-                raise AssertionError(
-                    f"Expected exactly one arg for lift func, got args={args} kwargs={kwargs}"
-                )
+            # if len(kwargs) != 0 or len(args) != 1:
+            #     raise AssertionError(
+            #         f"Expected exactly one arg for lift func, got args={args} kwargs={kwargs}"
+            #     )
 
-            if type(args[0]) is Tensor:
-                return converter.from_real_tensor(self, args[0])
+            # if type(args[0]) is Tensor:
+            #     return converter.from_real_tensor(self, args[0])
+            raise AssertionError("lift function + symints logic not implemented")
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
@@ -2612,31 +2594,32 @@ class FakeTensorMode(TorchDispatchMode):
             and not avoiding_device_init
             and func is not aten._nested_tensor_from_tensor_list.default
         ):
-            const_flat_args = [
-                a.constant if self.is_our_fake(a) else a for a in flat_args
-            ]
-            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
+            raise AssertionError("constant prop logic not implemented")
+            # const_flat_args = [
+            #     a.constant if self.is_our_fake(a) else a for a in flat_args
+            # ]
+            # const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
 
-            # NB: not in_kernel_invocation_manager(self) as we want to do REAL
-            # compute
-            with no_dispatch():
-                out = func(*const_args, **const_kwargs)
+            # # NB: not in_kernel_invocation_manager(self) as we want to do REAL
+            # # compute
+            # with no_dispatch():
+            #     out = func(*const_args, **const_kwargs)
 
-            flat_out = pytree.tree_leaves(out)
-            flat_out_tensors = [t for t in flat_out if isinstance(t, Tensor)]
-            all_constant = all(self.may_turn_const(t) for t in flat_out_tensors)
+            # flat_out = pytree.tree_leaves(out)
+            # flat_out_tensors = [t for t in flat_out if isinstance(t, Tensor)]
+            # all_constant = all(self.may_turn_const(t) for t in flat_out_tensors)
 
-            if all_constant:
-                return pytree.tree_map_only(
-                    Tensor,
-                    lambda t: converter.from_real_tensor(self, t, make_constant=True),
-                    out,
-                )
+            # if all_constant:
+            #     return pytree.tree_map_only(
+            #         Tensor,
+            #         lambda t: converter.from_real_tensor(self, t, make_constant=True),
+            #         out,
+            #     )
 
-            # we weren't able to turn outputs to constants,
-            # so invalidate all constants that might be aliases of the outputs
-            for ten in flat_out_tensors:
-                converter.invalidate_constant_aliases(ten)
+            # # we weren't able to turn outputs to constants,
+            # # so invalidate all constants that might be aliases of the outputs
+            # for ten in flat_out_tensors:
+            #     converter.invalidate_constant_aliases(ten)
 
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
@@ -2656,7 +2639,7 @@ class FakeTensorMode(TorchDispatchMode):
             with self, maybe_ignore_fresh_unbacked_symbols():
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
-        self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
+        # self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         def maybe_to_real_tensor(
             t: T,
@@ -2702,31 +2685,32 @@ class FakeTensorMode(TorchDispatchMode):
                 for a in flat_args
             )
         ):
-            log.debug("propagate_real_tensors %s", func)
-            real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
-            real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+            raise AssertionError("propagate_real_tensors logic not implemented")
+            # log.debug("propagate_real_tensors %s", func)
+            # real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
+            # real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
 
-            is_builtin = library_utils.is_builtin(func)
-            if not is_builtin:
-                mutation_checker = library_utils.MutationChecker(
-                    func, real_flat_args, args_spec
-                )
+            # is_builtin = library_utils.is_builtin(func)
+            # if not is_builtin:
+            #     mutation_checker = library_utils.MutationChecker(
+            #         func, real_flat_args, args_spec
+            #     )
 
-            try:
-                real_out = func(*real_args, **real_kwargs)
-            except ZeroDivisionError as exc:
-                # we shouldn't broadly catch all errors here;
-                # some come from real-kernel mutation/aliasing checks we want to run.
-                # add more exception types as needed.
-                log.debug(
-                    "real-tensor fallback failed for %s: %s; silently ignoring",
-                    func,
-                    exc,
-                )
+            # try:
+            #     real_out = func(*real_args, **real_kwargs)
+            # except ZeroDivisionError as exc:
+            #     # we shouldn't broadly catch all errors here;
+            #     # some come from real-kernel mutation/aliasing checks we want to run.
+            #     # add more exception types as needed.
+            #     log.debug(  # noqa: G200
+            #         "real-tensor fallback failed for %s: %s; silently ignoring",
+            #         func,
+            #         exc,
+            #     )
 
-            if not is_builtin:
-                mutation_checker.check()  # type: ignore[possibly-undefined]
-                library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+            # if not is_builtin:
+            #     mutation_checker.check()  # type: ignore[possibly-undefined]
+            #     library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
 
         elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
@@ -2735,15 +2719,16 @@ class FakeTensorMode(TorchDispatchMode):
             # know what the unbacked SymInt is, but we will know later.
             # However, if there's a bug in the condition above, this condition
             # will also trigger.
-            log.debug(
-                "SKIPPED propagate_real_tensors %s(%s, %s) %s",
-                func,
-                flat_arg_fake_tensors,
-                flat_args,
-                self.shape_env.real_tensor_prop_unbacked_vals
-                if self.shape_env
-                else None,
-            )
+            # log.debug(
+            #     "SKIPPED propagate_real_tensors %s(%s, %s) %s",
+            #     func,
+            #     flat_arg_fake_tensors,
+            #     flat_args,
+            #     self.shape_env.real_tensor_prop_unbacked_vals
+            #     if self.shape_env
+            #     else None,
+            # )
+            raise AssertionError("propagate_real_tensors logic not implemented")
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
             import sympy
@@ -2781,7 +2766,9 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(
+                            s, int(real_t)
+                        )
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2832,6 +2819,7 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+            # raise AssertionError("symbolic sizes logic not implemented")
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
 
@@ -2843,6 +2831,8 @@ class FakeTensorMode(TorchDispatchMode):
             )
         ):
             from torch._decomp import decomposition_table
+
+            # raise AssertionError("decomposition_table logic not implemented")
 
             # Prefer Python decompositions over C++ ones
             if func in decomposition_table and (
@@ -2883,8 +2873,9 @@ class FakeTensorMode(TorchDispatchMode):
 
         profiles = torch._dynamo.config._custom_ops_profile
         if profiles is not None:
-            if func in profiles.data:
-                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
+            # if func in profiles.data:
+            #     return profiles.generic_fake_kernel(func, self, *args, **kwargs)
+            raise AssertionError("custom_ops_profile logic not implemented")
 
         if (
             self.propagate_real_tensors
@@ -2893,16 +2884,17 @@ class FakeTensorMode(TorchDispatchMode):
             and self.shape_env is not None
         ):
             # Automatically infer a Fake kernel if there isn't one.
-            if not library_utils.has_fake_kernel(func):
-                result = inferred_fake_kernel_from_real_out(self, func, real_out)
+            # if not library_utils.has_fake_kernel(func):
+            #     result = inferred_fake_kernel_from_real_out(self, func, real_out)
 
-                dtrace_structured(
-                    "missing_fake_kernel",
-                    metadata_fn=lambda: {
-                        "op": str(func),
-                    },
-                )
-                return maybe_propagate_real_tensors(result)
+            #     dtrace_structured(
+            #         "missing_fake_kernel",
+            #         metadata_fn=lambda: {
+            #             "op": str(func),
+            #         },
+            #     )
+            #     return maybe_propagate_real_tensors(result)
+            raise AssertionError("missing_fake_kernel logic not implemented")
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
@@ -2910,55 +2902,61 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).fake_impl.kernel
         if maybe_fake_impl:
-            try:
-                ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
-                    result = maybe_fake_impl(*args, **kwargs)
-                    return maybe_propagate_real_tensors(result)
+            # try:
+            #     ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+            #     with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+            #         result = maybe_fake_impl(*args, **kwargs)
+            #         return maybe_propagate_real_tensors(result)
 
-            except MissingOpProfile as e:
-                # If we have a fake kernel registered generated from OpProfiles
-                # but there doesn't exist a profile for the existing inputs, and we are in
-                if (
-                    self.propagate_real_tensors
-                    and real_out is not nil
-                    and not library_utils.is_builtin(func)
-                    and self.shape_env is not None
-                ):
-                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
+            # except MissingOpProfile as e:
+            #     # If we have a fake kernel registered generated from OpProfiles
+            #     # but there doesn't exist a profile for the existing inputs, and we are in
+            #     if (
+            #         self.propagate_real_tensors
+            #         and real_out is not nil
+            #         and not library_utils.is_builtin(func)
+            #         and self.shape_env is not None
+            #     ):
+            #         result = inferred_fake_kernel_from_real_out(self, func, real_out)
 
-                    dtrace_structured(
-                        "missing_fake_kernel",
-                        metadata_fn=lambda: {
-                            "op": str(func),
-                        },
-                    )
-                    return maybe_propagate_real_tensors(result)
-                else:
-                    raise e
+            #         dtrace_structured(
+            #             "missing_fake_kernel",
+            #             metadata_fn=lambda: {
+            #                 "op": str(func),
+            #             },
+            #         )
+            #         return maybe_propagate_real_tensors(result)
+            #     else:
+            #         raise e
+            raise AssertionError("user defined logic not implemented")
+
+        # structured kernels
+        # if func in structured_kernel_registry:
+        #     # with FakeTensor. We should remove this once we have a
+        #     # better way to handle structured kernels
+        #     # from torch._library.simple_registry import structured_kernel_registry
+
+        #     # with self:
+        #     #     return maybe_propagate
+        #     raise AssertionError("structured_kernel_registry logic not implemented")
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
-                # pyrefly: ignore [bad-argument-count]
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out is not NotImplemented:
-                    # pyrefly: ignore [bad-return]
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
             error: RuntimeError | None = None,
         ) -> FakeTensor | None:
-            # We infer the meta of custom ops that return None to just
-            # return None, and Tag.out ops to return their out= args.
-            # Custom ops are not allowed to mutate metadata of their
-            # inputs, so this is safe.
+            # We infer the meta of a custom ops that return None to just
+            # return None. custom ops are not allowed to mutate metadata
+            # of their inputs, so this is safe.
             if torch._library.utils.can_generate_trivial_fake_impl(func):
-                return torch._library.utils.generate_trivial_fake_impl(
-                    func, *args, **kwargs
-                )
+                return None
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
@@ -3119,7 +3117,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def create_symbolic_nested_int(
         self, *, nt_tensor_id: int | None = None
-    ) -> IntLikeType:
+    ) -> torch.SymInt:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor

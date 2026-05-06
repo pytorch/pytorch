@@ -231,6 +231,14 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
 
+  // Callback to run a Python decomposition for an op. Set from Python-aware
+  // code (torch/csrc/Module.cpp) so ATen code can call into Python without
+  // depending on Python headers. The arguments are type-erased:
+  //   op:    const c10::OperatorHandle*
+  //   stack: torch::jit::Stack* (std::vector<IValue>*)
+  // Returns true if a decomposition was found and executed.
+  std::function<bool(const void* op, void* stack)> decomp_fn_;
+
   FakeTensorMode(std::shared_ptr<c10::SafePyObject> shape_env, std::shared_ptr<c10::SafePyObject> converter)
       : shape_env_(std::move(shape_env)), fake_tensor_converter_(std::move(converter)) {}
 };
