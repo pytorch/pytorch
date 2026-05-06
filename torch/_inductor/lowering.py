@@ -2657,13 +2657,16 @@ def philox_rand_offset(shape):
 
 @register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
 def philox_rand(size, seed, offset, stride, device, dtype):
-    # stride arg is optional and will be used in future for distributed random
-    # ops. Currently, its unused.
+    # stride arg is used to ensure RNG alignment with non-contiguous layouts
+    # (e.g. transposed or sliced views). When None, fall back to contiguous
+    # strides for backward compatibility.
+    if stride is None:
+        stride = ir.FlexibleLayout.contiguous_strides(size)
     random_pos = ir.FixedLayout(
         device,
         dtype,
         size,
-        ir.FlexibleLayout.contiguous_strides(size),
+        list(stride),
     ).make_indexer()
     seed_loader = seed.make_loader()
     offset_loader = offset.make_loader()

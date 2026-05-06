@@ -10731,6 +10731,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(eager_out, compiled_out)
 
+    @config.patch(fallback_random=True)
+    def test_dropout_on_transposed_view_rng_consistency(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/174078"""
+
+        def fn(x):
+            y = x[::2, ::2]
+            return torch.nn.functional.dropout(y, p=0.5, training=True)
+
+        x = torch.randn(20, 20, device=self.device)
+
+        torch.manual_seed(42)
+        eager_out = fn(x.clone())
+        torch.manual_seed(42)
+        compiled_out = torch.compile(fn)(x.clone())
+
+        self.assertEqual(eager_out, compiled_out)
+
     @config.patch(fallback_random=False)
     def test_fast_like_rands_decomps_use_non_eager_path(self):
         x = torch.zeros(3, 6, device=self.device)
