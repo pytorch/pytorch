@@ -2588,6 +2588,58 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm
+    def test_scaled_mm_v2_fullgraph(self, device) -> None:
+        m, n, k = 15, 32, 16
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        b = torch.randn(k, n, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn).t().contiguous().t()
+        scale_a = torch.ones(1, device=device)
+        scale_b = torch.ones(1, device=device)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a, b,
+                scale_a=scale_a,
+                scale_recipe_a=ScalingType.TensorWise,
+                swizzle_a=SwizzleType.NO_SWIZZLE,
+                scale_b=scale_b,
+                scale_recipe_b=ScalingType.TensorWise,
+                swizzle_b=SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
+
+        expected = fn(a, b, scale_a, scale_b)
+        actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b)
+        self.assertEqual(actual, expected)
+
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        a = torch.randn(m, k * n_groups, device=device).to(fp8_dtype)
+        b = torch.randn(n, k * n_groups, device=device).to(fp8_dtype)
+        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+
+        def fn(a, b, scale_a, scale_b, offs):
+            return scaled_grouped_mm(
+                a, b.t(),
+                scale_a,
+                ScalingType.RowWise,
+                scale_b,
+                ScalingType.RowWise,
+                offs=offs,
+                output_dtype=torch.bfloat16,
+            )
+
+        expected = fn(a, b, scale_a, scale_b, offs)
+        actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
+        self.assertEqual(actual, expected)
+
+
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
