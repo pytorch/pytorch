@@ -5,6 +5,7 @@ from contextlib import nullcontext
 
 import torch
 import torch.distributed as dist
+from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._local_tensor import (
     local_tensor_mode,
     LocalIntNode,
@@ -652,6 +653,19 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             dist_res = torch.cat([d1, d2], dim=-1)
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
+
+    def test_compile_all_gather(self):
+        fake_pg = dist.distributed_c10d._get_default_group()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def my_func(x):
+            return all_gather_tensor(x, gather_dim=0, group=fake_pg)
+
+        different_tensors = {r: torch.randn(2, 3) + r for r in range(self.world_size)}
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(different_tensors)
+            result = my_func(lt)
+            self.assertEqual(result.shape, torch.Size([8, 3]))
 
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
