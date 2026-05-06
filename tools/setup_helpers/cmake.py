@@ -7,6 +7,7 @@ import json
 import multiprocessing
 import os
 import platform
+import re
 import shutil
 import sys
 import sysconfig
@@ -194,6 +195,29 @@ class CMake:
                 )
                 self.clear_cache()
                 cmake_cache_file_available = False
+            elif (
+                cached_python := cmake_cache_variables.get("Python_EXECUTABLE")
+            ) and cached_python != sys.executable:
+                # Drop all Python_* cache entries (including FindPython's INTERNAL
+                # `_Python_*` copies) so find_package(Python) re-detects headers,
+                # libraries, and NumPy paths for the new interpreter. Without
+                # this, Python-linked targets relink against stale headers and
+                # produce wheels that fail to import. Non-Python entries stay,
+                # so we skip a full reconfigure.
+                eprint(
+                    "!!!WARNING!!!: Python interpreter changed "
+                    f"({cached_python!r} -> {sys.executable!r}). "
+                    "Dropping Python_* cache entries."
+                )
+                python_name_re = re.compile(r"^_?(?:Python|PYTHON)[23]?_")
+                self._remove_cache_entries(
+                    [
+                        name
+                        for name in self._cache_variable_names()
+                        if python_name_re.match(name)
+                    ]
+                )
+                cmake_cache_file_available = False
 
         if cmake_cache_file_available and (
             not USE_NINJA or os.path.exists(self._ninja_build_file)
@@ -358,3 +382,42 @@ class CMake:
             os.remove(self._cmake_cache_file)
         if os.path.isfile(self._ninja_build_file):
             os.remove(self._ninja_build_file)
+
+    # CMakeCache.txt lines look like `NAME:TYPE=VALUE` (TYPE optional). The
+    # variable name may be quoted if it contains punctuation.
+    _CACHE_LINE_RE = re.compile(r'^("?)([^:=]+?)\1[:=]')
+
+    def _cache_variable_names(self) -> list[str]:
+        """All variable names in CMakeCache.txt, including INTERNAL ones
+        (which `get_cmake_cache_variables` skips)."""
+        with open(self._cmake_cache_file) as f:
+            return [m.group(2) for line in f if (m := self._CACHE_LINE_RE.match(line))]
+
+    def _remove_cache_entries(self, names: list[str]) -> None:
+        """Remove the given variable names from CMakeCache.txt in place.
+
+        CMake writes each entry as a blank line, one or more ``//`` help
+        comments, then ``NAME:TYPE=VALUE``. When removing an entry, we drop
+        its comment/blank preamble along with the value line so the rewritten
+        file has no orphan comments.
+        """
+        to_remove = set(names)
+        with open(self._cmake_cache_file) as f:
+            lines = f.readlines()
+        kept: list[str] = []
+        preamble: list[str] = []
+        for line in lines:
+            stripped = line.lstrip()
+            if not stripped.strip() or stripped.startswith("//"):
+                preamble.append(line)
+                continue
+            m = self._CACHE_LINE_RE.match(line)
+            if m and m.group(2) in to_remove:
+                preamble.clear()
+                continue
+            kept.extend(preamble)
+            preamble.clear()
+            kept.append(line)
+        kept.extend(preamble)
+        with open(self._cmake_cache_file, "w") as f:
+            f.writelines(kept)

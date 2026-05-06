@@ -121,10 +121,9 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(z, FakeTensor))
 
     def test_custom_op_fallback(self):
-        from torch.library import impl, Library
+        from torch.library import _scoped_library, impl
 
-        try:
-            test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
+        with _scoped_library("my_test_op", "DEF") as test_lib:
             test_lib.define("foo(Tensor self) -> Tensor")
 
             @impl(test_lib, "foo", "CPU")
@@ -138,9 +137,6 @@ class FakeTensorTest(TestCase):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
-
-        finally:
-            test_lib._destroy()
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -601,6 +597,16 @@ class FakeTensorTest(TestCase):
             return torch.functional.split(x, 0)[0]
 
         # meta should not return self
+        with FakeTensorMode(), enable_python_dispatcher():
+            out_fake = fn(torch.empty((0,)))
+
+        out_eager = fn(torch.empty((0,)))
+        self.checkMetaProps(out_fake, out_eager)
+
+    def test_split_empty_dim(self):
+        def fn(x):
+            return torch.split(x, 2)[0]
+
         with FakeTensorMode(), enable_python_dispatcher():
             out_fake = fn(torch.empty((0,)))
 
@@ -1632,6 +1638,62 @@ class FakeTensorConverterTest(TestCase):
             raise AssertionError("expected mode_weak() is None")
         if y_weak() is not None:
             raise AssertionError("expected y_weak() is None")
+
+    def test_grad_dtype_preserved(self):
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+
+    def test_grad_dtype_none_preserved(self):
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = None
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertIsNone(fake_t.grad_dtype)
+
+    def test_grad_dtype_functional_tensor_no_crash(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+
+        mode = FakeTensorMode()
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+
+        with FunctionalTensorMode():
+            func_t = FunctionalTensor.to_functional(fake_t)
+            # Re-fakifying a FunctionalTensor should not crash even though
+            # the inner tensor has a custom grad_dtype.
+            re_faked = mode.from_tensor(func_t)
+        self.assertTrue(re_faked.requires_grad)
+
+    @skipIfTorchDynamo("make_fx tracing is incompatible with dynamo")
+    def test_grad_dtype_make_fx(self):
+        def train_step(w):
+            y = (w.float() * 2).sum()
+            (g,) = torch.autograd.grad(y, w)
+            return g
+
+        w = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        w.grad_dtype = torch.float32
+
+        g_eager = train_step(w)
+
+        fake_mode = FakeTensorMode()
+        w_fake = fake_mode.from_tensor(w)
+        with fake_mode:
+            gm = make_fx(train_step)(w_fake)
+        g_traced = gm(w)
+
+        self.assertEqual(g_eager.dtype, g_traced.dtype)
 
 
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
