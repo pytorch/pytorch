@@ -517,7 +517,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      runner: linux.c7i.12xlarge
+      runner: linux.c7i.8xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       test-matrix: |
