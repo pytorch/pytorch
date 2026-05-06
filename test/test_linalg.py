@@ -40,7 +40,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU
+    _get_torch_cuda_version, TEST_MULTIGPU, blas_library_context
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -10318,6 +10318,23 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         cpu_out = torch.nn.functional.linear(m1.cpu(), m2.cpu())
 
         self.assertEqual(ck_out, cpu_out)
+
+    @onlyCUDA
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_ck_blas_library_mm(self, dtype):
+        device = 'cuda'
+        shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
+        for M, K, N in shapes:
+            a = torch.randint(2, 5, (M, K), device=device, dtype=torch.float32).to(dtype)
+            b = torch.randint(2, 5, (K, N), device=device, dtype=torch.float32).to(dtype)
+            cpu_out = torch.mm(a.cpu(), b.cpu())
+            with blas_library_context("ck"):
+                ck_out = torch.mm(a, b)
+            self.assertEqual(ck_out, cpu_out)
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
