@@ -62,7 +62,9 @@ from .dicts import (
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BaseUserFunctionVariable,
+    BoundBuiltinMethodVariable,
     BuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
@@ -71,6 +73,8 @@ from .functions import (
     InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
+    MethodDescriptorVariable,
+    MethodWrapperVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
@@ -82,6 +86,7 @@ from .functions import (
     TritonSetAllocatorVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
     WrapperUserMethodVariable,
 )
@@ -118,7 +123,7 @@ from .misc import (
     ExceptionVariable,
     GetAttrVariable,
     LambdaVariable,
-    MethodWrapperVariable,
+    ConstantMethodWrapperVariable,
     NewGlobalVariable,
     NumpyVariable,
     ObjectVariable,
