@@ -332,13 +332,7 @@ void fakeFallback(
   // and throw an error if so to pass control to the next torch dispatch
   // but since C++ fake sits below python i dont think we need that here
 
-  // sym int check
-  TORCH_CHECK(
-    !has_symbolic_sizes(stack, arguments_begin, num_arguments),
-    "SymInts are not fully yet supported in C++ FakeTensor (op: ",
-    op.operator_name(),
-    ")"
-  );
+  bool has_symints = has_symbolic_sizes(stack, arguments_begin, num_arguments);
 
   std::vector<at::Tensor> flat_arg_fake_tensors;
   for_each_tensor(
@@ -362,7 +356,7 @@ void fakeFallback(
   // which lives in the Python layer and is unavailable here.
   if ((is_lift_func(op) && flat_arg_fake_tensors.empty()) ||
       (false /* TODO: should_allow_numbers_as_tensors */ &&
-       !has_symbolic_sizes(stack, arguments_begin, num_arguments) &&
+       !has_symints &&
        flat_arg_fake_tensors.empty() &&
        !device_conversion_skip_const_prop)) {
     // TODO: implement constant propagation
@@ -413,24 +407,27 @@ void fakeFallback(
         });
   };
 
-  // THIS IS NOT COMPLETE
-  // for symints, call back to python for decomp table
-  if (has_symbolic_sizes(stack, arguments_begin, num_arguments) &&
-      !cpp_meta_supports_symint(op) && mode) {
+  // For ops with symbolic sizes, try decompositions before the Meta kernel.
+  // Python FakeTensorMode (fake_tensor.py:2826) checks `meta_table` (a Python
+  // dict), NOT hasKernelForDispatchKey(Meta). Many ops (e.g. aten::where,
+  // aten::expand) have Meta kernels registered via @register_decomposition
+  // which registers as BOTH decomposition AND Meta kernel. We must try the
+  // decomp table for these ops because the bottom path runs Meta kernels with
+  // Fake excluded from TLS, so sub-ops can't handle SymInt. The decomp path
+  // keeps Fake in TLS, allowing sub-ops to re-enter fakeFallback.
+  if (has_symints && !cpp_meta_supports_symint(op) && mode) {
     // 1. Try Python decomposition table
     if (mode->decomp_fn_ && mode->decomp_fn_(&op, stack)) {
       wrap_meta_outputs_with_default_device_logic();
       return;
     }
 
-    // 2. Try CompositeImplicitAutograd decomposition. Run with Fake key
-    //    active in TLS so sub-ops re-enter fakeFallback, matching Python
-    //    FakeTensorMode's `with self: func.decompose(*args, **kwargs)`.
-    //    We must remove Fake from the redispatch keyset for THIS call so
-    //    the dispatcher doesn't re-enter fakeFallback for the op itself
-    //    (which would infinite-loop). Sub-ops called by the CIA kernel
-    //    compute fresh keysets from TLS where Fake is still active.
-    if (op.hasKernelForDispatchKey(
+    // 2. Try CompositeImplicitAutograd decomposition. Remove Fake from the
+    //    redispatch keyset so this op doesn't re-enter fakeFallback (which
+    //    would infinite-loop). Sub-ops compute fresh keysets from TLS where
+    //    Fake is still active, so they re-enter fakeFallback correctly.
+    if (!op.hasKernelForDispatchKey(c10::DispatchKey::Meta) &&
+        op.hasKernelForDispatchKey(
             c10::DispatchKey::CompositeImplicitAutograd)) {
       auto ks = dispatchKeySet;
       ks = ks.remove(c10::DispatchKey::Fake);
@@ -442,12 +439,72 @@ void fakeFallback(
     }
   }
 
+  // Prims ops with Meta kernels: redispatch to the Meta kernel with Fake
+  // removed from the keyset (so this op doesn't re-enter fakeFallback) but
+  // Fake stays in TLS (so sub-ops like torch.empty_strided re-enter
+  // fakeFallback and get properly fakified). This matches Python
+  // FakeTensorMode's `with self: func.prim_meta_impl(...)` pattern.
+  // We must add Meta to the keyset because C++ fake tensors report
+  // device=cpu (their fake device), so Meta isn't in the tensor's keyset.
+  // BackendSelect must be removed because it has higher priority than Meta
+  // and some prims (e.g. iota) have BackendSelect kernels that call back
+  // to aten ops (torch.arange), which would re-enter the decomp table and
+  // infinite-loop.
   if (schema.name().rfind("prims::", 0) == 0 &&
-          op.hasKernelForDispatchKey(c10::DispatchKey::Meta)) {
-    // omitting stride_incorrect_op(func) because it looks like it
-    // always returns false ??
-    // https://github.com/pytorch/pytorch/blob/main/torch/_subclasses/fake_impls.py#L311
-    TORCH_CHECK(false, "prims not implemented in C++ faketensor");
+      op.hasKernelForDispatchKey(c10::DispatchKey::Meta)) {
+    // Python calls prim_meta_impl directly so scalar args stay as Python
+    // floats/ints. In C++, the dispatcher wraps them as tensors with default
+    // dtypes (float64 for floats, int64 for ints) before we get here, causing
+    // dtype mismatches. Get the target dtype from non-0-dim non-bool tensors.
+    // If all tensors are 0-dim, use the first whose dtype isn't a default
+    // wrapping dtype (float64/int64) since those are likely wrapped scalars.
+    std::optional<c10::ScalarType> target_dtype;
+    for_each_tensor(
+        stack, arguments_begin, num_arguments,
+        [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+          if (t.defined() && t.dim() > 0 &&
+              t.scalar_type() != c10::ScalarType::Bool &&
+              !target_dtype.has_value()) {
+            target_dtype = t.scalar_type();
+          }
+          return std::nullopt;
+        });
+    if (!target_dtype.has_value()) {
+      for_each_tensor(
+          stack, arguments_begin, num_arguments,
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (t.defined() &&
+                t.scalar_type() != c10::ScalarType::Bool &&
+                t.scalar_type() != c10::ScalarType::Double &&
+                t.scalar_type() != c10::ScalarType::Long &&
+                !target_dtype.has_value()) {
+              target_dtype = t.scalar_type();
+            }
+            return std::nullopt;
+          });
+    }
+    if (target_dtype.has_value()) {
+      for_each_tensor(
+          stack, arguments_begin, num_arguments,
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (t.defined() &&
+                t.scalar_type() != c10::ScalarType::Bool &&
+                t.scalar_type() != *target_dtype) {
+              return t.to(*target_dtype);
+            }
+            return std::nullopt;
+          });
+    }
+
+    auto ks = dispatchKeySet;
+    ks = ks.remove(c10::DispatchKey::Fake);
+    ks = ks.remove(c10::DispatchKey::Python);
+    ks = ks.remove(c10::DispatchKey::PythonTLSSnapshot);
+    ks = ks.remove(c10::DispatchKey::BackendSelect);
+    ks = ks | c10::DispatchKeySet(c10::DispatchKey::Meta);
+    op.redispatchBoxed(ks, stack);
+    wrap_meta_outputs_with_default_device_logic();
+    return;
   }
 
   // TODO: profiles
@@ -488,8 +545,16 @@ void fakeFallback(
     op.callBoxed(stack);
     wrap_meta_outputs_with_default_device_logic();
   } catch (c10::NotImplementedError&) {
-    // Meta kernel failed — restore the stack and run the real kernel
-    // with zero-filled inputs to discover output metadata.
+    // Meta kernel failed. With symbolic sizes we cannot run the unsafe
+    // fallback (it materializes real tensors from symbolic shapes).
+    // Match Python FakeTensorMode: raise UnsupportedOperatorException.
+    TORCH_CHECK(
+        !has_symints,
+        "Unsupported operator for C++ FakeTensor with symbolic sizes: ",
+        op.operator_name());
+
+    // Restore the stack and run the real kernel with zero-filled inputs
+    // to discover output metadata.
     stack->resize(arguments_begin);
     for (auto& arg : saved_args) {
       stack->push_back(std::move(arg));

@@ -2178,11 +2178,11 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
-#     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-#     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-#              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
-#     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
-#         _test_make_fx_helper(self, device, dtype, op, "symbolic")
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
+    def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
+        _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
 #     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
 #     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',

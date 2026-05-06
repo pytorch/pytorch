@@ -238,15 +238,9 @@ struct C10_API BackendMeta : intrusive_ptr_target {
   }
 };
 
-namespace impl {
-enum class TorchDispatchModeKey : int8_t;
-using PyObject_TorchDispatchMode = SafePyObjectT<TorchDispatchModeKey>;
-} // namespace impl
-
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> python_fallback_mode_;
 
   // Callback to run a Python decomposition for an op. Set from Python-aware
   // code (torch/csrc/Module.cpp) so ATen code can call into Python without
@@ -258,11 +252,9 @@ struct C10_API FakeTensorMode {
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
-      std::shared_ptr<c10::SafePyObject> converter,
-      std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> fallback = nullptr)
+      std::shared_ptr<c10::SafePyObject> converter)
       : shape_env_(std::move(shape_env)),
-        fake_tensor_converter_(std::move(converter)),
-        python_fallback_mode_(std::move(fallback)) {}
+        fake_tensor_converter_(std::move(converter)) {}
 };
 
 struct C10_API ExtraMeta {

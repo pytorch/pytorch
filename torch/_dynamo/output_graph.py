@@ -2671,6 +2671,8 @@ class OutputGraph(OutputGraphCommon):
                 ),
             )
             self.call_cleanup_hooks()
+            # if config.use_cpp_fake_tensor:
+            raise AssertionError("graph completed")
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
             # Store old_fake_mode so it can be cleared at end of compile

@@ -878,6 +878,20 @@ cpp_fake_only_fake_failures = {
     xfail('tensor_split'),
 }
 
+# Failures specific to symbolic shapes under C++ fake mode.
+# These mirror symbolic_tensor_failures from test_proxy_tensor.py.
+cpp_fake_symbolic_failures = {
+    xfail('combinations', ''),
+    xfail('geqrf', ''),
+    xfail('histogram', ''),
+    xfail('histogramdd', ''),
+    xfail('nn.functional.binary_cross_entropy', ''),
+    xfail('nn.functional.cross_entropy', ''),
+    xfail('nn.functional.ctc_loss'),
+    xfail('max_pool2d_with_indices_backward', ''),
+    skip('nn.functional.batch_norm'),
+}
+
 
 def _get_safe_inplace(inplace_variant):
     @functools.wraps(inplace_variant)
@@ -908,6 +922,23 @@ def _test_make_fx_helper_cpp_fake(self, device, dtype, op, inplace=False,
             _make_fx_check_cpp_fake(fn, args, kwargs, self.assertEqual,
                                     randomize_data=True,
                                     decomp_table=decomp_table)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
+
+
+def _test_make_fx_helper_cpp_fake_symbolic(self, device, dtype, op):
+    """Like _test_make_fx_helper_cpp_fake but with symbolic shapes."""
+    fn = op.op
+    sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+
+    for sample_input in itertools.islice(sample_inputs_itr, 100):
+        args = [sample_input.input] + list(sample_input.args)
+        kwargs = sample_input.kwargs
+
+        try:
+            _make_fx_check_cpp_fake_symbolic(fn, args, kwargs,
+                                             self.assertEqual,
+                                             randomize_data=True)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
 
@@ -971,6 +1002,43 @@ def _make_fx_check_cpp_fake(func, args, kwargs, assert_close,
     assert_close(result, expected, msg=msg)
 
 
+def _make_fx_check_cpp_fake_symbolic(func, args, kwargs, assert_close,
+                                     randomize_data=False, decomp_table=None):
+    """Like _make_fx_check_cpp_fake but with symbolic shapes."""
+    from torch.testing._internal.optests.make_fx import (
+        handle_sizes_for_dynamic_shapes,
+        randomize,
+    )
+    from torch.testing._utils import wrapper_set_seed
+    from torch.utils._pytree import tree_map_only
+
+    f, *new_args = handle_sizes_for_dynamic_shapes(func, args, kwargs)
+
+    def run(f, *args, **kwargs):
+        return wrapper_set_seed(f, *args, **kwargs)
+
+    with cpp_fake_tensor_mode() as shape_env:
+        symbolic_args = tree_map_only(torch.Tensor, _to_cpp_fake_symbolic, new_args)
+        traced_f = make_fx(f, tracing_mode="real",
+                           decomposition_table=decomp_table)(*symbolic_args)
+
+    msg = (
+        "op(*args, **kwargs) and make_fx(op)(*args, **kwargs) under "
+        "cpp_fake_tensor_mode (symbolic) produced different values."
+    )
+
+    if randomize_data:
+        new_args = randomize(new_args)
+    try:
+        expected = run(f, *new_args)
+    except Exception:
+        if randomize_data:
+            return
+        raise
+    result = run(traced_f, *new_args)
+    assert_close(result, expected, msg=msg)
+
+
 # HOPs whose user-facing wrappers (torch.cond, etc.) call torch.compile internally,
 # creating a Python FakeTensorMode that conflicts with C++ fake mode.
 # These are tested directly via internal ops in TestCppFakeProxyTensor.
@@ -983,7 +1051,7 @@ filtered_hop_db = [op for op in hop_db if op.name not in _HOP_SKIP_USER_FACING]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestCppFakeProxyTensorOpInfo(TestCase):
-    """Exhaustive op tests under C++ FakeTensor mode (no symbolic shapes)."""
+    """Exhaustive op tests under C++ FakeTensor mode."""
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestCppFakeProxyTensorOpInfo', 'test_make_fx_exhaustive',
@@ -998,6 +1066,12 @@ class TestCppFakeProxyTensorOpInfo(TestCase):
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         print(f"\n[cpp_fake fake_exhaustive] {op.name}.{op.variant_test_name or 'default'}")
         _test_make_fx_helper_cpp_fake(self, device, dtype, op)
+
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestCppFakeProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
+             cpp_fake_make_fx_failures | cpp_fake_symbolic_failures)
+    def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
+        _test_make_fx_helper_cpp_fake_symbolic(self, device, dtype, op)
 
 
 only_for = ("cpu",)

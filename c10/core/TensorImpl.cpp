@@ -634,6 +634,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
+  dest_impl->custom_device_ = src_impl->custom_device_;
 
   dest_impl->refresh_sizes_strides_policy();
   dest_impl->refresh_layout_policy();
