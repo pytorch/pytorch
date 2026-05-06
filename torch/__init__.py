@@ -2751,6 +2751,13 @@ def compile(
 
         backend = get_default_backend()
 
+    # Auto-wrap ParamsSpec → ShapesSpec for convenience
+    if shapes_spec is not None:
+        from torch._dynamo.dynamic_spec import ParamsSpec, ShapesSpec
+
+        if isinstance(shapes_spec, ParamsSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
+
     # Decorator mode
     if model is None:
 

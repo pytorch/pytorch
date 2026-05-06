@@ -388,6 +388,14 @@ class TestShapeVarCompile(TestCase):
         compiled(torch.randn(8, 3), torch.randn(8, 3))  # x dim0 absorbed, y recompiles
         self.assertEqual(cnt.frame_count, 2)
 
+        # 3rd distinct y shape → still recompiles (auto-dynamic NOT triggered)
+        compiled(torch.randn(12, 3), torch.randn(12, 3))
+        self.assertEqual(cnt.frame_count, 3)
+
+        # 4th distinct y shape → still recompiles (confirms no promotion)
+        compiled(torch.randn(16, 3), torch.randn(16, 3))
+        self.assertEqual(cnt.frame_count, 4)
+
     def test_unspecified_parameter_stays_static(self):
         """nn.Parameter arg not mentioned in shapes_spec stays fully static."""
         backend = EagerAndRecordGraphs()
@@ -410,6 +418,19 @@ class TestShapeVarCompile(TestCase):
 
     # TODO: once ObjectSpec is added, test the opposite — that specifying a
     # TensorSpec on an nn.Parameter makes it a placeholder (not inlined).
+
+    def test_params_spec_shorthand(self):
+        """shapes_spec=ParamsSpec(...) is auto-wrapped into ShapesSpec."""
+        backend = EagerAndRecordGraphs()
+        fn = torch.compile(
+            lambda x: x.sum(0),
+            backend=backend,
+            shapes_spec=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}),
+        )
+        for n in [4, 8, 16]:
+            fn(torch.randn(n, 3))
+        # Unbacked dim 0 → single compile
+        self.assertEqual(len(backend.graphs), 1)
 
 
 if __name__ == "__main__":

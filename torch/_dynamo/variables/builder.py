@@ -38,7 +38,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -2286,9 +2286,6 @@ class VariableBuilder:
                     )
                 return result
 
-            # allowlist has higher precedence over specialization control.
-            # I am keeping some power for dynamic_source over unspecified
-            # spec.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
@@ -2407,13 +2404,15 @@ class VariableBuilder:
         is_static_input = get_static_address_type(value) is not None
 
         # When a shapes_spec is provided for this tensor, we must skip the
-        # fast paths below (mark_static_input, register_attr_or_module,
-        # guarded ID_MATCH) that would freeze the tensor as a graph constant.
+        # fast paths below that would freeze the tensor as a graph constant.
         # Those paths bypass _automatic_dynamic where the spec is applied.
         # Without this check, specifying TensorSpec on an nn.Parameter would
         # be silently ignored.
-        _tensor_spec = lookup_spec_from_dynamo_source(source, config._shapes_spec)
-        if isinstance(_tensor_spec, TensorSpec) and len(_tensor_spec) != value.dim():
+        _tensor_spec = cast(
+            TensorSpec | None,
+            lookup_spec_from_dynamo_source(source, config._shapes_spec),
+        )
+        if _tensor_spec and len(_tensor_spec) != value.dim():
             raise ValueError(
                 f"TensorSpec has {len(_tensor_spec)} dims but tensor {source.name} "
                 f"has {value.dim()} dims"
@@ -2556,11 +2555,7 @@ class VariableBuilder:
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
         example_value = wrap_to_fake_tensor_and_record(
-            value,
-            tx=self.tx,
-            is_tensor=True,
-            source=source,
-            tensor_spec=_tensor_spec if isinstance(_tensor_spec, TensorSpec) else None,
+            value, tx=self.tx, is_tensor=True, source=source, tensor_spec=_tensor_spec
         )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
