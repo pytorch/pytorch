@@ -183,7 +183,8 @@ class ShortenTraceback(TorchDynamoException):
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
-            assert tb is not None, "internal error, please report a bug"
+            if tb is None:
+                raise AssertionError("internal error, please report a bug")
         return self.with_traceback(tb)
 
 
@@ -228,7 +229,8 @@ class Unsupported(TorchDynamoException):
         self.logged = False
 
     def remove_from_stats(self) -> None:
-        assert self.category is not None
+        if self.category is None:
+            raise AssertionError("category must be set before removing from stats")
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
@@ -281,7 +283,8 @@ class UserError(TorchDynamoException):
         case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
         """
         if case_name is not None:
-            assert isinstance(case_name, str)
+            if not isinstance(case_name, str):
+                raise AssertionError(f"case_name must be a str, got {type(case_name)}")
             if msg.endswith("."):
                 msg += " "
             else:
@@ -446,7 +449,8 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    assert isinstance(exception_vt, ExceptionVals)
+    if not isinstance(exception_vt, ExceptionVals):
+        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
