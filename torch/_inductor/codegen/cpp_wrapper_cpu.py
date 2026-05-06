@@ -26,7 +26,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, normalize_name
+from ..utils import _align, make_codegen_buffer, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -425,10 +425,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.header.writeline(f"// {name} {hashed}")
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
-        if V.graph.aot_mode:
-            return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
+    def get_device_include_path_jit(device: str) -> str:
         return f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>"
+
+    @staticmethod
+    def get_device_include_path_aot(device: str) -> str:
+        return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
 
     def add_device_include(self, device: str) -> None:
         if device in self.included_devices:
@@ -438,7 +440,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # Add the default header for this device, plus any C-shim extensions that are
         # present.
-        self.header.splice(self.get_device_include_path(device))
+        self.header.splice_jit(self.get_device_include_path_jit(device))
+        self.header.splice_aot(self.get_device_include_path_aot(device))
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
@@ -860,17 +863,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Emit input stealing and (in JIT mode) GIL release."""
         if V.graph.is_const_graph:
             return
-        if V.graph.aot_mode:
-            num_args = len(V.graph.graph_inputs)
-        else:
-            # Weights are promoted in the JIT mode
-            num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-            # release GIL to support multiple instances inference (in different threads of the same process)
-            self.prefix.splice("py::gil_scoped_release_simple release;")
-        self.prefix.splice(
-            f"""
-                auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {num_args});
-            """
+        aoti_num_args = len(V.graph.graph_inputs)
+        # Weights are promoted in the JIT mode
+        jit_num_args = aoti_num_args + len(V.graph.constants)
+        # release GIL to support multiple instances inference (in different threads of the same process)
+        self.prefix.splice_jit("py::gil_scoped_release_simple release;")
+        self.prefix.splice_jit(
+            f"auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {jit_num_args});"
+        )
+        self.prefix.splice_aot(
+            f"auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {aoti_num_args});"
         )
 
     def _write_input_unpacking(self):
@@ -909,27 +911,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
             isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
         ), "Expect all constants to be Tensor"
         for idx, constants_key in enumerate(V.graph.constants.keys()):
-            if V.graph.aot_mode:
-                # Weights are stored in constants_ and owned by ConstantHandle there.
-                # Don't call std::move here because it will cause constants_ to lose the ownership.
-                self.prefix.writeline(
-                    f"""[[maybe_unused]] auto& {constants_key} = constants_->at({idx});"""
-                )
-            else:
-                # Append constants as inputs to the graph
-                constants_idx = inputs_len + idx
-                self.prefix.writeline(
-                    f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
-                )
+            # AOTI: weights live in constants_ owned by ConstantHandle; never std::move.
+            # JIT: weights are appended as inputs to the graph.
+            constants_idx = inputs_len + idx
+            self.prefix.writeline_aot(
+                f"[[maybe_unused]] auto& {constants_key} = constants_->at({idx});"
+            )
+            self.prefix.writeline_jit(
+                f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
+            )
 
     def _write_entry_point_postamble(self):
         """Emit AOTI-specific post-input setup (inputs.clear, kernels ref)."""
-        if V.graph.aot_mode:
-            if not V.graph.is_const_graph:
-                self.prefix.writeline("inputs.clear();")
-            self.prefix.writeline(
-                "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
-            )
+        if not V.graph.is_const_graph:
+            self.prefix.writeline_aot("inputs.clear();")
+        self.prefix.writeline_aot(
+            "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+        )
 
     def write_wrapper_decl(self):
         self._write_entry_point_signature()
@@ -1341,7 +1339,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode and not V.graph.is_const_graph:
             self._codegen_aoti_model_class(aot_mode_decls)
 
-        self.prefix = cache_decls = IndentedBuffer()
+        self.prefix = cache_decls = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
             cache_decls.writeline(f"CACHE_TORCH_DTYPE({dtype});")
         for device in self.used_cached_devices:
@@ -1361,7 +1359,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline("\n")
                 wrapper.generate(self)
 
-        self.prefix.splice(aot_mode_decls)
+        # aot_mode_decls is AOTI-only; splice_aot routes correctly across modes
+        # (no-op on plain IndentedBuffer in pure-JIT).
+        self.prefix.splice_aot(aot_mode_decls)
         self.prefix.splice(prior)
 
     @staticmethod
