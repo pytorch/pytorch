@@ -936,27 +936,28 @@ class TestStatelessOptimizerReparam(TestCase):
     class _TestException(Exception):
         pass
 
-    def _init_optimizer(self):
+    def _init_optimizer(self, freeze_l1: bool = False):
+        # ChainedLinear + AdamW stepped once. With freeze_l1=True, l1's
+        # params have requires_grad=False so no state is lazy-init'd for them
+        # (their packed ids appear in param_groups but are absent from state).
         module = ChainedLinear()
-        optimizer = torch.optim.AdamW(
-            [
-                {
-                    "params": [module.l1.weight, module.l1.bias],
-                    "lr": 0.1,
-                    "weight_decay": 0.01,
-                },
-                {
-                    "params": [module.l2.weight, module.l2.bias],
-                    "lr": 0.01,
-                    "weight_decay": 0.0,
-                },
-            ]
-        )
-        x = torch.randn(4, 2)
-        loss = module(x).sum()
+        if freeze_l1:
+            for p in module.l1.parameters():
+                p.requires_grad = False
+            optimizer = torch.optim.AdamW(module.parameters(), lr=0.01)
+        else:
+            optimizer = torch.optim.AdamW(
+                [
+                    {"params": [module.l1.weight, module.l1.bias],
+                     "lr": 0.1, "weight_decay": 0.01},
+                    {"params": [module.l2.weight, module.l2.bias],
+                     "lr": 0.01, "weight_decay": 0.0},
+                ]
+            )
+        loss = module(torch.randn(4, 2)).sum()
         loss.backward()
         optimizer.step()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         return module, optimizer
 
     def _make_reparam_inputs(self):
@@ -976,123 +977,74 @@ class TestStatelessOptimizerReparam(TestCase):
         for group, params in zip(optimizer.param_groups, params_before, strict=True):
             self.assertIs(group["params"], params)
 
-    def test_reparametrize_optimizer_rejects_uninitialized_state(self):
-        module = ChainedLinear()
-        initialized_optimizer = torch.optim.AdamW(module.parameters(), lr=0.1)
-        optimizer_state_dict = deepcopy(initialized_optimizer.state_dict())
-        uninitialized_optimizer = torch.optim.AdamW(module.parameters(), lr=0.1)
-        parameters = {
-            name: torch.randn_like(param, requires_grad=param.requires_grad)
-            for name, param in module.named_parameters()
-        }
+    def test_reparametrize_optimizer_rejects_invalid_inputs(self):
+        _, optimizer, parameters, base_osd = self._make_reparam_inputs()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape("_reparametrize_optimizer requires initialized optimizer state."),
-        ):
-            with _reparametrize_optimizer(
-                uninitialized_optimizer, parameters, optimizer_state_dict
-            ):
-                pass
+        def expect(opt, params, bad_input, pattern):
+            with self.assertRaisesRegex(RuntimeError, re.escape(pattern)):
+                with _reparametrize_optimizer(opt, params, bad_input):
+                    pass
 
-    def test_reparametrize_optimizer_rejects_non_raw_state(self):
-        _, optimizer, parameters, _ = self._make_reparam_inputs()
-        invalid_optimizer_state_dict = deepcopy(optimizer.state_dict())
-        invalid_optimizer_state_dict["state"] = {"l1.weight": {}}
-        invalid_optimizer_state_dict["param_groups"][0]["params"] = [
-            "l1.weight",
-            "l1.bias",
-        ]
+        with self.subTest("uninitialized"):
+            m = ChainedLinear()
+            uninit_opt = torch.optim.AdamW(m.parameters(), lr=0.1)
+            uninit_params = {
+                n: torch.randn_like(p, requires_grad=p.requires_grad)
+                for n, p in m.named_parameters()
+            }
+            expect(
+                uninit_opt, uninit_params, deepcopy(uninit_opt.state_dict()),
+                "_reparametrize_optimizer requires initialized optimizer state.",
+            )
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "_reparametrize_optimizer requires optimizer.state_dict()-style "
-                "param_groups[*]['params'] entries keyed by packed parameter ids."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, invalid_optimizer_state_dict
-            ):
-                pass
+        with self.subTest("non_raw_state"):
+            osd = deepcopy(base_osd)
+            osd["state"] = {"l1.weight": {}}
+            osd["param_groups"][0]["params"] = ["l1.weight", "l1.bias"]
+            expect(
+                optimizer, parameters, osd,
+                "param_groups[*]['params'] entries keyed by packed parameter ids",
+            )
 
-    def test_reparametrize_optimizer_rejects_bad_state_field(self):
-        _, optimizer, parameters, _ = self._make_reparam_inputs()
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "_reparametrize_optimizer requires optimizer_state_dict['state'] "
-                "to be a dict mapping packed parameter ids to per-param state "
-                "dicts, got list."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, {"state": [], "param_groups": []}
-            ):
-                pass
+        with self.subTest("bad_state_field"):
+            expect(
+                optimizer, parameters, {"state": [], "param_groups": []},
+                "optimizer_state_dict['state'] to be a dict",
+            )
 
-    def test_reparametrize_optimizer_rejects_bad_param_groups_field(self):
-        _, optimizer, parameters, _ = self._make_reparam_inputs()
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "_reparametrize_optimizer requires optimizer_state_dict['param_groups'] "
-                "to be a list of param-group dicts, got dict."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, {"state": {}, "param_groups": {}}
-            ):
-                pass
+        with self.subTest("bad_param_groups_field"):
+            expect(
+                optimizer, parameters, {"state": {}, "param_groups": {}},
+                "optimizer_state_dict['param_groups'] to be a list",
+            )
 
-    def test_reparametrize_optimizer_rejects_param_group_count_mismatch(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
-        optimizer_state_dict["param_groups"].pop()
+        with self.subTest("group_count_mismatch"):
+            osd = deepcopy(base_osd)
+            osd["param_groups"].pop()
+            expect(optimizer, parameters, osd, "different number of parameter groups")
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "optimizer_state_dict has a different number of parameter groups than "
-                "the live optimizer."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, optimizer_state_dict
-            ):
-                pass
+        with self.subTest("group_size_mismatch"):
+            osd = deepcopy(base_osd)
+            osd["param_groups"][0]["params"].pop()
+            expect(
+                optimizer, parameters, osd,
+                "does not match the size of live optimizer param group 0",
+            )
 
-    def test_reparametrize_optimizer_rejects_param_group_size_mismatch(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
-        optimizer_state_dict["param_groups"][0]["params"].pop()
+        with self.subTest("non_dict_param_state"):
+            osd = deepcopy(base_osd)
+            osd["state"][osd["param_groups"][0]["params"][0]] = torch.tensor(1.0)
+            expect(
+                optimizer, parameters, osd,
+                "per-parameter optimizer state entries to be dictionaries",
+            )
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "optimizer_state_dict param group does not match the size of "
-                "live optimizer param group 0."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, optimizer_state_dict
-            ):
-                pass
-
-    def test_reparametrize_optimizer_rejects_non_dict_param_state(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
-        first_param_id = optimizer_state_dict["param_groups"][0]["params"][0]
-        optimizer_state_dict["state"][first_param_id] = torch.tensor(1.0)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "_reparametrize_optimizer requires per-parameter optimizer "
-                "state entries to be dictionaries."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, optimizer_state_dict
-            ):
-                pass
+        with self.subTest("non_param_state"):
+            osd = deepcopy(base_osd)
+            osd["state"]["global_step"] = 42
+            expect(
+                optimizer, parameters, osd, "got extra keys ['global_step']",
+            )
 
     def test_reparametrize_optimizer_handles_missing_param_state(self):
         # When some params have ``requires_grad=False`` their grads stay
@@ -1102,17 +1054,7 @@ class TestStatelessOptimizerReparam(TestCase):
         # _reparametrize_optimizer must accept this shape, and mutations the
         # trace makes to such params must stay local (not pollute the input
         # ``optimizer_state_dict``).
-        module = ChainedLinear()
-        for p in module.l1.parameters():
-            p.requires_grad = False
-        optimizer = torch.optim.AdamW(module.parameters(), lr=0.01)
-
-        x = torch.randn(4, 2)
-        loss = module(x).sum()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
+        module, optimizer = self._init_optimizer(freeze_l1=True)
         optimizer_state_dict = deepcopy(optimizer.state_dict())
         # Sanity: state has fewer entries than param_groups (2 trainable l2
         # params have state; 2 frozen l1 params do not).
@@ -1170,23 +1112,6 @@ class TestStatelessOptimizerReparam(TestCase):
             [g["param_names"] for g in optimizer.param_groups],
             param_names_before,
         )
-
-    def test_reparametrize_optimizer_rejects_non_param_state(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
-        optimizer_state_dict["state"]["global_step"] = 42
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "_reparametrize_optimizer requires optimizer_state_dict['state'] to "
-                "be keyed only by packed parameter ids from "
-                "param_groups[*]['params']; got extra keys ['global_step']."
-            ),
-        ):
-            with _reparametrize_optimizer(
-                optimizer, parameters, optimizer_state_dict
-            ):
-                pass
 
     def test_reparametrize_optimizer_restores_after_exception(self):
         _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
