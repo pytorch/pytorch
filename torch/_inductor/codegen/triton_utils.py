@@ -67,7 +67,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
             if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.get_current_device_or_throw()
+                V.graph.current_device
             ):
                 return "fp64"
             return "fp32"
@@ -76,7 +76,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
         ):
             # Unbacked floats from .item() should preserve fp64 precision
             if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.get_current_device_or_throw()
+                V.graph.current_device
             ):
                 return "fp64"
             return "fp32"

@@ -3786,9 +3786,9 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
-def device_supports_fp64(device: torch.device) -> bool:
+def device_supports_fp64(device: torch.device | None) -> bool:
     """Check if the given device supports float64."""
-    if device.type == "xpu":
+    if device is not None and device.type == "xpu":
         return torch.xpu.get_device_properties(device).has_fp64
     return True
 
