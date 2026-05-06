@@ -178,7 +178,7 @@ size_t parseChosenWorkspaceSize() {
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool use32mb = properties != nullptr && (properties->major == 9 || properties->major == 10 || properties->major == 12);
+  const bool use32mb = properties != nullptr && (properties->major == 9);
   const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
