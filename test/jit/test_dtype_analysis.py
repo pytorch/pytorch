@@ -87,7 +87,10 @@ class TestDtypeBase(JitTestCase):
 
     def setUp(self):
         # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
-        # hooks that cause segfaults during process cleanup.
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         self.prev_symbolic_shapes_test_enabled = (
             torch._C._jit_symbolic_shapes_test_mode_enabled()
         )
