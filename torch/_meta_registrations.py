@@ -2147,7 +2147,8 @@ def _pad2d_common(input, padding, *, is_reflection):
         return input.new_empty((nplane, output_h, output_w))
     else:
         output = input.new_empty((nbatch, nplane, output_h, output_w))
-        if input.is_contiguous(memory_format=torch.channels_last):
+        memory_format = utils.suggest_memory_format(input)
+        if memory_format == torch.channels_last:
             output = output.to(memory_format=torch.channels_last)
         return output
 
