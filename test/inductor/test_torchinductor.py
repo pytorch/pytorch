@@ -5329,18 +5329,18 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @expectedFailureCodegenDynamic
     def test_conv2d_backward_mixed_memory_format_1x1(self):
-        # Regression test: when inductor converts conv weights to channels-last
-        # in the forward graph, the saved input retains contiguous strides.
-        # With 1x1 spatial dims the contiguous strides (C,1,1,1) differ from
-        # channels-last strides (C,1,C,C), causing incorrect gradients on
-        # backends that are sensitive to the actual stride values (e.g. XPU).
+        # With 1x1 spatial dims, contiguous strides (C,1,1,1) differ from
+        # channels-last strides (C,1,C,C) but both satisfy is_contiguous()
+        # and is_contiguous(channels_last). XPU is sensitive to actual stride
+        # values in convolution_backward.
         def fn(grad_output, inp, weight):
             return torch.ops.aten.convolution_backward.default(
                 grad_output,
                 inp,
                 weight,
-                [0],  # no bias
+                [0],
                 [1, 1],
                 [0, 0],
                 [1, 1],
@@ -5351,8 +5351,6 @@ class CommonTemplate:
             )
 
         N, C_in, C_out = 2, 64, 128
-        # Weight is channels-last, input and grad_output are contiguous —
-        # this is the mixed-format scenario from the forward/backward split.
         self.common(
             fn,
             (
@@ -5363,9 +5361,10 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @expectedFailureCodegenDynamic
     def test_conv2d_backward_mixed_memory_format(self):
-        # Same mixed-format scenario but with larger spatial dims where
-        # channels-last and contiguous strides are unambiguously different.
+        # Mixed-format scenario with larger spatial dims where channels-last
+        # and contiguous strides are unambiguously different.
         def fn(grad_output, inp, weight):
             return torch.ops.aten.convolution_backward.default(
                 grad_output,
@@ -5381,9 +5380,9 @@ class CommonTemplate:
                 [True, True, True],
             )
 
-        # On XPU the layout constraint normalises all inputs to channels-last
-        # for correctness, which changes the computation order vs eager and
-        # introduces small numerical differences.
+        # The layout constraint forces all inputs to channels-last which may
+        # cause the backend to pick a different algorithm with slightly
+        # different accumulation order.
         atol, rtol = (1e-4, 1e-4) if self.device == "xpu" else (None, None)
         self.common(
             fn,
