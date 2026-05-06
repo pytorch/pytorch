@@ -3,7 +3,7 @@ Re-export shim for the ``spmd_types`` package.
 
 Use ``import torch.distributed.spmd_types as spmd`` and guard attribute
 access with ``spmd.is_available()``.  When the package is installed,
-all public names from ``spmd_types`` are available on this module.
+all names from ``spmd_types`` are available on this module.
 """
 
 import importlib as _importlib
@@ -18,4 +18,9 @@ def is_available() -> bool:
 
 
 if _HAS_SPMD_TYPES:
-    from spmd_types import *  # noqa: F403  # pyrefly: ignore[missing-import]
+    import spmd_types as _spmd_types  # pyrefly: ignore[missing-import]
+
+    def __getattr__(name):
+        attr = getattr(_spmd_types, name)
+        globals()[name] = attr
+        return attr
