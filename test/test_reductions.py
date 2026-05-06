@@ -560,8 +560,6 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
-    @dtypesIfXPU(torch.complex128)
-    # Skip the torch.complex64 for XPU, see https://github.com/intel/torch-xpu-ops/issues/2279 for details
     @skipIfMPS
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
