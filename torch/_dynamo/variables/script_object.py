@@ -90,10 +90,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
-        assert not (isinstance(value, type) and issubclass(value, enum.Enum)), (
-            f"Enum class {value} should use UserDefinedClassVariable, "
-            "not OpaqueObjectClassVariable"
-        )
+        if isinstance(value, type) and issubclass(value, enum.Enum):
+            raise AssertionError(
+                f"Enum class {value} should use UserDefinedClassVariable, "
+                "not OpaqueObjectClassVariable"
+            )
         super().__init__(**kwargs)
         self.value = value
 
@@ -106,11 +107,10 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)  # pyrefly: ignore[bad-argument-type]
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # OpaqueObjectClassVariable wraps the CLASS, not an instance.
+        # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
+        return hash(self.value), False
 
     def nb_or_impl(
         self,
@@ -255,9 +255,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
-        assert not isinstance(value, enum.Enum), (
-            f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
-        )
+        if isinstance(value, enum.Enum):
+            raise AssertionError(
+                f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
+            )
         out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
@@ -293,7 +294,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         if not isinstance(self.proxy, torch.fx.Proxy):
             # If we have a hoisted value type, then lazily lift it to be a graph
             # input when as_proxy() is called.
-            assert is_opaque_value_type(type(self.proxy))
+            if not is_opaque_value_type(type(self.proxy)):
+                raise AssertionError(
+                    f"Expected opaque value type, got {type(self.proxy)}"
+                )
             if should_hoist(type(self.proxy)):
                 from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -403,7 +407,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 ],
             )
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "TorchScriptObjectVariable requires a source for var_getattr"
+            )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
@@ -530,19 +537,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def is_python_hashable(self) -> bool:
-        try:
-            self.get_python_hash()
-            return True
-        except TypeError:
-            return False
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        from ..exc import raise_type_error
 
-    def get_python_hash(self) -> int:
         real_obj = self.as_python_constant()
-        return hash(real_obj)
+        try:
+            return hash(real_obj), False
+        except TypeError:
+            raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
 
     def is_python_equal(self, other: object) -> bool:
-        assert isinstance(other, VariableTracker)
+        if not isinstance(other, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
         real_self = self.as_python_constant()
         real_other = other.as_python_constant()
         return real_self == real_other
