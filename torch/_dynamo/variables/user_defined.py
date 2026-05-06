@@ -855,8 +855,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
-        if self.can_constant_fold_through() and (
-            constant_args or check_args_peekable_as_constant(args, kwargs)
+        if (
+            self.can_constant_fold_through()
+            and self.value is not torch.Size
+            and (constant_args or check_args_peekable_as_constant(args, kwargs))
         ):
             # constant fold - catch AsPythonConstantNotImplementedError for lazy
             # args that realize into SymNodeVariable (specialize_int=False)
