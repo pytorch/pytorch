@@ -50,7 +50,6 @@ __all__ = [
     "memory_allocated",
     "max_memory_allocated",
     "memory_reserved",
-    "private_pool_memory_reserved",
     "max_memory_reserved",
     "memory_cached",
     "max_memory_cached",
@@ -304,6 +303,12 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
       memory requested by client code, compare this with allocated_bytes to check if
       allocation rounding adds too much overhead.
+    - ``"reserved_bytes_by_private_pools"``: nested dictionary keyed by
+      ``torch.cuda.MemPool.id`` tuples. Each value has the same
+      ``{all,large_pool,small_pool}.{current,peak,allocated,freed}`` structure
+      as ``reserved_bytes``, but scoped to a single private pool. In
+      :func:`~torch.cuda.memory_stats`, tuple keys are flattened by joining
+      their stringified elements with ``"_"``, so ``(0, 1)`` becomes ``"0_1"``.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -320,12 +325,20 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     """
     result = []
 
+    def _format_key(key):
+        if isinstance(key, str):
+            return key
+        if isinstance(key, tuple):
+            return "_".join(str(part) for part in key)
+        return str(key)
+
     def _recurse_add_to_result(prefix, obj):
         if isinstance(obj, dict):
             if len(prefix) > 0:
                 prefix += "."
             for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
+                key = _format_key(k)
+                _recurse_add_to_result(prefix + key, v)
         else:
             result.append((prefix, obj))
 
@@ -568,25 +581,6 @@ def memory_reserved(device: "Device" = None) -> int:
         management.
     """
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
-
-
-def private_pool_memory_reserved(device: "Device" = None) -> int:
-    r"""Return the current GPU memory reserved in private memory pools (e.g. CUDA graph pools).
-
-    Unlike :func:`~torch.cuda.memory_reserved`, this is not reduced by
-    :func:`~torch.cuda.empty_cache`; it only decreases when a private pool
-    is deleted.
-
-    Args:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    return memory_stats(device=device).get("private_pool_reserved_bytes.all.current", 0)
 
 
 def max_memory_reserved(device: "Device" = None) -> int:
