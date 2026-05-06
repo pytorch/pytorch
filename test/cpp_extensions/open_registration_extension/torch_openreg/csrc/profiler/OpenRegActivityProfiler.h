@@ -5,7 +5,6 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <vector>
 
 #include <IActivityProfiler.h>
 
@@ -33,10 +32,14 @@ class OpenRegActivityProfiler : public libkineto::IActivityProfiler {
 
  private:
   std::string name_{"openreg"};
-    // Real vendor: list every ActivityType your SDK can record
-    // (e.g. PRIVATEUSE1_RUNTIME, PRIVATEUSE1_DRIVER)
+  // Real vendor: list every ActivityType your SDK can record
+  // (e.g. PRIVATEUSE1_RUNTIME, PRIVATEUSE1_DRIVER)
   std::set<libkineto::ActivityType> activities_{
-      libkineto::ActivityType::CONCURRENT_KERNEL,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
+    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
   };
 };
 

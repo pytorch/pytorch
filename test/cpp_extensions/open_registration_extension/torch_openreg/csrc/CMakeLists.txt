@@ -23,15 +23,16 @@ if(KINETO_LIBRARY)
         add_executable(${PROFILER_TEST_TARGET}
             ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_activity_profiler.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegActivityProfiler.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegActivityProfilerSession.cpp)
+            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegActivityProfilerSession.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegTracer.cpp)
         target_link_libraries(${PROFILER_TEST_TARGET}
             PRIVATE torch_cpu_library gtest gtest_main)
         target_include_directories(${PROFILER_TEST_TARGET} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${KINETO_INCLUDE_DIR})
-        target_compile_definitions(${PROFILER_TEST_TARGET} PRIVATE USE_KINETO)
+        target_compile_definitions(${PROFILER_TEST_TARGET} PRIVATE USE_KINETO KINETO_NAMESPACE=libkineto)
         add_test(NAME ${PROFILER_TEST_TARGET} COMMAND ${PROFILER_TEST_TARGET})
-    endif()                                                                   
+    endif()
 else()
     message(STATUS "torch_openreg: Kineto not found, profiler/OpenRegActivityProfiler.cpp compiled as no-op")
 endif()
@@ -41,3 +42,14 @@ install(TARGETS ${LIBRARY_NAME}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+
+# OpenReg tracer unit tests
+set(OPENREG_TESTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../tests/cpp)
+if(USE_TEST AND TARGET gtest_main)
+    add_executable(test_openreg_tracer
+        ${OPENREG_TESTS_DIR}/test_openreg_tracer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/profiler/OpenRegTracer.cpp
+    )
+    target_link_libraries(test_openreg_tracer PRIVATE gtest_main)
+    target_include_directories(test_openreg_tracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
