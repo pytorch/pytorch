@@ -8,7 +8,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
@@ -280,7 +280,9 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
-    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.float32, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
         # and verify large launch configs don't produce invalid kernel launches
@@ -290,7 +292,14 @@ class TestScatterGather(TestCase):
             atol, rtol = 2e-2, 2e-2
         else:
             atol, rtol = 0.2, 0.5
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
+        # The large shape tests grid.y clipping at maxGridSize[1]=65535.
+        # Use it only for small dtypes to avoid OOM on CI (22GB GPUs).
+        shapes = [(4096, 3072, 4096), (4096, 3072, 4100)]
+        if dtype.itemsize <= 2:
+            shapes.append((4, 4, 16384 * 8192))
+        else:
+            shapes.append((4, 4, 16384 * 256))
+        for (m, n, k) in shapes:
             torch.cuda.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
