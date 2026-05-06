@@ -1446,12 +1446,10 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
-    if split_size == 0:
-        if dim_size != 0:
-            raise AssertionError(
-                f"split_size is 0 but dim_size is {dim_size}, expected 0"
-            )
+    if dim_size == 0:
         return (self.detach(),)
+    if split_size == 0:
+        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -3122,8 +3120,12 @@ def _index_add(
 
 @register_decomposition(aten.pad_sequence.default)
 @aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="right"):
     torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
+    torch._check(
+        padding_side == "left" or padding_side == "right",
+        lambda: f"Expected padding_side to be one of left or right, but got {padding_side}.",
+    )
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
@@ -3137,9 +3139,15 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
         currseq = sequences[i]
-        row = aten.constant_pad_nd(
-            currseq, dim_paddings + (0, max_len - currseq.size(0)), padding_value
-        )
+        pad_amount = max_len - currseq.size(0)
+        if padding_side == "right":
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (0, pad_amount), padding_value
+            )
+        else:
+            row = aten.constant_pad_nd(
+                currseq, dim_paddings + (pad_amount, 0), padding_value
+            )
         if batch_first:
             out = aten.select_scatter(out, row, dim=0, index=i)
         else:

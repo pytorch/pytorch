@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import set_default_dtype
 
 
@@ -199,6 +200,34 @@ user_stack=None)
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
+
+    def test_fake_script_type_match_guard(self):
+        class Real:
+            pass
+
+        class Other:
+            pass
+
+        root = RootGuardManager()
+        real = Real()
+        fake = FakeScriptObject(object(), "Real", real)
+        guard = guards.FAKE_SCRIPT_TYPE_MATCH(
+            root,
+            FakeScriptObject,
+            id_type(real),
+            ["type match through FakeScriptObject"],
+            None,
+        )
+
+        # Passes for the FakeScriptObject at compile time and the real
+        # underlying object at runtime.
+        self.assertTrue(guard(fake))
+        self.assertTrue(guard(real))
+        # Different real type wrapped in FakeScriptObject should fail.
+        self.assertFalse(guard(FakeScriptObject(object(), "Other", Other())))
+        # Different raw type should fail.
+        self.assertFalse(guard(Other()))
+        self.assertFalse(guard(5))
 
     def test_id_guard(self):
         root = RootGuardManager()
@@ -901,9 +930,13 @@ user_stack=None)
 
         self.assertTrue(root.check(f_locals))
 
-        # Check that no one can add a leaf guard
+        # ID_MATCH is the only leaf guard supported on DictGuardManager.
+        dict_mgr.add_id_match_guard(id(f_locals["d"]), "id match on dict", None)
+        self.assertTrue(root.check(f_locals))
+
+        # Other leaf guards are rejected.
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_id_match_guard(id_type(f_locals), "id match", None)
+            dict_mgr.add_equals_match_guard(f_locals["d"], ["equals match"], None)
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):

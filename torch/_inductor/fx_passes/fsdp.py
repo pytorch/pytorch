@@ -362,7 +362,7 @@ def pre_bucket_fsdp_collectives(
     """Pre-bucket FSDP collectives before overlap scheduling.
 
     Identifies FSDP process groups via all_gather structural heuristics,
-    then merges all_gather, reduce_scatter, and all_reduce ops on those
+    then merges all_gather, reduce_scatter, and all_reduce ops on  those
     groups into bandwidth-saturating buckets.
     """
     import torch._inductor.config as inductor_config

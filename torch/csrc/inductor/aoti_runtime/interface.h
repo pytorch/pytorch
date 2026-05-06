@@ -311,6 +311,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     const char** in_spec,
     const char** out_spec);
 
+// Retrieves the error message from the last failed AOTI runtime call on the
+// current thread. The returned pointer is valid until the next AOTI runtime
+// call on the same thread. Returns an empty string if the last call succeeded.
+AOTI_API AOTIRuntimeError AOTInductorGetLastError(const char** error_msg);
+
 // ---------------------------------------------------------------------------
 // C-ABI-safe variant of AOTInductorModelRunMinimalArrayrefInterface.
 //

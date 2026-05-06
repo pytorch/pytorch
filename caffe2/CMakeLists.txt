@@ -48,7 +48,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__torch_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+  file(GLOB_RECURSE torchgen_python CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/torchgen/*.py")
 
 
   # Add source, includes, and libs to lists
@@ -256,19 +256,8 @@ set(GENERATED_CXX_TORCH
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
+  append_filelist("libtorch_generated_sources('{}', only_type_vars=True)" GENERATED_CXX_TORCH)
   list(APPEND GENERATED_CXX_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
     "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp"
   )
@@ -357,9 +346,9 @@ if(USE_PER_OPERATOR_HEADERS)
   list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
 endif()
 
-file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
-file(GLOB_RECURSE autograd_yaml "${TOOLS_PATH}/autograd/*.yaml")
-file(GLOB_RECURSE autograd_templates "${TOOLS_PATH}/autograd/templates/*")
+file(GLOB_RECURSE autograd_python CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE autograd_yaml CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/*.yaml")
+file(GLOB_RECURSE autograd_templates CONFIGURE_DEPENDS "${TOOLS_PATH}/autograd/templates/*")
 add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
@@ -719,6 +708,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/print.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/xpu.cpp
   )
 endif()
@@ -1241,9 +1231,9 @@ endif()
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
-  file(GLOB lite_interpreter_python "${TOOLS_PATH}/lite_interpreter/*.py")
+  file(GLOB lite_interpreter_python CONFIGURE_DEPENDS "${TOOLS_PATH}/lite_interpreter/*.py")
   if(${TRACING_BASED})
-    file(GLOB code_analyzer_python "${TOOLS_PATH}/code_analyzer/*.py")
+    file(GLOB code_analyzer_python CONFIGURE_DEPENDS "${TOOLS_PATH}/code_analyzer/*.py")
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
