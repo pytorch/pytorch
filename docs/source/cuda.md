@@ -179,13 +179,25 @@
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
 .. autofunction:: version
 ```
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.profiler
+```
+
+```{eval-rst}
 .. autofunction:: profile
+```
+
+```{eval-rst}
 .. autofunction:: start
+```
+
+```{eval-rst}
 .. autofunction:: stop
 ```
 
