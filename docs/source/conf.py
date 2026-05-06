@@ -11,6 +11,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+import functools
 import inspect
 import os
 import pkgutil
@@ -2185,6 +2186,36 @@ master_doc = "index"
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
+@functools.cache
+def _add_docstr_source_lines(module_file):
+    pattern = re.compile(r"^([A-Za-z_]\w*)\s*=\s*_add_docstr\(")
+    source_lines = {}
+    try:
+        with open(module_file, encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                match = pattern.match(line)
+                if match is not None:
+                    source_lines[match.group(1)] = lineno
+    except OSError:
+        return {}
+
+    return source_lines
+
+
+def _find_add_docstr_source(module, fullname):
+    if "." in fullname or not re.match(r"^[A-Za-z_]\w*$", fullname):
+        return None
+
+    module_file = getattr(module, "__file__", None)
+    if module_file is None or not module_file.endswith(".py"):
+        return None
+
+    lineno = _add_docstr_source_lines(module_file).get(fullname)
+    if lineno is None:
+        return None
+    return module_file, lineno
+
+
 def linkcode_resolve(domain, info):
     if domain != "py":
         return None
@@ -2193,15 +2224,21 @@ def linkcode_resolve(domain, info):
 
     try:
         module = __import__(info["module"], fromlist=[""])
+    except Exception:
+        return None
+
+    try:
         obj = module
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
-        # Get the source file and line number
         obj = inspect.unwrap(obj)
         fn = inspect.getsourcefile(obj)
         source, lineno = inspect.getsourcelines(obj)
     except Exception:
-        return None
+        resolved = _find_add_docstr_source(module, info["fullname"])
+        if resolved is None:
+            return None
+        fn, lineno = resolved
 
     # Determine the tag based on the torch_version
     if RELEASE:
