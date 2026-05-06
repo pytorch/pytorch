@@ -363,15 +363,7 @@ class BenchmarkRunner:
         ) and curr_test_total_time > self.args.min_time_per_test
 
     def _launch_forward(self, test_case, iters, print_per_iter):
-        """Use Python's timeit module to measure execution time (unit: second).
-
-        Treat cuda and xpu the same — both go through the
-        ``Timer.adaptive_autorange`` path, both sync their GPU inside
-        the stmt.  The cpu branch keeps the plain ``timeit.timeit``
-        path.  Return value is ``result.median * iters`` (matching
-        the original cuda logic), so ``_measure_metrics`` downstream
-        sees the same units for both GPU devices.
-        """
+        """Use Python's timeit module to measure execution time (unit: second)."""
         test_name = test_case.test_config.test_name
         gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
         func = test_case.run_forward
