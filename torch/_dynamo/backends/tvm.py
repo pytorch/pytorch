@@ -154,7 +154,7 @@ def tvm(
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
-        active_inputs = set(shape_info.keys())
+        active_inputs = {name for name, _ in shape_info.items()}
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:
