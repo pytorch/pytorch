@@ -385,7 +385,7 @@ class UvTcpServer : public UvTcpSocket {
 
   static void missingOnConnect(int status) {
     C10D_THROW_ERROR(
-        DistStoreError, "Socket accepted byt onConnect callback missing");
+        DistStoreError, "Socket accepted but onConnect callback missing");
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {

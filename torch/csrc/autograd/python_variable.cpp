@@ -4,7 +4,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/SmallVector.h>
@@ -536,14 +535,14 @@ static PyObject* view_func_impl(
 
         // Determine new SymInt / tensor state as needed.
         std::optional<std::vector<c10::SymInt>> new_symints = std::nullopt;
-        if (symint_visitor_fn != Py_None) {
+        if (!Py_IsNone(symint_visitor_fn)) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
         std::optional<std::vector<at::Tensor>> new_tensors = std::nullopt;
-        if (tensor_visitor_fn != Py_None) {
+        if (!Py_IsNone(tensor_visitor_fn)) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
               view_func.get_tensors());
@@ -1027,7 +1026,7 @@ static bool checked_istrue(PyObject* obj) {
   return result;
 }
 
-// pybind11 does not not use PyObject_Vectorcall currently; it seems
+// pybind11 does not use PyObject_Vectorcall currently; it seems
 // to materialize a tuple of args instead.
 template <std::size_t N>
 static py::object checked_vectorcall(
@@ -1302,19 +1301,21 @@ get_thread_local_native_sharding_propagator_cache() {
       thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
           py::capsule(new std::thread::id(this_thread_id), [](void* p) {
             auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            std::optional<NativeShardingPropagatorCache>* popt_cache = nullptr;
             {
               std::lock_guard<std::mutex> inner_lock(
                   native_sharding_propagator_cache_cleanup_mutex);
               auto it = all_thread_caches.find(*ptid);
               if (it != all_thread_caches.end()) {
-                // We need to both:
-                // 1) free python objects, and
-                it->second->reset();
-                // 2) make sure we don't try to come back and mess with
-                // a destroyed thread-local at module unload (e.g.,
-                // process exit) time.
+                popt_cache = it->second;
                 all_thread_caches.erase(it);
               }
+            }
+            if (popt_cache != nullptr) {
+              // Destroy cached py::object values outside the cleanup mutex
+              // since pybind/Python deallocators can re-enter Python and
+              // temporarily drop the GIL.
+              popt_cache->reset();
             }
             delete ptid;
           });
@@ -1889,7 +1890,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.ptr());
   }
   if (!comparison_key) {
     return false;
@@ -2469,9 +2470,11 @@ create_native_op_schema(
     // way; the C++ fast path must match. Without this filter, step-varying
     // scalar kwargs (e.g. the `value` arg of addcdiv_ used by AdamW bias
     // corrections) cause unbounded cache growth.
+    py::list static_kwargkey =
+        py::reinterpret_borrow<py::list>(native_info.static_kwargkey);
     c10::SmallVector<std::string, 2> static_kwarg_names;
-    for (const auto& key :
-         py::reinterpret_borrow<py::list>(native_info.static_kwargkey)) {
+    static_kwarg_names.reserve(static_kwargkey.size());
+    for (const auto& key : static_kwargkey) {
       static_kwarg_names.push_back(py::cast<std::string>(key));
     }
 
@@ -2722,7 +2725,7 @@ static int THPVariable_set_grad_fn(
     return handle_torch_function_setter(self, "_grad_fn", obj);
   }
   TORCH_CHECK(obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
-  TORCH_CHECK(obj == Py_None, "_grad_fn can be only set to None");
+  TORCH_CHECK(Py_IsNone(obj), "_grad_fn can be only set to None");
   THPVariable_Unpack(self).detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2766,7 +2769,7 @@ static int THPVariable_set_grad(
     return handle_torch_function_setter(self, "grad", py_grad);
   }
   const auto& var = THPVariable_Unpack(self);
-  if (!py_grad || py_grad == Py_None) {
+  if (!py_grad || Py_IsNone(py_grad)) {
     var.mutable_grad().reset();
     return 0;
   }
@@ -2948,7 +2951,7 @@ static int THPVariable_set_names(
     return handle_torch_function_setter((THPVariable*)self, "names", names);
   }
   const auto& var = THPVariable_Unpack(self);
-  if (names == Py_None) {
+  if (Py_IsNone(names)) {
     at::internal_set_names_inplace(var, std::nullopt);
   } else {
     TORCH_CHECK(
@@ -2970,10 +2973,10 @@ static int THPVariable_set_requires_grad(
   }
   TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
-  auto requires_grad = (obj == Py_True);
+  auto requires_grad = (Py_IsTrue(obj));
   if (!var.is_leaf()) {
     THPUtils_setError(
-        autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
+        autograd::utils::requires_grad_leaf_error(Py_IsTrue(obj)).c_str());
     return -1;
   }
   if (requires_grad &&
@@ -3023,7 +3026,7 @@ static int THPVariable_set_backwards_hooks(
     return handle_torch_function_setter(self, "_backward_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _backwards_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3064,7 +3067,7 @@ static int THPVariable_set_post_accumulate_grad_hooks(
         self, "_post_accumulate_grad_hooks", obj);
   }
   TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = nullptr;
   }
   Py_XINCREF(obj);
@@ -3335,10 +3338,10 @@ static int THPVariable_set_grad_dtype(
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(
-      THPDtype_Check(obj) || obj == Py_None,
+      THPDtype_Check(obj) || Py_IsNone(obj),
       "grad_dtype must be a torch.dtype or None, but got ",
       Py_TYPE(obj)->tp_name);
-  if (var.grad().defined() && obj != Py_None) {
+  if (var.grad().defined() && !Py_IsNone(obj)) {
     auto new_dtype = reinterpret_cast<THPDtype*>(obj);
     TORCH_CHECK(
         var.grad().dtype() == new_dtype->scalar_type,
@@ -3350,7 +3353,7 @@ static int THPVariable_set_grad_dtype(
         "or ensure the new grad_dtype matches the existing gradient's dtype.");
   }
   std::optional<at::ScalarType> new_dtype;
-  if (obj != Py_None) {
+  if (!Py_IsNone(obj)) {
     auto* dtype = reinterpret_cast<THPDtype*>(obj);
     new_dtype = dtype->scalar_type;
   }
@@ -3833,13 +3836,10 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj (stored in "pyobj_")
-          Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they also have an "obj" field
-          if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-            Py_VISIT(py_node_fn->obj);
-          }
+        // Check that this python object is the sole owner of the grad_fn.
+        // The grad_fn's PyObject holds the other reference.
+        if (grad_fn && grad_fn.use_count() == 2) {
+          Py_VISIT(grad_fn->pyobj_slot()->load_pyobj());
         }
       }
     }

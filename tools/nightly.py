@@ -288,7 +288,7 @@ class Venv:
             python=python,
             capture_output=True,
         ).stdout
-        # pyrefly: ignore [bad-argument-type, no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
