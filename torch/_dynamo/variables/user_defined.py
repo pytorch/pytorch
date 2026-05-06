@@ -867,7 +867,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
-        from .ctx_manager import GenericContextWrappingVariable
+        from .ctx_manager import (
+            GenericContextWrappingVariable,
+            get_device_context_manager,
+        )
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -1020,26 +1023,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
-        elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
-            if not args[0].is_python_constant():
-                raise_type_error(tx, "torch.cuda.device() requires a constant argument")
-            return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
-        elif self.value is torch.xpu.device and not kwargs and len(args) == 1:
-            if not args[0].is_python_constant():
-                raise_type_error(tx, "torch.xpu.device() requires a constant argument")
-            return variables.XPUDeviceVariable.create(tx, args[0].as_python_constant())
         elif (
-            self.value is torch.accelerator.device_index
-            and not kwargs
+            not kwargs
             and len(args) == 1
+            and (variable_cls := get_device_context_manager(self.value)) is not None
         ):
             if not args[0].is_python_constant():
                 raise_type_error(
-                    tx, "torch.accelerator.device_index() requires a constant argument"
+                    tx,
+                    f"{self.value.__module__}.{self.value.__qualname__} requires a constant argument",
                 )
-            return variables.AcceleratorDeviceIndexVariable.create(
-                tx, args[0].as_python_constant()
-            )
+            return variable_cls.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
             and hasattr(
