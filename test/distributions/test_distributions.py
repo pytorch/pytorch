@@ -4011,6 +4011,55 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
         self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
 
+    def test_dirichlet_generator(self):
+        # Test that passing a generator produces reproducible samples
+        concentration = torch.tensor([0.5, 0.5, 0.5])
+        gen1 = torch.Generator().manual_seed(12345)
+        gen2 = torch.Generator().manual_seed(12345)
+        d1 = Dirichlet(concentration, generator=gen1)
+        d2 = Dirichlet(concentration, generator=gen2)
+        self.assertEqual(d1.sample((5,)), d2.sample((5,)))
+
+    def test_dirichlet_generator_different_seeds(self):
+        # Test that different seeds give different samples
+        concentration = torch.tensor([2.0, 3.0, 5.0])
+        gen1 = torch.Generator().manual_seed(1)
+        gen2 = torch.Generator().manual_seed(2)
+        d1 = Dirichlet(concentration, generator=gen1)
+        d2 = Dirichlet(concentration, generator=gen2)
+        s1 = d1.sample((100,))
+        s2 = d2.sample((100,))
+        self.assertFalse(torch.allclose(s1, s2))
+
+    def test_beta_generator(self):
+        # Test that passing a generator produces reproducible samples
+        gen1 = torch.Generator().manual_seed(12345)
+        gen2 = torch.Generator().manual_seed(12345)
+        b1 = Beta(2.0, 5.0, generator=gen1)
+        b2 = Beta(2.0, 5.0, generator=gen2)
+        self.assertEqual(b1.sample((5,)), b2.sample((5,)))
+
+    def test_beta_generator_different_seeds(self):
+        # Test that different seeds give different samples
+        gen1 = torch.Generator().manual_seed(1)
+        gen2 = torch.Generator().manual_seed(2)
+        b1 = Beta(2.0, 5.0, generator=gen1)
+        b2 = Beta(2.0, 5.0, generator=gen2)
+        s1 = b1.sample((100,))
+        s2 = b2.sample((100,))
+        self.assertFalse(torch.allclose(s1, s2))
+
+    def test_beta_generator_rsample_grad(self):
+        # Test that gradients flow through rsample with a generator
+        gen = torch.Generator().manual_seed(42)
+        con1 = torch.tensor([2.0], requires_grad=True)
+        con0 = torch.tensor([5.0], requires_grad=True)
+        b = Beta(con1, con0, generator=gen)
+        sample = b.rsample()
+        sample.sum().backward()
+        self.assertIsNotNone(con1.grad)
+        self.assertIsNotNone(con0.grad)
+
     @set_default_dtype(torch.double)
     def test_continuous_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
