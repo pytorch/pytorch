@@ -1221,6 +1221,7 @@ class TestReplicationStager(DTensorTestBase):
             )
 
     @with_comms
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(4)
     def test_replication_basic(self):
         """Test basic replication functionality with world_size=16"""
@@ -1253,6 +1254,7 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(4)
     def test_replication_dtensors(self):
         """Test replication with DTensor and mixed tensor types"""
@@ -1294,6 +1296,7 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(4)
     def test_replication_sharded_tensors(self):
         """Test replication with ShardedTensor and mixed tensor types"""
@@ -1334,6 +1337,7 @@ class TestReplicationStager(DTensorTestBase):
         stager.close()
 
     @with_comms
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(4)
     def test_replication_persistence(self):
         """Test persistence functionality in _ReplicationStager"""
