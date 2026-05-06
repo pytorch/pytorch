@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -1161,19 +1162,17 @@ class TracingContext:
         if self.loc_in_frame is None:
             raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
-        positions = self.loc_in_frame_positions
-        colno = None
-        end_colno = None
-        if positions is not None:
-            colno = positions.col_offset
-            end_colno = positions.end_col_offset
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["colno"] = self.loc_in_frame_positions.col_offset
+            kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
         return traceback.FrameSummary(
             filename,
             lineno,
             frame_name,
             lookup_line=False,
-            colno=colno,
-            end_colno=end_colno,
+            **kwargs,
         )
 
     # Call this when you want to call into some code that isn't necessarily
