@@ -113,6 +113,17 @@ class StableLibrary final {
     return *this;
   }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+  // corresponds to a limited, stable version of
+  // torch::library::set_python_module()
+  StableLibrary& set_python_module(
+      const char* pymodule,
+      const char* context = "") {
+    torch_library_set_python_module(lib_, pymodule, context);
+    return *this;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 };
 
 class StableTorchLibraryInit final {
