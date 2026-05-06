@@ -580,7 +580,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def force_apply_to_var_sequence(
         self, tx: Any, fn: Callable[[VariableTracker], Any]
     ) -> None:
-        assert self.has_force_unpack_var_sequence(tx)
+        if not self.has_force_unpack_var_sequence(tx):
+            raise AssertionError(
+                "force_apply_to_var_sequence requires has_force_unpack_var_sequence(tx) == True"
+            )
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
@@ -1195,6 +1198,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
         return self._nb_slot_not_implemented("nb_inplace_or", other)
 
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_negative slot.
+
+        Called when type_implements_nb_negative returns True for this type.
+        Subclasses override to provide the actual negation.
+        """
+        unimplemented(
+            gb_type="nb_negative_impl not implemented",
+            context=f"{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_negative C slot but "
+            "the corresponding VariableTracker doesn't implement nb_negative_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,
@@ -1214,15 +1234,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # If this fails, it's either
                 # 1. one mistakenly passed in a source
                 # 2. `mutation_type` is incorrect
-                assert source is None
+                if source is not None:
+                    raise AssertionError(
+                        "source must be None for ValueMutationNew/AttributeMutationNew"
+                    )
             else:
-                assert isinstance(
+                if not isinstance(
                     mutation_type, (ValueMutationExisting, AttributeMutationExisting)
-                )
+                ):
+                    raise AssertionError(
+                        f"Expected ValueMutationExisting or AttributeMutationExisting, "
+                        f"got {type(mutation_type)}"
+                    )
                 # If this fails, it's either
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
-                assert source is not None
+                if source is None:
+                    raise AssertionError(
+                        "source must not be None for ValueMutationExisting/AttributeMutationExisting"
+                    )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """

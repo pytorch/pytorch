@@ -1236,6 +1236,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
@@ -1252,7 +1258,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>    \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
         selfInfo, sourceInfo, indexInfo,                                     \
         selfAddDim, sourceAddDim, sourceTotalSize,                          \
@@ -1417,6 +1423,12 @@ void index_reduce_func_cuda_impl(
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
@@ -1433,7 +1445,7 @@ void index_reduce_func_cuda_impl(
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>                 \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
         selfInfo, sourceInfo, indexInfo,                                                   \
         selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
@@ -1533,27 +1545,6 @@ void index_reduce_func_cuda_impl(
 
 TORCH_IMPL_FUNC(index_add_cuda_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-#if defined(__HIP_PLATFORM_AMD__)
-  // On AMD MI350X, scatter_add_ outperforms the indexFuncLargeIndex
-  // atomicAdd path across all measured source sizes (>=1.0x at 1K rising
-  // to ~2x for uniform / ~5x for Zipf-distributed indices). Always
-  // redirect for the matching shape; see bench_index_add_powerlaw.py.
-  // When deterministicAlgorithms() is enabled, fall through to
-  // index_add_cuda_impl so its index_put_ deterministic path is honored —
-  // scatter_add_ on HIP uses non-deterministic atomicAdd.
-  if (alpha.equal(1) && dim == 0 && self.dim() == 2 &&
-      !globalContext().deterministicAlgorithms()) {
-    // Mirror index_add_cuda_impl's structured-kernel pre-copy: for
-    // out-of-place / index_add(out=...) the result is uninitialized
-    // and must be seeded with self before accumulating.
-    if (!result.is_same(self)) {
-      result.copy_(self);
-    }
-    auto expanded_index = index.to(at::kLong).unsqueeze(1).expand_as(source);
-    result.scatter_add_(dim, expanded_index, source);
-    return;
-  }
-#endif
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 
