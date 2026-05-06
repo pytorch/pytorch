@@ -2524,6 +2524,7 @@ class _XpuDeviceProperties:
     has_subgroup_matrix_multiply_accumulate: _bool
     has_subgroup_matrix_multiply_accumulate_tensor_float32: _bool
     has_subgroup_2d_block_io: _bool
+    is_integrated_gpu: _bool
     total_memory: _int
     gpu_subslice_count: _int
     architecture: _int
