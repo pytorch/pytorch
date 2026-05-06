@@ -256,10 +256,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def is_hashable(self) -> bool:
+    def is_hashable_lazy(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
-        # This is used by ConstDictVariable tracker to find if the key LazyVT
-        # can be hashed.
+        # This is used by the is_hashable() function in hashable.py as a fast
+        # path for unrealized LazyVTs.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
             return (
