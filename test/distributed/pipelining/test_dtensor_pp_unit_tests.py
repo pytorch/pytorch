@@ -656,6 +656,38 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             )
         self.assertIn("mix", str(ctx.exception))
 
+    @_requires_multi_gpu
+    def test_split_target_preserves_dtensor_placements(self):
+        """Regression test: schedules._split_target must split DTensor targets
+        via _split_tensor (not torch.tensor_split) so that Shard placements
+        survive (no implicit all-gather to Replicate) and so that uneven splits
+        agree across ranks. If the target-split path is reverted to
+        torch.tensor_split, Shard(0) placements degrade to Replicate() and this
+        test fails."""
+        from torch.distributed.pipelining.schedules import _split_target
+
+        self.init_pg()
+        mesh = self._make_mesh()
+
+        # Even-split and uneven-split cases; Shard(0) and Replicate() placements.
+        for n_microbatches, batch in [(2, 8), (3, 7)]:
+            for placements in ([Shard(0)], [Replicate()]):
+                dt = self._make_dtensor(mesh, placements, shape=(batch,))
+                chunks = _split_target(dt, n_microbatches)
+
+                self.assertEqual(len(chunks), n_microbatches)
+                total = 0
+                for i, chunk in enumerate(chunks):
+                    self.assertIsInstance(chunk, DTensor, f"chunk {i} not DTensor")
+                    self.assertEqual(
+                        chunk.placements,
+                        tuple(placements),
+                        f"chunk {i} placements changed from {placements} "
+                        f"to {chunk.placements}",
+                    )
+                    total += chunk.shape[0]
+                self.assertEqual(total, batch)
+
 
 # =============================================================================
 # Run Tests
