@@ -112,6 +112,22 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def get_python_hash(self) -> int:
         return hash(self.value)
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        reverse: bool = False,
+    ) -> "VariableTracker":
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def as_proxy(self) -> Any:
         return self.value
 
@@ -167,8 +183,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # disallow creating reference-type opaque objects in the middle of the
         # program
         if is_opaque_reference_type(self.value):
-            # Skip __init__ to prevent dynamo from tracing it during resume
-            skip_code(self.value.__init__.__code__)
+            # Skip __init__ to prevent dynamo from tracing it during resume.
+            # C extension types (e.g. torch._C.Generator) have wrapper_descriptor
+            # __init__ without __code__, so guard the skip_code call.
+            if hasattr(self.value.__init__, "__code__"):
+                skip_code(self.value.__init__.__code__)
 
             unimplemented(
                 gb_type="An opaque object was created in the middle of the program.",

@@ -73,6 +73,8 @@ def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
 
 @compatibility(is_backward_compatible=False)
 class NodeSourceAction(Enum):
+    """Enum representing the action taken to produce a node in provenance tracking."""
+
     CREATE = "create"
     REPLACE = "replace"
 

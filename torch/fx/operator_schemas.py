@@ -399,7 +399,7 @@ def normalize_function(
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs). Does not support modules.
+    parameters or varargs parameters (``*args``, ``**kwargs``). Does not support modules.
 
     May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
 
@@ -538,7 +538,7 @@ def normalize_module(
     signature and return exclusively kwargs in positional order if
     `normalize_to_only_use_kwargs` is True.
     Also populates default values. Does not support positional-only
-    parameters or varargs parameters (*args, **kwargs).
+    parameters or varargs parameters (``*args``, ``**kwargs``).
 
     Args:
         root (nn.Module): root module upon which we query modules

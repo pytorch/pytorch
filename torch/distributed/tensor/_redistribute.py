@@ -1311,7 +1311,7 @@ class DTensorRedistributePlanner:
         This would detect if there're mis-aligned/nested shardings between src/dst placements.
         E.g. Suppose the redistribution to perform is (Shard(0), Shard(0)) -> (Replicate(), Shard(0)),
         in this case Shard(0) -> Shard(0) for mesh dimension 1 actually needs resharding, because in
-        the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
+        the former is a nested-sharding of a tensor already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
         # logical shape records the logic tensor shape on the mesh dimension

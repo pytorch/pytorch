@@ -1,13 +1,12 @@
 name: s390x-periodic
 
+# DISABLED: this workflow has been failing for months and not providing a useful
+# signal.
+# Details in the PR description for https://github.com/pytorch/pytorch/pull/181005
+# Re-enable once workflow has been fully fixed and someone is willing to maintain it.
 on:
-  schedule:
-    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
-    # Also run less frequently on weekends.
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
-      - ciflow/periodic/*
       - ciflow/s390/*
   workflow_dispatch:
 
