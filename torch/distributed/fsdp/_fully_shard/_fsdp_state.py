@@ -286,7 +286,7 @@ class FSDPState(_State):
                 if not fsdp_param_group.is_unsharded:
                     fsdp_param_group.unshard()
                     fsdp_param_group.wait_for_unshard()
-            return args, kwargs
+            return self._cast_forward_inputs(args, kwargs)
         # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
         # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
         # run for each). Root setup and forward prefetch are one-shot, gated
@@ -295,15 +295,7 @@ class FSDPState(_State):
         self._training_state = TrainingState.FORWARD
         if state_first_in_pass:
             args, kwargs = self._root_pre_forward(module, args, kwargs)
-        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
-            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
-                cast_fn = functools.partial(
-                    _cast_fp_tensor, self._mp_policy.param_dtype
-                )
-                args, kwargs = (
-                    _apply_to_tensors(cast_fn, args),
-                    _apply_to_tensors(cast_fn, kwargs),
-                )
+        args, kwargs = self._cast_forward_inputs(args, kwargs)
         for fsdp_param_group in self._fsdp_param_groups:
             args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
         if state_first_in_pass:
@@ -319,7 +311,7 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
-            return output
+            return self._cast_output_dtype(output)
         for fsdp_param_group in self._fsdp_param_groups:
             output = fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
@@ -336,6 +328,15 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
         return self._cast_output_dtype(output)
+
+    def _cast_forward_inputs(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if not (self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype):
+            return args, kwargs
+        with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+            cast_fn = functools.partial(_cast_fp_tensor, self._mp_policy.param_dtype)
+            return _apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs)
 
     def _cast_output_dtype(self, output: Any) -> Any:
         if self._mp_policy.output_dtype is None:
