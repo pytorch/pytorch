@@ -7615,7 +7615,7 @@ def forward(self, primals_1, tangents_1):
     # --- Backward prologue codegen tests ---
 
     def test_backward_prologue_codegen_emitted(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7631,7 +7631,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("_raise_if_functorch_active_", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7642,7 +7642,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 0)
 
     def test_backward_prologue_baked_arity(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7657,7 +7657,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("if len(flat_args) != 3:", source)
 
     def test_backward_prologue_tangent_filtering(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7713,7 +7713,7 @@ def forward(self, primals_1, tangents_1):
         prev = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(True)
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7730,7 +7730,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("are_deterministic_algorithms_enabled", source)
 
     def test_backward_prologue_elides_tokens_when_zero(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7744,7 +7744,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("[None]", source)
 
     def test_backward_prologue_deterministic_check_when_false(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7796,7 +7796,7 @@ def forward(self, primals_1, tangents_1):
         h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
         h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7833,7 +7833,7 @@ def forward(self, primals_1, tangents_1):
 
         clone_op.register_autograd(backward, setup_context=setup_context)
 
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             def fn(x, x1):
                 return torch.ops.test._bw_prologue_clone_mutate(x, x1)
@@ -7886,7 +7886,7 @@ def forward(self, primals_1, tangents_1):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_prologue_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
