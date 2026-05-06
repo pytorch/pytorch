@@ -690,6 +690,43 @@ class TestPrecomputedSizeHinting(InductorTestCase):
         self.assertEqual(hint, 53)
 
 
+class TestHintDisproves(InductorTestCase):
+    """Tests for hint-disproves fast-path in statically_known_true."""
+
+    def test_hint_disproves_false_claim(self):
+        """If the hint says the expression is False, statically_known_true
+        should return False without expensive sympy reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 < 5 is False when s0=10
+        self.assertFalse(sizevars.statically_known_true(s0 < 5))
+
+    def test_hint_does_not_prove_true_claim(self):
+        """If the hint says True, statically_known_true should not
+        short-circuit — it must fall through to full reasoning."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # s0 > 5 is True for hint=10, but not provably universal
+        # (statically_known_true may or may not return True depending
+        # on range info — we just verify it doesn't crash)
+        sizevars.statically_known_true(s0 > 5)
+
+    def test_hint_disproves_with_complex_expr(self):
+        """Hint fast-path works on multi-symbol expressions."""
+        sizevars = SizeVarAllocator()
+        s0 = sizevars.shape_env.create_symbol(160, source=ConstantSource("s0"))
+        s1 = sizevars.shape_env.create_symbol(200, source=ConstantSource("s1"))
+        sizevars.backed_var_to_val[s0] = sympy.Integer(160)
+        sizevars.backed_var_to_val[s1] = sympy.Integer(200)
+
+        # (s0 + s1) < 100 is False when hints sum to 360
+        self.assertFalse(sizevars.statically_known_true((s0 + s1) < 100))
+
+
 class TestWideExpressionThresholds(InductorTestCase):
     """Verify that safe_gcd / free-symbols thresholds only affect WIDE
     expressions.  Small expressions must still get full simplification."""
