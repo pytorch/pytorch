@@ -49,6 +49,7 @@ class Dirichlet(ExponentialFamily):
     Args:
         concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
+        generator (torch.Generator, optional): a pseudorandom number generator for sampling
     """
 
     # pyrefly: ignore [bad-override]

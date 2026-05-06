@@ -28,6 +28,7 @@ class Beta(ExponentialFamily):
             (often referred to as alpha)
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
+        generator (torch.Generator, optional): a pseudorandom number generator for sampling
     """
 
     # pyrefly: ignore [bad-override]
