@@ -3078,6 +3078,35 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check("triton_tem_fused").run(code[0])
 
+    @config.patch(
+        {
+            "max_autotune": True,
+        }
+    )
+    def test_deffered_layout_constraint_mm_cat_mm(self):
+        def mm_cat_mm(t1, t2, t3, t4):
+            add = t2 + 1
+            matmul1 = torch.matmul(t1, add)
+            cat = torch.cat((t3, add), dim=1)
+            matmul2 = torch.matmul(t4, add)
+            return matmul1, cat, matmul2
+
+        B = 3072
+        M = 128
+        K = 144
+        N = 160
+        P = 96
+        t1 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+        t2 = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float16)
+        t3 = torch.randn(B, P, N, device=GPU_TYPE, dtype=torch.float16)
+        t4 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+
+        args = (t1, t2, t3, t4)
+
+        compiled_fn = torch.compile(mm_cat_mm)
+
+        run_and_get_code(compiled_fn, *args)
+
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
