@@ -91,6 +91,7 @@ def make_inputs_non_leaves(inps):
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
     def test_print(self):

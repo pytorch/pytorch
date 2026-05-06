@@ -299,6 +299,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
 class TestSparseSemiStructured(TestCase):
     def setUp(self):
+        super().setUp()
         if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
             self.skipTest("semi-structured sparsity has no available backend!")
         if IS_WINDOWS:
@@ -646,6 +647,7 @@ def create_random_mask(shape) -> torch.Tensor:
 
 class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
+        super().setUp()
         if not _IS_SM8X:
             self.skipTest(
                 "SparseSemiStructuredTensor training only supported on SM8x (Ampere)"
@@ -1046,6 +1048,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         SparseSemiStructuredTensor._FORCE_CUTLASS = True
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest("CUTLASS not enabled")
@@ -1310,6 +1313,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         SparseSemiStructuredTensor._FORCE_CUTLASS = False
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest("cuSPARSELt not enabled")

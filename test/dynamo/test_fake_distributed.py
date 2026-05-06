@@ -234,6 +234,7 @@ instantiate_parametrized_tests(TestFakeDistributed)
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2P(DynamoTestCase):
     def setUp(self):
+        super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=2)
 
     def tearDown(self):

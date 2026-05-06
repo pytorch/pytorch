@@ -37,6 +37,7 @@ class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
         cls._store = TCPStore("localhost", 0, is_master=True)  # type: ignore[call-arg]
 
     def setUp(self) -> None:
+        super().setUp()
         # Make sure we have a clean slate.
         self._store.delete_key("torch.rendezvous.dummy_run_id")
 
@@ -50,6 +51,7 @@ class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
     _store: ClassVar[FileStore]
 
     def setUp(self) -> None:
+        super().setUp()
         _, path = tempfile.mkstemp()
         self._path = path
 
@@ -68,6 +70,7 @@ class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
 class CreateBackendTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # For testing, the default parameters used are for tcp. If a test
         # uses parameters for file store, we set the self._params to
         # self._params_filestore.

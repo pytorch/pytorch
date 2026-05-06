@@ -282,6 +282,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         cls._etcd_server.stop()
 
     def setUp(self):
+        super().setUp()
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self._run_id = str(uuid.uuid4()).split("-")[0]
 

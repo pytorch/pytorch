@@ -161,6 +161,7 @@ def _aligned_zeros(shape, dtype=float, order="C", align=None):
 @instantiate_parametrized_tests
 class TestFlag(TestCase):
     def setUp(self):
+        super().setUp()
         self.a = np.arange(10)
 
     @xfail
@@ -351,6 +352,7 @@ class TestHash(TestCase):
 @xpassIfTorchDynamo_np  # (reason="TODO: hash")
 class TestAttributes(TestCase):
     def setUp(self):
+        super().setUp()
         self.one = np.arange(10)
         self.two = np.arange(20).reshape(4, 5)
         self.three = np.arange(60, dtype=np.float64).reshape(2, 5, 6)
@@ -758,6 +760,7 @@ class TestDtypedescr(TestCase):
 @skip  # (reason="TODO: zero-rank?")   # FIXME: revert skip into xfail
 class TestZeroRank(TestCase):
     def setUp(self):
+        super().setUp()
         self.d = np.array(0), np.array("x", object)
 
     def test_ellipsis_subscript(self):
@@ -862,6 +865,7 @@ class TestZeroRank(TestCase):
 
 class TestScalarIndexing(TestCase):
     def setUp(self):
+        super().setUp()
         self.d = np.array([0, 1])[0]
 
     def test_ellipsis_subscript(self):
@@ -4373,6 +4377,7 @@ class TestFromBuffer(TestCase):
 @skip  # (reason="TODO")   # FIXME: skip -> xfail (a0.shape = (4, 5) raises)
 class TestFlat(TestCase):
     def setUp(self):
+        super().setUp()
         a0 = np.arange(20.0)
         a = a0.reshape(4, 5)
         a0.shape = (4, 5)
@@ -4554,6 +4559,7 @@ class TestStats(TestCase):
     funcs = [_mean, _var, _std]
 
     def setUp(self):
+        super().setUp()
         np.random.seed(3)
         self.rmat = np.random.random((4, 5))
         self.cmat = self.rmat + 1j * self.rmat
@@ -4963,6 +4969,7 @@ class TestVdot(TestCase):
 @instantiate_parametrized_tests
 class TestDot(TestCase):
     def setUp(self):
+        super().setUp()
         np.random.seed(128)
 
         # Numpy and pytorch random streams differ, so inline the
@@ -5473,6 +5480,7 @@ class MatmulCommon:
 @instantiate_parametrized_tests
 class TestMatmul(MatmulCommon, TestCase):
     def setUp(self):
+        super().setUp()
         self.matmul = np.matmul
 
     def test_out_arg(self):
@@ -5793,6 +5801,7 @@ class TestInner(TestCase):
 @instantiate_parametrized_tests
 class TestChoose(TestCase):
     def setUp(self):
+        super().setUp()
         self.x = 2 * np.ones((3,), dtype=int)
         self.y = 3 * np.ones((3,), dtype=int)
         self.x2 = 2 * np.ones((2, 3), dtype=int)
@@ -5859,6 +5868,7 @@ class TestChoose(TestCase):
 
 class TestRepeat(TestCase):
     def setUp(self):
+        super().setUp()
         self.m = np.array([1, 2, 3, 4, 5, 6])
         self.m_rect = self.m.reshape((2, 3))
 

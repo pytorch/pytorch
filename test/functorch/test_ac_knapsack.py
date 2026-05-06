@@ -332,6 +332,7 @@ class TestKnapsackEvaluator(TestCase):
 
 class TestActivationCheckpointingKnapsack(TestCase):
     def setUp(self):
+        super().setUp()
         # (memory, runtime, max_memory, expected_runtime, expected_saved, expected_recomputable)
         self.test_cases = [
             ([2, 3, 2, 4, 1], [1, 2, 1, 3, 2], 5, 5.0, [3, 4], [2, 1, 0]),
