@@ -993,10 +993,11 @@ User code traceback:
         msg = re.sub(r"line (\d+)", "line N", msg)
         # remove carets
         msg = re.sub(r"\n\s*~*\^+\n", "\n", msg)
-        # collapse multi-line raise into first line
+        # normalize multi-line raise: 3.10 only shows the first line,
+        # 3.11+ shows the full statement. Replace either form with a single line.
         msg = re.sub(
-            r"(    raise e\.with_traceback\().*?(\) from)",
-            r"\1None\2",
+            r"    raise e\.with_traceback\((?:.*\) from e\.__cause__  # User compiler error|[^\n]*)",
+            "    raise e.with_traceback(None) from e.__cause__  # User compiler error",
             msg,
             flags=re.DOTALL,
         )

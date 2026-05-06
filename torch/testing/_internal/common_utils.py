@@ -6049,10 +6049,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
-    if strip_carets:
-        # Remove caret/tilde indicator lines (e.g. "    ~~~^^^^") since their
-        # presence and alignment vary across Python versions.
-        s = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", s)
     if strip_stack_attribution:
         # Strip the contents of "Stack variable source attribution" blocks but
         # keep the header, since the entries depend on whether specific bytecodes
@@ -6062,6 +6058,10 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
             r"\1\n\n",
             s,
         )
+    if strip_carets:
+        # Remove caret/tilde indicator lines (e.g. "    ~~~^^^^") since their
+        # presence and alignment vary across Python versions.
+        s = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", s)
     return s
 
 
