@@ -269,6 +269,13 @@ class FunctionalTensor(torch.Tensor):
                 raise AssertionError("Expected 1 arg with FunctionalTensor")
 
             return func(torch._from_functional_tensor(args[0].elem))
+        if func is torch.ops.aten.detach.default:
+            # detach can reach this dispatch when no FunctionalTensorMode is active
+            # (e.g. snapshot_fake under ProxyTorchDispatchMode). Returning self is safe:
+            # autograd has already run above this layer, so detach has no effect here,
+            # and we must avoid falling through to the "on its own" RuntimeError below.
+            if len(args) == 1 and isinstance(args[0], FunctionalTensor):
+                return args[0]
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
         # - If we want to use _make_subclass(), we have a problem: the subclass will share a TensorImpl with the inner tensor,
@@ -580,7 +587,16 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # Sometimes these functions cannot be directly dispatched to functionalize key
                     # because args are sometimes not functional tensors for some reason?
                     if func in FunctionalTensor.metadata_fns:
-                        outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
+                        # With dynamic shapes, metadata ops (e.g. aten.sym_size)
+                        # on the unwrapped inner tensor re-enter Python dispatch
+                        # because symbolic sizes require Python-side evaluation.
+                        # The inner tensors don't have proxy slots (only the outer
+                        # FunctionalTensor does), so ProxyTorchDispatchMode would
+                        # store them as spurious graph constants. The metadata op
+                        # was already recorded on the FunctionalTensor by the proxy
+                        # mode above us, so we disable proxy tracing here.
+                        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+                            outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                         outs_wrapped = pytree.tree_map_only(
                             torch.Tensor, wrap, outs_unwrapped
                         )
