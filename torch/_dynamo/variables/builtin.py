@@ -2657,8 +2657,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     _fn = dict
 
-    def __init__(self, value: type = dict, **kwargs: Any) -> None:
-        assert value is dict
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -2836,8 +2836,8 @@ class IterBuiltinVariable(BaseBuiltinVariable):
 
     _fn = iter
 
-    def __init__(self, value: Any = iter, **kwargs: Any) -> None:
-        assert value is iter
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -2871,8 +2871,8 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = getattr
 
-    def __init__(self, value: Any = getattr, **kwargs: Any) -> None:
-        assert value is getattr
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3082,8 +3082,8 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = hasattr
 
-    def __init__(self, value: Any = hasattr, **kwargs: Any) -> None:
-        assert value is hasattr
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3250,8 +3250,8 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = setattr
 
-    def __init__(self, value: Any = setattr, **kwargs: Any) -> None:
-        assert value is setattr
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3454,8 +3454,8 @@ class StrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = str
 
-    def __init__(self, value: type = str, **kwargs: Any) -> None:
-        assert value is str
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3579,8 +3579,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
 
     _fn = type
 
-    def __init__(self, value: type = type, **kwargs: Any) -> None:
-        assert value is type
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3656,8 +3656,8 @@ class ListBuiltinVariable(BaseBuiltinVariable):
 
     _fn = list
 
-    def __init__(self, value: type = list, **kwargs: Any) -> None:
-        assert value is list
+    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
