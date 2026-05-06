@@ -297,6 +297,15 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// C-ABI-safe variant of AOTInductorModelUpdateConstantsMap.
+// Uses an array of (name, handle) pairs instead of an opaque pointer to
+// std::unordered_map, so the host and DSO can use different C++ standard
+// libraries without ABI conflicts.
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
+    AOTInductorModelHandle model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    int32_t num_pairs);
+
 // Get the size of the constant blob
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
     AOTInductorModelContainerHandle container_handle,
