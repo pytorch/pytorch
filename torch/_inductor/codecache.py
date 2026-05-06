@@ -1031,12 +1031,16 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
         and isinstance(custom_pass, CustomGraphPass)
         and custom_pass.uuid() is not None
     )
+    pass_name = (
+        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+        if custom_pass is not None
+        else "<none>"
+    )
 
     if timing == "default":
         supports_late = custom_pass is None or has_uuid
         timing = "late" if supports_late else "early"
         if timing == "early" and custom_pass:
-            pass_name = type(custom_pass).__qualname__
             if pass_name not in _warned_pre_grad_pass_missing_uuid:
                 _warned_pre_grad_pass_missing_uuid.add(pass_name)
                 log.warning(
@@ -1053,7 +1057,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(
-            "pre_grad_custom_pass must implement uuid() to run late "
+            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
