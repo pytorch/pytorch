@@ -347,7 +347,7 @@ class Vectorizedf8 {
   static constexpr size_type size() {
     return 64;
   }
-  Vectorizedf8() {}
+  Vectorizedf8() = default;
   Vectorizedf8(__m512i v) : values(v) {}
   Vectorizedf8(T val) {
     value_type uw = val.x;

@@ -174,7 +174,6 @@ def check_dynamo(backend, device, err_msg) -> None:
                 return x + x
 
         mod = Module()
-        # pyrefly: ignore [bad-argument-type]
         opt_mod = dynamo.optimize(backend, nopython=True)(mod)
 
         for f in (fn, opt_mod):

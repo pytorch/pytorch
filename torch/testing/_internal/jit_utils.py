@@ -242,7 +242,7 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     return
 
-            # import the model again (from a the copy we made of the original)
+            # import the model again (from the copy we made of the original)
             buffer2 = io.BytesIO(buffer_copy)
             imported = torch.jit.load(buffer2)
 
@@ -737,7 +737,7 @@ def get_module_method(m, module, method):
     return m._c.getattr(module)._get_method(method)
 
 def attrs_with_prefix(module, prefix):
-    return [x for x, _ in module._modules._c.items()
+    return [x for x in module._modules._c
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
