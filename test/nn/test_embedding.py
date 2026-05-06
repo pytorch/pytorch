@@ -231,7 +231,7 @@ class TestEmbeddingNN(NNTestCase):
             if (padding_idx < -num_embeddings) or (padding_idx >= num_embeddings):
                 with self.assertRaisesRegex(RuntimeError, functional_err_msg):
                     F.embedding_bag(a, embeddings, padding_idx=padding_idx)
-                with self.assertRaisesRegex(AssertionError, module_err_msg):
+                with self.assertRaisesRegex(ValueError, module_err_msg):
                     torch.nn.EmbeddingBag(
                         num_embeddings, num_features, padding_idx=padding_idx
                     )
@@ -487,14 +487,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
         # out of bounds check for padding_idx
         self.assertRaises(
-            AssertionError,
+            ValueError,
             nn.Embedding,
             num_embeddings=10,
             embedding_dim=20,
             padding_idx=25,
         )
         self.assertRaises(
-            AssertionError,
+            ValueError,
             nn.Embedding,
             num_embeddings=10,
             embedding_dim=20,
