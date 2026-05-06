@@ -38,7 +38,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -164,7 +164,6 @@ from ..utils import (
     is_namedtuple,
     is_parameter_freezing,
     is_pybind11_enum_member,
-    is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
@@ -234,6 +233,7 @@ from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallableGenericAliasVariable,
     ComptimeVariable,
     ConstantLikeVariable,
     DebuggingVariable,
@@ -253,7 +253,7 @@ from .misc import (
     SavedTensorBox,
     StringFormatVariable,
     TorchVersionVariable,
-    TypingVariable,
+    UnionVariable,
     WeakRefVariable,
 )
 from .nn_module import (
@@ -328,7 +328,6 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-from typing import TypeVar
 
 
 # Placeholder for a VariableTracker to be used in proxy
@@ -1043,13 +1042,8 @@ class VariableBuilder:
             return FunctoolsPartialVariable(
                 func_obj, args, keywords, original_cache_hash=original_cache_hash
             )
-        elif is_typing(value):
-            # typing.List, typing.Mapping, etc.
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return TypingVariable(
-                value,
-                source=self.source,
-            )
+        elif isinstance(value, types.UnionType):
+            return UnionVariable(value, source=self.source)
         elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
@@ -1559,6 +1553,9 @@ class VariableBuilder:
                     value,
                     source=self.source,
                 )
+
+            if sys.version_info >= (3, 14) and value is Union:
+                return BuiltinVariable.create_with_source(value, self.source)
 
             return UserDefinedClassVariable(
                 value,
@@ -4381,8 +4378,8 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, (types.GenericAlias, types.UnionType)):
-            return TypingVariable(value)
+        elif isinstance(value, types.UnionType):
+            return UnionVariable(value)
         elif is_namedtuple(value):
             output = [
                 SourcelessBuilder.create(tx, getattr(value, name))
@@ -4406,6 +4403,11 @@ class SourcelessBuilder:
             return SliceVariable(items, tx)  # pyrefly: ignore[bad-argument-type]
         elif istype(value, object):
             return ObjectVariable(value)
+        elif isinstance(
+            value,
+            collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        ):
+            return CallableGenericAliasVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",

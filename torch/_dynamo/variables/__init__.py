@@ -111,6 +111,7 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallableGenericAliasVariable,
     CellVariable,
     DeletedVariable,
     ExceptionVariable,
@@ -127,7 +128,7 @@ from .misc import (
     SuperVariable,
     TorchVersionVariable,
     TracebackVariable,
-    TypingVariable,
+    UnionVariable,
     UnknownVariable,
     WeakRefVariable,
 )

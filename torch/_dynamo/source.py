@@ -690,6 +690,8 @@ class GetItemSource(ChainedSource):
         codegen(self.base)
         if self.index_is_slice:
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
+        elif isinstance(self.index, Source):
+            codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
@@ -703,10 +705,12 @@ class GetItemSource(ChainedSource):
     def _name_template(self) -> str:
         # Index can be of following types
         # 1) index is a slice - example 1:4
-        # 2) index is a constant - example string, integer
-        assert not isinstance(self.index, Source)
+        # 2) index is a Source representing a type object - example list[typing.Any]
+        # 3) index is a constant - example string, integer
         if self.index_is_slice:
             return f"{{0}}[{_esc_str(self.unpack_slice(), apply_repr=True)}]"
+        elif isinstance(self.index, Source):
+            return f"{{0}}[{_esc_str(self.index.name)}]"
         else:
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
