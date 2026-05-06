@@ -107,11 +107,10 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)  # pyrefly: ignore[bad-argument-type]
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # OpaqueObjectClassVariable wraps the CLASS, not an instance.
+        # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
+        return hash(self.value), False
 
     def nb_or_impl(
         self,
@@ -538,16 +537,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def is_python_hashable(self) -> bool:
-        try:
-            self.get_python_hash()
-            return True
-        except TypeError:
-            return False
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        from ..exc import raise_type_error
 
-    def get_python_hash(self) -> int:
         real_obj = self.as_python_constant()
-        return hash(real_obj)
+        try:
+            return hash(real_obj), False
+        except TypeError:
+            raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):

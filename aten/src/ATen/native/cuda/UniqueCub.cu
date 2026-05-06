@@ -46,7 +46,7 @@ const scalar_t * wrap_input_iterator(const scalar_t *data) {
 }
 
 struct LoadBoolOp {
-  __device__ bool operator()(uint8_t x) const {
+  __device__ int operator()(uint8_t x) const {
     return static_cast<bool>(x);
   }
 };
@@ -54,7 +54,7 @@ struct LoadBoolOp {
 auto wrap_input_iterator(const bool *data) {
   // See NOTE [Loading boolean values]
   LoadBoolOp op;
-  return ATEN_CUB_TRANSFORM_ITERATOR(bool, LoadBoolOp, const uint8_t*, int)(
+  return ATEN_CUB_TRANSFORM_ITERATOR(bool, LoadBoolOp, const uint8_t*)(
       reinterpret_cast<const uint8_t*>(data), op);
 }
 
@@ -259,7 +259,7 @@ struct UniqueCub<bool> {
 
     const bool* self_data = self.const_data_ptr<bool>();
     MapNumberOfTrueValues op;
-    ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*, int)
+    ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*)
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
                           NO_ROCM(::cuda)::std::plus<>{}, 0);
