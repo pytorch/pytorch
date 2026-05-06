@@ -919,7 +919,7 @@ Reconstruction failure
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
 Stack variable source attribution:
-  NullVariable originated from:
+  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:
   File "test_error_messages.py", line N
                 torch._dynamo.graph_break()
 
