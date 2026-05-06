@@ -251,6 +251,11 @@ class Tensor(torch._C.TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
+            # Register the new tensor in the memo before recursing into
+            # slot/dict deepcopy so self-referential state on subclasses
+            # terminates instead of looping back through __deepcopy__.
+            memo[id(self)] = new_tensor
+
             if type(self) is not Tensor:
                 if type(new_tensor) is not type(self):
                     raise RuntimeError(
@@ -268,7 +273,6 @@ class Tensor(torch._C.TensorBase):
             self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
-            memo[id(self)] = new_tensor
             return new_tensor
 
     def __reduce_ex__(self, proto):
