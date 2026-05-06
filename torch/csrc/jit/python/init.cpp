@@ -567,7 +567,7 @@ void initJITBindings(PyObject* module) {
             arg_spec_creator.specializeTypes(*graph, spec);
             // We only get partial specialization from the arg_spec_creator, but
             // we want full shape specialization. The alternative would be to
-            // have a "complete type inference" function in ArguemntSpecCreator.
+            // have a "complete type inference" function in ArgumentSpecCreator.
             auto g_inputs = graph->inputs();
             for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
