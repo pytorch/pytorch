@@ -104,6 +104,21 @@ CPU_BUILD_ENV: dict[str, str] = {
     "USE_CUDA": "0",
 }
 
+# ROCm builds use static linking and skip debug info; mirror the original
+# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
+ROCM_BUILD_ENV_STATIC: dict[str, str] = {
+    "ROCM_HOME": "/opt/rocm",
+    "MAGMA_HOME": "/opt/rocm/magma",
+    "BUILD_DEBUG_INFO": "0",
+    "TH_BINARY_BUILD": "1",
+    "USE_STATIC_CUDNN": "1",
+    "USE_STATIC_NCCL": "1",
+    "ATEN_STATIC_CUDA": "1",
+    "USE_CUDA_STATIC_LINK": "1",
+    "INSTALL_TEST": "0",
+    "FORCE_RPATH": "--force-rpath",
+}
+
 PLATFORM_TAGS: dict[str, str] = {
     "x86_64": "manylinux_2_28_x86_64",
     "aarch64": "manylinux_2_28_aarch64",
@@ -369,7 +384,15 @@ def main() -> None:
         cleanup_cuda_for_cpu_build()
         env_out.update(CPU_BUILD_ENV)
         print("CPU environment configured")
-    # ROCm and XPU use the legacy Docker-in-Docker workflow and skip this script.
+    elif gpu_arch_type == "rocm":
+        env_out.update(ROCM_BUILD_ENV_STATIC)
+        # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
+        # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
+        desired = os.environ.get("DESIRED_CUDA", "")
+        if desired and not desired.startswith("rocm"):
+            env_out["DESIRED_CUDA"] = f"rocm{desired}"
+        print(f"ROCm environment configured ({desired})")
+    # XPU still uses the legacy Docker-in-Docker workflow and skips this script.
 
     write_env_exports(env_out, args.env_out)
     print("before-all setup complete")
