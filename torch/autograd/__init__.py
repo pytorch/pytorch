@@ -24,6 +24,7 @@ from .grad_mode import (
     _force_original_view_tracking,
     _unsafe_preserve_version_counter,
     enable_grad,
+    enforce_grad_layout_policy,
     inference_mode,
     no_grad,
     set_grad_enabled,
@@ -50,6 +51,7 @@ __all__ = [
     "set_detect_anomaly",
     "set_grad_enabled",
     "set_multithreading_enabled",
+    "enforce_grad_layout_policy",
     "variable",
 ]
 
@@ -595,6 +597,7 @@ from torch._C._autograd import (
     _enable_profiler_legacy,
     _enable_record_function,
     _get_sequence_nr,
+    _is_kineto_stopped,
     _kineto_step,
     _KinetoEvent,
     _pop_saved_tensors_default_hooks,
