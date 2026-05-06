@@ -56,6 +56,18 @@ class CuteDSLScheduling(BaseScheduling):
         """
         return False
 
+    def can_fuse_horizontal(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
+        CuteDSL doesn't support horizontal fusion. Without this override,
+        CUDACombinedScheduling dispatches into BaseScheduling.can_fuse_horizontal
+        which raises NotImplementedError, so any model with two cutedsl-template
+        adjacent scheduler nodes (e.g. multiple flex_attention calls) fails to
+        compile during fusion analysis.
+        """
+        return False
+
     def define_kernel(self, src_code_str: str, node_schedule) -> str:
         """Produce the kernel string
         Args:
