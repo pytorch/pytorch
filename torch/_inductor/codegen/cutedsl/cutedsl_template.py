@@ -64,7 +64,7 @@ class CuteDSLTemplate(KernelTemplate):
             return NotImplementedError(f"CuteDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
-        """Generate the CuteDSL kernel caller."""
+        """Generate the CuteDSL kernel caller for template autotuning."""
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
