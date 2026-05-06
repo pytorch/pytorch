@@ -389,8 +389,13 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
         for cuda in compatible_releases:
             cu_tag = "cu" + cuda.replace(".", "")
             lines.append(
-                f"  pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+                f"  For CUDA {cuda} use pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
             )
+    else:
+        lines.append(
+            f"No published PyTorch CUDA builds for release {torch.__version__} support this GPU. "
+            "Visit https://pytorch.org/get-started/locally/ to find a compatible release."
+        )
 
     warnings.warn("\n".join(lines), stacklevel=2)
 
