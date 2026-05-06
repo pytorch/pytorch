@@ -4714,7 +4714,9 @@ add_docstr_all(
     r"""
 sigmoid() -> Tensor
 
-See :func:`torch.sigmoid`
+Equivalent to :func:`torch.sigmoid` applied to this tensor.
+
+See :class:`torch.nn.Sigmoid` for the module form and formula.
 """,
 )
 

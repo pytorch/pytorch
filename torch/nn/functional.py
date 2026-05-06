@@ -2304,6 +2304,8 @@ def sigmoid(input):
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
 
+    Equivalent to :func:`torch.sigmoid`.
+
     See :class:`~torch.nn.Sigmoid` for more details.
     """
     return input.sigmoid()
