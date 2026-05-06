@@ -106,6 +106,30 @@ class LazyConstantVariableTests(TestCase):
         compiled = opt_fn(x, 2)
         self.assertTrue(same(eager, compiled))
 
+    def test_torch_size_with_lazy_constant_int(self):
+        """torch.Size() called with a tuple containing a lazy constant int
+        must use its dedicated handler, not the peekable-constant-fold path.
+
+        The constant-fold path builds a plain ConstantVariable from the
+        result, losing the SizeVariable type that downstream code expects.
+        This reproduces the test_torch_distributions_gamma_dynamic failure.
+        """
+
+        def fn(n):
+            distribution = torch.distributions.Gamma(
+                concentration=torch.tensor(2.0),
+                rate=torch.tensor(1.0),
+            )
+            return distribution.sample((n,))
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+
+        torch.manual_seed(42)
+        expected = fn(5)
+        torch.manual_seed(42)
+        result = opt_fn(5)
+        self.assertEqual(result, expected)
+
     def test_slice_indices_unspecialized_ints(self):
         """Test that slice indices work with unspecialized ints.
 
