@@ -519,7 +519,9 @@ void bf16bf16_foreach_mm_impl(
       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
           stride_output + group_count);
 
-  // Build pointer arrays on host, async copy to device
+  // Build pointer arrays on host, copy to device.
+  // Synchronous copy because host_ptrs is stack-allocated and would be
+  // freed before an async copy completes.
   std::vector<void*> host_ptrs(3 * aligned_group_count, nullptr);
   for (int i = 0; i < group_count; i++) {
     host_ptrs[i] = self_list[i].data_ptr();
@@ -527,10 +529,10 @@ void bf16bf16_foreach_mm_impl(
     host_ptrs[2 * aligned_group_count + i] = outputs[i].data_ptr();
   }
   auto stream = at::cuda::getCurrentCUDAStream().stream();
-  AT_CUDA_CHECK(cudaMemcpyAsync(
+  AT_CUDA_CHECK(cudaMemcpy(
       buf_ptr, host_ptrs.data(),
       3 * aligned_group_count * sizeof(void*),
-      cudaMemcpyHostToDevice, stream));
+      cudaMemcpyHostToDevice));
 
   int64_t lda = a_row_major ? self_list[0].stride(-2) : self_list[0].stride(-1);
   int64_t ldb = b_row_major ? mat2_list[0].stride(-2) : mat2_list[0].stride(-1);

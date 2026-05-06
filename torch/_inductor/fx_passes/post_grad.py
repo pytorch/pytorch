@@ -404,11 +404,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.horizontal_fusion import foreach_mm_pass
 
         GraphTransformObserver(gm, "foreach_mm_unwrap").apply_graph_pass(
-            lambda graph: foreach_mm_post_scheduling_pass(graph.owning_module)
+            lambda graph: foreach_mm_post_scheduling_pass(graph.owning_module)  # type: ignore[arg-type]
         )
 
         GraphTransformObserver(gm, "foreach_mm_batch").apply_graph_pass(
-            lambda graph: foreach_mm_pass(graph.owning_module)
+            lambda graph: foreach_mm_pass(graph.owning_module)  # type: ignore[arg-type]
         )
 
     if config.aten_distributed_optimizations.enable_low_contention_collectives:

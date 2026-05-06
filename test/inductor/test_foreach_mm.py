@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
 """Tests for aten._foreach_mm kernel and inductor foreach_mm_pass."""
 
-import unittest
-
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
@@ -13,10 +11,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
-HAS_FOREACH_MM = hasattr(torch.ops.aten, "_foreach_mm")
-
-
-@unittest.skipUnless(HAS_FOREACH_MM, "aten._foreach_mm not available")
 class TestForeachMM(TestCase):
     """Numerical correctness tests for aten._foreach_mm."""
 
@@ -24,7 +18,7 @@ class TestForeachMM(TestCase):
         return [torch.mm(a, b) for a, b in zip(a_list, b_list)]
 
     @onlyCUDA
-    @dtypes(torch.bfloat16, torch.float32)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
     @parametrize("batch_size", [1, 3, 8, 16])
     @parametrize("m,k,n", [(64, 64, 64), (128, 256, 128), (2048, 2048, 2048)])
     def test_correctness(self, device, dtype, batch_size, m, k, n):
@@ -40,7 +34,6 @@ class TestForeachMM(TestCase):
 
         self.assertEqual(len(result), batch_size)
         for i, (res, exp) in enumerate(zip(result, expected)):
-            # bf16 CUTLASS may differ slightly from cuBLAS
             self.assertEqual(
                 res, exp, atol=1e-2, rtol=1e-2, msg=f"mismatch at index {i}"
             )
@@ -58,6 +51,25 @@ class TestForeachMM(TestCase):
         ]
         result = torch.ops.aten._foreach_mm(a, b)
         expected = self._reference(a, b)
+        for r, e in zip(result, expected):
+            self.assertEqual(r, e, atol=1e-2, rtol=1e-2)
+
+    @onlyCUDA
+    def test_transposed_inputs(self, device):
+        """Verify correctness with transposed (column-major) inputs."""
+        if not SM90OrLater:
+            self.skipTest("CUTLASS transpose dispatch requires SM90+")
+        m, k, n, batch = 128, 64, 128, 4
+        a_list = [
+            torch.randn(k, m, device=device, dtype=torch.bfloat16).T
+            for _ in range(batch)
+        ]
+        b_list = [
+            torch.randn(n, k, device=device, dtype=torch.bfloat16).T
+            for _ in range(batch)
+        ]
+        result = torch.ops.aten._foreach_mm(a_list, b_list)
+        expected = self._reference(a_list, b_list)
         for r, e in zip(result, expected):
             self.assertEqual(r, e, atol=1e-2, rtol=1e-2)
 
@@ -115,6 +127,32 @@ class TestForeachMM(TestCase):
         ]
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             torch.ops.aten._foreach_mm(a, b)
+
+    @onlyCUDA
+    def test_error_stride_mismatch(self, device):
+        a = [
+            torch.randn(4, 4, device=device),
+            torch.randn(4, 4, device=device).T.contiguous().T,
+        ]
+        b = [torch.randn(4, 4, device=device) for _ in range(2)]
+        with self.assertRaisesRegex(RuntimeError, "same strides"):
+            torch.ops.aten._foreach_mm(a, b)
+
+    @onlyCUDA
+    def test_error_batch_size_limit(self, device):
+        a = [
+            torch.randn(4, 4, device=device, dtype=torch.bfloat16) for _ in range(1024)
+        ]
+        b = [
+            torch.randn(4, 4, device=device, dtype=torch.bfloat16) for _ in range(1024)
+        ]
+        if SM90OrLater:
+            with self.assertRaisesRegex(RuntimeError, "1024"):
+                torch.ops.aten._foreach_mm(a, b)
+        else:
+            # cuBLAS fallback has no batch limit
+            result = torch.ops.aten._foreach_mm(a, b)
+            self.assertEqual(len(result), 1024)
 
 
 instantiate_device_type_tests(TestForeachMM, globals(), only_for="cuda")

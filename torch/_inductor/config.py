@@ -1224,10 +1224,11 @@ class aten_distributed_optimizations:
 
     # Post-scheduling foreach_mm: after overlap scheduling, unwrap
     # control_deps(mm) that don't depend on collectives, then batch
-    # the unwrapped mm ops into aten._foreach_mm (CUTLASS grouped GEMM).
+    # the unwrapped mm ops into aten._foreach_mm.
+    # Uses CUTLASS grouped GEMM on SM90+ for bf16, cuBLAS loop otherwise.
     # Preserves overlap scheduling while enabling cascading fusion
     # of pointwise ops between the batched mm nodes.
-    # Requires aten._foreach_mm to be available (compiled with CUTLASS).
+    # Not differentiable: backward will raise NotImplementedError.
     foreach_mm: bool = False
     foreach_mm_min_group_size: int = 3
 

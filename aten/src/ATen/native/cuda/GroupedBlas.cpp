@@ -809,5 +809,4 @@ std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
   return outputs;
 }
 
-
 } // namespace at::native

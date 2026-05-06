@@ -15,31 +15,37 @@ import logging
 
 import torch
 import torch.fx as fx
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
-# Comm op targets to check against (not string matching)
-_COMM_TARGETS: set[torch._ops.OpOverload] = set()
+# Comm op targets to check against
+_COMM_TARGETS: OrderedSet[torch._ops.OpOverload] = OrderedSet()
 
 
-def _get_comm_targets() -> set[torch._ops.OpOverload]:
+def _get_comm_targets() -> OrderedSet[torch._ops.OpOverload]:
     """Lazily build the set of comm op targets."""
     global _COMM_TARGETS
     if _COMM_TARGETS:
         return _COMM_TARGETS
     try:
         funcol = torch.ops._c10d_functional
-        _COMM_TARGETS = {
-            funcol.all_reduce.default,
-            funcol.all_gather_into_tensor.default,
-            funcol.reduce_scatter_tensor.default,
-            funcol.wait_tensor.default,
-        }
-        # Also add inplace/out variants if they exist
-        for name in ["all_reduce_", "all_gather_into_tensor_out", "reduce_scatter_tensor_out"]:
+        _COMM_TARGETS = OrderedSet(
+            [
+                funcol.all_reduce.default,
+                funcol.all_gather_into_tensor.default,
+                funcol.reduce_scatter_tensor.default,
+                funcol.wait_tensor.default,
+            ]
+        )
+        for name in [
+            "all_reduce_",
+            "all_gather_into_tensor_out",
+            "reduce_scatter_tensor_out",
+        ]:
             op = getattr(funcol, name, None)
             if op is not None:
                 _COMM_TARGETS.add(op.default)
@@ -48,55 +54,54 @@ def _get_comm_targets() -> set[torch._ops.OpOverload]:
     return _COMM_TARGETS
 
 
-def _is_mm_control_deps(node: fx.Node) -> bool:
-    """Check if node is a control_deps wrapping an mm op."""
+def _get_subgraph_inner_target(
+    gm: torch.fx.GraphModule, node: fx.Node
+) -> torch._ops.OpOverload | None:
+    """Get the call_function target from a control_deps subgraph module."""
     if node.op != "call_function":
-        return False
+        return None
     if node.target is not torch.ops.higher_order.control_deps:
-        return False
-    if len(node.args) < 4:
-        return False
-    subgraph = node.args[1]
-    if not isinstance(subgraph, fx.Node):
-        return False
-    # Check the subgraph module contains a single mm op
-    sg_name = getattr(subgraph, "target", "") or getattr(subgraph, "name", "")
+        return None
+    if len(node.args) < 2:
+        return None
+    sg = node.args[1]
+    if not isinstance(sg, fx.Node):
+        return None
+    sg_name = getattr(sg, "target", None)
     if not isinstance(sg_name, str):
-        sg_name = str(sg_name)
-    if not sg_name.startswith("subgraph_mm"):
-        return False
-    rest = sg_name[len("subgraph_mm"):]
-    return rest == "" or rest[0] in ("_", " ")
+        return None
+    sg_mod = getattr(gm, sg_name, None)
+    if sg_mod is None or not hasattr(sg_mod, "graph"):
+        return None
+    for n in sg_mod.graph.nodes:
+        if n.op == "call_function":
+            return n.target
+    return None
 
 
-def _involves_comm(node: fx.Node) -> bool:
+def _is_mm_control_deps(gm: torch.fx.GraphModule, node: fx.Node) -> bool:
+    """Check if node is a control_deps wrapping an mm op."""
+    return _get_subgraph_inner_target(gm, node) is aten.mm.default
+
+
+def _involves_comm(gm: torch.fx.GraphModule, node: fx.Node) -> bool:
     """Check if a node is a comm op by matching its target."""
     comm_targets = _get_comm_targets()
     if node.op == "call_function" and node.target in comm_targets:
         return True
-    # Also check control_deps wrapping comm ops (by subgraph name)
-    if (
-        node.op == "call_function"
-        and node.target is torch.ops.higher_order.control_deps
-        and len(node.args) >= 2
-    ):
-        sg = node.args[1]
-        sg_name = getattr(sg, "target", "") if isinstance(sg, fx.Node) else ""
-        if isinstance(sg_name, str):
-            for comm_prefix in ("subgraph_all_reduce", "subgraph_all_gather",
-                                "subgraph_reduce_scatter", "subgraph_wait_tensor"):
-                if sg_name.startswith(comm_prefix):
-                    return True
+    inner = _get_subgraph_inner_target(gm, node)
+    if inner is not None and inner in comm_targets:
+        return True
     return False
 
 
-def _sched_deps_involve_comm(node: fx.Node) -> bool:
+def _sched_deps_involve_comm(gm: torch.fx.GraphModule, node: fx.Node) -> bool:
     """Check if any scheduling dep of a control_deps node is a comm op."""
     sched_tuple = node.args[0]
     if not isinstance(sched_tuple, (tuple, list)):
         return False
     for dep in sched_tuple:
-        if isinstance(dep, fx.Node) and _involves_comm(dep):
+        if isinstance(dep, fx.Node) and _involves_comm(gm, dep):
             return True
     return False
 
@@ -108,10 +113,10 @@ def foreach_mm_post_scheduling_pass(gm: torch.fx.GraphModule) -> bool:
     unwrapped = 0
 
     for node in list(graph.nodes):
-        if not _is_mm_control_deps(node):
+        if not _is_mm_control_deps(gm, node):
             continue
 
-        if _sched_deps_involve_comm(node):
+        if _sched_deps_involve_comm(gm, node):
             continue
 
         lhs = node.args[2]
@@ -123,7 +128,6 @@ def foreach_mm_post_scheduling_pass(gm: torch.fx.GraphModule) -> bool:
 
         node.replace_all_uses_with(mm_node)
 
-        # Clean up: erase control_deps node, its get_attr, and the submodule
         subgraph_node = node.args[1]
         graph.erase_node(node)
         if isinstance(subgraph_node, fx.Node) and len(subgraph_node.users) == 0:
