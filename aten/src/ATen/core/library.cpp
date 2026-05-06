@@ -2,7 +2,6 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <fmt/format.h>
-#include <mutex>
 
 namespace torch {
 

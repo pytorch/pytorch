@@ -105,7 +105,9 @@ class SymmMemArgsHolder:
         self._symm_mem_args: OrderedSet[str] | None = None
         self.qualname: str = qualname
 
-    def register(self, arg_names: list[str], *, op_overload: Any | None = None) -> None:
+    def register(
+        self, arg_names: list[str], *, op_overload: Any | None = None
+    ) -> RegistrationHandle:
         if not arg_names:
             raise ValueError(
                 f"Cannot register empty arg_names list for {self.qualname}"
@@ -127,6 +129,11 @@ class SymmMemArgsHolder:
 
         self._symm_mem_args = OrderedSet(arg_names)
 
+        def deregister() -> None:
+            self._symm_mem_args = None
+
+        return RegistrationHandle(deregister)
+
     def get(self) -> OrderedSet[str] | None:
         return self._symm_mem_args
 
@@ -137,36 +144,38 @@ class SymmMemArgsHolder:
         return self._symm_mem_args is not None and arg_name in self._symm_mem_args
 
     def _validate_arg_names(self, arg_names: list[str], op_overload: Any) -> None:
-        try:
-            schema = op_overload._schema
-            schema_arg_names = {arg.name for arg in schema.arguments}
+        from torch._ops import OpOverload
 
-            invalid_args = [name for name in arg_names if name not in schema_arg_names]
-            if invalid_args:
-                raise ValueError(
-                    f"Invalid argument names for {self.qualname}: {invalid_args}. "
-                    f"Valid arguments are: {sorted(schema_arg_names)}"
-                )
+        if not isinstance(op_overload, OpOverload):
+            raise AssertionError(
+                f"Expected OpOverload, got {type(op_overload)} for {self.qualname}"
+            )
 
-            # Warn if group_name is missing (it's needed for automatic realization)
-            if "group_name" not in schema_arg_names:
-                import logging
+        schema = op_overload._schema
+        schema_arg_names = {arg.name for arg in schema.arguments}
 
-                log = logging.getLogger(__name__)
-                log.warning(
-                    "Operator %s is missing 'group_name' argument. "
-                    "Automatic symmetric memory realization will not work at compile time. "
-                    "Available arguments: %s",
-                    self.qualname,
-                    sorted(schema_arg_names),
-                )
-        except AttributeError:
+        invalid_args = [name for name in arg_names if name not in schema_arg_names]
+        if invalid_args:
+            raise ValueError(
+                f"Invalid argument names for {self.qualname}: {invalid_args}. "
+                f"Valid arguments are: {sorted(schema_arg_names)}"
+            )
+
+        # Inductor's _maybe_realize_symm_mem_args (ir.py) extracts group_name from
+        # the op's kwargs to pass to realize_as_comm_buffer(). Without a group_name
+        # argument, the realization is skipped and the op won't get P2P memory.
+        if "group_name" not in schema_arg_names:
             import logging
 
             log = logging.getLogger(__name__)
             log.warning(
-                "Could not validate arg names for %s: OpOverload missing _schema attribute",
+                "Operator %s is missing 'group_name' argument. "
+                "Automatic symmetric memory realization requires group_name so "
+                "Inductor can allocate P2P buffers for the correct process group. "
+                "See FallbackKernel._maybe_realize_symm_mem_args in ir.py. "
+                "Available arguments: %s",
                 self.qualname,
+                sorted(schema_arg_names),
             )
 
 

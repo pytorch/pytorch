@@ -231,6 +231,23 @@ class TestLibraryIntegration(TestCase):
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("self"))
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("other"))
 
+    def test_library_cleanup_on_delete(self):
+        """Test that deleting a Library cleans up its symm_mem_args registration."""
+        lib = Library("test_lib_cleanup", "DEF")
+        lib.define(
+            "my_op(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        lib.register_symm_mem_args("my_op", ["input"])
+
+        qualname = "test_lib_cleanup::my_op"
+        entry = singleton.find(qualname)
+        self.assertTrue(entry.symm_mem_args.is_registered())
+
+        del lib
+
+        self.assertFalse(entry.symm_mem_args.is_registered())
+        self.assertIsNone(entry.symm_mem_args.get())
+
 
 class TestFunctionalOpCompile(TestCase):
     """Test that functional ops with registered symm_mem_args work with torch.compile."""

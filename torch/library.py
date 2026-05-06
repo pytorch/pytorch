@@ -368,6 +368,22 @@ class Library:
         handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
         self._registration_handles.append(handle)
 
+    def _resolve_op_name(self, op_name):
+        """Resolve op_name (str or OpOverload) to (name, op_overload_or_none)."""
+        if isinstance(op_name, str):
+            return op_name, None
+        elif isinstance(op_name, OpOverload):
+            name = op_name._schema.name
+            overload_name = op_name._schema.overload_name
+            if overload_name:
+                name = name + "." + overload_name
+            return name, op_name
+        else:
+            raise RuntimeError(
+                "Expected a name (str) or an OpOverload object "
+                f"as the first argument, got {type(op_name)}"
+            )
+
     def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
         r"""Register the operator to use the AOTI-compiled implementation.
 
@@ -390,18 +406,7 @@ class Library:
                 f"dispatch_key {dispatch_key} does not have Dense in its keyset"
             )
 
-        if isinstance(op_name, str):
-            name = op_name
-        elif isinstance(op_name, OpOverload):
-            name = op_name._schema.name
-            overload_name = op_name._schema.overload_name
-            if overload_name != "":
-                name = name + "." + overload_name
-        else:
-            raise RuntimeError(
-                "_impl_with_aoti_compile should be passed either a name or an OpOverload object "
-                "as the first argument"
-            )
+        name, _ = self._resolve_op_name(op_name)
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
@@ -456,17 +461,7 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
-        if isinstance(op_name, str):
-            name = op_name
-        elif isinstance(op_name, OpOverload):
-            name = op_name._schema.name
-            overload_name = op_name._schema.overload_name
-            if overload_name != "":
-                name = name + "." + overload_name
-        else:
-            raise RuntimeError(
-                "impl should be passed either a name or an OpOverload object as the first argument"
-            )
+        name, _ = self._resolve_op_name(op_name)
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if (not allow_override) and key in _impls:
@@ -514,8 +509,14 @@ class Library:
         r"""Registers which arguments require symmetric memory allocation for an operator.
 
         This method allows operators to declaratively specify which arguments need
-        symmetric memory treatment. This enables automatic lowering in Inductor and
-        allows custom operators to leverage symmetric memory optimizations.
+        symmetric memory treatment. When used with ``torch.compile``, Inductor
+        automatically allocates these arguments in P2P-accessible NVLink memory
+        (``empty_strided_p2p``), enabling zero-copy inter-GPU communication.
+
+        The operator's schema should include a ``group_name`` (``str``) argument.
+        Inductor's ``FallbackKernel._maybe_realize_symm_mem_args`` extracts
+        ``group_name`` at compile time to allocate P2P buffers for the correct
+        process group. Without ``group_name``, the automatic realization is skipped.
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
@@ -527,20 +528,11 @@ class Library:
             >>> my_lib.define("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor")
             >>> my_lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
         """
-        if isinstance(op_name, str):
-            if "::" in op_name:
-                qualname = op_name
-            else:
-                qualname = f"{self.ns}::{op_name}"
-            op_overload = None
-        elif isinstance(op_name, OpOverload):
-            qualname = op_name.__qualname__
-            op_overload = op_name
+        name, op_overload = self._resolve_op_name(op_name)
+        if "::" in name:
+            qualname = name
         else:
-            raise RuntimeError(
-                "register_symm_mem_args should be passed either a name or an OpOverload object "
-                "as the first argument"
-            )
+            qualname = f"{self.ns}::{name}"
 
         if op_overload is None:
             try:
@@ -549,7 +541,8 @@ class Library:
                 pass
 
         entry = torch._library.simple_registry.singleton.find(qualname)
-        entry.symm_mem_args.register(arg_names, op_overload=op_overload)
+        handle = entry.symm_mem_args.register(arg_names, op_overload=op_overload)
+        self._registration_handles.append(handle)
 
     def fallback(self, fn, dispatch_key="", *, with_keyset=False):
         r"""Registers the function implementation as the fallback for the given key.

@@ -38,7 +38,6 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/library.h>
 #include <cstdlib>
 #include <iostream>
 #include <unordered_map>
