@@ -3148,7 +3148,7 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
 
     _fn = isinstance
 
-    def __init__(self, value: type(_fn) = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Any = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -3161,11 +3161,20 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import LazyVariableTracker
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
-        if any(isinstance(a, LazyVariableTracker) for a in args):
+        # Realize non-constant lazy args; LazyConstantVariable.python_type()
+        # installs only a TYPE_MATCH guard, which is what isinstance() needs.
+        if any(
+            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            for a in args
+        ):
             args = [
-                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+                a.realize()
+                if isinstance(a, LazyVariableTracker)
+                and not isinstance(a, LazyConstantVariable)
+                else a
+                for a in args
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
@@ -3480,7 +3489,7 @@ class StrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = str
 
-    def __init__(self, value: type = str, **kwargs: Any) -> None:
+    def __init__(self, value: type = _fn, **kwargs: Any) -> None:
         assert value is str
         super().__init__(**kwargs)
 
