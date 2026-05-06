@@ -189,9 +189,14 @@ Tensor& random_mps_impl(Tensor& self,
 // disjoint streams of the same seed. The kernel itself takes `numel` as
 // `uint32_t`, so the splitting is what keeps it correct for >2^31-element
 // tensors instead of silently wrapping.
+// `params_t` is the array type bound to buffer 1 of the kernel; `float2` for
+// the bulk of distributions and `long2` for the int64 random path. The
+// templated dispatcher keeps the recursion / generator-advance / 32-bit-iter
+// boilerplate in one place. A `(double, double)` overload below preserves the
+// ergonomics for the common float-param callers.
+template <typename params_t>
 static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
-                                         double param1,
-                                         double param2,
+                                         params_t params,
                                          const std::string& kernel_name,
                                          int64_t randoms_per_thread,
                                          std::optional<Generator> gen,
@@ -201,7 +206,7 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   }
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      distribution_kernel_mps_impl(sub_iter, param1, param2, kernel_name, randoms_per_thread, gen, elements_per_thread);
+      distribution_kernel_mps_impl(sub_iter, params, kernel_name, randoms_per_thread, gen, elements_per_thread);
     }
     return;
   }
@@ -213,7 +218,7 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   if (!iter.is_contiguous()) {
     Tensor tmp = at::empty(iter.tensor(0).sizes(), iter.tensor(0).options());
     auto tmp_iter = at::TensorIterator::borrowing_nullary_op(tmp);
-    distribution_kernel_mps_impl(tmp_iter, param1, param2, kernel_name, randoms_per_thread, gen, elements_per_thread);
+    distribution_kernel_mps_impl(tmp_iter, params, kernel_name, randoms_per_thread, gen, elements_per_thread);
     iter.tensor(0).copy_(tmp);
     return;
   }
@@ -247,7 +252,7 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         bind_iter_tensors(computeEncoder, iter, /*ntensors=*/1);
-        mtl_setBytes(computeEncoder, std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)}, 1);
+        mtl_setBytes(computeEncoder, params, 1);
         mtl_setBytes(computeEncoder, std::array<long, 2>{seed, base_offset}, 2);
         mtl_setBytes(computeEncoder, numel, 3);
         mtl_dispatch1DJob(computeEncoder, pso, threads);
@@ -256,7 +261,23 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   }
 }
 
-// Helpers extract the (writable) tensor backing a TensorIteratorBase /
+// Float-param convenience overload for callers that don't need the int64
+// kernel path. Forwards to the templated dispatcher above.
+static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
+                                         double param1,
+                                         double param2,
+                                         const std::string& kernel_name,
+                                         int64_t randoms_per_thread,
+                                         std::optional<Generator> gen,
+                                         int64_t elements_per_thread = 4) {
+  distribution_kernel_mps_impl(iter,
+                               std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
+                               kernel_name,
+                               randoms_per_thread,
+                               gen,
+                               elements_per_thread);
+}
+
 // Tensor-p Bernoulli: dispatches the Metal `bernoulli_tensor` kernel with a
 // flat float32 probability buffer matching `self.numel()`.
 static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
@@ -376,8 +397,26 @@ static void random_from_to_kernel_mps(TensorIteratorBase& iter,
                                       uint64_t range,
                                       int64_t base,
                                       std::optional<Generator> gen) {
-  // `range` is `to - from` (exclusive `to`); the int64 cast is safe here because
-  // `random_from_to_impl` clamps `to` to `int64_t::max()` before invoking us.
+  // `range` is `to - from`. For ranges that fit in 32 bits the float-based
+  // `random_int` kernel is plenty: it converts a uniform Philox uint32 to a
+  // float and scales to `[base, base + range)`. For wider ranges (notably
+  // `randint(int64_min, int64_max)` which Inductor uses to seed its generated
+  // dropout kernels with a per-call int64) float precision tops out at 24
+  // bits, so we'd silently collapse to a single value. Route those through
+  // the int64 path which combines two Philox words per output.
+  if (range > std::numeric_limits<uint32_t>::max()) {
+    // `0` is the kernel-side sentinel for "full uint64 range" since
+    // `static_cast<int64_t>(UINT64_MAX)` would otherwise be `-1` and look
+    // like an empty range.
+    const int64_t range_param = (range == std::numeric_limits<uint64_t>::max()) ? 0 : static_cast<int64_t>(range);
+    distribution_kernel_mps_impl(iter,
+                                 std::array<long, 2>{base, range_param},
+                                 "random_int_full",
+                                 /*randoms_per_thread=*/1,
+                                 gen,
+                                 /*elements_per_thread=*/2);
+    return;
+  }
   random_kernel_mps_impl(iter, base, base + static_cast<int64_t>(range), gen);
 }
 
@@ -403,9 +442,17 @@ static void random_kernel_mps(TensorIteratorBase& iter, std::optional<Generator>
   random_kernel_mps_impl(iter, 0, to, gen);
 }
 
-static void random_full_64_bits_range_kernel_mps(TensorIteratorBase&, std::optional<Generator>) {
-  // TODO: support [int64_t::min(), int64_t::max()] in the random_int kernel.
-  TORCH_CHECK(false, "random_mps does not handle the lowest() -> max() range");
+static void random_full_64_bits_range_kernel_mps(TensorIteratorBase& iter, std::optional<Generator> gen) {
+  // [int64_min, int64_max]: forward through the same int64 kernel the
+  // `random_from_to` wide-range path uses. `range = 0` is its full-uint64
+  // sentinel, and `base = int64_min` shifts the unsigned output back into
+  // the signed range.
+  distribution_kernel_mps_impl(iter,
+                               std::array<long, 2>{std::numeric_limits<int64_t>::min(), 0},
+                               "random_int_full",
+                               /*randoms_per_thread=*/1,
+                               gen,
+                               /*elements_per_thread=*/2);
 }
 
 REGISTER_MPS_DISPATCH(uniform_stub, &uniform_kernel_mps)

@@ -163,6 +163,37 @@ kernel void random_int(
   }
 }
 
+// Random integer with full int64 precision: combines two uint32 Philox words
+// into one uint64 per output. `params.x` is the additive base; `params.y` is
+// the range (`high - low`) interpreted as `uint64_t`, where `0` is the
+// sentinel for the full `2^64` range that doesn't fit in any signed type.
+// One Philox round (4 uint32) gives 2 int64 outputs per thread.
+template <typename T>
+kernel void random_int_full(
+    device T* output [[buffer(0)]],
+    constant long2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint base = tid * 2;
+  uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  long add = params.x;
+  ulong range = static_cast<ulong>(params.y);
+  uint count = min(2u, numel - base);
+  for (uint i = 0; i < count; ++i) {
+    ulong v = (static_cast<ulong>(raw[2 * i]) << 32) |
+        static_cast<ulong>(raw[2 * i + 1]);
+    // `range == 0` is the sentinel for the full 2^64 range: emit raw bits and
+    // shift by `add` (modular addition keeps the distribution uniform). Other
+    // ranges go through `% range` which is unbiased enough for any range that
+    // fits in uint64.
+    long out =
+        (range == 0) ? static_cast<long>(v) : static_cast<long>(v % range);
+    output[base + i] = static_cast<T>(out + add);
+  }
+}
+
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
       device DTYPE*, constant float2&, constant long2&, constant uint&, uint)
@@ -201,6 +232,19 @@ REGISTER_OP(random_int, bool);
 REGISTER_OP(random_int, float);
 REGISTER_OP(random_int, half);
 REGISTER_OP(random_int, bfloat);
+
+// `random_int_full` takes `long2` params instead of `float2` (different buffer
+// layout) so it can't go through `REGISTER_OP`.
+#define REGISTER_INT_FULL(DTYPE)                                \
+  template [[host_name("random_int_full_" #DTYPE)]] kernel void \
+  random_int_full<DTYPE>(                                       \
+      device DTYPE*, constant long2&, constant long2&, constant uint&, uint)
+
+REGISTER_INT_FULL(int);
+REGISTER_INT_FULL(long);
+REGISTER_INT_FULL(short);
+REGISTER_INT_FULL(char);
+REGISTER_INT_FULL(uchar);
 
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
