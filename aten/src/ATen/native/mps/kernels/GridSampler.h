@@ -40,14 +40,19 @@ struct GridSamplerParams {
       const at::TensorBase& grid,
       bool align_corners_)
       : sampler_dims(N - 2), align_corners(align_corners_) {
-    using at::native::safe_downcast;
     for (unsigned dim = 0; dim < N; dim++) {
-      output_sizes[dim] = safe_downcast<idx_type_t>(output.size(dim));
-      output_strides[dim] = safe_downcast<idx_type_t>(output.stride(dim));
-      input_sizes[dim] = safe_downcast<idx_type_t>(input.size(dim));
-      input_strides[dim] = safe_downcast<idx_type_t>(input.stride(dim));
-      grid_sizes[dim] = safe_downcast<idx_type_t>(grid.size(dim));
-      grid_strides[dim] = safe_downcast<idx_type_t>(grid.stride(dim));
+      output_sizes[dim] =
+          c10::checked_convert<idx_type_t>(output.size(dim), "int32_t");
+      output_strides[dim] =
+          c10::checked_convert<idx_type_t>(output.stride(dim), "int32_t");
+      input_sizes[dim] =
+          c10::checked_convert<idx_type_t>(input.size(dim), "int32_t");
+      input_strides[dim] =
+          c10::checked_convert<idx_type_t>(input.stride(dim), "int32_t");
+      grid_sizes[dim] =
+          c10::checked_convert<idx_type_t>(grid.size(dim), "int32_t");
+      grid_strides[dim] =
+          c10::checked_convert<idx_type_t>(grid.stride(dim), "int32_t");
     }
   }
 #endif
@@ -80,14 +85,14 @@ struct GridSamplerBackwardParams {
         compute_grad_input(grad_input.defined()),
         compute_grad_grid(
             interpolation_mode_ != GridSamplerInterpolation::Nearest) {
-    using at::native::safe_downcast;
     for (unsigned dim = 0; dim < N; dim++) {
       grad_output_strides[dim] =
-          safe_downcast<idx_type_t>(grad_output.stride(dim));
+          c10::checked_convert<idx_type_t>(grad_output.stride(dim), "int32_t");
       grad_input_strides[dim] = grad_input.defined()
-          ? safe_downcast<idx_type_t>(grad_input.stride(dim))
+          ? c10::checked_convert<idx_type_t>(grad_input.stride(dim), "int32_t")
           : 0;
-      grad_grid_strides[dim] = safe_downcast<idx_type_t>(grad_grid.stride(dim));
+      grad_grid_strides[dim] =
+          c10::checked_convert<idx_type_t>(grad_grid.stride(dim), "int32_t");
     }
   }
 #endif
