@@ -2917,7 +2917,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_all_caches()
             compiled_fn = torch.compile(fn)
             with self.assertRaisesRegex(
-                RuntimeError, "pre_grad_custom_pass must implement uuid"
+                RuntimeError, "pre_grad_custom_pass.*NoUuidPass must implement uuid"
             ):
                 compiled_fn(x, y)
 
@@ -2957,7 +2957,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             ) as log_cm:
                 compiled_fn(x, y)
             uuid_warnings = [
-                m for m in log_cm.output if "does not implement uuid()" in m
+                m for m in log_cm.output if "NoUuidPass does not implement uuid()" in m
             ]
             self.assertEqual(len(uuid_warnings), 1)
 
