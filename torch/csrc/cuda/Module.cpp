@@ -1643,7 +1643,6 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  pybind11::gil_scoped_release no_gil;
   at::cuda::clearCublasWorkspaces();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
