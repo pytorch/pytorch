@@ -603,7 +603,22 @@ class RNN(RNNBase):
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
 
-    .. include:: ../cudnn_rnn_determinism.rst
+    .. warning::
+        There are known non-determinism issues for RNN functions on some versions of cuDNN and CUDA.
+        You can enforce deterministic behavior by setting the following environment variables:
+
+        On CUDA 10.1, set environment variable ``CUDA_LAUNCH_BLOCKING=1``.
+        This may affect performance.
+
+        On CUDA 10.2 or later, set environment variable
+        (note the leading colon symbol)
+        ``CUBLAS_WORKSPACE_CONFIG=:16:8``
+        or
+        ``CUBLAS_WORKSPACE_CONFIG=:4096:2``.
+
+        See the `cuDNN 8 Release Notes
+        <https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-880/release-notes/rel_8.html>`_
+        for more information.
 
     .. include:: ../cudnn_persistent_rnn.rst
 
@@ -974,7 +989,22 @@ class LSTM(RNNBase):
     .. note::
         ``proj_size`` should be smaller than ``hidden_size``.
 
-    .. include:: ../cudnn_rnn_determinism.rst
+    .. warning::
+        There are known non-determinism issues for RNN functions on some versions of cuDNN and CUDA.
+        You can enforce deterministic behavior by setting the following environment variables:
+
+        On CUDA 10.1, set environment variable ``CUDA_LAUNCH_BLOCKING=1``.
+        This may affect performance.
+
+        On CUDA 10.2 or later, set environment variable
+        (note the leading colon symbol)
+        ``CUBLAS_WORKSPACE_CONFIG=:16:8``
+        or
+        ``CUBLAS_WORKSPACE_CONFIG=:4096:2``.
+
+        See the `cuDNN 8 Release Notes
+        <https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-880/release-notes/rel_8.html>`_
+        for more information.
 
     .. include:: ../cudnn_persistent_rnn.rst
 
