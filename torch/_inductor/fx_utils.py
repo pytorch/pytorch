@@ -75,13 +75,9 @@ def _extract_subgraphs_and_args(
 
     If the second yielded value is None, this function was unable to determine what args
     to pass to the subgraph."""
-    if node.target in (
-        torch.ops.higher_order.associative_scan,
-        torch.ops.higher_order.scan,
-    ):
-        # Scans accept a dim keyword, but the dimensions will be reordered so that at
-        # this point we always scan over dim 0.
-        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
+    if node.target is torch.ops.higher_order.associative_scan:
+        # Associative scan operates on slices of xs (see: scan), but multiple slices.
+        yield args[0], (*(a[0] for a in args[1]), *(a[1] for a in args[1]), *args[2])
     elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
@@ -138,6 +134,10 @@ def _extract_subgraphs_and_args(
     elif node.target is torch.ops.higher_order.map_impl:
         # Map is applied over slices from the first dimension of each value in args[1].
         yield args[0], (*(a[0] for a in args[1]), *args[2])
+    elif node.target is torch.ops.higher_order.scan:
+        # Scans accept a dim keyword, but the dimensions will be reordered so that at
+        # this point we always scan over dim 0.
+        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
