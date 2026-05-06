@@ -282,6 +282,13 @@ void nccl_all_to_all_vdev(
           nccl_scratch != nullptr,
       "nccl_all_to_all_vdev: requires the NCCL symmetric memory backend");
 
+  // One-sided LSA loads require every peer in the NCCL team to be in the same
+  // direct-access (LSA) domain. Cross-node groups are not supported yet.
+  TORCH_CHECK(
+      in_hdl->world_within_direct_access(),
+      "nccl_all_to_all_vdev: requires intra-node direct peer access for all ranks "
+      "(LSA domain); cross-node execution is not supported yet");
+
   TORCH_CHECK(input.is_contiguous(), "nccl_all_to_all_vdev: input must be contiguous");
   TORCH_CHECK(out.is_contiguous(), "nccl_all_to_all_vdev: out must be contiguous");
   TORCH_CHECK(input.dim() >= 1, "nccl_all_to_all_vdev: input must be at least 1-D");
@@ -375,8 +382,8 @@ void nccl_all_to_all_vdev(
   // after the alltoallv finishes).
   const size_t input_bytes =
       static_cast<size_t>(input.numel()) * input.element_size();
-  const bool intra_node = nccl_in->has_multicast_support();
-  const int num_blocks = get_a2a_nblocks(input_bytes, npes, intra_node);
+  const int num_blocks =
+      get_a2a_nblocks(input_bytes, npes, /*intra_node=*/true);
   nccl_a2av_data_kernel<<<num_blocks, A2A_THREADS_PER_BLOCK, 0, stream>>>(
       in_win, in_off,
       out.mutable_data_ptr(),

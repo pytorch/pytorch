@@ -633,9 +633,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out_splits_offsets, group=group_name)
         c10d.barrier()
 
-        symm_mem.all_to_all_vdev(
-            inp, out, in_splits, out_splits_offsets, group_name
-        )
+        symm_mem.all_to_all_vdev(inp, out, in_splits, out_splits_offsets, group_name)
 
         # in_splits must be unchanged.
         torch.testing.assert_close(in_splits, inp_splits)
@@ -675,9 +673,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         # Rank r sends `r` elements to peer 0 and 0 to everyone else.
         # So peer 0 receives `0+1+2+...+(W-1)`, every other peer receives 0.
-        inp_splits = torch.zeros(
-            self.world_size, dtype=torch.int64, device=self.device
-        )
+        inp_splits = torch.zeros(self.world_size, dtype=torch.int64, device=self.device)
         inp_splits[0] = self.rank
 
         out_splits = torch.zeros_like(inp_splits)
@@ -707,9 +703,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out_splits_offsets, group=group_name)
         c10d.barrier()
 
-        symm_mem.all_to_all_vdev(
-            inp, out, in_splits, out_splits_offsets, group_name
-        )
+        symm_mem.all_to_all_vdev(inp, out, in_splits, out_splits_offsets, group_name)
 
         torch.testing.assert_close(out_splits_offsets[0], out_splits)
 

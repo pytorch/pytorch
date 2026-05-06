@@ -2328,8 +2328,9 @@ def all_to_all_vdev(
         >>> # doctest: +SKIP
         >>> # MoE token shuffle: every rank decides per-peer how many tokens to send
         >>> max_in = group.size() * max_tokens_per_peer
+        >>> max_out = group.size() * max_tokens_per_peer  # upper bound on rows received
         >>> input  = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
-        >>> out    = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
+        >>> out    = symm_mem.empty(max_out, hidden, dtype=torch.bfloat16, device="cuda")
         >>> in_sp  = symm_mem.empty(group.size(), dtype=torch.int64, device="cuda")
         >>> out_sp = symm_mem.empty(2, group.size(), dtype=torch.int64, device="cuda")
         >>> for t in (input, out, in_sp, out_sp):

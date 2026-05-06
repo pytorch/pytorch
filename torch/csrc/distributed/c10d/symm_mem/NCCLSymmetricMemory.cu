@@ -422,6 +422,22 @@ c10::Device NCCLSymmetricMemory::get_device() {
   return c10::Device(c10::DeviceType::CUDA, device_idx_);
 }
 
+bool NCCLSymmetricMemory::world_within_direct_access() {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  if (static_cast<int>(pai_->buffers_.size()) != world_size_) {
+    return false;
+  }
+  for (void* p : pai_->buffers_) {
+    if (p == nullptr) {
+      return false;
+    }
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
 ncclWindow_t NCCLSymmetricMemory::get_window() {
   return pai_->buffer_win_;
 }
