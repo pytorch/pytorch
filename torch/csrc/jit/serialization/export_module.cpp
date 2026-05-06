@@ -697,7 +697,7 @@ void ScriptModuleSerializer::writeByteCode(
     // Note that stripping off debug map will not strip off
     // debug handles.
     // The reason we save debug handles conditionally is so that
-    // we dont end up with a model that has debug handles but has not
+    // we don't end up with a model that has debug handles but has not
     // debug map to correlate debug handles with.
     // Once we have a model with both handles and debug map, we can
     // strip off debug map and have a lean model served to production.
@@ -712,7 +712,7 @@ void ScriptModuleSerializer::writeByteCode(
     // For delegated backends get source ranges that are in the debug info
     // map. Since delegated backend replace original module with lowered
     // module we will not serialize original module's code which is what would
-    // have contained source range. Since we dont have that anymore, extract
+    // have contained source range. Since we don't have that anymore, extract
     // source ranges out of delegated module and store in a separate archive.
     // Note that we must do this first because in order to serialize inlined
     // CS appropriate source_range_tags must have been generated.
