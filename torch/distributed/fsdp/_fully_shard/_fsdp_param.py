@@ -7,8 +7,13 @@ from enum import auto, Enum
 from typing import Any, cast
 
 import torch
-import torch.distributed.spmd_types as spmd
+import torch.distributed as dist
 import torch.nn as nn
+
+
+if dist.is_spmd_types_available():
+    import spmd_types as spmd
+
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
@@ -263,7 +268,7 @@ class FSDPParam:
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_spmd_types = (
-            spmd.is_available()
+            dist.is_spmd_types_available()
             and spmd.has_local_type(param)
             and not isinstance(param, DTensor)
         )

@@ -4,7 +4,12 @@ import functools
 from collections.abc import Callable, Sequence
 
 import torch
-import torch.distributed.spmd_types as spmd
+import torch.distributed as dist
+
+
+if dist.is_spmd_types_available():
+    import spmd_types as spmd
+
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._utils import ExplicitRedistributionContext
@@ -429,7 +434,7 @@ def _local_map_wrapped(
     local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
     if enable_spmd_types and seen_dtensor_arg:
-        if not spmd.is_available():
+        if not dist.is_spmd_types_available():
             raise RuntimeError(
                 "spmd_types=True requires the spmd_types package to be installed"
             )

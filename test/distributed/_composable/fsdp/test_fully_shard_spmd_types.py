@@ -3,24 +3,16 @@
 import unittest
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
 from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
-from torch.distributed.spmd_types import (
-    assert_type as spmd_assert_type,
-    get_local_type,
-    has_local_type,
-    I,
-    is_available as spmd_types_available,
-    MeshAxis,
-    R,
-    S,
-    set_current_mesh,
-    set_local_type,
-    typecheck,
-    V,
-)
+
+
+if dist.is_spmd_types_available():
+    import spmd_types as spmd
+
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
@@ -60,11 +52,11 @@ def _tp_init(model, tp_pg):
         )
 
     def _tp_forward(self, x):
-        x = convert(x, tp_pg, src=I, dst=R)
+        x = convert(x, tp_pg, src=spmd.I, dst=spmd.R)
         z = self.in_proj(x)
         z = F.relu(z)
         z = self.out_proj(z)
-        z = all_reduce(z, tp_pg, dst=I)
+        z = all_reduce(z, tp_pg, dst=spmd.I)
         z = F.relu(z)
         return z
 
@@ -73,7 +65,7 @@ def _tp_init(model, tp_pg):
     model.forward = types.MethodType(_tp_forward, model)
 
 
-@unittest.skipUnless(spmd_types_available(), "requires spmd_types")
+@unittest.skipUnless(dist.is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(FSDPTest):
     @property
     def world_size(self):
@@ -81,7 +73,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
 
     def setUp(self):
         super().setUp()
-        from torch.distributed.spmd_types import _reset
+        from spmd_types._mesh_axis import _reset
 
         _reset()
 
@@ -117,13 +109,13 @@ class TestFullyShardSpmdTypes(FSDPTest):
                         f"{fqn} should be plain tensor at compute time",
                     )
                     self.assertTrue(
-                        has_local_type(param),
+                        spmd.has_local_type(param),
                         f"{fqn} should have spmd_types annotation at compute time",
                     )
                     if fqn in expected_types:
                         expected_lt, expected_ps = expected_types[fqn]
                         self.assertEqual(
-                            dict(get_local_type(param)),
+                            dict(spmd.get_local_type(param)),
                             expected_lt,
                             f"{fqn} local type mismatch",
                         )
@@ -146,10 +138,10 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_loss = ref_out.sum()
         ref_loss.backward()
 
-        with typecheck(strict_mode="strict", local=False):
-            spmd_assert_type(inp, input_type)
+        with spmd.typecheck(strict_mode="strict", local=False):
+            spmd.assert_type(inp, input_type)
             out = model(inp)
-        self.assertEqual(get_local_type(out)[fsdp_axis], V)
+        self.assertEqual(spmd.get_local_type(out)[fsdp_axis], spmd.V)
         loss = out.sum()
         loss.backward()
 
@@ -171,7 +163,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
         )
-        fsdp_axis = MeshAxis.of(mesh.get_group("fsdp"))
+        fsdp_axis = spmd.MeshAxis.of(mesh.get_group("fsdp"))
 
         torch.manual_seed(42)
         model = TestMLP(mlp_dim, device=device_type)
@@ -179,7 +171,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_model.load_state_dict(model.state_dict())
 
         for param in model.parameters():
-            set_local_type(param, {fsdp_axis: R})
+            spmd.set_local_type(param, {fsdp_axis: spmd.R})
 
         fully_shard(
             model,
@@ -195,15 +187,15 @@ class TestFullyShardSpmdTypes(FSDPTest):
         )
         replicate(ref_model, device_ids=[self.rank])
         expected_types = {
-            "in_proj.weight": ({fsdp_axis: R}, None),
-            "out_proj.weight": ({fsdp_axis: R}, None),
+            "in_proj.weight": ({fsdp_axis: spmd.R}, None),
+            "out_proj.weight": ({fsdp_axis: spmd.R}, None),
         }
         self._register_param_check_hooks(model, expected_types)
 
-        input_type = {fsdp_axis: S(0)}
+        input_type = {fsdp_axis: spmd.S(0)}
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((2, mlp_dim), device=device_type)
-        with set_current_mesh(mesh):
+        with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
 
     @skip_if_lt_x_gpu(4)
@@ -216,14 +208,14 @@ class TestFullyShardSpmdTypes(FSDPTest):
             (dp_size, tp_size),
             mesh_dim_names=("fsdp", "tp"),
         )
-        fsdp_axis = MeshAxis.of(mesh.get_group("fsdp"))
-        tp_axis = MeshAxis.of(mesh.get_group("tp"))
+        fsdp_axis = spmd.MeshAxis.of(mesh.get_group("fsdp"))
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
         tp_pg = mesh.get_group("tp")
         dp_pg = mesh.get_group("fsdp")
 
         tp_plan = {
-            "in_proj.weight": S(0),
-            "out_proj.weight": S(1),
+            "in_proj.weight": spmd.S(0),
+            "out_proj.weight": spmd.S(1),
         }
 
         torch.manual_seed(42)
@@ -233,12 +225,12 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            set_local_type(param, {fsdp_axis: R, tp_axis: tp_plan[fqn]})
+            spmd.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
 
         def shard_fn(param):
-            lt = get_local_type(param)
+            lt = spmd.get_local_type(param)
             tp_type = lt.get(tp_axis)
-            if isinstance(tp_type, S) and tp_type.dim == 0:
+            if isinstance(tp_type, spmd.S) and tp_type.dim == 0:
                 return Shard(1)
             return Shard(0)
 
@@ -262,20 +254,20 @@ class TestFullyShardSpmdTypes(FSDPTest):
         replicate(ref_model, process_group=dp_pg)
         expected_types = {
             "in_proj.weight": (
-                {fsdp_axis: R, tp_axis: V},
+                {fsdp_axis: spmd.R, tp_axis: spmd.V},
                 PartitionSpec(tp_axis, None),
             ),
             "out_proj.weight": (
-                {fsdp_axis: R, tp_axis: V},
+                {fsdp_axis: spmd.R, tp_axis: spmd.V},
                 PartitionSpec(None, tp_axis),
             ),
         }
         self._register_param_check_hooks(model, expected_types)
 
-        input_type = {fsdp_axis: S(0), tp_axis: I}
+        input_type = {fsdp_axis: spmd.S(0), tp_axis: spmd.I}
         torch.manual_seed(42 + dp_pg.rank() + 1)
         inp = torch.randn((2, 16), device=device_type)
-        with set_current_mesh(mesh):
+        with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
 
 

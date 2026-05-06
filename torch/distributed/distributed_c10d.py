@@ -92,6 +92,8 @@ __all__ = [
     "is_mpi_available",
     "is_backend_available",
     "is_nccl_available",
+    "is_spmd_types_available",
+    "spmd_no_typecheck",
     "is_torchelastic_launched",
     "is_ucc_available",
     "is_xccl_available",
@@ -1345,6 +1347,22 @@ def is_gloo_available() -> bool:
 def is_ucc_available() -> bool:
     """Check if the UCC backend is available."""
     return _UCC_AVAILABLE
+
+
+def is_spmd_types_available() -> bool:
+    """Check if the spmd_types package is installed."""
+    import importlib.util
+
+    return importlib.util.find_spec("spmd_types") is not None
+
+
+def spmd_no_typecheck():
+    """Return a spmd_types no_typecheck context/decorator, or nullcontext if not installed."""
+    if is_spmd_types_available():
+        import spmd_types
+
+        return spmd_types.no_typecheck()
+    return contextlib.nullcontext()
 
 
 def is_xccl_available() -> bool:

@@ -178,7 +178,13 @@ def install_config_module(module: ModuleType) -> None:
 
     class ConfigModuleInstance(ConfigModule):
         # __annotations__ is written to by Sphinx autodoc
-        _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
+        _bypass_keys = {
+            "_is_dirty",
+            "_hash_digest",
+            "_get_dict_dirty_keys_var",
+            "_get_dict_cache_var",
+            "__annotations__",
+        }
 
     def visit(
         source: ModuleType | type,
@@ -244,6 +250,12 @@ def install_config_module(module: ModuleType) -> None:
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
     module._hash_digest = None  # type: ignore[attr-defined]
+    module._get_dict_dirty_keys_var = ContextVar(  # pyrefly: ignore[missing-attribute]
+        f"{module.__name__}._get_dict_dirty_keys", default=None
+    )  # type: ignore[attr-defined]
+    module._get_dict_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
+        f"{module.__name__}._get_dict_cache", default=None
+    )  # type: ignore[attr-defined]
 
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"
@@ -285,6 +297,9 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str
     if current_comment != ("", -1):
         raise AssertionError(f"unconsumed {COMPILE_IGNORED_MARKER}")
     return assignments
+
+
+_GetDictCacheKey = tuple[tuple[str, ...], tuple[str, ...], bool]
 
 
 @dataclass
@@ -374,6 +389,12 @@ class ConfigModule(ModuleType):
     _compile_ignored_keys: set[str]
     _is_dirty: bool
     _hash_digest: bytes | None
+    # Per-thread cache state, backed by ContextVar so each thread/context gets
+    # its own dirty set and cache (config values are per-thread via ContextVar).
+    # None means fully dirty (initial state or >_GET_DICT_DIRTY_KEYS_CAP keys
+    # changed); empty set means the last _get_dict result is up to date.
+    _get_dict_dirty_keys_var: ContextVar[set[str] | None]
+    _get_dict_cache_var: ContextVar[dict[_GetDictCacheKey, dict[str, Any]]]
 
     def __init__(self) -> None:
         raise NotImplementedError(
@@ -407,6 +428,7 @@ class ConfigModule(ModuleType):
             else:
                 config.user_override.set(value)
                 self._is_dirty = True
+                self._mark_get_dict_dirty(name)
                 config.hide = False
 
     def __getattr__(self, name: str) -> Any:
@@ -450,6 +472,7 @@ class ConfigModule(ModuleType):
 
     def __delattr__(self, name: str) -> None:
         self._is_dirty = True
+        self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override.set(_UNSET_SENTINEL)
@@ -485,6 +508,16 @@ class ConfigModule(ModuleType):
         module, constant_name = data
         setattr(module, constant_name, val)
 
+    _GET_DICT_DIRTY_KEYS_CAP = 16
+
+    def _mark_get_dict_dirty(self, name: str) -> None:
+        dirty = self._get_dict_dirty_keys_var.get()
+        if dirty is None:
+            return
+        dirty.add(name)
+        if len(dirty) > self._GET_DICT_DIRTY_KEYS_CAP:
+            self._get_dict_dirty_keys_var.set(None)
+
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
@@ -514,6 +547,7 @@ class ConfigModule(ModuleType):
         ignored_keys: list[str] | None = None,
         ignored_prefixes: list[str] | None = None,
         skip_default: bool = False,
+        readonly_values: bool = False,
     ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
@@ -530,17 +564,57 @@ class ConfigModule(ModuleType):
                 not be exported
             skip_default does two things. One if a key has not been modified
                 it skips it.
+            readonly_values when True, enables caching of the result.
+                The caller owns the returned dict but must not mutate
+                its values. When False (default), no caching is used.
         """
-        config: dict[str, Any] = {}
-        for key, entry in self._config.items():
+
+        keys_to_update, config = None, None
+        cache_key = (
+            tuple(ignored_keys) if ignored_keys else (),
+            tuple(ignored_prefixes) if ignored_prefixes else (),
+            skip_default,
+        )
+
+        # Try to take a shortcut and only update dirty keys on top of a cached base.
+        cache = self._get_dict_cache_var.get()
+        if readonly_values:
+            if cache is None:
+                cache = {}
+                self._get_dict_cache_var.set(cache)
+            dirty_keys = self._get_dict_dirty_keys_var.get()
+            cached = cache.get(cache_key)
+            if cached is not None and dirty_keys is not None:
+                # Shortcut: copy the cached base and update only dirty keys.
+                # The cache entry itself is never mutated.
+                keys_to_update = dirty_keys
+                config = dict(cached)
+            elif dirty_keys is None:
+                # Fully dirty — clear entire cache and recompute
+                cache = {}
+                self._get_dict_cache_var.set(cache)
+                self._get_dict_dirty_keys_var.set(set())
+
+        # Recompute everything otherwise.
+        if keys_to_update is None:
+            keys_to_update = self._config.keys()
+        if config is None:
+            config = {}
+
+        for key in keys_to_update:
+            entry = self._config[key]
             if entry.alias is not None:
+                config.pop(key, None)
                 continue
             if ignored_keys and key in ignored_keys:
+                config.pop(key, None)
                 continue
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):
+                    config.pop(key, None)
                     continue
             if skip_default and self._is_default(key):
+                config.pop(key, None)
                 continue
 
             # Read value directly, bypassing __getattr__ overhead
@@ -560,6 +634,8 @@ class ConfigModule(ModuleType):
                 val = copy.deepcopy(val)
             config[key] = val
 
+        if readonly_values and cache_key not in cache:
+            cache[cache_key] = dict(config)
         return config
 
     def get_type(self, config_name: str) -> type:
@@ -569,30 +645,34 @@ class ConfigModule(ModuleType):
         """Convert config to a pickled blob"""
         ignored_keys = getattr(self, "_save_config_ignore", [])
         return pickle.dumps(
-            self._get_dict(ignored_keys=ignored_keys),
+            self._get_dict(ignored_keys=ignored_keys, readonly_values=True),
             protocol=2,
         )
 
     def save_config_portable(
-        self, *, ignore_private_configs: bool = True
+        self, *, ignore_private_configs: bool = True, readonly_values: bool = False
     ) -> dict[str, Any]:
         """Convert config to portable format"""
         prefixes = []
         if ignore_private_configs:
             prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
-        config = self._get_dict(ignored_prefixes=prefixes)
-        for key in getattr(self, "_cache_config_factory_keys", []):
-            if key in config and config[key] is not None:
-                instance = config[key]()
-                if hasattr(instance, "uuid"):
-                    config[key] = instance.uuid()
-                else:
-                    raise RuntimeError(
-                        f"Config '{key}' is set to {config[key]} which does not "
-                        f"implement uuid(). Implement uuid() for cache key "
-                        f"participation."
-                    )
+        config = self._get_dict(
+            ignored_prefixes=prefixes, readonly_values=readonly_values
+        )
+        factory_keys = getattr(self, "_cache_config_factory_keys", [])
+        if factory_keys:
+            for key in factory_keys:
+                if key in config and config[key] is not None:
+                    instance = config[key]()
+                    if hasattr(instance, "uuid"):
+                        config[key] = instance.uuid()
+                    else:
+                        raise RuntimeError(
+                            f"Config '{key}' is set to {config[key]} which does not "
+                            f"implement uuid(). Implement uuid() for cache key "
+                            f"participation."
+                        )
         return config
 
     def codegen_config(self) -> str:
@@ -653,7 +733,9 @@ class ConfigModule(ModuleType):
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
-            ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
+            ignored_keys=getattr(self, "_save_config_ignore", []),
+            skip_default=True,
+            readonly_values=True,
         ).items():
             lines.append(get_config_line(mod, k, v))
         for import_name in imports:
@@ -663,7 +745,9 @@ class ConfigModule(ModuleType):
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
-            dict_to_hash = self._get_dict(ignored_keys=list(self._compile_ignored_keys))
+            dict_to_hash = self._get_dict(
+                ignored_keys=list(self._compile_ignored_keys), readonly_values=True
+            )
             string_to_hash = repr(sorted(dict_to_hash.items()))
             self._hash_digest = hashlib.md5(
                 string_to_hash.encode("utf-8"), usedforsecurity=False
@@ -820,11 +904,13 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
-                self._config[k].user_override.set(v)
+                config[k].user_override.set(v)
+                self._mark_get_dict_dirty(k)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    self._config[k].user_override.set(v)
+                    config[k].user_override.set(v)
+                    self._mark_get_dict_dirty(k)
 
             return revert
 
