@@ -221,6 +221,15 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     bool use_inactive,
     bool validate_full_update);
 
+// Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
+// allowed to pass CPU tensors even when the model lives on a non-CPU device.
+// CPU tensors are silently copied to the model's device.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(

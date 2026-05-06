@@ -7481,7 +7481,7 @@ class Scheduler:
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
         candidate_symbols.update(
-            *(get_input_node_symbols(node) for node in input_nodes.values())
+            *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
         candidate_symbols = filter_symbols(candidate_symbols)
