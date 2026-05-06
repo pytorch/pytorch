@@ -78,11 +78,7 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
-from torch.fx.experimental.dynamic_spec import (
-    IntVar,
-    lookup_spec_from_dynamo_source,
-    TensorSpec,
-)
+from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -347,6 +343,21 @@ DimList = list
 def safe_has_grad(t: object) -> bool:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
+
+
+def lookup_spec_from_dynamo_source(
+    source: Source, shapes_spec: ShapesSpec | None
+) -> LeafSpec:
+    """Look up the spec for a function input arg from the shapes_spec.
+
+    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
+    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    """
+    if shapes_spec is None or shapes_spec._params is None:
+        return None
+    if not isinstance(source, LocalSource) or not source.is_input:
+        return None
+    return shapes_spec._params._named_args.get(source.local_name)
 
 
 class _missing:

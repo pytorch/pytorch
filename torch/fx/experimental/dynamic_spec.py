@@ -261,18 +261,3 @@ class ShapesSpec:
             "type": "ShapesSpec",
             "params": None if self._params is None else self._params.to_jsonable(),
         }
-
-
-def lookup_spec_from_dynamo_source(
-    source: Any, shapes_spec: ShapesSpec | None
-) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
-
-    Only supports LocalSource with is_input=True (direct function args).
-    Returns TensorSpec, IntVar, int, or None.
-    """
-    if shapes_spec is None or shapes_spec._params is None:
-        return None
-    if not getattr(source, "is_input", False):
-        return None
-    return shapes_spec._params._named_args.get(source.local_name)
