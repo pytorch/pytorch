@@ -29,7 +29,8 @@
 
 #ifdef USE_CUDA
 #include <ATen/native/cuda/Resize.h>
-#include <cuda_runtime.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #endif
 
 #include <ATen/detail/PrivateUse1HooksInterface.h>
@@ -39,6 +40,47 @@
 #define LSEEK _lseeki64
 #else
 #define LSEEK lseek
+#endif
+
+#ifdef USE_CUDA
+namespace {
+
+void resize_storage_cuda_with_addr(
+    const at::Storage& storage,
+    size_t size_bytes,
+    void* addr) {
+  if (size_bytes == 0) {
+    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), 0);
+    return;
+  }
+
+  auto* storage_impl = storage.unsafeGetStorageImpl();
+  TORCH_CHECK(
+      storage_impl->resizable(),
+      "Trying to resize storage that is not resizable");
+  auto allocator = storage_impl->allocator();
+  TORCH_CHECK(
+      allocator != nullptr, "Trying to resize storage without an allocator");
+  TORCH_CHECK(
+      storage.nbytes() == 0,
+      "_resize_with_addr_ only supports resizing a zero-sized CUDA storage to a non-zero size, but got current size ",
+      storage.nbytes(),
+      " bytes");
+  TORCH_CHECK(
+      addr != nullptr,
+      "_resize_with_addr_ expects a non-null addr when size is non-zero");
+  TORCH_CHECK(
+      allocator == c10::cuda::CUDACachingAllocator::get(),
+      "_resize_with_addr_ only supports storages allocated by the current CUDA caching allocator");
+
+  c10::cuda::CUDAGuard guard(storage.device().index());
+  auto data = c10::cuda::CUDACachingAllocator::allocateWithAddress(
+      size_bytes, addr);
+  storage_impl->set_data_ptr_noswap(std::move(data));
+  storage_impl->set_nbytes(size_bytes);
+}
+
+} // namespace
 #endif
 
 static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
@@ -128,7 +170,7 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -138,12 +180,6 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
       storage.sym_nbytes() != 0;
   TORCH_CHECK(
       !invalid, "Attempted to call resize_() on an invalid python storage.")
-  Py_ssize_t nargs = PyTuple_GET_SIZE(args);
-  TORCH_CHECK(
-      nargs >= 1 && nargs <= 2,
-      "resize_ expects 1 or 2 arguments, got ",
-      nargs);
-  PyObject* number_arg = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
@@ -153,16 +189,6 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCUDA) {
 #ifdef USE_CUDA
-    void* hint = nullptr;
-    if (nargs == 2) {
-      PyObject* hint_arg = PyTuple_GET_ITEM(args, 1);
-      TORCH_CHECK(
-          THPUtils_checkLong(hint_arg),
-          "resize_ hint_addr expects an int, "
-          "but got ",
-          THPUtils_typename(hint_arg));
-      hint = reinterpret_cast<void*>(THPUtils_unpackLong(hint_arg));
-    }
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i),
@@ -170,8 +196,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
         size_bytes_i,
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    at::native::resize_bytes_cuda(
-        storage.unsafeGetStorageImpl(), size_bytes, hint);
+    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #else
     TORCH_CHECK(false, "built without USE_CUDA");
 #endif
@@ -179,6 +204,61 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
     at::native::resize_bytes_nocuda(storage, newsize);
   }
   return Py_NewRef(self);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  const auto& storage = THPStorage_Unpack(self);
+  // See Note [Invalid Python Storages]
+  auto invalid = storage.data() == nullptr &&
+      storage.device_type() != c10::DeviceType::Meta &&
+      storage.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid,
+      "Attempted to call _resize_with_addr_() on an invalid python storage.")
+  Py_ssize_t nargs = PyTuple_GET_SIZE(args);
+  TORCH_CHECK(
+      nargs == 2,
+      "_resize_with_addr_ expects 2 arguments, got ",
+      nargs);
+  PyObject* number_arg = PyTuple_GET_ITEM(args, 0);
+  TORCH_CHECK(
+      THPUtils_checkLong(number_arg),
+      "_resize_with_addr_ expects an int size, "
+      "but got ",
+      THPUtils_typename(number_arg));
+  int64_t newsize = THPUtils_unpackLong(number_arg);
+  c10::DeviceType device_type = storage.device_type();
+  if (device_type == at::kCUDA) {
+#ifdef USE_CUDA
+    PyObject* addr_arg = PyTuple_GET_ITEM(args, 1);
+    TORCH_CHECK(
+        THPUtils_checkLong(addr_arg),
+        "_resize_with_addr_ expects an int addr, "
+        "but got ",
+        THPUtils_typename(addr_arg));
+    void* addr = reinterpret_cast<void*>(THPUtils_unpackLong(addr_arg));
+    ptrdiff_t size_bytes_i = newsize;
+    TORCH_CHECK(
+        !c10::overflows<size_t>(size_bytes_i),
+        "Requested storage size (",
+        size_bytes_i,
+        ") cannot be represented as a size_t");
+    const auto size_bytes = static_cast<size_t>(size_bytes_i);
+    resize_storage_cuda_with_addr(storage, size_bytes, addr);
+#else
+    TORCH_CHECK(false, "built without USE_CUDA");
+#endif
+  } else {
+    TORCH_CHECK(
+        false,
+        "_resize_with_addr_ is only supported on CUDA storage, got ",
+        storage.device_type());
+  }
+  Py_INCREF(self);
+  return self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -654,7 +734,8 @@ static PyMethodDef THPStorage_methods[] = {
     {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},
     {"fill_", THPStorage_fill_, METH_O, nullptr},
     {"new", THPStorage_new, METH_NOARGS, nullptr},
-    {"resize_", THPStorage_resize_, METH_VARARGS, nullptr},
+    {"resize_", THPStorage_resize_, METH_O, nullptr},
+    {"_resize_with_addr_", THPStorage_resize_with_addr_, METH_VARARGS, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
     {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},

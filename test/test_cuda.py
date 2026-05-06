@@ -4718,153 +4718,188 @@ print(ret)
         self.assertEqual(r, "1.0")
 
 
-class TestResizeStorageHint(TestCase):
+class TestResizeStorageWithAddr(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    def _find_pool_block(self, pool, addr):
+        for segment in pool.snapshot(include_traces=False):
+            for idx, block in enumerate(segment["blocks"]):
+                if block["address"] == addr:
+                    return segment["blocks"], idx
+        self.fail(f"Could not find block at address {addr}")
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
+        "CUDAMallocAsync does not support exact-address allocation",
     )
-    def test_resize_storage_hint_basic(self):
-        t = torch.randn(1024, device="cuda")
+    def test_resize_storage_with_addr_exact_allocation(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            other = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+        self.assertNotEqual(other.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_occupied_address_errors(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            occupied = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            t = torch.empty(2048, dtype=torch.uint8, device="cuda")
+
+        occupied_ptr = occupied.untyped_storage().data_ptr()
+        occupied_size = occupied.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "exact address"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(occupied_size, occupied_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_middle_of_block(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            prefix = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            suffix = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        prefix.untyped_storage().resize_(0)
+        t.untyped_storage().resize_(0)
+        suffix.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+
+        blocks, idx = self._find_pool_block(pool, original_ptr)
+        self.assertGreater(idx, 0)
+        self.assertLess(idx + 1, len(blocks))
+        self.assertEqual(blocks[idx]["state"], "active_allocated")
+        self.assertEqual(blocks[idx - 1]["state"], "inactive")
+        self.assertEqual(
+            blocks[idx - 1]["address"] + blocks[idx - 1]["size"],
+            original_ptr,
+        )
+        self.assertEqual(blocks[idx + 1]["state"], "inactive")
+        self.assertEqual(
+            blocks[idx]["address"] + blocks[idx]["size"],
+            blocks[idx + 1]["address"],
+        )
+
+    def test_resize_storage_with_addr_does_not_change_resize(self):
+        storage = torch.empty(1).untyped_storage()
+        with self.assertRaises(TypeError):
+            storage.resize_(storage.nbytes(), 0)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_out_of_pool_errors(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+        t.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "exact address"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr - 1)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_addr_recovers_viewed_slices(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            base = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            view1 = base[512:1024]
+            view2 = base[1024:1536]
+
+        storage = base.untyped_storage()
+        original_ptr = storage.data_ptr()
+        original_size = storage.nbytes()
+        storage.resize_(0)
+
+        self.assertEqual(base.untyped_storage().nbytes(), 0)
+        self.assertEqual(view1.untyped_storage().nbytes(), 0)
+        self.assertEqual(view2.untyped_storage().nbytes(), 0)
+
+        with torch.cuda.use_mem_pool(pool):
+            storage._resize_with_addr_(original_size, original_ptr)
+
+        self.assertEqual(base.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(view1.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(view2.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(base.untyped_storage().nbytes(), original_size)
+        self.assertEqual(view1.untyped_storage().nbytes(), original_size)
+        self.assertEqual(view2.untyped_storage().nbytes(), original_size)
+
+    def test_resize_storage_with_addr_requires_zero_sized_source(self):
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+
         original_ptr = t.untyped_storage().data_ptr()
         original_size = t.untyped_storage().nbytes()
 
-        t.untyped_storage().resize_(0)
+        with self.assertRaisesRegex(RuntimeError, "zero-sized CUDA storage"):
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+
+    def test_resize_storage_with_addr_zero_ignores_addr(self):
+        t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+        t.untyped_storage()._resize_with_addr_(0, 1)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
-        t.untyped_storage().resize_(original_size, original_ptr)
-        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
-
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
-    )
-    def test_resize_storage_hint_consumed(self):
-        t = torch.randn(1024, device="cuda")
-        original_ptr = t.untyped_storage().data_ptr()
-        original_size = t.untyped_storage().nbytes()
-
-        t.untyped_storage().resize_(0)
-
-        # Allocate another tensor that may consume the freed block
-        blocker = torch.randn(1024, device="cuda")
-
-        t.untyped_storage().resize_(original_size, original_ptr)
-        # The hint may or may not succeed depending on whether blocker
-        # consumed the exact block -- either way, no crash.
-        self.assertEqual(t.untyped_storage().nbytes(), original_size)
-        del blocker
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
-    )
-    def test_resize_storage_hint_no_hint(self):
-        t = torch.randn(1024, device="cuda")
-        original_size = t.untyped_storage().nbytes()
-
-        t.untyped_storage().resize_(0)
-
-        # Resize without hint -- should work like normal allocation
-        new_size = original_size * 2
-        t.untyped_storage().resize_(new_size)
-        self.assertEqual(t.untyped_storage().nbytes(), new_size)
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
+        "CUDAMallocAsync does not support exact-address allocation",
     )
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
-    def test_resize_storage_hint_expandable_segments(self):
-        torch.cuda.empty_cache()
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        try:
-            t = torch.randn(1024, device="cuda")
-            original_ptr = t.untyped_storage().data_ptr()
-            original_size = t.untyped_storage().nbytes()
-
-            t.untyped_storage().resize_(0)
-            self.assertEqual(t.untyped_storage().nbytes(), 0)
-
-            t.untyped_storage().resize_(original_size, original_ptr)
-            # With expandable segments the hint is best-effort; the block
-            # may have been merged or unmapped.  Just verify no crash and
-            # correct size.
-            self.assertEqual(t.untyped_storage().nbytes(), original_size)
-        finally:
-            del t
-            torch.cuda.empty_cache()
-            torch.cuda.memory._set_allocator_settings("")
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
-    )
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
-    def test_resize_split_block(self):
-        pool = torch.cuda.MemPool()
-
-        # Allocate two tensors in private pool and t is the second tensor
-        with torch.cuda.use_mem_pool(pool):
-            blocker = torch.randn(1024, device="cuda")
-            t = torch.randn(1024, device="cuda")
-
-        original_ptr = t.untyped_storage().data_ptr()
-        original_size = t.untyped_storage().nbytes()
-
-        # delete blocker and t such that the two blocks have been merged
-        # in CUDACachingAllocator.
-        t.untyped_storage().resize_(0)
-        blocker.untyped_storage().resize_(0)
-
-        # Reallocate t at the original ptr in mempool.
-        with torch.cuda.use_mem_pool(pool):
-            t.untyped_storage().resize_(original_size, original_ptr)
-
-        self.assertEqual(t.untyped_storage().nbytes(), original_size)
-        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
-
-        del blocker
-        del t
-        del pool
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
-    )
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
-    def test_resize_storage_hint_expandable_segments_with_split_block(self):
+    @serialTest()
+    def test_resize_storage_with_addr_expandable_segments_middle_of_block(self):
         torch.cuda.empty_cache()
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         try:
             pool = torch.cuda.MemPool()
-
-            # Allocate two tensors in private pool and t is the second tensor
+            torch.cuda.empty_cache()
             with torch.cuda.use_mem_pool(pool):
-                blocker = torch.randn(1024, device="cuda")
-                t = torch.randn(1024, device="cuda")
+                prefix = torch.empty(4096, dtype=torch.uint8, device="cuda")
+                t = torch.empty(4096, dtype=torch.uint8, device="cuda")
+                suffix = torch.empty(4096, dtype=torch.uint8, device="cuda")
 
             original_ptr = t.untyped_storage().data_ptr()
             original_size = t.untyped_storage().nbytes()
-
-            # delete blocker and t such that the two blocks have been merged
-            # in CUDACachingAllocator.
+            prefix.untyped_storage().resize_(0)
             t.untyped_storage().resize_(0)
-            blocker.untyped_storage().resize_(0)
+            suffix.untyped_storage().resize_(0)
 
-            # Reallocate t at the original ptr in mempool.
             with torch.cuda.use_mem_pool(pool):
-                t.untyped_storage().resize_(original_size, original_ptr)
+                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
 
-            self.assertEqual(t.untyped_storage().nbytes(), original_size)
             self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
         finally:
-            del blocker
-            del t
-            del pool
             torch.cuda.empty_cache()
             torch.cuda.memory._set_allocator_settings("")
 
