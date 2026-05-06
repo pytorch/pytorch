@@ -86,6 +86,7 @@ class TestDtypeBase(JitTestCase):
     SCALAR = "SCALAR"  # To mark unary vs 0 dim tensor
 
     def setUp(self):
+        super().setUp()
         self.prev_symbolic_shapes_test_enabled = (
             torch._C._jit_symbolic_shapes_test_mode_enabled()
         )

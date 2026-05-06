@@ -52,6 +52,7 @@ def warmup_forward(f, *args, profiling_count=3):
 class JitLlgaTestCase(JitTestCase):
 
     def setUp(self):
+        super().setUp()
         # PyTorch has divergent op support for AMP in JIT & eager modes
         # so we disable AMP for JIT & leverage eager-mode AMP.
         # Ref: https://github.com/pytorch/pytorch/issues/75956

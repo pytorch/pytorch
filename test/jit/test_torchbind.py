@@ -25,6 +25,7 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
+        super().setUp()
         load_torchbind_test_lib()
 
     def test_torchbind(self):

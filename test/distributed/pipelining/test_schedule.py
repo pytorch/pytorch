@@ -308,6 +308,7 @@ instantiate_parametrized_tests(ScheduleTest)
 
 class TestSchedulePlan(TestCase):
     def setUp(self):
+        super().setUp()
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         self.test_cases = [

@@ -62,6 +62,7 @@ def _fp8_all_gather(
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -504,6 +505,7 @@ class MicroPipelineTPTest(TestCase):
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
