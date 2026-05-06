@@ -2416,11 +2416,6 @@ class VariableBuilder:
             TensorSpec | None,
             lookup_spec_from_dynamo_source(source, config._shapes_spec),
         )
-        if _tensor_spec is not None and len(_tensor_spec) != value.dim():
-            raise ValueError(
-                f"TensorSpec has {len(_tensor_spec)} dims but tensor {source.name} "
-                f"has {value.dim()} dims"
-            )
         _has_spec = _tensor_spec is not None
 
         if (
@@ -3879,6 +3874,11 @@ def _symbolic_context_from_shapes_spec(
     view_base_context: SymbolicContext | None,
     shape_env_to_source_to_symbol_cache: dict[Any, Any],
 ) -> StatefulSymbolicContext:
+    if tensor_spec is not None and len(tensor_spec) != e.dim():
+        raise ValueError(
+            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
+            f"has {e.dim()} dims"
+        )
     dynamic_sizes = []
     dynamic_strides = []
 
