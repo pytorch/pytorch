@@ -115,9 +115,7 @@ def unpack_wheel(wheel: Path, work: Path) -> Path:
 
 
 def pack_wheel(unpacked: Path, output_dir: Path) -> None:
-    subprocess.run(
-        ["wheel", "pack", str(unpacked), "-d", str(output_dir)], check=True
-    )
+    subprocess.run(["wheel", "pack", str(unpacked), "-d", str(output_dir)], check=True)
 
 
 def repair_wheel(

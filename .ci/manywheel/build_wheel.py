@@ -67,9 +67,7 @@ def main() -> None:
 
     configure_blas_env()
 
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "build"], check=True
-    )
+    subprocess.run([sys.executable, "-m", "pip", "install", "build"], check=True)
     subprocess.run(
         [
             sys.executable,

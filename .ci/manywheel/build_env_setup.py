@@ -91,6 +91,7 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
         env["USE_MAGMA"] = "0"
     return env
 
+
 CPU_BUILD_ENV: dict[str, str] = {
     "TH_BINARY_BUILD": "1",
     "USE_CUDA": "0",
@@ -123,9 +124,24 @@ def install_os_packages() -> None:
     if any(distro in name for distro in ("AlmaLinux", "CentOS", "Red Hat")):
         subprocess.run(
             [
-                "yum", "install", "-q", "-y", "zip", "openssl", "openssl-devel",
-                "sudo", "wget", "curl", "perl", "util-linux", "xz", "bzip2",
-                "git", "patch", "which", "zlib-devel",
+                "yum",
+                "install",
+                "-q",
+                "-y",
+                "zip",
+                "openssl",
+                "openssl-devel",
+                "sudo",
+                "wget",
+                "curl",
+                "perl",
+                "util-linux",
+                "xz",
+                "bzip2",
+                "git",
+                "patch",
+                "which",
+                "zlib-devel",
             ],
             check=True,
         )
@@ -134,25 +150,37 @@ def install_os_packages() -> None:
         for entry in Path("/etc/apt").rglob("*.list"):
             text = entry.read_text()
             new = "\n".join(
-                f"# {line}" if "nvidia" in line else line
-                for line in text.splitlines()
+                f"# {line}" if "nvidia" in line else line for line in text.splitlines()
             )
             if new != text:
                 entry.write_text(new + ("\n" if text.endswith("\n") else ""))
         subprocess.run(["apt-get", "update", "-qq"], check=True)
         subprocess.run(
-            ["apt-get", "-y", "-qq", "install", "zip", "openssl", "wget", "curl", "git"],
+            [
+                "apt-get",
+                "-y",
+                "-qq",
+                "install",
+                "zip",
+                "openssl",
+                "wget",
+                "curl",
+                "git",
+            ],
             check=True,
         )
 
 
 def ensure_pip_on_path() -> None:
     """Manylinux images ship /usr/bin/python3 without pip; fall back to /opt/python/cp3*."""
-    if subprocess.run(
-        ["python3", "-mpip", "--version"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ).returncode == 0:
+    if (
+        subprocess.run(
+            ["python3", "-mpip", "--version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    ):
         return
     candidates = sorted(Path("/opt/python").glob("cp3*/bin"))
     if candidates:
@@ -193,9 +221,7 @@ def install_cuda_toolkit(cuda_version: str) -> None:
         for nccl_pin in pins.glob("nccl*"):
             shutil.copy(nccl_pin, stage / "ci_commit_pins" / nccl_pin.name)
 
-        subprocess.run(
-            ["bash", "install_cuda.sh", cuda_version], cwd=stage, check=True
-        )
+        subprocess.run(["bash", "install_cuda.sh", cuda_version], cwd=stage, check=True)
 
     subprocess.run(
         ["bash", str(docker_common / "install_magma.sh"), cuda_version], check=True
@@ -220,7 +246,11 @@ def setup_cuda(cuda_version: str) -> None:
     if arch != "aarch64" and not (cuda_dir / "magma").is_dir():
         print("MAGMA not found, installing...")
         subprocess.run(
-            ["bash", str(repo_root() / ".ci/docker/common/install_magma.sh"), cuda_version],
+            [
+                "bash",
+                str(repo_root() / ".ci/docker/common/install_magma.sh"),
+                cuda_version,
+            ],
             check=True,
         )
 
@@ -322,7 +352,9 @@ def main() -> None:
     if gpu_arch_type in ("cuda", "cuda-aarch64"):
         cuda_version = cuda_version_from_env()
         if not cuda_version:
-            sys.exit("Could not determine CUDA version from GPU_ARCH_VERSION/DESIRED_CUDA")
+            sys.exit(
+                "Could not determine CUDA version from GPU_ARCH_VERSION/DESIRED_CUDA"
+            )
         setup_cuda(cuda_version)
         env_out.update(cuda_build_env(cuda_version, arch))
         print(f"CUDA {cuda_version} environment configured")
