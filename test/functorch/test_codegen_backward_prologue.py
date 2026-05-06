@@ -1,14 +1,14 @@
 # Owner(s): ["module: functorch"]
 
 """
-Tests for codegen'ing backward non-tangent subclass unwrapping.
+Tests for codegen'ing _backward_prologue_functional non-tangent subclass
+unwrapping.
 
-The backward prologue (codegen'd via _codegen_backward_prologue) unwraps
-saved tensors (non-tangent subclass inputs) before passing them to the
-compiled backward. The tangent processing (process_runtime_tangent) is
-runtime-dependent and NOT a codegen candidate, but the non-tangent
-unwrapping is pure compile-time-determined subclass unwrapping, identical
-to the forward input unwrapping already codegen'd.
+_backward_prologue_functional unwraps saved tensors (non-tangent subclass
+inputs) before passing them to the compiled backward. The tangent processing
+(process_runtime_tangent) is runtime-dependent and NOT a codegen candidate,
+but the non-tangent unwrapping is pure compile-time-determined subclass
+unwrapping, identical to the forward input unwrapping already codegen'd.
 
 Tests verify that a "backward_subclass_unwrap" artifact is emitted via
 trace_structured.

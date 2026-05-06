@@ -498,7 +498,6 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
-        bw_prologue_fn = CompiledFunction._bw_prologue_fn
         del CompiledFunction
 
         if torch.is_grad_enabled():
@@ -515,12 +514,15 @@ class AutogradCompilerInstance:
             ctx_opaque_objs: Sequence[Any],
             flat_args: Sequence[Any],
         ) -> Any:
-            return bw_prologue_fn(
+            out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
                 ctx_symints,
                 ctx_opaque_objs,
+                metadata,
+                maybe_subclass_metadata,
                 flat_args,
             )
+            return out
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",

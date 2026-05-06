@@ -339,12 +339,7 @@ def _compile_and_exec_source(
         payload_fn=lambda: source,
     )
 
-    # Use a path under torch/_functorch/ so the code object is recognized by
-    # dynamo's MOD_SKIPLIST. The eval frame hook stays active during the entire
-    # torch.compile(fn)(*args) call (to handle graph breaks and resume functions),
-    # so codegen'd functions called during backward get intercepted even though
-    # no tracing is active. A real path makes them skip automatically.
-    code = compile(source, f"{__file__}:codegen({artifact_name})", "exec")
+    code = compile(source, f"<{artifact_name}>", "exec")
     local_dict: dict[str, object] = {}
     exec(code, globals_dict, local_dict)
     fn = local_dict[fn_name]
