@@ -2,6 +2,7 @@
 
 import unittest
 from collections import defaultdict
+from contextlib import contextmanager
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -35,6 +36,18 @@ class TestBypassDeviceRestrictions(TestCase):
         self.bypass_device_restrictions = True
         super().setUp()
 
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 2
+        actual_runs = cls.executed_count
+        if actual_runs != expected_runs:
+            raise AssertionError(
+                f"Bypass logic failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but only {actual_runs} executed."
+            )
+        super().tearDownClass()
+
     @onlyCUDA
     def test_bypass_only_cuda(self, device):
         type(self).executed_count += 1
@@ -44,19 +57,6 @@ class TestBypassDeviceRestrictions(TestCase):
     def test_bypass_only_on(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
-
-    def test_vaildate_bypass_execution(self, device):
-        # Must run last. The 'v' prefix ensures this sorts after test_bypass_* ('b') alphabetically,
-        # so executed_count has been incremented by both bypass tests before we check it here.
-        expected_runs = 2
-        actual_runs = type(self).executed_count
-        self.assertEqual(
-            actual_runs,
-            expected_runs,
-            f"Bypass logic failed! "
-            f"Expected {expected_runs} tests to run, "
-            f"but only {actual_runs} executed.",
-        )
 
 
 def _make_dummy_op(name, **kwargs):
@@ -81,6 +81,23 @@ op_precision = _make_dummy_op(
     "op_precision",
     decorators=[DecorateInfo(precisionOverride({torch.float32: 1e-5}))],
 )
+
+# Dummy ops for testing combined op_allowlist + op_overrides
+op_combined_supported = _make_dummy_op("op_combined_supported")
+op_combined_skip = _make_dummy_op("op_combined_skip")
+op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
+
+
+@contextmanager
+def _temp_attrs(obj, **attrs):
+    backup = {k: getattr(obj, k) for k in attrs}
+    for k, v in attrs.items():
+        setattr(obj, k, v)
+    try:
+        yield
+    finally:
+        for k, v in backup.items():
+            setattr(obj, k, v)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -179,6 +196,36 @@ PrivateUse1TestBase.test_exclusions = {
     "TestSkippedWholeTestClass": "*",
 }
 
+
+class TestSupportedOpsWithOverrides(TestCase):
+    """Verify that op_allowlist filtering works together with op_overrides.
+
+    op_allowlist filters which ops generate variants.
+    op_overrides adds decorators to those ops that pass the filter.
+    """
+
+    _executed_combined: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        # op_combined_supported should run (it's in op_allowlist, no skip decorator)
+        if cls._executed_combined["op_combined_supported"] == 0:
+            raise AssertionError("op_combined_supported should have run")
+        # op_combined_skip should NOT run (in op_allowlist but has skip decorator)
+        if cls._executed_combined["op_combined_skip"] != 0:
+            raise AssertionError("op_combined_skip should be skipped by op_overrides")
+        # op_combined_unsupported should NOT run (not in op_allowlist)
+        if cls._executed_combined["op_combined_unsupported"] != 0:
+            raise AssertionError(
+                "op_combined_unsupported should not run (not in op_allowlist)"
+            )
+        super().tearDownClass()
+
+    @ops([op_combined_supported, op_combined_skip, op_combined_unsupported])
+    def test_combined_filter(self, device, dtype, op):
+        type(self)._executed_combined[op.name] += 1
+
+
 instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
 instantiate_device_type_tests(
     TestBypassDeviceRestrictions, globals(), only_for="openreg"
@@ -187,6 +234,17 @@ instantiate_device_type_tests(
     TestSkippedSpecificTestCases, globals(), only_for="openreg"
 )
 instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
+
+with _temp_attrs(
+    PrivateUse1TestBase,
+    op_overrides={
+        "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
+    },
+    op_allowlist=("op_combined_supported", "op_combined_skip"),
+):
+    instantiate_device_type_tests(
+        TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
+    )
 
 if __name__ == "__main__":
     run_tests()
