@@ -34,7 +34,13 @@ from functools import lru_cache, partial
 from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
-from types import ModuleType
+from types import (
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    FunctionType,
+    MethodType,
+    ModuleType,
+)
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -481,6 +487,13 @@ def _ident(x: T) -> T:
     return x
 
 
+def _unpicklable_error(key: str) -> NoReturn:
+    raise RuntimeError(
+        f"Attempted to unpickle an object that was pickled only for cache-key "
+        f"hashing and cannot be reconstructed (key={key!r})"
+    )
+
+
 def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
@@ -493,6 +506,48 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+# Types that pickle handles natively via GLOBAL/INST opcodes even though their
+# __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
+# reducer_override to avoid infinite recursion.
+# We use a tuple for isinstance() checks so subclasses are also matched
+# (e.g. ABCMeta is a subclass of type).
+_PICKLE_NATIVE_TYPES_TUPLE = (
+    FunctionType,
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    MethodType,
+    type,
+)
+
+
+def _get_stable_obj_key(obj: object) -> str | None:
+    """Produce a deterministic string key for an otherwise-unpicklable object.
+
+    Used by FxGraphCachePickler.reducer_override as a fallback for objects
+    whose types don't support default pickling (e.g. pybind11 enums).
+
+    The key is derived from the object's fully-qualified type name plus
+    values obtained via known accessor patterns (pybind11 enum, Python enum,
+    etc.).  Returns ``None`` if no accessor succeeds, letting the caller
+    decide how to handle the failure.
+    """
+    t = type(obj)
+    type_id = f"{t.__module__}.{t.__qualname__}"
+    parts = []
+    for accessor in (
+        lambda o: o.type.name,  # pybind11 enum pattern
+        lambda o: o.name,  # Python enum / named constant pattern
+        lambda o: o.value,  # value-based pattern
+    ):
+        try:
+            parts.append(str(accessor(obj)))
+        except Exception:
+            continue
+    if parts:
+        return f"{type_id}:{repr(parts)}"
+    return None
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -500,6 +555,11 @@ class FxGraphCachePickler(pickle.Pickler):
     objects that don't pickle and/or vary between runs, and we want to capture the
     data that allow us to compute a stable, but safe hash.
     """
+
+    # Cache probe results so we only call __reduce_ex__ once per type.
+    # Maps type -> True (pickleable) or False (unpickleable).
+    # Class-level because a type's picklability doesn't change at runtime.
+    _pickleable_type_cache: dict[type, bool] = {}
 
     def __init__(
         self,
@@ -543,6 +603,52 @@ class FxGraphCachePickler(pickle.Pickler):
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        """Fallback reducer for objects not registered in dispatch_table.
+
+        This handles extension types (e.g. pybind11 enums) that don't support
+        default pickling.  Instead of bypassing the FX graph cache entirely,
+        we serialize a deterministic string representation of the object which
+        is sufficient for cache-key hashing.
+        """
+        t = type(obj)
+        # Types already registered or handled by default pickle.
+        # Use isinstance for _PICKLE_NATIVE_TYPES to cover subclasses
+        # (e.g. ABCMeta is a subclass of type, and pickle handles all
+        # type/class objects natively via GLOBAL opcode).
+        if t in self.dispatch_table or isinstance(obj, _PICKLE_NATIVE_TYPES_TUPLE):
+            return NotImplemented
+        # Fast path: type already probed.
+        if (pickleable := self._pickleable_type_cache.get(t)) is not None:
+            if not pickleable:
+                return self._reduce_unpicklable(obj)
+            return NotImplemented
+        # First encounter: probe whether the default reduce protocol works.
+        try:
+            result = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+        except (TypeError, AttributeError, pickle.PicklingError):
+            self._pickleable_type_cache[t] = False
+            return self._reduce_unpicklable(obj)
+        except RuntimeError as e:
+            if "is not pickleable" in str(e):
+                self._pickleable_type_cache[t] = False
+                return self._reduce_unpicklable(obj)
+            raise
+        # Default pickling works – let pickle handle it.
+        self._pickleable_type_cache[t] = True
+        return result
+
+    @staticmethod
+    def _reduce_unpicklable(obj: Any) -> Any:
+        key = _get_stable_obj_key(obj)
+        if key is None:
+            raise BypassFxGraphCache(
+                f"Cannot produce stable cache key for unpicklable type "
+                f"{type(obj).__qualname__}"
+            )
+        return _unpicklable_error, (key,)
 
     def _reduce_fake_tensor(
         self, t: Tensor

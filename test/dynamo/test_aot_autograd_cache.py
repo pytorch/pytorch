@@ -3811,6 +3811,39 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 "DTensor with Replicate() should have different cache key than Shard(0)",
             )
 
+    def test_reducer_override_fallthrough_for_unpicklable_types(self):
+        """
+        Test that AOTAutogradCachePickler falls through to the parent class
+        reducer_override for types that are not tensor subclasses but are
+        unpicklable (e.g. pybind11 enums).
+        """
+
+        class FakeReduceOp:
+            """Simulates a pybind11 enum that cannot be pickled."""
+
+            def __init__(self, name):
+                self.name = name
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle 'FakeReduceOp' object")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        obj_a = FakeReduceOp("SUM")
+        obj_b = FakeReduceOp("SUM")
+        obj_c = FakeReduceOp("PRODUCT")
+
+        # Should not raise — parent's reducer_override handles it
+        data_a = pickler.dumps(obj_a)
+        data_b = pickler.dumps(obj_b)
+        data_c = pickler.dumps(obj_c)
+
+        # Same value -> same hash
+        self.assertEqual(data_a, data_b)
+        # Different value -> different hash
+        self.assertNotEqual(data_a, data_c)
+
 
 def _subprocess_gen_dtensor_cache_key(queue):
     """
