@@ -7223,7 +7223,7 @@ class AOTInductorTestsTemplate:
         # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
         # accepts a CPU state_dict for a non-CPU model, the way a typical user
         # would after torch.load(..., map_location="cpu").
-        if self.device != GPU_TYPE:
+        if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
 
         class Model(torch.nn.Module):
