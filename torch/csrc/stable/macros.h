@@ -53,20 +53,19 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 //
 // Return type is inferred from the return value of FALLBACK_FUNCTION.
 #if !defined(C10_MOBILE) && !defined(_WIN32)
-#define TORCH_DYNAMIC_VERSION_CALL(                                   \
-    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)      \
-  ([]() {                                                             \
-    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {           \
-      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);        \
-      if (fn_ptr) {                                                   \
-        using ReturnType =                                            \
-            std::invoke_result_t<decltype(&FALLBACK_FUNCTION), void>; \
-        const auto typed_ptr =                                        \
-            reinterpret_cast<ReturnType (*)(__VA_ARGS__)>(fn_ptr);    \
-        return (typed_ptr)(__VA_ARGS__);                              \
-      }                                                               \
-    }                                                                 \
-    return FALLBACK_FUNCTION(__VA_ARGS__);                            \
+#define TORCH_DYNAMIC_VERSION_CALL(                                  \
+    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)     \
+  ([]() {                                                            \
+    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {          \
+      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);       \
+      if (fn_ptr) {                                                  \
+        using ReturnType = decltype(FALLBACK_FUNCTION(__VA_ARGS__)); \
+        const auto typed_ptr =                                       \
+            reinterpret_cast<ReturnType (*)(__VA_ARGS__)>(fn_ptr);   \
+        return (typed_ptr)(__VA_ARGS__);                             \
+      }                                                              \
+    }                                                                \
+    return FALLBACK_FUNCTION(__VA_ARGS__);                           \
   })()
 #else
 // On a platform without dlsym, so immediately call the fallback function.
