@@ -1500,7 +1500,7 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, (list, tuple)):
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for n in val.values())
+            return sum(object_nbytes(n) for _, n in val.items())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
