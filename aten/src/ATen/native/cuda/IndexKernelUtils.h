@@ -59,6 +59,7 @@ void vectorized_scatter_add_kernel_launch(
 template <typename scalar_t, typename index_t>
 void tma_scatter_add_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
-    int D, int64_t self_dim_size);
+    int D, int64_t self_dim_size,
+    int64_t self_stride_bytes, int64_t src_stride_bytes);
 
 }

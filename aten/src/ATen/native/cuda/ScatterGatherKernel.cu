@@ -179,7 +179,8 @@ struct _cuda_scatter_gather_internal_kernel {
               reinterpret_cast<scalar_t*>(self_ptr),
               reinterpret_cast<const scalar_t*>(src_ptr),
               reinterpret_cast<index_t*>(index_ptr),
-              num_ind, static_cast<int>(iter.shape()[0]), index_size);
+              num_ind, static_cast<int>(iter.shape()[0]), index_size,
+              self_stride_bytes, src_stride_bytes);
           return;
         }
         at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
