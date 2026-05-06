@@ -382,16 +382,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
         overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
-        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
 
-        # by default, insert overlap deps and enable fusion regions within inductor
+        # by default, insert overlap deps within inductor
         with config.patch(
             {
                 "aten_distributed_optimizations.insert_overlap_deps": (
                     True if overlap_deps is None else overlap_deps
-                ),
-                "aten_distributed_optimizations.enable_fusion_regions": (
-                    True if fusion_regions is None else fusion_regions
                 ),
             }
         ):

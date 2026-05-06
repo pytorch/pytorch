@@ -964,63 +964,6 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
         f.run(graph_str)
 
-    def test_dead_fusible_code_no_crash(self):
-        """
-        Test that dead fusible code (fusion regions with no external outputs)
-        does not crash collapse_fusion_regions, and that collapse/expand
-        round-trips preserve the graph.
-
-        Regression test for the bug where dead code created a fusion region
-        with no external outputs, causing fuse_by_partitions to crash with
-        "AssertionError: last_output_node is None".
-        """
-
-        def func_with_dead_fusible_code(x, y):
-            group_name = "0"
-            group_size = 1
-
-            ag = torch.ops._c10d_functional.all_gather_into_tensor(
-                x, group_size, group_name
-            )
-
-            # Dead fusible chain - not consumed by output
-            dead1 = x + 1.0
-            dead2 = dead1 * 2.0
-            dead3 = dead2 + dead1  # noqa: F841
-
-            # Live fusible chain
-            live1 = y + 1.0
-            live2 = live1 * 2.0
-
-            mm_result = torch.mm(y, y)
-            live3 = mm_result + 1.0
-
-            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
-
-            return (live2 + live3 + ag_out).sum()
-
-        from torch._inductor.fx_passes.fusion_regions import (
-            build_fusion_regions,
-            collapse_fusion_regions,
-            expand_fusion_regions,
-        )
-
-        with FakeTensorMode():
-            x = torch.randn(16, 16)
-            y = torch.randn(16, 16)
-            gm = make_fx(func_with_dead_fusible_code)(x, y)
-
-        graph_str_before = gm.print_readable(print_output=False)
-
-        region_of = build_fusion_regions(gm)
-        new_region_of = collapse_fusion_regions(gm, region_of)
-
-        # Expand back and verify graph is preserved
-        expand_fusion_regions(gm, new_region_of)
-        gm.recompile()
-        graph_str_after = gm.print_readable(print_output=False)
-        self.assertEqual(graph_str_before, graph_str_after)
-
     @torch._inductor.config.patch(deterministic=True)
     def test_deterministic_mode_no_benchmark_error(self):
         """
@@ -1430,13 +1373,11 @@ class TestFusibleNodeOverlap(InductorTestCase):
             OverlapScheduler,
         )
 
-        estimations, fusion_region_of = gather_node_runtime_estimations(
+        estimations = gather_node_runtime_estimations(
             traced,
             collective_estimator="analytical",
             enable_fusion_regions=enable_fusion_regions,
         )
-        for node in fusion_region_of:
-            self.assertIn(node, estimations)
 
         scheduler = OverlapScheduler(
             traced,
@@ -1559,19 +1500,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         result.graph.lint()
 
     def test_no_cycle_with_fusion_regions_and_bucketing(self):
-        """
-        Test that fusion regions + bucketing doesn't create cycles.
-
-        This tests multiple fixes:
-        1. Self-dependency prevention (augmented_graph_helper.py)
-        2. Track erased getitem nodes (const_fold.py, fusion_regions.py)
-        3. Skip DCE during expansion (const_fold.py, fusion_regions.py)
-
-        The scenario: Fusion regions collapse fusible ops into call_module nodes.
-        When bucketing merges collectives, getitem nodes from fusion outputs
-        get erased. Without proper tracking and DCE skip, this causes cycles
-        or assertion failures.
-        """
+        """Test that fusion regions + bucketing doesn't create cycles."""
 
         def func(a, b, c, d):
             group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1639,7 +1568,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             max_coll_distance=200,
             custom_runtime_estimation=None,
             collective_estimator="analytical",
-            enable_fusion_regions=True,  # Enable fusion regions
+            enable_fusion_regions=True,
         )
         # This should complete without errors
         result = scheduler.run()
@@ -1868,6 +1797,7 @@ class TestProfileGuidedEstimation(TestCase):
             lib.define("my_op(Tensor x, Tensor w) -> Tensor")
             lib.impl("my_op", lambda x, w: x @ w, "CPU")
             lib.impl("my_op", lambda x, w: x @ w, "Meta")
+
             trace = _make_pge_trace(
                 collectives=[
                     {
@@ -2124,7 +2054,7 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
                 return 5.0
             return None
 
-        estimations, _ = gather_node_runtime_estimations(
+        estimations = gather_node_runtime_estimations(
             traced,
             custom_runtime_estimation=custom_runtime,
             collective_estimator="analytical",
