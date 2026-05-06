@@ -171,7 +171,6 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 )
 
 constant_fold_functions_need_guards = [
-    torch._C._functorch.get_dynamic_layer_stack_depth,
     torch.accelerator.current_device_index,
     torch.accelerator.current_accelerator,
     torch.cuda.current_device,
@@ -257,6 +256,7 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
     Used by handle_autograd_grad to reject external GradientEdge objects that
     cannot be traced through.
     """
+    from .dicts import ConstDictVariable
     from .lists import BaseListVariable
 
     if isinstance(var, UserDefinedTupleVariable) and type(var.value) is GradientEdge:
@@ -284,6 +284,17 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
     elif isinstance(var, BaseListVariable):
         for i, item in enumerate(var.items):
             _check_for_gradient_edge(item, f"{arg_name}[{i}]")
+    elif isinstance(var, ConstDictVariable):
+        for hash_key, item in var.items.items():
+            if not hash_key.vt.is_python_constant():
+                unimplemented(
+                    gb_type="autograd.grad with non-constant dict key",
+                    context=f"non-constant key in {arg_name}",
+                    explanation="autograd.grad/backward dict inputs must have constant keys.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            key_repr = hash_key.vt.as_python_constant()
+            _check_for_gradient_edge(item, f"{arg_name}[{key_repr!r}]")
 
 
 def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node]:
@@ -323,6 +334,7 @@ def _collect_tensors_with_sources(
     """
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+    from .dicts import ConstDictVariable
     from .lazy import LazyVariableTracker
     from .lists import BaseListVariable
     from .tensor import TensorVariable
@@ -364,6 +376,9 @@ def _collect_tensors_with_sources(
         results.extend(_collect_tensors_with_sources(var.realize()))
     elif isinstance(var, BaseListVariable):
         for item in var.items:
+            results.extend(_collect_tensors_with_sources(item))
+    elif isinstance(var, ConstDictVariable):
+        for item in var.items.values():
             results.extend(_collect_tensors_with_sources(item))
     else:
         unimplemented(
@@ -501,6 +516,9 @@ class BaseTorchVariable(VariableTracker):
         if result is NotImplemented:
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
+
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1155,68 +1173,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             prev = torch.is_autocast_cache_enabled()
             torch.set_autocast_cache_enabled(enabled.as_python_constant())
             tx.output.add_cleanup_hook(lambda: torch.set_autocast_cache_enabled(prev))
-            return ConstantVariable.create(None)
-
-        @register(torch._functorch.predispatch._jvp_increment_nesting)
-        def handle_jvp_increment_nesting(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._jvp_increment_nesting
-            )
-            level = torch._functorch.predispatch._jvp_increment_nesting()
-            tx.output.add_cleanup_hook(
-                torch._functorch.predispatch._jvp_decrement_nesting
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._jvp_decrement_nesting)
-        def handle_jvp_decrement_nesting(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._jvp_decrement_nesting
-            )
-            level = torch._functorch.predispatch._jvp_decrement_nesting()
-            tx.output.add_cleanup_hook(
-                torch._functorch.predispatch._jvp_increment_nesting
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._enter_dual_level)
-        def handle_enter_dual_level(
-            self, tx: "InstructionTranslator"
-        ) -> VariableTracker:
-            tx.output.create_node(
-                "call_function", torch._functorch.predispatch._enter_dual_level
-            )
-            level = torch._functorch.predispatch._enter_dual_level()
-            tx.output.add_cleanup_hook(
-                lambda: torch._functorch.predispatch._exit_dual_level(level=level)
-            )
-            return VariableTracker.build(tx, level)
-
-        @register(torch._functorch.predispatch._exit_dual_level)
-        def handle_exit_dual_level(
-            self, tx: "InstructionTranslator", level: VariableTracker
-        ) -> VariableTracker:
-            level_const = level.as_python_constant()
-            tx.output.create_node(
-                "call_function",
-                torch._functorch.predispatch._exit_dual_level,
-                (),
-                {
-                    "level": level_const,
-                },
-            )
-            torch._functorch.predispatch._exit_dual_level(level=level_const)
-
-            def cleanup():
-                new_level = torch._C._enter_dual_level()
-                if new_level != level_const:
-                    raise AssertionError("Invalid _exit_dual_level")
-
-            tx.output.add_cleanup_hook(cleanup)
             return ConstantVariable.create(None)
 
         @register(torch._C._functorch._grad_increment_nesting)
@@ -2537,6 +2493,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
+            from .dicts import ConstDictVariable
+            from .lists import BaseListVariable
             from .tensor import TensorVariable
 
             if not config.trace_autograd_ops:
@@ -2727,6 +2685,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
+            # Convert dict inputs to tuple for the FX graph. The engine
+            # always operates on flat tuples; we reconstruct the dict after.
+            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
+            if isinstance(inputs_var, ConstDictVariable):
+                inputs_as_tuple = TupleVariable(list(inputs_var.items.values()))
+                if len(args) >= 2:
+                    args = (args[0], inputs_as_tuple, *args[2:])
+                else:
+                    kwargs = {**kwargs, "inputs": inputs_as_tuple}
+
             with (
                 torch.fx.traceback.preserve_node_meta(),
                 torch.fx.traceback._set_autograd_backward(),
@@ -2736,7 +2704,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     torch.autograd.grad,
                     *proxy_args_kwargs(args, kwargs),
                 )
-            return wrap_fx_proxy(tx=tx, proxy=proxy)
+            result = wrap_fx_proxy(tx=tx, proxy=proxy)
+
+            if isinstance(inputs_var, ConstDictVariable):
+                if not isinstance(result, BaseListVariable):
+                    raise AssertionError(
+                        f"Expected BaseListVariable from autograd.grad with dict inputs, "
+                        f"got {type(result)}"
+                    )
+                items: dict[VariableTracker, VariableTracker] = dict(
+                    zip(
+                        inputs_var.items.keys(),
+                        result.items,
+                        strict=True,
+                    )
+                )
+                return ConstDictVariable(items, dict)
+            return result
 
         @register(torch._functorch.eager_transforms._autograd_grad)
         def handle_functorch_autograd_grad(
@@ -3746,12 +3730,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
-
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
