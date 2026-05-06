@@ -4974,6 +4974,19 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def is_torch_class(cls: type) -> bool:
+    """Check if cls is defined in torch or a torch submodule.
+
+    Torch-internal C-level descriptors (e.g. torch.Tensor.unsqueeze_) need
+    to go through VariableTracker.build / trace_rules so they get the right
+    VT (TorchInGraphFunctionVariable), which has guards like
+    inplace-view-on-input-tensor detection. This helper identifies classes
+    whose descriptors should take that path instead of descriptor VTs.
+    """
+    module = getattr(cls, "__module__", None)
+    return module is not None and (module == "torch" or module.startswith("torch."))
+
+
 def is_torch_function_object(value: Any) -> bool:
     return hasattr(value, "__torch_function__")
 
