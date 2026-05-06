@@ -7,6 +7,17 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
+template <typename dst_t, typename src_t>
+static inline dst_t convert_scalar(src_t value) {
+  if constexpr (
+      std::is_same_v<dst_t, uint8_t> && std::is_floating_point_v<src_t>) {
+    // Match eager float -> uint8_t semantics for negative values.
+    return c10::convert<dst_t>(value);
+  } else {
+    return static_cast<dst_t>(value);
+  }
+}
+
 template <
     typename dst_t,
     int dst_n,
@@ -22,7 +33,7 @@ struct VecConvert {
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
     for (int i = 0; i < count; i++) {
-      dst_buf[i] = c10::convert<dst_t>(src_buf[i]);
+      dst_buf[i] = convert_scalar<dst_t>(src_buf[i]);
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }
@@ -58,6 +69,19 @@ struct VecRoundConvert {
   }
 };
 
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+struct VecConvert<
+    dst_t,
+    dst_n,
+    src_t,
+    src_n,
+    std::enable_if_t<std::is_same_v<dst_t, src_t> && dst_n == src_n>> {
+  static inline VectorizedN<dst_t, dst_n> apply(
+      const VectorizedN<src_t, src_n>& src) {
+    return src;
+  }
+};
+
 template <typename dst_t, typename src_t>
 inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert(
     const Vectorized<src_t>& src) {
@@ -65,9 +89,21 @@ inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert
 }
 
 template <typename dst_t, typename src_t>
+inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>>
+round_convert(const Vectorized<src_t>& src) {
+  return src;
+}
+
+template <typename dst_t, typename src_t>
 inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
 convert(const Vectorized<src_t>& src) {
   return VecConvert<dst_t, 1, src_t, 1>::apply(src);
+}
+
+template <typename dst_t, typename src_t>
+inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
+round_convert(const Vectorized<src_t>& src) {
+  return VecRoundConvert<dst_t, 1, src_t, 1>::apply(src);
 }
 
 template <
@@ -91,12 +127,6 @@ inline VectorizedN<dst_t, dst_n> round_convert(
   return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
 
-template <typename dst_t, typename src_t>
-inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
-round_convert(const Vectorized<src_t>& src) {
-  return VecRoundConvert<dst_t, 1, src_t, 1>::apply(src);
-}
-
 template <
     typename dst_t,
     int dst_n,
@@ -107,6 +137,18 @@ template <
 inline std::conditional_t<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>
 convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
+}
+
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    bool keep = false,
+    std::enable_if_t<dst_n == 1, int> = 0>
+inline std::conditional_t<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>
+round_convert(const VectorizedN<src_t, src_n>& src) {
+  return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
 
 } // namespace CPU_CAPABILITY

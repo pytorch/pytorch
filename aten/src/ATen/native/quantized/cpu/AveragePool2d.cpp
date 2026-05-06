@@ -48,7 +48,7 @@ void avg_pool2d_out_frame(
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
-  auto input_data = input_contig.data_ptr<scalar_t>();
+  auto input_data = input_contig.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   const auto scale_factor = input.q_scale() / output.q_scale();
   const auto input_zero_point = input.q_zero_point();
@@ -329,7 +329,7 @@ Tensor qnnpack_avg_pool2d(
           batch_size,
           inH,
           inW,
-          (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+          reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
           (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
           outC,

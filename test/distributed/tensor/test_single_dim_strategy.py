@@ -28,7 +28,6 @@ from torch.distributed.tensor._ops._pointwise_ops import (
     _common_pointwise_single_dim_strategy,
     _MUL_RULES,
     _UNARY_LINEAR_RULES,
-    single_mesh_dim_linear_pointwise_strategy,
 )
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -136,8 +135,9 @@ class TestExpandPlaceholder(TestCase):
             output_meta = [spec.tensor_meta for spec in out_spec.children]
 
             op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
-            strategy_fn = single_mesh_dim_linear_pointwise_strategy(
-                linearity=linearity or -1
+            extra_rules = _BINARY_ADDITIVE_RULES if linearity == 1 else None
+            strategy_fn = _common_pointwise_single_dim_strategy(
+                partial_extra_rules=extra_rules
             )
             expanded = _expand_single_dim_strategy_to_mesh(
                 mesh, op_schema, _SingleDimStrategyInfo(strategy_fn), output_meta
@@ -154,9 +154,8 @@ class TestExpandPlaceholder(TestCase):
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
-                self.assertEqual(
-                    len(strategy.children[0].strategies), 125
-                )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
+                # See test_expand_foreach_add_to_3d_mesh for derivation of 634.
+                self.assertEqual(len(strategy.children[0].strategies), 634)
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -258,7 +257,9 @@ class TestExpandPlaceholder(TestCase):
                 mesh,
                 op_schema,
                 _SingleDimStrategyInfo(
-                    single_mesh_dim_linear_pointwise_strategy(linearity=1)
+                    _common_pointwise_single_dim_strategy(
+                        partial_extra_rules=_BINARY_ADDITIVE_RULES
+                    )
                 ),
                 output_tensor_meta,
             )
@@ -270,9 +271,20 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(strategy, TupleStrategy)
             return strategy
 
-        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S0, S1, R, Psum, Pavg) ** 3 = 125
-        expected_num_strategies = (125, 8)
+        # Sizes are multiples of mesh dims so every shard option is valid.
+        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 6 partial rules
+        # (1 Psum, 3 Pavg, 1 Pmax, 1 Pmin). Mixed-partial filter allows
+        # Psum+Pavg to coexist but rejects other mixes. By inclusion-exclusion
+        # on a 3D mesh (n=4 non-partial, partial rule counts by type):
+        #   no partials:    4^3                                    =  64
+        #   Psum only:      (4+1)^3 - 4^3                         =  61
+        #   Pavg only:      (4+3)^3 - 4^3                         = 279
+        #   Pmax only:      (4+1)^3 - 4^3                         =  61
+        #   Pmin only:      (4+1)^3 - 4^3                         =  61
+        #   Psum+Pavg mix:  (4+1+3)^3 - (4+3)^3 - (4+1)^3 + 4^3  = 108
+        #   total: 634
+        # For scalars (no Shard), n=1 (R only): same formula gives 139.
+        expected_num_strategies = (634, 139)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -286,8 +298,9 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle
-            (Partial("sum"), Partial("sum"), Replicate()),
+            # P(avg),P(avg),R rule lets dim 2 keep P(avg) from input_a, only
+            # redistributing input_b to R (cheaper than both inputs → R)
+            (Partial("sum"), Partial("sum"), Partial("avg")),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -297,19 +310,23 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(child, OpStrategy)
             self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
 
-            # _select_min_cost_strategy can have multiple min-cost strategies,
-            # so just assert the expected placement has equal cost.
             def sum_cost(x):
                 return sum(sum(y) for y in x)
 
+            # Multiple strategies can produce the same output placement but
+            # with different input specs (and costs, including inf). Check
+            # that the cheapest strategy with the expected output ties with
+            # the overall minimum.
             expected = expected_output_placements[child_i]
             min_cost_strategy = _select_min_cost_strategy(child)
-            for strategy in child.strategies:
-                if strategy.output_spec.placements == expected:
-                    self.assertEqual(
-                        sum_cost(strategy.redistribute_cost),
-                        sum_cost(min_cost_strategy.redistribute_cost),
-                    )
+            min_cost = sum_cost(min_cost_strategy.redistribute_cost)
+            expected_costs = [
+                sum_cost(s.redistribute_cost)
+                for s in child.strategies
+                if s.output_spec.placements == expected
+            ]
+            self.assertTrue(len(expected_costs) > 0)
+            self.assertAlmostEqual(min(expected_costs), min_cost, places=5)
 
     def test_expand_cat_strategy_to_3d_mesh(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
@@ -854,6 +871,60 @@ class TestExpandPlaceholder(TestCase):
         prepared = _PreparedSingleDimStrategy(good_strategy, op_schema, meta)
         self.assertEqual(prepared.num_outputs, 1)
         self.assertEqual(prepared.num_inputs, 3)
+
+    def test_out_variant_partial_propagation(self):
+        """Test that partial rules work correctly for .out variant ops.
+
+        For mul.out with rule [P(sum), P(sum), R, P(sum)]
+        (output=P(sum), arg1=P(sum), arg2=R, out_kwarg=P(sum)),
+        the out kwarg should get P(sum) matching the output.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        partial_spec = DTensorSpec(mesh, (Partial("sum"),), meta)
+        replicate_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(partial_spec)]),
+                OpStrategy([OpSpec(replicate_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(partial_spec)])},
+        )
+
+        # [output, arg1, arg2, out_kwarg] — includes out kwarg placement
+        single_mesh_dim_strategies = [
+            [Partial("sum"), Partial("sum"), Replicate(), Partial("sum")],
+            [Replicate(), Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+            input_index=1,
+        )
+
+        self.assertIsInstance(result, OpStrategy)
+        # Should have strategies where output=P(sum) and out_kwarg=P(sum)
+        found_partial_strategy = False
+        for strategy in result.strategies:
+            if strategy.output_spec.placements == (Partial("sum"),):
+                found_partial_strategy = True
+                # The out kwarg (last input) must match the output
+                out_kwarg_placement = strategy.input_specs[2].placements
+                self.assertEqual(
+                    out_kwarg_placement,
+                    (Partial("sum"),),
+                    "out kwarg should be P(sum) matching the output, not R",
+                )
+        self.assertTrue(
+            found_partial_strategy,
+            "Expected a strategy with Partial('sum') output for mul.out",
+        )
 
     def test_expand_multi_output_strategy(self):
         """Test expanding single-dim strategies for multi-output ops.

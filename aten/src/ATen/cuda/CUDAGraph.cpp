@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/MemPool.h>
 #include <ATen/Functions.h>
@@ -9,6 +10,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <cstddef>
+#include <optional>
 
 namespace at::cuda {
 
@@ -22,12 +24,16 @@ static bool _cuda_graphs_debug = false;
 static std::mutex _currently_capturing_graphs_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
 
+
 #if defined(USE_ROCM)
+// Returns true when at least one CUDAGraph capture is currently active in this
+// process. Uses the same mutex-protected capture map as capture lifecycle
+// bookkeeping.
 bool is_graph_capture_active() {
   std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
   return !_currently_capturing_graphs.empty();
 }
-#endif
+#endif // defined(USE_ROCM)
 
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
@@ -74,6 +80,24 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const {
+  return [this](cudaStream_t stream) {
+    auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
+    return capture_id_opt.has_value() && capture_id_opt.value() == capture_id_;
+  };
+}
+
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const {
+  return [this](c10::Stream stream) {
+    cudaStream_t cuda_stream = CUDAStream(CUDAStream::UNCHECKED, stream);
+    auto capture_id_opt = c10::cuda::captureIdMayInitCtx(cuda_stream);
+    return capture_id_opt.has_value() && capture_id_opt.value() == capture_id_;
+  };
+}
+
 void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -86,11 +110,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
       std::nullopt, cuda::detail::getDefaultCUDAGenerator());
   gen->register_graph(this);
 
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->capture_prologue();
-  }
-
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream != at::cuda::getDefaultCUDAStream(),
@@ -100,6 +119,16 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
 
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
+
+#if defined(USE_ROCM)
+  // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
+  // Ensure the handle for the intended capture stream exists before
+  // capture begins, because hipblasLtCreate performs internal allocations
+  // that are not allowed once stream capture is active.
+  if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
+    (void)at::cuda::getCurrentCUDABlasLtHandle();
+  }
+#endif
 
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
@@ -118,26 +147,28 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, create_allocate_filter());
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
 
-  auto filter = create_allocate_filter();
-
-  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-    return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
-  });
+  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  cudaStreamCaptureStatus status{};
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
-  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+  auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
+  TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
+      "Stream should be actively capturing after cudaStreamBeginCapture");
+  capture_id_ = capture_id_opt.value();
 
   {
-    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
+  }
+
+  for (auto& [generator_state, wholegraph_increment] :
+       captured_generator_states_) {
+    generator_state->init_capture_state(capture_id_);
   }
 }
 
@@ -147,8 +178,10 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
+  // Capture is over once cudaStreamEndCapture returns (success or failure).
+  // Clear bookkeeping before propagating the return status so watchdog-side
+  // checks cannot observe stale "capture active" state on error paths.
   cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
-
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
     TORCH_CHECK(
@@ -157,16 +190,15 @@ void CUDAGraph::capture_end() {
     _currently_capturing_graphs.erase(capture_id_);
   }
 
-  AT_CUDA_CHECK(endCaptureErr);
-
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
-  for (auto& [generator_state, wholegraph_increments] :
+  for (auto& [generator_state, wholegraph_increment] :
        captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue();
+    wholegraph_increment = generator_state->capture_epilogue(capture_id_);
   }
 
   size_t numCUDAGraphNodes = 0;
@@ -228,9 +260,9 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  for (auto& [generator_state, wholegraph_increments] :
+  for (auto& [generator_state, wholegraph_increment] :
        captured_generator_states_) {
-    generator_state->replay_prologue(wholegraph_increments);
+    generator_state->replay_prologue(capture_id_, wholegraph_increment);
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
@@ -289,6 +321,20 @@ void CUDAGraph::reset() {
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
+
+  if (capture_id_ != 0) {
+    for (auto& [generator_state, wholegraph_increment] : captured_generator_states_) {
+      generator_state->remove_capture_state(capture_id_);
+    }
+  }
+  captured_generator_states_.clear();
+
+  if (capture_id_ != 0) {
+    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.erase(capture_id_);
+    capture_id_ = 0;
+  }
+
   if (capture_ended_) {
     // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
     // private pool cleanup
@@ -317,10 +363,6 @@ MempoolId_t CUDAGraph::pool() {
 }
 
 CUDAGraph::~CUDAGraph() {
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->unregister_graph(this);
-  }
   reset();
 
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
@@ -338,17 +380,14 @@ CUDAGraph::~CUDAGraph() {
 
 CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
   std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
-  cudaStreamCaptureStatus status{};
-  CaptureId_t current_capture_id = 0;
-  auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &current_capture_id));
+  auto capture_id_opt = c10::cuda::currentStreamCaptureIdMayInitCtx();
   TORCH_CHECK(
-      status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive,
+      capture_id_opt.has_value(),
       "The current stream is not currently capturing.");
   TORCH_CHECK(
-      _currently_capturing_graphs.count(current_capture_id),
+      _currently_capturing_graphs.count(capture_id_opt.value()),
       "get_currently_capturing_graph() can be used only between capture_begin() and capture_end(). Did you use a stream without making it depend upon the original stream used for capture?");
-  return _currently_capturing_graphs.at(current_capture_id);
+  return _currently_capturing_graphs.at(capture_id_opt.value());
 }
 
 void CUDAGraph::begin_capture_to_if_node(
@@ -434,13 +473,6 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   CUDAStream child_stream = getStreamFromPool();
   conditional_graph_capture_ids_.push(0);
-  conditional_rng_snapshots_.emplace();
-  auto& conditional_rng_snapshot = conditional_rng_snapshots_.top();
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    conditional_rng_snapshot.emplace(
-        generator_state, generator_state->offset_intragraph_);
-  }
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
@@ -454,10 +486,10 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
 
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-      child_stream, &status, &conditional_graph_capture_ids_.top()));
-  TORCH_INTERNAL_ASSERT(
-      status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+  auto child_capture_id_opt = c10::cuda::captureIdMayInitCtx(child_stream);
+  TORCH_INTERNAL_ASSERT(child_capture_id_opt.has_value(),
+      "Child stream should be actively capturing after cudaStreamBeginCaptureToGraph");
+  conditional_graph_capture_ids_.top() = child_capture_id_opt.value();
 
   conditional_node_streams_.emplace(child_stream);
 
@@ -478,50 +510,38 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 void CUDAGraph::end_capture_to_conditional_node() {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   TORCH_INTERNAL_ASSERT(
-      !conditional_rng_snapshots_.empty(),
-      "Missing RNG snapshot for conditional node capture.");
+      !conditional_graph_capture_ids_.empty(),
+      "Missing capture ID for conditional node.");
 
+  CaptureId_t child_capture_id = conditional_graph_capture_ids_.top();
   bool rng_or_generators_changed = false;
-  auto& conditional_rng_snapshot = conditional_rng_snapshots_.top();
-  if (conditional_rng_snapshot.size() != captured_generator_states_.size()) {
-    rng_or_generators_changed = true;
-  } else {
-    for (const auto& [generator_state, offset_intragraph_before_capture] :
-         conditional_rng_snapshot) {
-      const auto generator_it = captured_generator_states_.find(generator_state);
-      if (generator_it == captured_generator_states_.end() ||
-          generator_state->offset_intragraph_ !=
-              offset_intragraph_before_capture) {
-        rng_or_generators_changed = true;
-        break;
-      }
+  for (const auto& [generator_state, wholegraph_increment] :
+       captured_generator_states_) {
+    if (generator_state->get_capture_state(child_capture_id) != nullptr) {
+      rng_or_generators_changed = true;
+      break;
     }
   }
 
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
-    CaptureId_t capture_id = conditional_graph_capture_ids_.top();
     TORCH_CHECK(
-        _currently_capturing_graphs.count(capture_id),
+        _currently_capturing_graphs.count(child_capture_id),
         "capture_end() called before capture_begin().");
-    _currently_capturing_graphs.erase(capture_id);
+    _currently_capturing_graphs.erase(child_capture_id);
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
   AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
-  conditional_rng_snapshots_.pop();
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
   if (conditional_graph_capture_ids_.empty()) {
     c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-        capture_dev_, mempool_id_, create_allocate_filter());
-    auto filter = create_allocate_filter();
-    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
-    });
+        capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
   } else {
     c10::cuda::CUDACachingAllocator::beginAllocateToPool(
         capture_dev_, mempool_id_, create_child_allocate_filter());
@@ -530,7 +550,6 @@ void CUDAGraph::end_capture_to_conditional_node() {
       return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
     });
   }
-
   constexpr const char* rng_with_conditional_nodes_error =
       "RNG within data-dependent conditional nodes is not supported yet.";
   TORCH_CHECK(!rng_or_generators_changed, rng_with_conditional_nodes_error);
@@ -542,22 +561,11 @@ void CUDAGraph::end_capture_to_conditional_node() {
 #endif
 }
 
-std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter() {
-  return [this](cudaStream_t stream) {
-    cudaStreamCaptureStatus status{};
-    CaptureId_t stream_capture_id = 0;
-    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
-  };
-}
-
 std::function<bool(cudaStream_t)> CUDAGraph::create_child_allocate_filter() {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   return [&current_capture_id = conditional_graph_capture_ids_.top()](cudaStream_t stream) {
-      cudaStreamCaptureStatus status{};
-      CaptureId_t stream_capture_id{};
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == current_capture_id;
+      auto capture_id_opt = c10::cuda::captureIdMayInitCtx(stream);
+      return capture_id_opt.has_value() && capture_id_opt.value() == current_capture_id;
   };
 #else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   AT_ERROR(

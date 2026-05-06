@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_convert.h>
-#include <c10/util/TypeCast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
@@ -18,7 +17,7 @@ inline void convertImpl(
     int64_t n) {
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
-    dst[i] = c10::convert<dst_t>(src[i]);
+    dst[i] = convert_scalar<to_type>(src[i]);
   }
 }
 
@@ -373,6 +372,29 @@ struct VecConvert<float, 1, BFloat16, 1> {
     return result;
   }
 };
+
+// bf16/fp16 vec classes are not available for C10_MOBILE
+#if !defined(C10_MOBILE)
+template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    result[0] = convert_float_bfloat16(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<Half, 1, float, 2> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
+    VectorizedN<Half, 1> result;
+    result[0] = convert_float_half(src[0], src[1]);
+    return result;
+  }
+};
+
+#endif // !defined(C10_MOBILE)
 
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
 } // namespace CPU_CAPABILITY

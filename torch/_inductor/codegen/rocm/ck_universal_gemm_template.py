@@ -509,7 +509,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(  # noqa: G200
+                    log.debug(
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
@@ -549,7 +549,7 @@ class CKGemmTemplate(CKTemplate):
         stages = version_to_stages.get(version)
         if stages is None:
             # This means we're at stage 2, and this requires computation
-            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
+            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143
             wgp_per_cu = max(4 * warp_size // op.block_size, 1)
             full_mem_band_prefetch_stages = math.ceil(
                 32768

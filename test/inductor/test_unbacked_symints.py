@@ -4,6 +4,7 @@ import unittest
 
 import torch
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing import make_tensor
@@ -312,6 +313,23 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_repeat_interleave_with_unbacked_scalar(self, device):
+        def fn(x, repeats):
+            return x.repeat_interleave(repeats.item())
+
+        example_inputs = (
+            torch.arange(4, device=device),
+            torch.scalar_tensor(3, dtype=torch.int64, device=device),
+        )
+
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
@@ -499,9 +517,9 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
-    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
@@ -526,9 +544,9 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
+    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
-    @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
         if device == "cpu":
@@ -719,6 +737,276 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_trunc_large_float_scalar_tensor(self, device):
+        import math
+
+        def fn(x):
+            r = math.sqrt(x.size(0))
+            r = r**70
+            return torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_trunc_float_scalar_tensor_preserves_positive_zero(self, device):
+        import math
+
+        def fn(x):
+            r = math.sqrt(x.size(0)) - 2.5
+            return torch.signbit(
+                torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+            )
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        self.assertEqual(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_pow_symbolic_int_exponent(self, device):
+        """
+        Test that symbolic integer scalar exponents are cast before libdevice.pow.
+
+        Reproducer from https://github.com/pytorch/pytorch/issues/177131:
+        capture_scalar_outputs=True can pass a scalar like num_bits as an int64 ks*
+        kernel argument, which previously led Triton to reject libdevice.pow(2.0, ks0).
+        """
+
+        def calculate_range(num_bits, device):
+            bit_range = 2**num_bits
+            q_max = torch.tensor(bit_range / 2 - 1, device=device)
+            q_min = torch.tensor(-bit_range / 2, device=device)
+            return q_min, q_max
+
+        def fn(x, num_bits):
+            q_min, q_max = calculate_range(num_bits, x.device)
+            bit_range = q_max - q_min
+            max_val = torch.max(torch.abs(x))
+            scale = max_val / (float(bit_range) / 2)
+            scale = torch.where(
+                scale == 0,
+                torch.tensor(1e-10, device=x.device, dtype=x.dtype),
+                scale,
+            )
+            x_q = torch.clamp(torch.round(x / scale), q_min, q_max)
+            x_dq = x_q * scale
+            return (x_dq - x).abs().pow(2.4).sum(), scale, scale
+
+        example_inputs = (torch.randn(1, 1, 128, device=device, dtype=torch.float16), 8)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_pow_symbolic_negative_int_exponent(self, device):
+        def fn(x, exponent_src):
+            exponent = exponent_src.max().to(torch.int64) - 1
+            return x * (2**exponent)
+
+        example_inputs = (
+            torch.randn(128, device=device, dtype=torch.float16),
+            torch.tensor([0], device=device, dtype=torch.int64),
+        )
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_slice_unbacked_bindings_with_later_constraint(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166460
+        # When slicing with an unbacked symint end index (e.g. x[:total] where
+        # total = sum of data-dependent values), dynamo may allocate a fresh
+        # unbacked symbol for the output size because it can't prove bounds at
+        # trace time. Later operations (e.g. new_zeros with padding) may
+        # establish constraints that make the bounds provable at inductor time.
+        # Inductor must still define the unbacked symbol even when taking the
+        # efficient SliceView path.
+        def fn(x, sizes):
+            sizes_list = sizes.tolist()
+            total = sum(sizes_list)
+            num_padding = x.shape[0] - total
+            sliced = x[:total]
+            splits = torch.split(sliced, sizes_list, dim=0)
+            out = torch.cat([s * 2 for s in splits], dim=0)
+            out = torch.vstack((out, out.new_zeros((num_padding, out.shape[-1]))))
+            return out
+
+        example_inputs = (
+            torch.randn(64, 16, device=device, dtype=torch.bfloat16),
+            torch.tensor([8, 8], device=device, dtype=torch.int64),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_eager(self, device):
+        """Test that override_optimization_hint updates var_to_hint_override eagerly."""
+        t = torch.tensor([5], device=device)
+        torch._dynamo.decorators.mark_unbacked(t, 0)
+
+        def fn(x):
+            u = x.item()
+            torch._dynamo.override_optimization_hint(u, 42)
+            return u + 1
+
+        result = fn(t)
+        self.assertEqual(result, 6)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_compiled(self, device):
+        """Test override_optimization_hint inside a compiled function with fullgraph=True."""
+
+        def fn(x):
+            u = x.item()
+            torch._dynamo.override_optimization_hint(u, 42)
+            return u + 1
+
+        t = torch.tensor([5], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, 6)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_compiled_tolist(self, device):
+        """Test that override_optimization_hint is a no-op on concrete ints from tolist()."""
+
+        def fn(x):
+            vals = x.tolist()
+            for v in vals:
+                torch._dynamo.override_optimization_hint(v, 99)
+            return x.sum()
+
+        t = torch.tensor([3, 4, 5], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, t.sum())
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_multiple_items(self, device):
+        """Test override_optimization_hint on multiple unbacked symbols from separate .item() calls."""
+
+        def fn(x, y):
+            u = x.item()
+            v = y.item()
+            torch._dynamo.override_optimization_hint(u, 128)
+            torch._dynamo.override_optimization_hint(v, 256)
+            return u + v
+
+        tx = torch.tensor([10], device=device)
+        ty = torch.tensor([20], device=device)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(tx, ty)
+        self.assertEqual(result, 30)
+
+    def test_override_optimization_hint_concrete_int_noop(self, device):
+        """Test that override_optimization_hint on a plain int is a no-op."""
+        torch._dynamo.override_optimization_hint(42, 100)
+
+    def test_override_optimization_hint_rejects_wrong_type(self, device):
+        """Test that override_optimization_hint raises TypeError on non-int/non-SymInt."""
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint(3.14, 100)
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint("hello", 100)
+
+    def test_override_optimization_hint_rejects_non_int_val(self, device):
+        """Test that override_optimization_hint rejects non-int val."""
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, 3.14)
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, "hello")
+
+    def test_override_optimization_hint_rejects_derived_expression(self, device):
+        """Test that override_optimization_hint rejects derived expressions like u0 + 1."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        v = u + 1  # derived expression: u0 + 1
+        with self.assertRaisesRegex(ValueError, "single unbacked symbol"):
+            torch._dynamo.override_optimization_hint(v, 42)
+
+    def test_override_optimization_hint_rejects_backed_symbol(self, device):
+        """Test that override_optimization_hint rejects backed (non-unbacked) symbols."""
+
+        def fn(t):
+            s = t.size(0)  # backed symbol inside compile
+            torch._dynamo.override_optimization_hint(s, 42)
+            return t.sum()
+
+        t = torch.randn(5, device=device)
+        torch._dynamo.mark_dynamic(t, 0)
+        with self.assertRaisesRegex(
+            InternalTorchDynamoError,
+            "expects an unbacked symbol",
+        ):
+            torch.compile(fn, fullgraph=True)(t)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_override_optimization_hint_in_fx_pass(self, device):
+        """Test using override_optimization_hint in a custom FX pass (backend).
+
+        This shows the intended use case: a custom backend or FX pass walks
+        the graph, finds unbacked symbols from .item() calls, and sets
+        optimization hints on them before handing the graph to inductor.
+        """
+
+        def fx_pass_backend(gm, example_inputs):
+            # Walk the graph and set hints on unbacked SymInts
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.item.default
+                ):
+                    # The node's example value is a SymInt from .item()
+                    sym_val = node.meta.get("example_value", None)
+                    if sym_val is not None and isinstance(sym_val, torch.SymInt):
+                        torch._dynamo.override_optimization_hint(sym_val, 512)
+
+            # Verify the hint was set on shape_env
+            shape_env = None
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.item.default
+                ):
+                    sym_val = node.meta.get("example_value", None)
+                    if sym_val is not None and isinstance(sym_val, torch.SymInt):
+                        shape_env = sym_val.node.shape_env
+                        expr = sym_val.node.expr
+                        if expr not in shape_env.var_to_hint_override:
+                            raise AssertionError("hint not set on shape_env")
+                        if shape_env.var_to_hint_override[expr] != 512:
+                            raise AssertionError("hint value mismatch")
+
+            return gm
+
+        def fn(x):
+            u = x.item()
+            return u + 1
+
+        t = torch.tensor([7], device=device)
+        compiled_fn = torch.compile(fn, backend=fx_pass_backend, fullgraph=True)
+        result = compiled_fn(t)
+        self.assertEqual(result, 8)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)

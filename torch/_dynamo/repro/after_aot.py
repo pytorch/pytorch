@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
@@ -98,6 +99,39 @@ from torch.hub import tqdm
 from .. import config
 
 
+def _find_repeat_interleave_constraints(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[str, str]]:
+    """
+    Find repeat_interleave operations with output_size constraints.
+
+    Returns list of (repeats_placeholder_name, output_size_placeholder_name) pairs.
+    These represent constraints where sum(repeats) must equal output_size.
+    """
+    constraints = []
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or "repeat_interleave" not in str(node.target)
+            or not node.args
+        ):
+            continue
+
+        output_size_node = node.kwargs.get("output_size")
+        repeats_node = node.args[0]
+
+        # Both must be FX nodes (not constants) and direct placeholders
+        if (
+            isinstance(repeats_node, torch.fx.Node)
+            and isinstance(output_size_node, torch.fx.Node)
+            and repeats_node.op == "placeholder"
+            and output_size_node.op == "placeholder"
+        ):
+            constraints.append((str(repeats_node.target), str(output_size_node.target)))
+
+    return constraints
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -121,6 +155,7 @@ def _extract_distributed_info(
     Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
     Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
     """
+    from torch.distributed import GroupName
     from torch.fx.operator_schemas import normalize_function
 
     group_info: dict[str, dict[str, int]] = {}
@@ -143,9 +178,10 @@ def _extract_distributed_info(
             continue
         _, kwargs = opt_args_kwargs
 
-        group_name = kwargs.get("group_name")
-        if group_name is None:
+        group_name_ = kwargs.get("group_name")
+        if not isinstance(group_name_, str):
             continue
+        group_name = typing.cast(GroupName, group_name_)
 
         if group_name in group_info:
             continue
@@ -253,11 +289,16 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
+        compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
-        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
+        compiler_fn = functools.partial(
+            unconfigured_compiler_fn,
+            compile_region_name=compile_region_name,
+            **kwargs,
+        )
 
         from torch._functorch.aot_autograd import get_aot_graph_name
 
@@ -546,11 +587,8 @@ if "__compile_source__" in globals():
     )
 
     def get_fn_name(kernel: Any) -> str:
-        fn_name = (
-            # pyrefly: ignore [missing-attribute]
-            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
-        )
-        return fn_name.split(".")[-1]
+        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        return fn.__name__.split(".")[-1]
 
     def write_kernel_dependencies(
         kernel: Any,
@@ -653,6 +691,8 @@ if "__compile_source__" in globals():
             writer.const(placeholder)
         elif isinstance(arg, FakeScriptObject):
             writer.opaque(placeholder, arg.script_class_name)
+        elif isinstance(arg, torch._C.Generator):
+            writer.generator(placeholder, arg)
         else:
             writer.unsupported(placeholder, arg)
 
@@ -700,6 +740,32 @@ if "__compile_source__" in globals():
             f"{name} = {hint}" for name, hint in sorted(used_syms.items())
         )
         model_str = f"{hint_lines}\n\n{model_str}"
+
+    # Add fixup code for repeat_interleave constraints
+    # When inputs are regenerated randomly, sum(repeats) != output_size
+    # This fixup adjusts the repeats tensor to satisfy the constraint
+    constraints = _find_repeat_interleave_constraints(gm)
+    if constraints:
+        placeholder_to_idx = {name: idx for idx, name in enumerate(placeholder_targets)}
+        for repeats_name, output_size_name in constraints:
+            repeats_idx = placeholder_to_idx.get(repeats_name)
+            output_size_idx = placeholder_to_idx.get(output_size_name)
+            if repeats_idx is not None and output_size_idx is not None:
+                # Guard with hasattr since NopInputReader doesn't have args
+                writer._lines.append(
+                    "# Fixup: ensure sum(repeats) == output_size for repeat_interleave"
+                )
+                writer._lines.append("if hasattr(reader, 'args'):")
+                writer._lines.append(f"    _repeats = reader.args[{repeats_idx}]")
+                writer._lines.append(
+                    f"    _output_size = reader.args[{output_size_idx}]"
+                )
+                writer._lines.append(
+                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                )
+                writer._lines.append("        _n = _repeats.numel()")
+                writer._lines.append("        _repeats.fill_(_output_size // _n)")
+                writer._lines.append("        _repeats[:_output_size % _n] += 1")
 
     load_args_lines = writer.lines()
     load_args_code = "\n".join(load_args_lines)
@@ -922,7 +988,8 @@ def inductor_fails(
     sync()
 
     try:
-        compile_mod = compile_fx_inner(fx_g, args)
+        compile_args = _get_compile_args(fx_g, args)
+        compile_mod = compile_fx_inner(fx_g, compile_args)
         assert not isinstance(compile_mod, str)
         compile_mod(args)
         sync()
@@ -944,10 +1011,15 @@ def inductor_accuracy_fails(
 ) -> bool:
     from torch._inductor.compile_fx import compile_fx_inner
 
+    def _compile_with_symbolic_args(
+        gm: torch.fx.GraphModule, inputs: list[Any]
+    ) -> torch.fx.GraphModule:
+        return compile_fx_inner(gm, _get_compile_args(gm, inputs))  # type: ignore[return-value]
+
     return backend_aot_accuracy_fails(
         fx_g,
         args,  # type: ignore[arg-type]
-        compile_fx_inner,  # type: ignore[arg-type]
+        _compile_with_symbolic_args,  # type: ignore[arg-type]
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -963,7 +1035,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(
     options: Any, mod: nn.Module, load_args: Any
-) -> tuple[torch.fx.GraphModule, Sequence[Any]]:
+) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters())
     for n, b in mod.named_buffers():
@@ -1005,6 +1077,33 @@ def repro_common(
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args
+
+
+def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequence[Any]:
+    """Extract FakeTensor/SymInt args from the traced graph for compilation.
+
+    When repro_common traces with tracing_mode='symbolic', the resulting
+    GraphModule's placeholder nodes carry FakeTensor/SymInt metadata.
+    compile_fx_inner needs these (not the concrete args) so that Inductor
+    generates proper symbolic-size bindings in the output code.
+
+    For tracing_mode='real', concrete args are fine — we must NOT extract
+    FakeTensor metadata because different nodes may have FakeTensors from
+    different FakeTensorModes, causing a FakeTensorMode mismatch assertion
+    in Inductor.  We detect symbolic tracing by checking for SymInt values,
+    which only exist when tracing_mode='symbolic'.
+    """
+    placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
+    if not placeholders:
+        return args
+    # Only extract metadata if the graph was traced with symbolic mode.
+    # SymInt values in placeholder metadata are the reliable indicator —
+    # FakeTensors appear in both real and symbolic modes, but only symbolic
+    # tracing creates SymInts for integer inputs.
+    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
+    if not has_symint:
+        return args
+    return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
 
 ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
@@ -1081,8 +1180,9 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
+    compile_args = _get_compile_args(mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, args)
+        compiled = compile_fx_inner(mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1212,7 +1312,7 @@ def repro_get_args(
     options: Any, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
-    return mod, args  # type: ignore[return-value]
+    return mod, args
 
 
 def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
@@ -1222,7 +1322,8 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     from torch.cuda import synchronize
 
-    compiled = compile_fx_inner(mod, args)
+    compile_args = _get_compile_args(mod, args)
+    compiled = compile_fx_inner(mod, compile_args)
     assert not isinstance(compiled, str)
 
     if options.accuracy != "":

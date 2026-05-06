@@ -50,6 +50,9 @@ class SDPAParamsVariable(VariableTracker):
         self.param_vars = param_vars
         super().__init__(**kwargs)
 
+    def python_type(self) -> type:
+        return SDPAParams
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert self.source is None
         assert self.param_vars is not None

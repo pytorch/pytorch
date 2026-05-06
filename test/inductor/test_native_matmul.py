@@ -91,7 +91,7 @@ class TestTritonDotReduction(TestCase):
         # but same() uses the single value to assign both, resulting in
         # Accuracy failed: allclose not within tol=0.0001.
         self._check_equal(f, (x, y), tol=1e-3)
-        self._check_code(f, (x, y), 1, 1)
+        self._check_code(f, (x, y), 2, 1)
 
     def test_reduction_mask_zeroout(self):
         def f(x, y):
@@ -199,7 +199,7 @@ class TestTritonDotReduction(TestCase):
         out = torch.zeros((N_out, J), device=GPU_TYPE)
 
         self._check_equal(f, (inp, weight, val, I_idx, W_idx, O_idx, out))
-        self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 1, 1)
+        self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 2, 1)
 
     def test_bmm_fusion_complex2(self):
         # out[Ai[g],m,n] += Av[g,m,k,p] * B[Ak[g,p],k,n]

@@ -81,8 +81,34 @@ std::string precision2str(Float32Precision prec) {
       return "tf32";
     case Float32Precision::BF16:
       return "bf16";
+    case Float32Precision::DEFAULT:
+      // DEFAULT is an internal sentinel and should be resolved before reaching here
+      TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
+}
+
+CuDNNDepthwiseKernel str2cudnn_depthwise(const std::string& name) {
+  if (name == "auto")
+    return CuDNNDepthwiseKernel::AUTO;
+  else if (name == "cudnn")
+    return CuDNNDepthwiseKernel::CUDNN;
+  else if (name == "native")
+    return CuDNNDepthwiseKernel::NATIVE;
+  TORCH_CHECK(false, "Unknown cuDNN depthwise kernel mode: ", name,
+              ". Expected one of: auto, cudnn, native");
+}
+
+std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
+  switch (k) {
+    case CuDNNDepthwiseKernel::AUTO:
+      return "auto";
+    case CuDNNDepthwiseKernel::CUDNN:
+      return "cudnn";
+    case CuDNNDepthwiseKernel::NATIVE:
+      return "native";
+  }
+  TORCH_CHECK(false, "Invalid enum CuDNNDepthwiseKernel(", static_cast<int>(k), ")");
 }
 
 #ifdef USE_ROCM
@@ -180,6 +206,14 @@ bool Context::userEnabledNNPACK() const {
 
 void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
+}
+
+CuDNNDepthwiseKernel Context::cudnnDepthwiseKernel() const {
+  return depthwise_kernel_cudnn;
+}
+
+void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
+  depthwise_kernel_cudnn = k;
 }
 
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
@@ -360,6 +394,25 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
+
+  // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
+  // default". It is only used as the initial state for CUDA conv/rnn.
+  if (precision == Float32Precision::DEFAULT) {
+    key.second = Float32Op::ALL;
+    Float32Precision parent = fp32_precision.find(key)->second;
+    if (parent == Float32Precision::NONE || parent == Float32Precision::DEFAULT) {
+      key.first = Float32Backend::GENERIC;
+      parent = fp32_precision.find(key)->second;
+    }
+    if (parent != Float32Precision::NONE && parent != Float32Precision::DEFAULT) {
+      // A parent explicitly overrides; apply it (cuda does not support bf16).
+      return (backend == Float32Backend::CUDA && parent == Float32Precision::BF16)
+          ? Float32Precision::NONE
+          : parent;
+    }
+    return Float32Precision::TF32;
+  }
+
   if (precision == Float32Precision::NONE) {
     key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
@@ -414,6 +467,9 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
+  TORCH_CHECK(
+      p != Float32Precision::DEFAULT,
+      "DEFAULT precision is internal and cannot be set explicitly");
 
   it->second = p;
 }
@@ -452,37 +508,29 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() {
-  // Rather than put logic for interpreting what Default means at every
-  // call site for blasPreferredBackend(), we set it to an actual value.
-  if (blas_preferred_backend == at::BlasBackend::Default) {
+at::BlasBackend Context::blasDefaultBackend() {
+  at::BlasBackend result = at::BlasBackend::Cublas;
 #ifdef USE_ROCM
-    // ROCm - BLAS is default. May change to Lt in the code below.
-    blas_preferred_backend = at::BlasBackend::Cublas;
-#else
-    // CUDA - Lt by default if available
-    blas_preferred_backend = hasCuBLASLt()
-      ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
-#endif
-    // This logic sits in the getter because it needs to validate
-    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
-    // which initialize the backend without calling the setter
-#ifdef USE_ROCM
-    // AMD Instinct targets prefer hipblaslt
-    static const bool hipblaslt_preferred = []() {
-      const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          return false;
-        }
+  // AMD Instinct targets prefer hipblaslt
+  static const bool hipblaslt_preferred = []() {
+    const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
+        return false;
       }
-      return true;
-    }();
-    if (hipblaslt_preferred) {
-      blas_preferred_backend = at::BlasBackend::Cublaslt;
     }
+    return true;
+  }();
+  if (hipblaslt_preferred) {
+    result = at::BlasBackend::Cublaslt;
+  }
 #endif
+  return result;
+}
+
+at::BlasBackend Context::blasPreferredBackend() {
+  if (blas_preferred_backend == at::BlasBackend::Default) {
+    blas_preferred_backend = blasDefaultBackend();
   }
 
 #ifdef USE_ROCM
@@ -848,6 +896,14 @@ bool Context::warnOnAccumulateGradStreamMismatch() const {
 
 void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
   warn_on_accumulate_grad_stream_mismatch_ = enabled;
+}
+
+bool Context::overrideStaleCaptureStream() const {
+  return override_stale_capture_stream_;
+}
+
+void Context::setOverrideStaleCaptureStream(bool enabled) {
+  override_stale_capture_stream_ = enabled;
 }
 
 bool Context::isDefaultMobileCPUAllocatorSet() {
