@@ -161,7 +161,7 @@ class CMake:
         Returns:
           dict: A ``dict`` containing the value of cached CMake variables.
         """
-        with open(self._cmake_cache_file) as f:
+        with open(self._cmake_cache_file, encoding='utf-8', errors='ignore') as f:
             return get_cmake_cache_variables_from_file(f)
 
     def generate(
