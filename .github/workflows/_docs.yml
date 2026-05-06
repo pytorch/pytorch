@@ -93,8 +93,7 @@ jobs:
             timeout-minutes: 360
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}linux.c7i.2xlarge
-            # It takes less than 30m to finish python docs unless there are issues
-            timeout-minutes: 45
+            timeout-minutes: 60
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
     # The current name requires updating the database last docs push query from test-infra every time the matrix is updated
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
@@ -111,6 +110,11 @@ jobs:
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          # Docs build runs `git log --follow` per page for "Created/Updated"
+          # dates; a treeless clone triggers lazy fetches and makes the build
+          # hang. Use a full checkout for this job.
+          checkout-mode: normal
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -285,7 +289,7 @@ jobs:
             timeout-minutes: 360
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}l-x86iavx512-16-128
-            timeout-minutes: 45
+            timeout-minutes: 60
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
       - name: Setup Linux
@@ -297,6 +301,8 @@ jobs:
           compiler: ${{ inputs.compiler }}
           cuda-version: ${{ inputs.cuda-version }}
           submodules: false
+          # See comment in the EC2 build-docs job above.
+          checkout-mode: normal
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
