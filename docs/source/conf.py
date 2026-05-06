@@ -476,10 +476,6 @@ coverage_ignore_functions = [
     # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
     "quantization_perchannel_hook",
     "quantization_pertensor_hook",
-    # torch.distributed.algorithms.model_averaging.utils
-    "average_parameters",
-    "average_parameters_or_parameter_groups",
-    "get_params_to_average",
     # torch.distributed.checkpoint.default_planner
     "create_default_global_load_plan",
     "create_default_global_save_plan",
@@ -546,16 +542,10 @@ coverage_ignore_functions = [
     "configure",
     "expires",
     # torch.distributed.elastic.utils.api
-    "get_env_variable_or_raise",
     "get_socket_with_port",
     # torch.distributed.elastic.utils.distributed
     "create_c10d_store",
-    "get_free_port",
     "get_socket_with_port",
-    # torch.distributed.elastic.utils.log_level
-    "get_log_level",
-    # torch.distributed.elastic.utils.logging
-    "get_logger",
     # torch.distributed.elastic.utils.store
     "barrier",
     "get_all",
@@ -581,7 +571,6 @@ coverage_ignore_functions = [
     "as_functional_optim",
     "register_functional_optim",
     # torch.distributed.rendezvous
-    "register_rendezvous_handler",
     "rendezvous",
     # torch.distributed.rpc.api
     "get_worker_info",
