@@ -12,7 +12,12 @@ from torch._inductor.codegen.cutlass.utils import (
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import IS_SM100, IS_SM90, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    IS_SM100,
+    IS_SM90,
+    SM120OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
@@ -377,7 +382,7 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
         from torch._inductor.codegen.cutlass.utils import cutlass_arch
@@ -439,7 +444,7 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
         from torch._inductor.codegen.cutlass.utils import cutlass_arch
@@ -504,7 +509,7 @@ def fn(accum, bias):
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code, _ = trace(
