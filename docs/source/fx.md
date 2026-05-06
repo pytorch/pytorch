@@ -1232,7 +1232,7 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.graph_manipulation
 .. autofunction:: get_size_of_all_nodes
-.. autofunction:: get_size_of_nodes
+.. autofunction:: get_size_of_node
 ```
 
 ```{eval-rst}
