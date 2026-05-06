@@ -62,6 +62,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
+    from torch.fx.experimental.dynamic_spec import ShapesSpec
     from torch.types import Device, IntLikeType
 
 
@@ -2580,7 +2581,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: "torch._dynamo.dynamic_spec.ShapesSpec | None" = None,
+    shapes_spec: "ShapesSpec | None" = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2595,7 +2596,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: "torch._dynamo.dynamic_spec.ShapesSpec | None" = None,
+    shapes_spec: "ShapesSpec | None" = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2611,7 +2612,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
-    shapes_spec: "torch._dynamo.dynamic_spec.ShapesSpec | None" = None,
+    shapes_spec: "ShapesSpec | None" = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2753,7 +2754,7 @@ def compile(
 
     # Auto-wrap ParamsSpec → ShapesSpec for convenience
     if shapes_spec is not None:
-        from torch._dynamo.dynamic_spec import ParamsSpec, ShapesSpec
+        from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 
         if isinstance(shapes_spec, ParamsSpec):
             shapes_spec = ShapesSpec(shapes_spec)

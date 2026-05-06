@@ -4,15 +4,15 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.fx.experimental._config as _fx_experimental_config
-from torch._dynamo.dynamic_spec import (
+from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import EagerAndRecordGraphs
+from torch.fx.experimental.dynamic_spec import (
     IntVar,
     ParamsSpec,
     ShapesSpec,
     ShapeVar,
     TensorSpec,
 )
-from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
@@ -29,8 +29,14 @@ def _tensor_placeholder_shape(gm):
     raise AssertionError("no tensor placeholder found")
 
 
-def _placeholders(gm):
-    return [n for n in gm.graph.nodes if n.op == "placeholder"]
+def _tensor_placeholders(gm):
+    out = []
+    for n in gm.graph.nodes:
+        if n.op == "placeholder" and isinstance(
+            n.meta.get("example_value"), torch.Tensor
+        ):
+            out.append(n)
+    return out
 
 
 class TestShapeVarConstruction(TestCase):
@@ -326,7 +332,7 @@ class TestShapeVarCompile(TestCase):
         compiled(torch.randn(16), 30)
         self.assertEqual(len(backend.graphs), 3)
         # n is specialized -> not a placeholder; x dim 0 is SymInt (ShapeVar)
-        phs = _placeholders(backend.graphs[0])
+        phs = _tensor_placeholders(backend.graphs[0])
         self.assertEqual(len(phs), 1)
         self.assertIsInstance(phs[0].meta["example_value"].shape[0], torch.SymInt)
 
@@ -353,7 +359,7 @@ class TestShapeVarCompile(TestCase):
         compiled(torch.randn(16, 3), torch.randn(16, 3))
         self.assertEqual(len(backend.graphs), 4)
         # x dim 0 is SymInt (ShapeVar), x dim 1 is static; y is fully static
-        phs = _placeholders(backend.graphs[0])
+        phs = _tensor_placeholders(backend.graphs[0])
         self.assertEqual(len(phs), 2)
         x_shape = phs[0].meta["example_value"].shape
         y_shape = phs[1].meta["example_value"].shape
@@ -382,7 +388,7 @@ class TestShapeVarCompile(TestCase):
         # x dim 0 is unbacked (absorbed), but w changed shape -> recompile
         self.assertEqual(len(backend.graphs), 2)
         # x dim 0 is SymInt (ShapeVar), x dim 1 is static; w is fully static
-        phs = _placeholders(backend.graphs[0])
+        phs = _tensor_placeholders(backend.graphs[0])
         self.assertEqual(len(phs), 2)
         x_shape = phs[0].meta["example_value"].shape
         w_shape = phs[1].meta["example_value"].shape

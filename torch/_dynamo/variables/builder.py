@@ -45,11 +45,7 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.dynamic_spec import (
-    IntVar,
-    lookup_spec_from_dynamo_source,
-    TensorSpec,
-)
+from torch._dynamo.dynamic_spec import lookup_spec_from_dynamo_source
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
@@ -83,6 +79,7 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
+from torch.fx.experimental.dynamic_spec import IntVar, TensorSpec
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
