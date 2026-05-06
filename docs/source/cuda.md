@@ -177,6 +177,24 @@
 .. autoclass:: torch.cuda.use_mem_pool
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+.. autofunction:: profile
+.. autofunction:: start
+.. autofunction:: stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+```
+
 ## NVIDIA Tools Extension (NVTX)
 
 ```{eval-rst}
