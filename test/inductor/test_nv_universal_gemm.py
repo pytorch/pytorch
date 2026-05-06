@@ -303,6 +303,59 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    @parametrize(
+        "m,n,k",
+        (
+            (16, 512, 1024),
+            (32, 256, 512),
+            (64, 512, 1024),
+            (64, 64, 512),
+        ),
+    )
+    def test_scaled_gemm_nvf4_padded_scales(self, m, n, k):
+        """Test NVF4 with padded scales (M or N < 128).
+
+        torch._scaled_mm creates scales with block_size_mn=128 padding,
+        producing more elements than the kernel expects. The kernel's
+        _supports() must accept both padded and unpadded scale numels.
+        """
+        packed_k = k // 2
+
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.bfloat16
+            )
+
+        a_fp4 = _create_tensor_with_layout(
+            "contiguous", m, packed_k, torch.float4_e2m1fn_x2
+        )
+        b_fp4 = torch.randint(
+            0, 256, (n, packed_k), device="cuda", dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b_fp4_t = b_fp4.T
+
+        num_k_blocks = ceildiv(k, 16)
+        padded_k_blocks = _round_up(num_k_blocks, 4)
+        scale_a_numel = _round_up(m, 128) * padded_k_blocks
+        scale_b_numel = _round_up(n, 128) * padded_k_blocks
+
+        scale_a = torch.rand(scale_a_numel, device="cuda").to(torch.float8_e4m3fn)
+        scale_b = torch.rand(scale_b_numel, device="cuda").to(torch.float8_e4m3fn)
+
+        expected = scaled_mm(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            _nvgemm_config(
+                **{"test_configs.autotune_choice_desc_regex": "inductor_vendored"}
+            )
+        ):
+            compiled_fn = torch.compile(scaled_mm)
+            result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        torch.testing.assert_close(result, expected, equal_nan=True)
+
     @parametrize("out_dtype", (torch.float32, torch.bfloat16))
     @parametrize(
         "layout_a",

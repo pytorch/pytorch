@@ -266,7 +266,7 @@ def has_metadata_mutation(
         # However, multiple set_() calls can cancel out. So we also check whether the
         # storage of the tensor has changed.
         # Note: if an input experienced two set_() calls that cancel out, **and**
-        # it experiences an data mutation, we pessimistically think that the set_()
+        # it experiences a data mutation, we pessimistically think that the set_()
         # call is necessary here. We could in theory fix this, but this will
         # hopefully never happen in user code, and is not needed for fsdp.
         if is_sparse_any(arg):

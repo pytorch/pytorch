@@ -100,6 +100,12 @@ class TestStaticTritonLauncher(TestCase):
         return result
 
     def test_basic(self):
+        """Verify _FastCudaLauncher correctly launches a kernel with tensor + scalar args.
+
+        Compiles a simple kernel, wraps it in _FastCudaLauncher, then invokes
+        via vectorcall and checks the output tensor has the expected value.
+        """
+
         @triton.jit
         def simple_kernel(arg0, arg1):
             x = tl.load(arg0)
@@ -528,6 +534,210 @@ class TestStaticTritonCompileResult(TestCase):
                 mocked.assert_not_called()
 
             self.assertEqual(result, torch.cat(((x * 4), y + 10)))
+
+
+@requires_gpu_and_triton
+@skipIfXpu
+class TestFastCudaLauncher(TestCase):
+    """Tests for _FastCudaLauncher vectorcall C extension."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp_files = []
+
+    def tearDown(self):
+        super().tearDown()
+        for tmp_file in self.tmp_files:
+            try:
+                os.remove(tmp_file.name)
+            except OSError:
+                pass
+
+    def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
+        if hasattr(kernel, "_cubin_path"):
+            return
+        binary_key = "hsaco" if torch.version.hip else "cubin"
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as tmp_file:
+            tmp_file.write(kernel.asm[binary_key])
+            self.tmp_files.append(tmp_file)
+            return tmp_file.name
+
+    def _make_launcher(
+        self,
+        compiled_kernel: CompiledKernel,
+    ) -> StaticallyLaunchedCudaKernel:
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        compiled_kernel._cubin_path = cubin_file
+        result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
+        old_cubin_path = result.cubin_path
+        if old_cubin_path is None:
+            raise AssertionError
+        result.cubin_path = None
+        result.reload_cubin_from_raw(old_cubin_path)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        result.load_kernel(device_interface.current_device())
+        return result
+
+    def _make_fast_launcher(self, kernel):
+        from torch._C import _FastCudaLauncher
+
+        n_scratch = 0
+        if getattr(kernel, "has_global_scratch", False):
+            n_scratch += 1
+        if getattr(kernel, "has_profile_scratch", False):
+            n_scratch += 1
+        return _FastCudaLauncher(
+            kernel.function, kernel.num_warps, kernel.shared, kernel.arg_tys, n_scratch
+        )
+
+    def test_basic(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, 5)
+        self.assertEqual(
+            new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
+        )
+
+    def test_multiple_tensor_args(self):
+        """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
+
+        @triton.jit
+        def add_kernel(a, b, out):
+            x = tl.load(a)
+            y = tl.load(b)
+            tl.store(out, x + y)
+
+        a = torch.tensor([3], dtype=torch.int32, device=GPU_TYPE)
+        b = torch.tensor([7], dtype=torch.int32, device=GPU_TYPE)
+        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = add_kernel[(1,)](a, b, out)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        out2 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, a, b, out2)
+        self.assertEqual(out2, torch.tensor([10], dtype=torch.int32, device=GPU_TYPE))
+
+    def test_zero_grid(self):
+        """Verify zero-grid launch is a no-op (kernel does not execute)."""
+
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        target = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(0, 1, 1, stream, target, 99)
+        self.assertEqual(target, torch.tensor([0], dtype=torch.int32, device=GPU_TYPE))
+
+    def test_wrong_arg_count(self):
+        """Verify _FastCudaLauncher raises RuntimeError on argument count mismatch."""
+
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        with self.assertRaises(RuntimeError):
+            fast(1, 1, 1, stream, arg0)  # missing arg1
+
+
+@requires_gpu_and_triton
+@torch._inductor.config.patch(
+    {
+        "use_static_triton_launcher": True,
+        "strict_static_triton_launcher": True,
+        "use_fast_triton_launcher": True,
+    }
+)
+class TestFastCudaLauncherCompileResult(TestCase):
+    """E2E tests verifying _FastCudaLauncher is actually used by torch.compile.
+
+    These tests assert both correctness (output matches eager) and that the
+    _FastCudaLauncher C extension was constructed, not silently skipped.
+    """
+
+    def _patch_build_fast_launcher(self):
+        """Context manager that tracks _build_fast_launcher calls.
+
+        Returns a list that accumulates True/False for each call,
+        indicating whether a _FastCudaLauncher was successfully built.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        results = []
+        original = CachingAutotuner._build_fast_launcher
+
+        def tracking_build(autotuner_self, launcher):
+            result = original(autotuner_self, launcher)
+            results.append(result is not None)
+            return result
+
+        return mock.patch.object(
+            CachingAutotuner, "_build_fast_launcher", tracking_build
+        ), results
+
+    def test_basic_compile(self):
+        """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher:
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=GPU_TYPE)
+            y = torch.randn(10, device=GPU_TYPE)
+            self.assertEqual(foo(x, y), x + y)
+            self.assertTrue(
+                any(results), "_FastCudaLauncher was not built by any CachingAutotuner"
+            )
+
+    def test_disable_fast_launcher(self):
+        """Verify disabling the config falls back to the regular launcher."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher, torch._inductor.config.patch("use_fast_triton_launcher", False):
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=GPU_TYPE)
+            y = torch.randn(10, device=GPU_TYPE)
+            result = foo(x, y)
+            self.assertEqual(result, x + y)
+            self.assertFalse(
+                any(results),
+                "_FastCudaLauncher should not be built when config is disabled",
+            )
 
 
 if __name__ == "__main__":
