@@ -2286,8 +2286,6 @@ class VariableBuilder:
         # because ConstantVariable.is_literal() rejects non-exact types.
         # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
-            assert isinstance(value, int)
-
             # Check for user-provided spec from shapes_spec.
             if config._shapes_spec is not None:
                 int_spec = lookup_spec_from_dynamo_source(
@@ -3963,7 +3961,7 @@ def _symbolic_context_from_shapes_spec(
             f"has {e.dim()} dims"
         )
     dynamic_sizes = []
-    dynamic_strides = []
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
 
     for i in range(e.dim()):
         if tensor_spec is None:
@@ -3987,8 +3985,6 @@ def _symbolic_context_from_shapes_spec(
                     f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
                     f"(expected int, IntVar, or None)"
                 )
-
-        dynamic_strides.append(DimDynamic.INFER_STRIDE)
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
@@ -4143,8 +4139,7 @@ def _automatic_dynamic(
 
     # Fast path: when the tensor must be static (and not in the dynamic-source
     # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
-    # Only safe when shapes_spec is None.
-    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+    if static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -4365,7 +4360,6 @@ def _wrap_to_fake_tensor_and_record_impl(
                 e, tx, source, static_shapes, tensor_spec=tensor_spec
             )
         else:
-<<<<<<< HEAD
             # Parent contexts are passed in when we are recursively creating
             # fake tensors for subclasses. A better design would be not to create a
             # parent/child relationship, but to recursively call _automatic_dynamic
@@ -4377,9 +4371,6 @@ def _wrap_to_fake_tensor_and_record_impl(
                 raise AssertionError(
                     f"Expected AttrSource for parent context, got {type(source)}"
                 )
-=======
-            assert isinstance(source, AttrSource)
->>>>>>> a265f6fe9b8 (pipe dynamoc spec in dynamo v0)
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
