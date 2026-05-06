@@ -114,6 +114,18 @@ class TestXpu(TestCase):
             self.assertEqual(target_device, torch.xpu.current_device())
         self.assertEqual(current_device, torch.xpu.current_device())
 
+    def test_xpu_device(self):
+        def fn(x):
+            with torch.xpu.device(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="xpu")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
@@ -250,9 +262,9 @@ if __name__ == "__main__":
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_parse_visible_devices(self):
-        def _parse_visible_devices(val):
+        def _parse_visible_devices(val, strict=False):
             with patch.dict(os.environ, {"ZE_AFFINITY_MASK": val}, clear=True):
-                return torch.xpu._parse_visible_devices()
+                return torch.xpu._parse_visible_devices(strict=strict)
 
         # Tokens with trailing non-numeric characters are invalid; entire list is rejected
         self.assertEqual(_parse_visible_devices("1a, 2b"), [])
@@ -264,6 +276,37 @@ if __name__ == "__main__":
         self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
         # Purely alphabetic tokens make the entire list invalid
         self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
+
+        # Valid masks should work the same with strict=True
+        self.assertEqual(_parse_visible_devices("0, 1, 2", strict=True), [0, 1, 2])
+        # COMPOSITE-style masks raise ValueError in strict mode
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("0.0,0.1", strict=True)
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("one, two", strict=True)
+
+    def test_device_info_api_raises_import_error_without_pyzes(self):
+        with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.temperature()
+
+    def test_temperature_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            temp = torch.xpu.temperature()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU temperature requires elevated privileges")
+            raise
+
+        self.assertIsInstance(temp, float)
+        # Sanity check: GPU temperature should be in a plausible range (0–150 °C)
+        self.assertGreaterEqual(temp, 0.0)
+        self.assertLess(temp, 150.0)
 
     def test_device_count_respects_affinity_mask(self):
         try:
@@ -323,6 +366,45 @@ print(f"{r1}, {r2}")
 
         x = torch.xpu.device_count()
         self.assertEqual(f"{x}, 1", r)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_cached_zes_device_infos(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        test_script = """\
+import torch
+import os
+from torch.xpu import _cached_zes_device_infos, _parse_visible_devices, _enum_zes_device_infos
+
+def device_key(info):
+    return (info.device_handle.value, info.subdevice_id)
+
+# Enumerate both devices and snapshot their keys
+os.environ['ZE_AFFINITY_MASK'] = '0, 1'
+_enum_zes_device_infos(_parse_visible_devices())
+orig_keys = [device_key(info) for info in _cached_zes_device_infos]
+
+# Restrict to device 1 only; cached entry should match orig device 1
+os.environ['ZE_AFFINITY_MASK'] = '1'
+_enum_zes_device_infos(_parse_visible_devices())
+match1 = orig_keys[1] == device_key(_cached_zes_device_infos[0])
+
+# Restrict to device 0 only; cached entry should match orig device 0
+os.environ['ZE_AFFINITY_MASK'] = '0'
+_enum_zes_device_infos(_parse_visible_devices())
+match0 = orig_keys[0] == device_key(_cached_zes_device_infos[0])
+print(match1, match0)
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
 
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
