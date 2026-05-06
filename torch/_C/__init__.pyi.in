@@ -2174,6 +2174,7 @@ def _cuda_record_memory_history_legacy(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_host: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2184,6 +2185,7 @@ def _cuda_record_memory_history(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_host: _bool,
 ) -> None: ...
 def _cuda_allocationTraceback(data_ptr: _int) -> list[dict[str, Any]] | None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...

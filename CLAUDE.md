@@ -8,7 +8,19 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Environment
 
-If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+If any tool you're trying to use (pip, python, spin, etc) is missing, check for
+a `.venv` directory in the project root or its parent directory. If found,
+activate it and retry. If no `.venv` is found, stop and ask the user if an
+environment is needed. Do NOT try to find alternatives or install these tools.
+
+# CI Docker Images
+
+The `.ci/docker/` directory is content-hashed to determine whether Docker images
+need rebuilding. Any file change inside `.ci/docker/` (including the README)
+changes the hash and triggers a full Docker image rebuild. Do not make changes
+in this directory unless you intend to rebuild Docker images. When Docker builds
+are broken (e.g., due to an upstream Ubuntu outage), avoid touching this
+directory so you don't force a rebuild against the broken state.
 
 # Build
 
@@ -34,11 +46,19 @@ To test Tensor equality, use assertEqual.
 For tests over multiple inputs, use the `@parametrize` decorator.
 For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
+# Type Stubs
+
+Many `.pyi` files are generated from corresponding `.pyi.in` templates. Always
+edit the `.pyi.in` file, not the generated `.pyi`.
+
 # Linting
 
 Only use commands provided via `spin` for linting.
 Use `spin help` to list available commands.
 Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
+
+When the user asks you to commit or amend, run `lintrunner -a` before creating
+the commit. Fix any lint errors it reports, then commit.
 
 # Commit messages
 
@@ -54,6 +74,11 @@ the commit body (e.g., "Authored by Claude." or a similar attribution for
 whichever assistant was used). NEVER add a `Co-authored-by:` trailer
 attributing the AI assistant, as it interferes with the Linux Foundation CLA
 bot.
+
+When the user asks you to amend a commit, check whether the commit message
+still accurately describes the changes. If it doesn't and the commit is not a
+ghstack commit, update the message. For ghstack commits, amending the message
+is a no-op, so just remind the user to update the PR description if needed.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack

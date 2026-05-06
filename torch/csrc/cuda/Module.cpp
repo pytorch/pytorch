@@ -24,8 +24,8 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/ApproximateClock.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -1199,8 +1199,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           const std::vector<std::string>&,
-          bool)>(
-          torch::cuda::_record_memory_history));
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def(
       "_cuda_record_memory_history",
@@ -1213,8 +1212,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           const std::vector<std::string>&,
-          bool)>(
-          torch::cuda::_record_memory_history));
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();

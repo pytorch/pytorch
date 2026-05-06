@@ -204,6 +204,9 @@ void _record_memory_history(
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions,
     bool record_host) {
+  TORCH_CHECK(
+      !record_host || enabled,
+      "record_host requires memory history recording to be enabled");
   c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -228,14 +231,11 @@ void _record_memory_history(
       clearHistory,
       skip_actions);
 
-  // When disabling, always turn off host recording if it was on.
-  // When enabling, only turn on host recording if requested.
-  if (record_host || !enabled) {
-    auto* host_alloc = at::getHostAllocator(at::kCUDA);
-    if (host_alloc && (record_host || host_alloc->is_history_enabled())) {
-      host_alloc->record_history(
-          enabled, recorder, trace_alloc_max_entries, when, clearHistory);
-    }
+  bool host_enabled = enabled && record_host;
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
+    host_alloc->record_history(
+        host_enabled, recorder, trace_alloc_max_entries, when, clearHistory);
   }
 }
 
@@ -257,6 +257,9 @@ void _record_memory_history(
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions,
     bool record_host) {
+  TORCH_CHECK(
+      !record_host || enabled.has_value(),
+      "record_host requires memory history recording to be enabled");
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -300,14 +303,11 @@ void _record_memory_history(
       clearHistory,
       skip_actions);
 
-  // When disabling, always turn off host recording if it was on.
-  // When enabling, only turn on host recording if requested.
-  if (record_host || !enabled.has_value()) {
-    auto* host_alloc = at::getHostAllocator(at::kCUDA);
-    if (host_alloc && (record_host || host_alloc->is_history_enabled())) {
-      host_alloc->record_history(
-          enabled.has_value(), recorder, max_entries, when, clearHistory);
-    }
+  bool host_enabled = enabled.has_value() && record_host;
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
+    host_alloc->record_history(
+        host_enabled, recorder, max_entries, when, clearHistory);
   }
 }
 
@@ -538,17 +538,7 @@ std::string _memory_snapshot_pickled() {
   // Collect host allocator data
   auto* host_alloc = at::getHostAllocator(at::kCUDA);
   if (host_alloc && host_alloc->is_history_enabled()) {
-    c10::ApproximateClockToUnixTimeConverter host_clock_converter;
-    auto host_tsc_to_ns = host_clock_converter.makeConverter();
-    auto host_tsc_to_us = [=](c10::approx_time_t t_approx) {
-      return host_tsc_to_ns(t_approx) / 1000;
-    };
-
-    auto host_trace_entries = host_alloc->get_traces();
-    for (auto& te : host_trace_entries) {
-      te.time_.t_ = host_tsc_to_us(te.time_.approx_t_);
-    }
-    snapshot.host_traces = std::move(host_trace_entries);
+    snapshot.host_traces = host_alloc->get_traces();
     snapshot.host_segments = host_alloc->get_segments();
   }
 
