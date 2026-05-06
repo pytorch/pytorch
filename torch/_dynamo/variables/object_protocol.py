@@ -494,7 +494,7 @@ def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
 def generic_pos(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
     """Mirrors PyNumber_Positive.
 
-    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1392
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1393
 
     Algorithm:
     1. If type has nb_positive slot, call obj.nb_positive_impl(tx)
