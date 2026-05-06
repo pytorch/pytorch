@@ -250,7 +250,7 @@ def is_core_aten_op(schema) -> bool:
         #
         # If the core ATen op has been removed, we cannot be sure whether it
         # was previously a core ATen op or not via checking tags this way.
-        # Conservatively assume that you are ARE a core ATen op in this case.
+        # Conservatively assume that you ARE a core ATen op in this case.
         # This means that deleting a core ATen op will still be caught.
         # But if you're deleting an operator that is not a core ATen op
         # and add it to the allow_list, you would need to additionally specify
