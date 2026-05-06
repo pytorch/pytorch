@@ -468,13 +468,13 @@ estimate_op_runtime = "default"
 
 runtime_estimations_mms_benchmark: bool = False
 
-# unit: GB/s, uni-directional P2P bandwidth per card
-# default value is NVLink
-intra_node_bw = 300
+# unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
+# None = auto-detect from GPU generation; set to override.
+intra_node_bw: int | None = None
 
-# unit: GB/s, uni-directional P2P bandwidth per node
-# default value is InfiniBand
-inter_node_bw = 25
+# unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
+# None = auto-detect from GPU generation; set to override.
+inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
 # default value is PCIe; modify for your hardware or measured bandwidth
