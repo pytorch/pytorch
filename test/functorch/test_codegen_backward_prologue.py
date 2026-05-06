@@ -14,9 +14,10 @@ Tests verify that a "backward_subclass_unwrap" artifact is emitted via
 trace_structured.
 """
 
+from common_utils import capture_codegen_source
+
 import torch
 import torch._functorch.config
-from common_utils import capture_codegen_source
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
