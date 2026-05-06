@@ -7900,6 +7900,78 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_get_rng_state_", source)
 
+    # --- CompiledFunction.forward codegen tests ---
+
+    def test_compiled_forward_codegen_emitted(self):
+        with self._capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _compiled_forward(", source)
+        self.assertIn("_normalize_as_list_", source)
+
+    def test_compiled_forward_elides_backward_state(self):
+        with self._capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("BackwardState", source)
+
+    def test_compiled_forward_elides_amp(self):
+        with self._capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("DisableAutocast", source)
+
+    def test_compiled_forward_includes_amp_when_active(self):
+        with self._capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            with torch.autocast("cpu"):
+                x = torch.randn(4, requires_grad=True)
+                f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_DisableAutocast_", source)
+
+    def test_compiled_forward_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y, x + y
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        o1, o2 = f(x, y)
+        (o1.sum() + o2.sum()).backward()
+        self.assertEqual(x.grad, y + 1)
+        self.assertEqual(y.grad, x + 1)
+
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):

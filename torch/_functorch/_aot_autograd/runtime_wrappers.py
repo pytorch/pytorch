@@ -3099,6 +3099,50 @@ def _codegen_backward_epilogue(
     )
 
 
+def _codegen_compiled_forward(
+    fw_metadata: ViewAndMutationMeta,
+    backward_state_indices: list[int],
+    disable_amp: bool,
+    num_rng: int,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    L: list[str] = [
+        "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
+    ]
+    G: dict[str, object] = {
+        "torch": torch,
+        "BackwardState": BackwardState,
+        "_normalize_as_list_": normalize_as_list,
+    }
+
+    if backward_state_indices:
+        idx = backward_state_indices[0]
+        L.append(f"    _bw_state = args[{idx}]")
+        L.append("    if not isinstance(_bw_state, BackwardState):")
+        L.append("        raise AssertionError(")
+        L.append("            f'expected BackwardState, got {type(_bw_state)}')")
+        L.append("    ctx._compiled_autograd_backward_state = _bw_state")
+
+    if num_rng > 0:
+        L.append("    args = _rng_add_(ctx, args)")
+
+    if disable_amp:
+        G["_DisableAutocast_"] = torch._C._DisableAutocast
+        L.append("    with _DisableAutocast_():")
+        L.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+    else:
+        L.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+
+    L.append("    _save_(ctx, fw_outs)")
+    L.append("    return _finalize_(ctx, fw_outs)")
+
+    source = "\n".join(L)
+    return _compile_and_exec_source(
+        source, G, "_compiled_forward", "compiled_function_forward"
+    )
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
@@ -3152,6 +3196,13 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_wrap_fn,
+        )
+
+        _codegen_fwd = _codegen_compiled_forward(
+            fw_metadata,
+            backward_state_indices,
+            disable_amp,
+            rng_state.num_rng,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3266,6 +3317,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_prologue_fn = _codegen_bw_prologue
             _bw_epilogue_fn = _codegen_bw_epilogue
+            _fwd_fn = _codegen_fwd
             boxed_grads_call = True
 
             @staticmethod
@@ -3275,33 +3327,14 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
-                args = deduped_flat_tensor_args
-                if backward_state_indices:
-                    bw_state = args[backward_state_indices[0]]
-                    if not isinstance(bw_state, BackwardState):
-                        raise AssertionError(
-                            f"expected BackwardState, got {type(bw_state)}"
-                        )
-                    ctx._compiled_autograd_backward_state = bw_state
-
-                args = rng_state.add_forward_args(ctx, args)
-
-                # There is a pretty complicated calling convention around what the compiled fw returns.
-                # The full list of outputs and their relative order is:
-                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-                #   of the original view, and not the synthetic base
-                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
-                #   in the fw output order.
-                fw_outs = call_func_at_runtime_with_args(
+                return CompiledFunction._fwd_fn(
+                    ctx,
+                    deduped_flat_tensor_args,
+                    rng_state.add_forward_args,
+                    saved_state.save_from_forward,
+                    forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
-                    # pyrefly: ignore [bad-argument-type]
-                    args,
-                    disable_amp=disable_amp,
                 )
-
-                saved_state.save_from_forward(ctx, fw_outs)
-                return forward_epilogue.finalize(ctx, fw_outs)
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
