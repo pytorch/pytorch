@@ -31,6 +31,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
@@ -53,7 +54,7 @@ INPUT_SEED = 42
 TARGET_SEED = 123
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 backend = dist.get_default_backend_for_device(device_type)
 
 

@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
     load_tests,
@@ -54,7 +55,7 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 def gpus_for_rank(world_size):

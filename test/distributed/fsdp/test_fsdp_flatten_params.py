@@ -14,6 +14,7 @@ from torch.distributed.fsdp._flat_param import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -44,9 +45,7 @@ class TestFlattenParams(FSDPTestContinuous):
         return 1
 
     def _get_default_config(self):
-        device_type = (
-            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-        )
+        device_type = ACCELERATOR_TYPE.value or "cpu"
         return {
             "device": torch.device(device_type),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,

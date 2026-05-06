@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -70,11 +71,7 @@ from torch._custom_op.impl import custom_op  # usort: skip
 MyList = list
 MyTensor = torch.Tensor
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 def requires_compile(fun):

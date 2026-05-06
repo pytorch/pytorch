@@ -5,12 +5,10 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TEST_XPU
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, TEST_XPU
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):

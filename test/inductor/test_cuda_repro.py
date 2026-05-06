@@ -37,6 +37,7 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     DeterministicGuard,
     freeze_rng_state,
     instantiate_parametrized_tests,
@@ -93,11 +94,7 @@ check_model_cuda = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 @instantiate_parametrized_tests

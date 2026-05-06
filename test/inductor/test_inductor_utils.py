@@ -7,15 +7,12 @@ import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE
 
 
 log = logging.getLogger(__name__)
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestBench(TestCase):

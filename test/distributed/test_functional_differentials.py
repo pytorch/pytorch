@@ -13,6 +13,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -27,8 +28,8 @@ if not dist.is_available():
 # Determine available devices
 DEVICE = "cuda"
 devices = ["cpu"]
-if acc := torch.accelerator.current_accelerator(True):
-    devices += [acc.type]
+if ACCELERATOR_TYPE:
+    devices += [ACCELERATOR_TYPE.value]
 
 
 def with_comms(func=None):

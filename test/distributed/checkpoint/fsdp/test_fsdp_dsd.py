@@ -27,12 +27,12 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, run_tests
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.utils._pytree import tree_all_only
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestFullyShardWithDistributedStateDict(FSDPTest):
