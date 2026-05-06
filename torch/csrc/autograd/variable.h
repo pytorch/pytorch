@@ -653,7 +653,7 @@ struct TORCH_API ViewInfo {
 /// Such views include:
 ///   1. Views created from .detach()
 ///   2. Views that are non-differentiable by its nature.
-///      E.g., `sparse_tensor.indices()` is a integral view on a (possibly)
+///      E.g., `sparse_tensor.indices()` is an integral view on a (possibly)
 ///      floating point tensor.
 ///      See top of `derivatives.yaml` on how to specify that outputs of a
 ///      function are non-differentiable.
