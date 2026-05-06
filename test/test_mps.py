@@ -2662,6 +2662,55 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("N", [64, 256, 1024, 4096, 4097, 8192])
+    @parametrize("M_kind", ["m1", "small", "multiblock"])
+    @parametrize("elementwise_affine", [True, False])
+    def test_layer_norm_backward_metal(self, dtype, N, M_kind, elementwise_affine):
+        """Backward correctness for the Metal LayerNorm kernels vs fp32 CPU.
+
+        N routes the dx kernel (single_row <= 4096, looped above); M_kind routes
+        dw/db: m1 fast path (M == 1), single-tile (M <= 64), and the multi-row-block
+        tiled+reduce composition (M = 130 -> 3 partial blocks).
+        """
+        B, T = {"m1": (1, 1), "small": (4, 16), "multiblock": (2, 65)}[M_kind]
+        if N > 4096:
+            B, T = {"m1": (1, 1), "small": (2, 8), "multiblock": (2, 65)}[M_kind]
+        # bf16 error scales with the number of accumulated rows (input rounding,
+        # ~sqrt(M)); measured max 1.6e-1 at M<=64 and 1.9e-1 at M=130.
+        bf16_atol = 3e-1 if M_kind == "multiblock" else 2e-1
+        atol = 1e-3 if dtype == torch.float32 else (5e-2 if dtype == torch.float16 else bf16_atol)
+
+        x = torch.randn(B, T, N, dtype=torch.float32, requires_grad=True)
+        w = torch.randn(N, requires_grad=True) if elementwise_affine else None
+        b = torch.randn(N, requires_grad=True) if elementwise_affine else None
+        y = F.layer_norm(x, (N,), w, b)
+        dy = torch.randn_like(y)
+        y.backward(dy)
+
+        xm = x.detach().to(device='mps', dtype=dtype).requires_grad_()
+        wm = w.detach().to(device='mps', dtype=dtype).requires_grad_() if elementwise_affine else None
+        bm = b.detach().to(device='mps', dtype=dtype).requires_grad_() if elementwise_affine else None
+        ym = F.layer_norm(xm, (N,), wm, bm)
+        ym.backward(dy.to(device='mps', dtype=dtype))
+
+        self.assertEqual(xm.grad.float().cpu(), x.grad, atol=atol, rtol=0)
+        if elementwise_affine:
+            self.assertEqual(wm.grad.float().cpu(), w.grad, atol=atol, rtol=0)
+            self.assertEqual(bm.grad.float().cpu(), b.grad, atol=atol, rtol=0)
+
+    def test_layer_norm_backward_metal_empty(self):
+        # N == 0 with dgamma/dbeta requested must not encode zero-sized
+        # dispatches (asserts under the Metal validation layer).
+        dx, dw, db = torch.ops.aten.native_layer_norm_backward(
+            torch.empty(4, 0, device="mps"), torch.empty(4, 0, device="mps"), (0,),
+            torch.zeros(4, 1, device="mps"), torch.ones(4, 1, device="mps"),
+            torch.empty(0, device="mps"), torch.empty(0, device="mps"),
+            [False, True, True])
+        self.assertEqual(dw.shape, torch.Size([0]))
+        self.assertEqual(db.shape, torch.Size([0]))
+
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
