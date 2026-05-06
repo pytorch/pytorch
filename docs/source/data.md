@@ -4,42 +4,6 @@
 .. automodule:: torch.utils.data
 ```
 
-```{eval-rst}
-.. currentmodule:: torch.utils.data.dataset
-```
-
-```{eval-rst}
-.. autofunction:: random_split
-```
-
-```{eval-rst}
-.. currentmodule:: torch.utils.data.datapipes.utils.decoder
-```
-
-```{eval-rst}
-.. autofunction:: basichandlers
-```
-
-```{eval-rst}
-.. autofunction:: handle_extension
-```
-
-```{eval-rst}
-.. currentmodule:: torch.utils.data.graph
-```
-
-```{eval-rst}
-.. autofunction:: traverse
-```
-
-```{eval-rst}
-.. autofunction:: traverse_dps
-```
-
-```{eval-rst}
-.. currentmodule:: torch.utils.data
-```
-
 At the heart of PyTorch data loading utility is the {class}`torch.utils.data.DataLoader`
 class. It represents a Python iterable over a dataset, with support for
 
@@ -516,7 +480,9 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.utils.data.random_split
+.. currentmodule:: torch.utils.data.dataset
+
+.. autofunction:: random_split
 ```
 
 ```{eval-rst}
@@ -546,6 +512,14 @@ for batch_ndx, sample in enumerate(loader):
 ```{eval-rst}
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
 
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.graph
+
+.. autofunction:: traverse
+
+.. autofunction:: traverse_dps
 ```
 
 % These modules are documented as part of torch/data listing them here for
@@ -596,4 +570,12 @@ for batch_ndx, sample in enumerate(loader):
 
 ```{eval-rst}
 .. py:module:: torch.utils.data.datapipes.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.decoder
+
+.. autofunction:: basichandlers
+
+.. autofunction:: handle_extension
 ```
