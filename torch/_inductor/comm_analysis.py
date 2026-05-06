@@ -44,6 +44,7 @@ class InterconnectType(IntEnum):
     NVLINK_B200 = 3
     IB_HDR = 4  # 200 Gbps InfiniBand
     IB_NDR = 5  # 400 Gbps InfiniBand / RoCE
+    PCIE = 6  # PCIe (no NVLink)
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,8 @@ INTERCONNECT_PROFILES: dict[InterconnectType, InterconnectProfile] = {
     InterconnectType.IB_HDR: InterconnectProfile(
         11.0, 14.0, 30.0, min_saturation_bytes=75 * _MB
     ),
+    # PCIe: ~10 GB/s effective NCCL bus BW (GPU->CPU->GPU ring steps)
+    InterconnectType.PCIE: InterconnectProfile(10.0, 60.0, 15.0),
 }
 
 _GPU_TO_INTRA: dict[NVIDIA_GPU_TYPE, InterconnectType] = {
@@ -89,6 +92,33 @@ _GPU_TO_INTER: dict[NVIDIA_GPU_TYPE, InterconnectType] = {
     NVIDIA_GPU_TYPE.HOPPER: InterconnectType.IB_NDR,
     NVIDIA_GPU_TYPE.BLACKWELL: InterconnectType.IB_NDR,
 }
+
+
+@functools.lru_cache
+def _has_nvlink() -> bool:
+    """Detect NVLink via nvidia-smi topology, falling back to peer access check."""
+    import subprocess
+
+    if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+        return True  # Single GPU: interconnect irrelevant
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "topo", "-m"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            # Check GPU-GPU section (before Legend) for "NV" links
+            topo = result.stdout.split("Legend")[0]
+            return "NV" in topo
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    # Fallback: peer access generally implies NVLink on datacenter GPUs
+    try:
+        return torch.cuda.can_device_access_peer(0, 1)
+    except (AssertionError, RuntimeError):
+        return True
 
 
 @functools.lru_cache
@@ -123,6 +153,8 @@ def detect_interconnect(group_size: int) -> InterconnectType:
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
     gpu_gen = get_gpu_type()
     if math.ceil(group_size / gpus_per_node) == 1:
+        if not _has_nvlink():
+            return InterconnectType.PCIE
         return _GPU_TO_INTRA.get(gpu_gen, InterconnectType.NVLINK_A100)
     return _GPU_TO_INTER.get(gpu_gen, InterconnectType.IB_HDR)
 
@@ -371,12 +403,16 @@ _GPU_NCHANNELS = {
 
 # NVLink bus bandwidth per GPU (GB/s).
 # https://github.com/NVIDIA/nccl/blob/master/src/graph/topo.h (link speed constants)
-_GPU_INTRA_NODE_BW: dict[NVIDIA_GPU_TYPE, float] = {
+_GPU_NVLINK_BW: dict[NVIDIA_GPU_TYPE, float] = {
     NVIDIA_GPU_TYPE.VOLTA: 120.0,
     NVIDIA_GPU_TYPE.AMPERE: 240.0,
     NVIDIA_GPU_TYPE.HOPPER: 370.0,
     NVIDIA_GPU_TYPE.BLACKWELL: 720.0,
 }
+
+# PCIe effective intra-node bandwidth (GB/s) for NCCL ring.
+# Conservative: GPU->CPU->GPU ring steps limit effective BW well below link rate.
+_PCIE_INTRA_NODE_BW = 24.0
 
 # Per-GPU inter-node bandwidth (GB/s), assuming 1:1 GPU:NIC ratio.
 # HDR: 200Gbps=25GB/s, NDR: 400Gbps=50GB/s per NIC.
@@ -389,11 +425,13 @@ _GPU_INTER_NODE_BW: dict[NVIDIA_GPU_TYPE, float] = {
 
 
 def get_intra_node_bw() -> float:
-    """Return intra-node (NVLink) bandwidth in GB/s. Config overrides auto-detection."""
+    """Return intra-node bandwidth in GB/s. Config overrides auto-detection."""
     override = torch._inductor.config.intra_node_bw
     if override is not None:
         return float(override)
-    return _GPU_INTRA_NODE_BW.get(get_gpu_type(), 240.0)
+    if not _has_nvlink():
+        return _PCIE_INTRA_NODE_BW
+    return _GPU_NVLINK_BW.get(get_gpu_type(), 240.0)
 
 
 def get_inter_node_bw() -> float:
@@ -563,7 +601,7 @@ def _nccl_algo_time(
         return -1.0
 
     # --- Latency computation (mirrors ncclTopoTuneModel) ---
-    intraHw = NCCL_HW.NVLINK
+    intraHw = NCCL_HW.PCI if interconnect == InterconnectType.PCIE else NCCL_HW.NVLINK
     lat = baseLat[algo][proto]
     intraLat = hwLat[intraHw][algo][proto]
     interLat = hwLat[NCCL_HW.NET][algo][proto]
@@ -795,7 +833,9 @@ def estimate_nccl_collective_runtime_from_fx_node(
     assert opt_args_kwargs is not None
     args, kwargs = opt_args_kwargs
 
-    group_name = kwargs["group_name"]
+    from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+    group_name = _resolve_group_name(kwargs["group_name"])
     group_size = _get_group_size_by_name(group_name)
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())

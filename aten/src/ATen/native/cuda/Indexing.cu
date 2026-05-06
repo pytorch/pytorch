@@ -515,11 +515,17 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if(__builtin_amdgcn_processor_is("gfx942") ||
+       __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #endif
@@ -1230,6 +1236,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
@@ -1246,7 +1258,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>    \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
         selfInfo, sourceInfo, indexInfo,                                     \
         selfAddDim, sourceAddDim, sourceTotalSize,                          \
@@ -1411,6 +1423,12 @@ void index_reduce_func_cuda_impl(
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
@@ -1427,7 +1445,7 @@ void index_reduce_func_cuda_impl(
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>                 \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
         selfInfo, sourceInfo, indexInfo,                                                   \
         selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
