@@ -69,10 +69,13 @@ def is_fsdp_reduce_scatter_wait(wait: torch.fx.Node) -> bool:
     """
     if not wait.users:
         return False
-    # Unary chains cannot cycle, so no visited set needed.
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
     queue = [wait]
     while queue:
         node = queue.pop()
+        if node in visited:
+            continue
+        visited.add(node)
         for user in node.users:
             if user.op == "output":
                 continue
