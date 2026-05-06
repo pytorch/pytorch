@@ -8,6 +8,7 @@ live in their respective VT files.
 """
 
 import collections
+import functools
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -320,10 +321,14 @@ def vt_getitem(
     # Branch 3: special handling for type objects, otherwise call __class_getitem__
     if issubclass(obj_type, type):
         cls = obj.as_python_constant()
-        # TODO get rid of the callable special case
-        if cls is type or cls is collections.abc.Callable:
+        # TODO should just be for type
+        if cls is type or issubclass(
+            cls, (collections.abc.Callable, functools.partial)
+        ):
             key_py = key.as_python_constant()
-            result = cls[key_py]  # pyrefly: ignore[bad-specialization]
+            result = cls[  # pyrefly: ignore[unsupported-operation,bad-specialization]
+                key_py
+            ]
             source = None
             if obj.source and key.source:
                 source = GetItemSource(obj.source, key.source)

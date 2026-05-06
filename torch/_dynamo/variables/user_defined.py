@@ -755,9 +755,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         typing._generic_class_getitem,  # pyrefly: ignore [missing-attribute]
                         self,
                     ).call_function(tx, args, kwargs)
-            if hasattr(self.value, "__class_getitem__"):
+            if (fn := getattr(self.value, "__class_getitem__", None)) and isinstance(
+                fn, (types.FunctionType, types.MethodType)
+            ):
+                if hasattr(fn, "__func__"):
+                    fn = fn.__func__
                 # unwrap lru_cache'd functions
-                fn = self.value.__class_getitem__.__func__
                 if hasattr(fn, "__wrapped__"):
                     fn = fn.__wrapped__
                 return variables.UserMethodVariable(fn, self).call_function(
@@ -1411,6 +1414,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.DispatchKey,
                 torch._C._functorch.TransformType,
                 typing._BaseGenericAlias,  # pyrefly: ignore [missing-attribute]
+                typing.TypeVar,
                 typing._SpecialForm,
                 types.GenericAlias,
             ),

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import collections
+import functools
 import typing
 import unittest
 from typing_extensions import TypeVar
@@ -186,7 +187,17 @@ class TypingTests(TestCase):
 
     def test_callable(self):
         def f(x):
-            return x.sin(), collections.abc.Callable[[int], int]
+            return x.sin(), collections.abc.Callable[[int, T], int]
+
+        x = torch.randn(3, 3)
+        y = f(x)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        opt_y = opt_f(x)
+        self.assertEqual(y, opt_y)
+
+    def test_partial(self):
+        def f(x):
+            return x.sin(), functools.partial[[int, T], int]
 
         x = torch.randn(3, 3)
         y = f(x)
