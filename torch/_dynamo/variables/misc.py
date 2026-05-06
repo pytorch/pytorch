@@ -1348,7 +1348,7 @@ class GetAttrVariable(VariableTracker):
         return self.obj.call_method(tx, self.name, list(args), kwargs)
 
 
-class ConstantMethodWrapperVariable(VariableTracker):
+class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
@@ -1486,6 +1486,31 @@ class ConstantMethodWrapperVariable(VariableTracker):
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+
+class GetSetDescriptorVariable(VariableTracker):
+    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.desc = desc
+
+    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
+        return self.desc
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__get__" and self.source:
+            source = AttrSource(self.source, "__get__")
+            return VariableTracker.build(tx, self.desc.__get__, source)
+        elif name in ("__objclass__", "__name__"):
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, getattr(self.desc, name), source)
+        else:
+            return super().var_getattr(tx, name)
+
+    def is_python_constant(self) -> Literal[True]:
+        return True
+
+    def as_python_constant(self) -> types.GetSetDescriptorType:
+        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
