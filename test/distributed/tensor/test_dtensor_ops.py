@@ -331,6 +331,7 @@ dtensor_compiled_fails = {
     xfail("nn.functional.logsigmoid"),
     # Miscellaneous runtime crashes (e.g. index out of bounds).
     xfail("gather"),
+    xfail("index_fill"),
     xfail("index_add"),
     xfail("index_copy"),
     xfail("index_reduce", "amax"),
@@ -342,6 +343,7 @@ dtensor_compiled_fails = {
     xfail("scatter"),
     xfail("scatter_add"),
     xfail("take_along_dim"),
+    xfail("nn.functional.max_unpool3d", "grad"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
