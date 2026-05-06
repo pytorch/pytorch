@@ -2789,6 +2789,18 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t[-1].item(), 2)
         del t
 
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific HIP launch limit regression test")
+    @largeTensorTest("17GB")
+    def test_arange_rocm_above_hip_global_work_size_limit(self, device):
+        bigint = 2 ** 32 + 1
+        t = torch.arange(bigint, dtype=torch.int32, device=device)
+        self.assertEqual(t.numel(), bigint)
+        self.assertEqual(
+            t[-3:].cpu(), torch.tensor([-2, -1, 0], dtype=torch.int32)
+        )
+        del t
+
     @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
     @onlyNativeDeviceTypes
     def test_tensor_ctor_device_inference(self, device):
