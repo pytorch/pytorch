@@ -209,7 +209,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.nn.Parameter`.
 
@@ -286,7 +286,7 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters
     hold no data and attempting to access some properties, like their shape,
-    will throw a runtime error. The only operations that can be performed on a uninitialized
+    will throw a runtime error. The only operations that can be performed on an uninitialized
     parameter are changing its datatype, moving it to a different device and
     converting it to a regular :class:`torch.Tensor`.
 
