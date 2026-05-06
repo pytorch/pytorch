@@ -12,6 +12,9 @@ Below is a state diagram describing how rendezvous works.
 
 ## Registry
 
+```{currentmodule} torch.distributed.elastic.rendezvous
+```
+
 ```{autoclass} RendezvousParameters
 :members:
 ```
@@ -130,7 +133,7 @@ and will be deprecated in the future.
 
 ### Etcd Store
 
-The `EtcdStore` is the C10d `Store` instance type returned by `next_rendezvous()`
+The `EtcdStore` is the C10d `Store` instance returned by `next_rendezvous()`
 when etcd is used as the rendezvous backend.
 
 ```{currentmodule} torch.distributed.elastic.rendezvous.etcd_store
