@@ -233,7 +233,7 @@ class FakeTensorUpdater:
             node,
             node.target,
             get_hash_or_ids(node.args),
-            get_hash_or_ids(tuple(i) for i in node.kwargs.items()),
+            get_hash_or_ids(chain.from_iterable(node.kwargs.items())),
         )
 
     def incremental_update(self) -> int:
