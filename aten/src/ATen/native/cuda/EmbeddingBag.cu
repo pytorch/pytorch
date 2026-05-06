@@ -31,6 +31,8 @@
 
 #include <c10/macros/Macros.h>
 
+#include <thrust/iterator/reverse_iterator.h>
+
 namespace at::native {
 
 
@@ -228,9 +230,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 3 3 3 2 2 1 2 2
       cuda::cub::inclusive_scan_by_key(
-        cccl_make_reverse_iterator(sorted_data + num_indices),
-        cccl_make_reverse_iterator(count_data + num_indices),
-        cccl_make_reverse_iterator(count_data + num_indices),
+        thrust::make_reverse_iterator(sorted_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
         ATEN_CUB_MAXIMUM(),
         num_indices
       );
