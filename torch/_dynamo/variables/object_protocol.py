@@ -577,7 +577,7 @@ def binary_op1(
 
     # Same class → only call once (CPython: slotw = NULL if same type) don't use
     # v.python_type() is w.python_type() here since v := ConstantVariable(int)
-    # and w := SymNodeVariable(int) can have different VT types but the same
+    # and w := SymNodeVariable(int) have different VT types but the same
     # Python type.
     if type(v) is type(w):
         w_slot = None

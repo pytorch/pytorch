@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     parametrize,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 class UserDefinedDict(dict):
@@ -302,6 +303,45 @@ class TestNbOr(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             frozenset({1}) | frozenset({2}) | frozenset({3}),
             frozenset({1, 2, 3}),
+        )
+
+    # --- Bitwise | OrderedSet ---
+
+    @make_dynamo_test
+    def test_orderedset_union_basic(self):
+        operand1 = OrderedSet([1, 2])
+        operand2 = OrderedSet([2, 3])
+        expected = OrderedSet([1, 2, 3])
+        self.assertEqual(operand1 | operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_union_single(self):
+        operand1 = OrderedSet([1])
+        operand2 = OrderedSet([2])
+        expected = OrderedSet([1, 2])
+        self.assertEqual(operand1 | operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_union_duplicate(self):
+        operand1 = OrderedSet([1, 2, 3])
+        operand2 = OrderedSet([1, 2, 3])
+        expected = OrderedSet([1, 2, 3])
+        self.assertEqual(operand1 | operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_union_with_empty(self):
+        self.assertEqual(OrderedSet([1, 2]) | OrderedSet(), OrderedSet([1, 2]))
+        self.assertEqual(OrderedSet() | OrderedSet([1, 2]), OrderedSet([1, 2]))
+
+    @make_dynamo_test
+    def test_orderedset_union_empty(self):
+        self.assertEqual(OrderedSet() | OrderedSet(), OrderedSet())
+
+    @make_dynamo_test
+    def test_orderedset_union_chained(self):
+        self.assertEqual(
+            OrderedSet([1]) | OrderedSet([2]) | OrderedSet([3]),
+            OrderedSet([1, 2, 3]),
         )
 
     # --- Bitwise | dict combinations ---
@@ -878,6 +918,36 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         self.assertEqual(5 - True, 4)
         self.assertEqual(0 - True, -1)
 
+    @make_dynamo_test
+    def test_sub_int_mixed(self):
+        self.assertEqual(100 - 1, 99)
+        self.assertEqual(1 - 100, -99)
+        self.assertEqual(-10 - (-10), 0)
+        x = 42
+        self.assertEqual(x - 2, 40)
+
+    @make_dynamo_test
+    def test_sub_float_mixed(self):
+        self.assertAlmostEqual(0.1 - 0.1, 0.0)
+        self.assertAlmostEqual(1.0 - 0.3, 0.7)
+        self.assertAlmostEqual(-1.5 - (-2.5), 1.0)
+        x = 3.14
+        self.assertAlmostEqual(x - 1.0, 2.14)
+
+    @make_dynamo_test
+    def test_sub_complex(self):
+        self.assertEqual((3 + 4j) - (1 + 2j), 2 + 2j)
+        self.assertEqual((1 + 0j) - (0 + 1j), 1 - 1j)
+        self.assertEqual((0 + 0j) - (0 + 0j), 0j)
+        self.assertEqual((-1 - 1j) - (-1 - 1j), 0j)
+
+    @make_dynamo_test
+    def test_sub_complex_with_real(self):
+        self.assertEqual((5 + 3j) - 2, 3 + 3j)
+        self.assertEqual((5 + 3j) - 2.0, 3 + 3j)
+        self.assertEqual(10 - (3 + 4j), 7 - 4j)
+        self.assertEqual(1.5 - (0.5 + 1j), 1 - 1j)
+
     # --- Set difference ---
 
     @parametrize(
@@ -923,6 +993,45 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
     def test_frozenset_difference_with_empty(self):
         self.assertEqual(frozenset({1, 2}) - frozenset(), frozenset({1, 2}))
         self.assertEqual(frozenset() - frozenset({1, 2}), frozenset())
+
+    # --- OrderedSet difference ---
+
+    @make_dynamo_test
+    def test_orderedset_difference_basic(self):
+        operand1 = OrderedSet([1, 2, 3])
+        operand2 = OrderedSet([2, 3])
+        expected = OrderedSet([1])
+        self.assertEqual(operand1 - operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_difference_single(self):
+        operand1 = OrderedSet([1, 2])
+        operand2 = OrderedSet([2])
+        expected = OrderedSet([1])
+        self.assertEqual(operand1 - operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_difference_no_overlap(self):
+        operand1 = OrderedSet([1, 2, 3])
+        operand2 = OrderedSet([4, 5])
+        expected = OrderedSet([1, 2, 3])
+        self.assertEqual(operand1 - operand2, expected)
+
+    @make_dynamo_test
+    def test_orderedset_difference_with_empty(self):
+        self.assertEqual(OrderedSet([1, 2]) - OrderedSet(), OrderedSet([1, 2]))
+        self.assertEqual(OrderedSet() - OrderedSet([1, 2]), OrderedSet())
+
+    @make_dynamo_test
+    def test_orderedset_difference_empty(self):
+        self.assertEqual(OrderedSet() - OrderedSet(), OrderedSet())
+
+    @make_dynamo_test
+    def test_orderedset_difference_chained(self):
+        self.assertEqual(
+            OrderedSet([1, 2, 3, 4]) - OrderedSet([2]) - OrderedSet([3]),
+            OrderedSet([1, 4]),
+        )
 
     # --- Inplace -= ---
 
@@ -1112,6 +1221,32 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         b = _RSubReturnsMarker()
         result = a - b
         self.assertEqual(result, "_RSubReturnsMarker.__rsub__ called")
+
+    # --- OrderedSet reversed subtraction (__rsub__) ---
+
+    @make_dynamo_test
+    def test_orderedset_rsub_basic(self):
+        # Test reversed subtraction: other_set - ordered_set
+        os = OrderedSet([2, 3])
+        s = {1, 2, 3}
+        result = s - os
+        self.assertEqual(result, {1})
+
+    @make_dynamo_test
+    def test_orderedset_rsub_with_set(self):
+        # Test that set - OrderedSet works correctly
+        os = OrderedSet([1, 2])
+        s = {1, 2, 3}
+        result = s - os
+        self.assertEqual(result, {3})
+
+    @make_dynamo_test
+    def test_orderedset_rsub_both_orderedsets(self):
+        # Test OrderedSet - OrderedSet (forward subtraction)
+        os1 = OrderedSet([1, 2, 3])
+        os2 = OrderedSet([2, 3])
+        result = os1 - os2
+        self.assertEqual(result, OrderedSet([1]))
 
 
 instantiate_parametrized_tests(TestNbOr)
