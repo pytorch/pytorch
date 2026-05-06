@@ -7,13 +7,13 @@ namespace at::native {
 class QLinearOnednn final {
  public:
   C10_API static Tensor run_pointwise_tensor(
-    const Tensor& act, // int8 CPU tensor, not QTensor
-    const Tensor& act_scale,
-    const Tensor& act_zero_point,
-    const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-    const Tensor& weight_scales,
-    const Tensor& weight_zero_points,
-    const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
@@ -22,14 +22,14 @@ class QLinearOnednn final {
       std::string_view post_op_algorithm);
 
 C10_API static Tensor run_pointwise_binary_tensor(
-    const Tensor& act, // int8 CPU tensor, not QTensor
-    const Tensor& act_scale,
-    const Tensor& act_zero_point,
-    const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-    const Tensor& weight_scales,
-    const Tensor& weight_zero_points,
-    const std::optional<at::Tensor>& other, // extra input for binary post-op
-    const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
