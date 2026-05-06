@@ -310,8 +310,8 @@ class GraphModule(torch.nn.Module):
         o_5: "f32[8, 16, 96]" = o0 + o_4;  o0 = o_4 = None
         return (o_5,)
     class subgraph_0(torch.nn.Module):
-        def forward(self, q_1: "f32[1, 2, 4, 6]", k_1: "f32[1, 2, 16, 6]", v_1: "f32[1, 2, 16, 6]"):
-            out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
+        def forward(self, query: "f32[1, 2, 4, 6]", key: "f32[1, 2, 16, 6]", value: "f32[1, 2, 16, 6]"):
+            out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = query, key = key, value = value, is_causal = False);  query = key = value = None
             return (out,)""",
                 ignore_empty_lines=True,
             )
@@ -534,6 +534,11 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_dynamo_reordered_inputs(self):
+        # Dynamo lifts subgraph freevars in first-use order inside the body,
+        # which can differ from the user's call-site order (especially under
+        # dynamic shapes where `.shape` accesses force early lifts). The HOP
+        # reorders subgraph placeholders back to call-site order so that
+        # `in_placements` always lines up with the user-written arg order.
         @local_map(
             out_placements=((Shard(0), Shard(0)),),
             in_placements=(
@@ -545,18 +550,34 @@ class GraphModule(torch.nn.Module):
             device_mesh=self.mesh,
         )
         def reorder_inputs(first_input, second_input):
-            return second_input.sum() * 10 + first_input  # dynamo will reorder inputs
+            return second_input.sum() * 10 + first_input  # first-use: second, first
 
         x = torch.randn(64, 64, 64, requires_grad=True)
         y = torch.randn(8, 64, 64, requires_grad=True)
-        with (
-            LocalMapWrappedHigherOrderVariable.enable(),
-            self.assertRaisesRegex(
-                AssertionError,
-                r"Dynamo changed the order of inputs to the local_map function, please adjust the order of inputs and input_placements from \[l_args_0_, l_args_1_\], to: \[l_args_1_, l_args_0_\].*",
-            ),
-        ):
-            torch.compile(reorder_inputs, backend="eager", fullgraph=True)(x, y)
+
+        captured_gms: list[torch.fx.GraphModule] = []
+
+        def capture(gm, example_inputs):
+            captured_gms.append(gm)
+            return gm
+
+        with LocalMapWrappedHigherOrderVariable.enable():
+            torch.compile(reorder_inputs, backend=capture, fullgraph=True)(x, y)
+
+        self.assertEqual(len(captured_gms), 1)
+        root = captured_gms[0]
+        subgraph = root.subgraph_0
+        ph_names = [n.name for n in subgraph.graph.find_nodes(op="placeholder")]
+        self.assertEqual(ph_names, ["first_input", "second_input"])
+        # The HOP call in the parent graph should pass the args in the user's
+        # call-site order: (subgraph, first_input, second_input).
+        hop_call = next(
+            n
+            for n in root.graph.nodes
+            if n.op == "call_function" and "local_map_hop" in str(n.target)
+        )
+        arg_names = [a.name if hasattr(a, "name") else a for a in hop_call.args]
+        self.assertEqual(arg_names, ["subgraph_0", "l_args_0_", "l_args_1_"])
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_with_local_shapes_hop_tracing(self):
