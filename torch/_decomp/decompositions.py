@@ -5165,8 +5165,8 @@ def _reflection_or_replication_pad(
     inp_shape = a.shape[-dim:]
     nc_dim = a.dim() - dim
 
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
+    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
 
     result = a
     for i in range(dim):
@@ -5189,8 +5189,8 @@ def _reflection_pad_backward(grad_output, x, padding):
 
     dhw = [h - 1 for h in x.shape[-dim:]]
 
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
+    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
 
     indices = []
     for i in range(x.ndim):
