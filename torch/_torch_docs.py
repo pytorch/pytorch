@@ -13367,11 +13367,14 @@ shape (1, 1, 4, 2).
 
 Args:
     input (Tensor): the tensor whose elements to repeat.
-    dims (tuple): the number of repetitions per dimension.
+    dims (torch.Size, int, tuple of int, or list of int): the number of
+        repetitions per dimension.
 
 Example::
 
     >>> x = torch.tensor([1, 2, 3])
+    >>> x.tile(2)
+    tensor([1, 2, 3, 1, 2, 3])
     >>> x.tile((2,))
     tensor([1, 2, 3, 1, 2, 3])
     >>> y = torch.tensor([[1, 2], [3, 4]])
