@@ -23,7 +23,6 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestCodegenBackwardPrologue(TestCase):
-
     def test_saved_subclass_tensors_unwrapped(self):
         """
         When subclass tensors are saved for backward, the prologue should
