@@ -45,5 +45,4 @@ add_custom_target(bundle_licenses ALL
 install(FILES "${_cmake_bindir}/LICENSES_BUNDLED.txt"
   DESTINATION "."
   RENAME "LICENSE"
-  OPTIONAL
 )
