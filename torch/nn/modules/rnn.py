@@ -576,8 +576,8 @@ class RNN(RNNBase):
           `(h_t)` from the last layer of the RNN, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
-          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(\text{num\_layers} * D, H_{out})` for unbatched input or
+          :math:`(\text{num\_layers} * D, N, H_{out})` containing the final hidden state
           for each element in the batch.
 
     Attributes:
@@ -599,6 +599,8 @@ class RNN(RNNBase):
         For bidirectional RNNs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+        Example of splitting the hidden state layers:
+        ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
@@ -918,12 +920,12 @@ class LSTM(RNNBase):
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence. When ``bidirectional=True``, `output` will contain
           a concatenation of the forward and reverse hidden states at each time step in the sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
-          :math:`(D * \text{num\_layers}, N, H_{out})` containing the
+        * **h_n**: tensor of shape :math:`(\text{num\_layers} * D, H_{out})` for unbatched input or
+          :math:`(\text{num\_layers} * D, N, H_{out})` containing the
           final hidden state for each element in the sequence. When ``bidirectional=True``,
           `h_n` will contain a concatenation of the final forward and reverse hidden states, respectively.
-        * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
-          :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
+        * **c_n**: tensor of shape :math:`(\text{num\_layers} * D, H_{cell})` for unbatched input or
+          :math:`(\text{num\_layers} * D, N, H_{cell})` containing the
           final cell state for each element in the sequence. When ``bidirectional=True``,
           `c_n` will contain a concatenation of the final forward and reverse cell states, respectively.
 
@@ -962,6 +964,9 @@ class LSTM(RNNBase):
         For bidirectional LSTMs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+        Examples of splitting the hidden and cell states:
+        ``h_n.view(num_layers, num_directions, batch, H_out)`` and
+        ``c_n.view(num_layers, num_directions, batch, H_cell)``.
 
     .. note::
         For bidirectional LSTMs, `h_n` is not equivalent to the last element of `output`; the
@@ -1274,8 +1279,8 @@ class GRU(RNNBase):
           `(h_t)` from the last layer of the GRU, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence.
-        * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` or
-          :math:`(D * \text{num\_layers}, N, H_{out})` containing the final hidden state
+        * **h_n**: tensor of shape :math:`(\text{num\_layers} * D, H_{out})` or
+          :math:`(\text{num\_layers} * D, N, H_{out})` containing the final hidden state
           for the input sequence.
 
     Attributes:
@@ -1297,6 +1302,8 @@ class GRU(RNNBase):
         For bidirectional GRUs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+        Example of splitting the hidden state layers:
+        ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
