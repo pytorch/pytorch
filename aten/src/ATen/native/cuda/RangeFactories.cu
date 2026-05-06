@@ -6,9 +6,11 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/RangeUtils.h>
-#include <algorithm>
 #include <cmath>
 #include <limits>
+#if defined(USE_ROCM)
+#include <algorithm>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -74,9 +76,6 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   if (N == 0) {
     return;
   }
-  auto stream = at::cuda::getCurrentCUDAStream();
-  using scalar_t = typename function_traits<func_t>::result_type;
-  auto* data = output.mutable_data_ptr<scalar_t>();
 #if defined(USE_ROCM)
   constexpr int blocks_per_sm = 4;
   const int sm_count =
@@ -85,21 +84,26 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   int64_t grid = std::min<int64_t>(
       orig_grid, static_cast<int64_t>(sm_count) * blocks_per_sm);
   grid = std::max<int64_t>(grid, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
-    elementwise_kernel_with_index_grid_stride<int><<<grid, num_threads(), 0, stream>>>(
-        static_cast<int>(N), f, data);
+    elementwise_kernel_with_index_grid_stride<int><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    elementwise_kernel_with_index_grid_stride<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+    elementwise_kernel_with_index_grid_stride<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-  const int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
-    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(static_cast<int>(N), f, data);
+    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
 }
 
