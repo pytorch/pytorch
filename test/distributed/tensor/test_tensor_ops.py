@@ -82,6 +82,17 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
+    def test_clone_partial(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(12, 8)
+        for reduce_op in ("sum", "avg", "max", "min"):
+            dt = DTensor.from_local(
+                tensor.clone(), device_mesh, [Partial(reduce_op)], run_check=False
+            )
+            cloned = dt.clone()
+            self.assertEqual(cloned.placements, (Partial(reduce_op),))
+            self.assertEqual(cloned.to_local(), dt.to_local())
+
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
