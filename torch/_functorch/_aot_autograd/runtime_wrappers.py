@@ -3053,9 +3053,7 @@ def _codegen_backward_epilogue(
     has_subclass = maybe_subclass_meta is not None
 
     if has_subclass:
-        lines: list[str] = [
-            "def _backward_epilogue(out, make_subclass_override=None):"
-        ]
+        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
     else:
         lines = ["def _backward_epilogue(out):"]
     code_globals: dict[str, object] = {}

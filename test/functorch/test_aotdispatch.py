@@ -7615,7 +7615,7 @@ def forward(self, primals_1, tangents_1):
     # --- Backward prologue codegen tests ---
 
     def test_backward_prologue_codegen_emitted(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7631,7 +7631,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("_raise_if_functorch_active_", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7642,7 +7642,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 0)
 
     def test_backward_prologue_baked_arity(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7657,7 +7657,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("if len(flat_args) != 3:", source)
 
     def test_backward_prologue_tangent_filtering(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7713,7 +7713,7 @@ def forward(self, primals_1, tangents_1):
         prev = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(True)
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7730,7 +7730,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("are_deterministic_algorithms_enabled", source)
 
     def test_backward_prologue_elides_tokens_when_zero(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7744,7 +7744,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("[None]", source)
 
     def test_backward_prologue_deterministic_check_when_false(self):
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7796,7 +7796,7 @@ def forward(self, primals_1, tangents_1):
         h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
         h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7833,7 +7833,7 @@ def forward(self, primals_1, tangents_1):
 
         clone_op.register_autograd(backward, setup_context=setup_context)
 
-        with self._capture_codegen_source("backward_prologue") as captured:
+        with capture_codegen_source("backward_prologue") as captured:
 
             def fn(x, x1):
                 return torch.ops.test._bw_prologue_clone_mutate(x, x1)
@@ -7886,7 +7886,7 @@ def forward(self, primals_1, tangents_1):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_prologue_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with self._capture_codegen_source("backward_prologue") as captured:
+            with capture_codegen_source("backward_prologue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -7903,7 +7903,7 @@ def forward(self, primals_1, tangents_1):
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7918,7 +7918,7 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("tuple(out)", source)
 
     def test_backward_epilogue_no_codegen_for_inference(self):
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7929,7 +7929,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 0)
 
     def test_backward_epilogue_elides_rng_when_off(self):
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -7943,7 +7943,7 @@ def forward(self, primals_1, tangents_1):
         self.assertNotIn("_set_offset_", source)
 
     def test_backward_epilogue_elides_tokens_when_zero(self):
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -8003,7 +8003,7 @@ def forward(self, primals_1, tangents_1):
     def test_backward_epilogue_subclass_emits_wrap(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
 
             def f(x):
                 return x * 2
@@ -8036,7 +8036,7 @@ def forward(self, primals_1, tangents_1):
         h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
         h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("backward_epilogue") as captured:
+            with capture_codegen_source("backward_epilogue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -8087,7 +8087,7 @@ def forward(self, primals_1, tangents_1):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_backward_epilogue_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with self._capture_codegen_source("backward_epilogue") as captured:
+            with capture_codegen_source("backward_epilogue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -8153,7 +8153,7 @@ def forward(self, primals_1, tangents_1):
         h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
         try:
             with torch._functorch.config.patch(functionalize_rng_ops=True):
-                with self._capture_codegen_source("backward_epilogue") as captured:
+                with capture_codegen_source("backward_epilogue") as captured:
 
                     @torch.compile(backend="aot_eager")
                     def f(x):
@@ -8227,7 +8227,7 @@ def forward(self, primals_1, tangents_1):
         h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
         h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("backward_epilogue") as captured:
+            with capture_codegen_source("backward_epilogue") as captured:
 
                 def f(x):
                     return torch.ops.test.bw_epi_sub_tok_fwd(x) * 2
@@ -8310,7 +8310,7 @@ def forward(self, primals_1, tangents_1):
         h3 = _register_effectful_op(fwd_op2, EffectType.ORDERED)
         h4 = _register_effectful_op(bwd_op2, EffectType.ORDERED)
         try:
-            with self._capture_codegen_source("backward_epilogue") as captured:
+            with capture_codegen_source("backward_epilogue") as captured:
 
                 @torch.compile(backend="aot_eager")
                 def f(x):
@@ -8387,7 +8387,7 @@ def forward(self, primals_1, tangents_1):
         def dummy_wrap(out):
             return out
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
             _codegen_backward_epilogue(
                 fw_metadata, SimpleNamespace(grad_input_metas=[]), dummy_wrap
             )
@@ -8412,7 +8412,7 @@ def forward(self, primals_1, tangents_1):
         def dummy_wrap(out):
             return out
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
             _codegen_backward_epilogue(
                 fw_metadata, SimpleNamespace(grad_input_metas=[]), dummy_wrap
             )
@@ -8439,7 +8439,7 @@ def forward(self, primals_1, tangents_1):
         )
         subclass_meta = SimpleNamespace(grad_input_metas=[])
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
             _codegen_backward_epilogue(fw_metadata, subclass_meta, None)
 
         self.assertEqual(len(captured), 1)
@@ -8475,7 +8475,7 @@ def forward(self, primals_1, tangents_1):
         def dummy_wrap(out):
             return out
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
             _codegen_backward_epilogue(fw_metadata, subclass_meta, dummy_wrap)
 
         self.assertEqual(len(captured), 1)
@@ -8540,7 +8540,7 @@ def forward(self, primals_1, tangents_1):
             is_rng_op_functionalized=False,
         )
 
-        with self._capture_codegen_source("backward_epilogue") as captured:
+        with capture_codegen_source("backward_epilogue") as captured:
             _codegen_backward_epilogue(fw_metadata, None, None)
 
         self.assertEqual(len(captured), 1)
