@@ -293,12 +293,13 @@ void Engine::stop() {
   auto wait_duration =
       wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
-  for (auto& queue : device_ready_queues_) {
-    noBackward = noBackward && queue->empty();
+  auto num_queues = device_queues_size_.load(std::memory_order_acquire);
+  for (c10::DeviceIndex i = 0; i < num_queues; ++i) {
+    noBackward = noBackward && device_ready_queues_[i]->empty();
   }
   if (noBackward && wait_duration > 0.0f) {
-    for (auto& queue : device_ready_queues_) {
-      queue->pushShutdownTask();
+    for (c10::DeviceIndex i = 0; i < num_queues; ++i) {
+      device_ready_queues_[i]->pushShutdownTask();
     }
     // Do not wait for termination of global threads on Windows
     // Because CRT terminates DLL threads before calling
@@ -1614,8 +1615,12 @@ void Engine::ensure_device_queues_allocated(c10::DeviceIndex required_size) {
 void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
   TORCH_INTERNAL_ASSERT(
       device_index >= 0 &&
-      device_index < device_queues_size_.load(std::memory_order_acquire),
+          device_index < device_queues_size_.load(std::memory_order_acquire),
       "Device index out of bounds");
+
+  if (stopped_) {
+    return;
+  }
 
   if (device_thread_ready_[device_index].load(std::memory_order_acquire)) {
     return;
@@ -1639,6 +1644,9 @@ void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
       track_bad_autograd_forks();
       ensure_thread_pool_initialized();
 
+      C10_LOG_API_USAGE_ONCE(
+          "torch.autograd.thread_start." + std::to_string(device_index));
+
       try {
         std::thread t(
             &Engine::thread_init,
@@ -1651,13 +1659,17 @@ void Engine::ensure_device_thread_started(c10::DeviceIndex device_index) {
         // Reset so future callers can retry thread creation.
         device_thread_started_[device_index].store(
             false, std::memory_order_release);
-        throw;
+        throw; // @allow-raw-throw
       }
     }
   }
 
   while (!device_thread_ready_[device_index].load(std::memory_order_acquire)) {
     std::this_thread::yield();
+  }
+
+  if (stopped_) {
+    device_ready_queues_[device_index]->pushShutdownTask();
   }
 }
 

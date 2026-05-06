@@ -6,6 +6,7 @@ import contextlib
 import functools
 import gc
 import io
+import json
 import math
 import operator
 import os
@@ -16580,6 +16581,163 @@ instantiate_device_type_tests(
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
+
+
+class TestLazyAutogradEngineInit(TestCase):
+    """Tests verifying that autograd device threads are initialized lazily."""
+
+    def test_no_device_threads_before_backward(self):
+        """Importing torch must not start any device threads."""
+        code = """import torch
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertNotRegex(s, r"torch\.autograd\.thread_start")
+
+    def test_cpu_backward_creates_no_device_threads(self):
+        """CPU-only backward must not start any device threads."""
+        code = """import torch
+x = torch.randn(4, 4, requires_grad=True)
+(x @ x.T).sum().backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertNotRegex(s, r"torch\.autograd\.thread_start")
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_gpu_backward_starts_only_used_device_thread(self):
+        """Backward on cuda:0 starts thread 0 but no other device threads."""
+        code = """import torch
+x = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+(x @ x.T).sum().backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertRegex(s, r"torch\.autograd\.thread_start\.0\b")
+        for i in range(1, torch.cuda.device_count()):
+            self.assertNotRegex(s, rf"torch\.autograd\.thread_start\.{i}\b")
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 if TEST_CUDA else True,
+        "requires 2+ GPUs",
+    )
+    def test_gpu_backward_on_non_zero_device(self):
+        """Backward on cuda:1 starts thread 1 only, not thread 0 or others."""
+        code = """import torch
+x = torch.randn(4, 4, device="cuda:1", requires_grad=True)
+(x @ x.T).sum().backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertRegex(s, r"torch\.autograd\.thread_start\.1\b")
+        self.assertNotRegex(s, r"torch\.autograd\.thread_start\.0\b")
+        for i in range(2, torch.cuda.device_count()):
+            self.assertNotRegex(s, rf"torch\.autograd\.thread_start\.{i}\b")
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(IS_WINDOWS, "requires /proc filesystem")
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 if TEST_CUDA else True,
+        "requires 2+ GPUs",
+    )
+    def test_multi_device_backward_starts_both_threads(self):
+        """Backward on cuda:0 then cuda:1 starts both device threads."""
+        code = """import torch
+import os
+import json
+
+x = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+(x @ x.T).sum().backward()
+y = torch.randn(4, 4, device="cuda:1", requires_grad=True)
+(y @ y.T).sum().backward()
+
+pid = os.getpid()
+task_path = f"/proc/{pid}/task"
+thread_names = set()
+for tid in os.listdir(task_path):
+    try:
+        with open(f"{task_path}/{tid}/comm") as f:
+            thread_names.add(f.read().strip())
+    except FileNotFoundError:
+        pass
+print(json.dumps(sorted(thread_names)))
+"""
+        stdout, _ = TestCase.run_process_no_exception(code)
+        thread_names = set(json.loads(stdout.decode()))
+        self.assertIn("pt_autograd_0", thread_names)
+        self.assertIn("pt_autograd_1", thread_names)
+        for i in range(2, torch.cuda.device_count()):
+            self.assertNotIn(f"pt_autograd_{i}", thread_names)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(IS_WINDOWS, "requires /proc filesystem")
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 if TEST_CUDA else True,
+        "requires 2+ GPUs",
+    )
+    def test_concurrent_backward_starts_both_threads(self):
+        """Concurrent backward on cuda:0 and cuda:1 initializes both threads safely."""
+        code = """import torch
+import os
+import json
+import threading
+
+barrier = threading.Barrier(2)
+
+def backward_on_device(device):
+    x = torch.randn(4, 4, device=device, requires_grad=True)
+    loss = (x @ x.T).sum()
+    barrier.wait()
+    loss.backward()
+
+t0 = threading.Thread(target=backward_on_device, args=("cuda:0",))
+t1 = threading.Thread(target=backward_on_device, args=("cuda:1",))
+t0.start()
+t1.start()
+t0.join()
+t1.join()
+
+pid = os.getpid()
+task_path = f"/proc/{pid}/task"
+thread_names = set()
+for tid in os.listdir(task_path):
+    try:
+        with open(f"{task_path}/{tid}/comm") as f:
+            thread_names.add(f.read().strip())
+    except FileNotFoundError:
+        pass
+print(json.dumps(sorted(thread_names)))
+"""
+        stdout, _ = TestCase.run_process_no_exception(code)
+        thread_names = set(json.loads(stdout.decode()))
+        self.assertIn("pt_autograd_0", thread_names)
+        self.assertIn("pt_autograd_1", thread_names)
+        for i in range(2, torch.cuda.device_count()):
+            self.assertNotIn(f"pt_autograd_{i}", thread_names)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(IS_WINDOWS, "fork not supported on Windows")
+    def test_fork_after_backward_prevents_new_threads(self):
+        """After backward + fork, child cannot start new device threads."""
+        code = """import torch
+import os
+import sys
+
+x = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+(x @ x.T).sum().backward()
+
+pid = os.fork()
+if pid == 0:
+    try:
+        y = torch.randn(4, 4, device="cuda:0", requires_grad=True)
+        (y @ y.T).sum().backward()
+    except RuntimeError as e:
+        if "fork" in str(e).lower():
+            print("FORK_ERROR_CAUGHT", file=sys.stderr)
+    os._exit(0)
+else:
+    os.waitpid(pid, 0)
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertIn("FORK_ERROR_CAUGHT", s)
+
 
 if __name__ == "__main__":
     run_tests()
