@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
+from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
@@ -687,6 +688,87 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             forward_inputs["l2_input_y"].dtype,
             torch.float16 if enable_submodule_cast else torch.float32,
         )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_forward_inputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="input",
+        )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_checkpoint_recompute_casts_outputs(self):
+        self._test_checkpoint_recompute_casts(
+            recompute_cast="output",
+        )
+
+    def _test_checkpoint_recompute_casts(self, recompute_cast: str):
+        class RecordingLinear(nn.Linear):
+            def __init__(self) -> None:
+                super().__init__(1, 1)
+                self.input_dtypes: list[torch.dtype] = []
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.input_dtypes.append(x.dtype)
+                return super().forward(x)
+
+        class Model(nn.Module):
+            def __init__(self, checkpoint_input_dtype: torch.dtype) -> None:
+                super().__init__()
+                self.linear1 = RecordingLinear()
+                self.checkpoint_input_dtype = checkpoint_input_dtype
+                self.linear1_output_dtypes: list[torch.dtype] = []
+
+            def checkpointed_linear1(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.linear1(x)
+                self.linear1_output_dtypes.append(x.dtype)
+                return x
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.to(dtype=self.checkpoint_input_dtype)
+                x = checkpoint(
+                    self.checkpointed_linear1,
+                    x,
+                    use_reentrant=False,
+                    early_stop=False,
+                )
+                return x.float().sum()
+
+        if recompute_cast == "input":
+            checkpoint_input_dtype = torch.float32
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+            )
+        elif recompute_cast == "output":
+            checkpoint_input_dtype = torch.bfloat16
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+                output_dtype=torch.float32,
+                cast_forward_inputs=False,
+            )
+        else:
+            raise AssertionError(f"Unknown recompute_cast: {recompute_cast}")
+
+        torch.manual_seed(42)
+        model = Model(checkpoint_input_dtype).to(device_type)
+        fully_shard(model.linear1, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        inp = torch.randn(8, 1, device=device_type.type)
+        model(inp).backward()
+        if recompute_cast == "input":
+            self.assertEqual(
+                model.linear1.input_dtypes,
+                [torch.bfloat16, torch.bfloat16],
+            )
+        else:
+            self.assertEqual(
+                model.linear1_output_dtypes,
+                [torch.float32, torch.float32],
+            )
 
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
