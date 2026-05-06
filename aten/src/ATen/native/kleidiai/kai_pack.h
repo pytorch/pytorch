@@ -25,7 +25,7 @@ void kai_pack_rhs_groupwise_int4(
   const size_t sr = ukernel.get_sr();
   auto weight_packed_data =
       reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
   auto scales_data = scales.const_data_ptr();
 
   if (weight_data == nullptr) {
@@ -73,9 +73,9 @@ void kai_pack_rhs_channelwise_int4(
   const size_t sr = ukernel.get_sr();
   auto weight_packed_data =
       reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
 
-  const auto scales_data = scales.to(kFloat).data_ptr<float>();
+  const auto scales_data = scales.to(kFloat).const_data_ptr<float>();
 
   if (weight_data == nullptr) {
     AT_ERROR("kai_pack_rhs_channelwise_int4: Weight data pointer is null");
