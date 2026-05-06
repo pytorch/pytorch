@@ -26,6 +26,10 @@ __all__ = [
 ]
 
 
+# Indent unit for nested repr output. Two spaces per level.
+_INDENT = "  "
+
+
 class IntVar:
     """Indicates that a scalar integer argument is dynamic (no implicit range).
 
@@ -144,7 +148,7 @@ class TensorSpec:
     def __repr__(self) -> str:
         lines = ["Tensor:"]
         for i, spec in enumerate(self._specs):
-            lines.append(f"  {i}: {spec!r}")
+            lines.append(f"{_INDENT}{i}: {spec!r}")
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
@@ -199,7 +203,7 @@ class ParamsSpec:
         for k, v in self._named_args.items():
             v_repr = repr(v)
             if "\n" in v_repr:
-                indented = "\n".join("  " + line for line in v_repr.splitlines())
+                indented = "\n".join(_INDENT + line for line in v_repr.splitlines())
                 lines.append(f"{k}:\n{indented}")
             else:
                 lines.append(f"{k}: {v_repr}")
@@ -233,6 +237,7 @@ class ShapesSpec:
     def __init__(
         self,
         params: ParamsSpec | None = None,
+        *,
         globals: Any = None,
         assumptions: Any = None,
     ) -> None:
@@ -242,17 +247,13 @@ class ShapesSpec:
             raise NotImplementedError("ShapesSpec.assumptions is not supported yet")
         self._params = params
 
-    @property
-    def params(self) -> ParamsSpec | None:
-        return self._params
-
     def __repr__(self) -> str:
         lines = ["shapes_spec:"]
         if self._params is not None:
-            lines.append("  params:")
+            lines.append(f"{_INDENT}params:")
             param_repr = repr(self._params)
             for line in param_repr.splitlines():
-                lines.append("    " + line)
+                lines.append(_INDENT * 2 + line)
         return "\n".join(lines)
 
     def to_jsonable(self) -> dict[str, Any]:
@@ -260,3 +261,20 @@ class ShapesSpec:
             "type": "ShapesSpec",
             "params": None if self._params is None else self._params.to_jsonable(),
         }
+
+
+def lookup_spec_from_dynamo_source(
+    source: Any, shapes_spec: ShapesSpec | None
+) -> LeafSpec:
+    """Look up the spec for a function input arg from the shapes_spec.
+
+    Only supports LocalSource with is_input=True (direct function args).
+    Returns TensorSpec, IntVar, int, or None.
+
+    Duck-typed on `source` to avoid a hard dependency on dynamo's Source class.
+    """
+    if shapes_spec is None or shapes_spec._params is None:
+        return None
+    if not getattr(source, "is_input", False):
+        return None
+    return shapes_spec._params._named_args.get(source.local_name)

@@ -228,7 +228,7 @@ class TestParamsSpecConstruction(TestCase):
 
     def test_shapes_spec(self):
         ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}))
-        self.assertIsNotNone(ss.params)
+        self.assertIsNotNone(ss._params)
 
     def test_shapes_spec_repr(self):
         sv = ShapeVar("batch")
@@ -384,7 +384,7 @@ class TestShapeVarCompile(TestCase):
         backend = EagerAndRecordGraphs()
 
         def fn(x, y):
-            return x + y
+            return x * 19, y * 10
 
         compiled = torch.compile(
             fn,
@@ -393,11 +393,12 @@ class TestShapeVarCompile(TestCase):
                 params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
             ),
         )
-        compiled(torch.randn(4, 3), torch.randn(4, 3))
+        x = torch.randn(12, 3)
+        compiled(x, torch.randn(4, 3))
         # y not in spec -> all static; changing y's shape recompiles each time
-        compiled(torch.randn(8, 3), torch.randn(8, 3))
-        compiled(torch.randn(12, 3), torch.randn(12, 3))
-        compiled(torch.randn(16, 3), torch.randn(16, 3))
+        compiled(x, torch.randn(8, 3))
+        compiled(x, torch.randn(12, 3))
+        compiled(x, torch.randn(16, 3))
         self.assertEqual(len(backend.graphs), 4)
 
         # x dim 0 is SymInt (ShapeVar), x dim 1 is static; y is fully static
