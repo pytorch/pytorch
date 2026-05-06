@@ -3,13 +3,14 @@
 import copy
 import gc
 import inspect
+import logging
 import os
 import runpy
 import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -67,6 +68,8 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+log = logging.getLogger(__name__)
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -337,6 +340,24 @@ class DeviceTypeTestBase(TestCase):
     # in the future.
     op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
+    # An optional mechanism to limit which ops generate test variants.
+    # When set, only ops whose full_name is in this collection will generate tests.
+    # This is useful for less mature backends that only implement a few operators.
+    # Keys are OpInfo.full_name (e.g. "add", "mul", "linalg.norm").
+    # If None (default), all ops in the @ops decorator's op_list generate variants.
+    op_allowlist = None  # type: Optional[Collection[str]]
+
+    # An optional skip mechanism built upon instantiate_device_type_tests(),
+    # designed to facilitate skipping either an entire class or specific test cases
+    # within a class.
+    #
+    # Format:
+    #   test_exclusions = {
+    #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
+    #       "TestClassB": "*",                    # Global: Skips the entire class
+    #   }
+    test_exclusions: ClassVar[dict[str, Collection[str]]]
+
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
 
@@ -387,6 +408,30 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def _get_test_exclusions(cls, test_class_name):
+        test_exclusions = getattr(cls, "test_exclusions", None)
+        if test_exclusions is not None and test_class_name in test_exclusions:
+            return test_exclusions[test_class_name]
+        return []
+
+    @classmethod
+    def _apply_op_allowlist(cls, ops):
+        """Filters ops.op_list to only include ops declared in op_allowlist.
+
+        If op_allowlist is None (default), no filtering is applied.
+        If op_allowlist is set, only ops whose full_name is in the collection
+        will generate test variants.
+
+        Args:
+            ops: The ops decorator instance whose op_list will be filtered.
+        """
+        if cls.op_allowlist is None:
+            return
+
+        supported_set = set(cls.op_allowlist)
+        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
 
     @classmethod
     def _init_and_get_primary_device(cls):
@@ -946,6 +991,11 @@ def instantiate_device_type_tests(
     for base in get_desired_device_type_test_bases(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
+        skipped = base._get_test_exclusions(generic_test_class.__name__)
+        # Skip the entire class
+        if "*" in skipped:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupported runtime class:
@@ -977,6 +1027,9 @@ def instantiate_device_type_tests(
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
+                # Skip the specified methods.
+                if name in skipped:
+                    continue
                 test = getattr(generic_test_class, name)
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
@@ -1125,6 +1178,9 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        # Order matters: op_allowlist filters first, then op_overrides adds decorators
+        # This ensures op_overrides only applies to ops that passed the op_allowlist filter
+        device_cls._apply_op_allowlist(self)
         device_cls._apply_op_overrides(self)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
@@ -1245,9 +1301,13 @@ class ops(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print(f"Failed to instantiate {test_name} for op {op.name}!")
+                    log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
         if op is check_exhausted_iterator:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
             raise ValueError(
                 "An empty op_list was passed to @ops. "
                 "Note that this may result from reuse of a generator."
@@ -1733,6 +1793,19 @@ def onlyPRIVATEUSE1(fn):
         reason = f"Skip as torch has no module of {device_type}"
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
+
+
+def onlyAccelerator(fn):
+    """Skip test if not running on an accelerator device (i.e., skip on CPU and meta)."""
+
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type in ("cpu", "meta"):
+            reason = "onlyAccelerator: doesn't run on CPU or meta devices"
+            raise unittest.SkipTest(reason)
+        return fn(self, *args, **kwargs)
+
+    return only_fn
 
 
 def onlyCUDAAndPRIVATEUSE1(fn):

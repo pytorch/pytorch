@@ -1095,7 +1095,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
 @dataclass(frozen=True, slots=True)
 class _DimRange:
     """
-    This represents an dimension of a tensor and the corresponding
+    This represents a dimension of a tensor and the corresponding
     min and max values it can take.  Don't create this
     class directly; instead, use :func:`mark_dynamic`.
     """
@@ -1162,6 +1162,7 @@ def mark_unbacked(
                 t._dynamo_strict_unbacked_indices = set()
 
             t._dynamo_strict_unbacked_indices.add(index)
+            t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
             return
 
         if not hasattr(t, "_specialized_on"):

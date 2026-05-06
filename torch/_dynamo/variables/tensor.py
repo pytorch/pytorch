@@ -651,43 +651,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
-    def call_id(self, tx: "InstructionTranslator") -> VariableTracker:
-        if not self.source:
-            unimplemented(
-                gb_type="Unsupported call_id() without source",
-                context=f"call_id {self}",
-                explanation="call_id() not supported for sourceless TensorVariable.",
-                hints=[],
-            )
-
-        assert self.source
-        # For local source, we associate the real value. We use this real value
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        _input_associated_real_value = None
-        try:
-            _input_associated_real_value = eval(self.source.name, scope)
-        except Exception as exc:
-            unimplemented(
-                gb_type="Error getting associated real value",
-                context=f"call_id {self}",
-                explanation="Dynamo encountered an error while trying to "
-                "get the associated real value.",
-                hints=[],
-                from_exc=exc,
-            )
-
-        if _input_associated_real_value is None:
-            unimplemented(
-                gb_type="call_id() without associated real value",
-                context=f"call_id {self}",
-                explanation="Dynamo could not find an associated real value for the tensor.",
-                hints=[],
-            )
-
-        install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
-        id_value = id(_input_associated_real_value)
-        return VariableTracker.build(tx, id_value)
-
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return self.ndim > 0
 
@@ -2152,6 +2115,22 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
         return None
 
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def is_python_hashable(self) -> bool:
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -2302,6 +2281,22 @@ class SymNodeVariable(VariableTracker):
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         return self.nb_int_impl(tx)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
 
     def nb_float_impl(
         self,

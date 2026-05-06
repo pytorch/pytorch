@@ -2816,7 +2816,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
         _buffer, layout = as_storage_and_layout(x, freeze=False)
-        # pad the stride here so we will NOT claim an tensor as contiguous
+        # pad the stride here so we will NOT claim a tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
             assert isinstance(layout, FlexibleLayout), type(layout)
@@ -6387,6 +6387,19 @@ class ExternKernel(InputsKernel):
                     if kernel._overloadname == "default"
                     else kernel.__name__.replace(".", "_")
                 )
+                # If the op has a versioned c_shim entry, call the latest _v{N}
+                # variant so new AOTI artifacts match the current op schema. The
+                # unversioned shim is retained solely for BC with existing
+                # already-compiled artifacts.
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                version_info = inductor_fallback_ops.get(f"aten.{kernel.__name__}", {})
+                latest_version = max(
+                    (int(v[1:]) for v in version_info if v.startswith("v")),
+                    default=1,
+                )
+                if latest_version > 1:
+                    opname = f"{opname}_v{latest_version}"
                 self.cpp_kernel_name = f"at::_ops::{opname}::call"
             else:
                 self.cpp_kernel_name = kernel._schema.name
@@ -8248,7 +8261,12 @@ class DynamicSelectStorageOffset(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.index, unbacked_only)
+        return (
+            get_free_symbols(self.index, unbacked_only)
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.base_offset, unbacked_only))
+            .union(get_free_symbols(self.base_dim_stride, unbacked_only))
+        )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
@@ -8299,8 +8317,11 @@ class DynamicSliceSize(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.start, unbacked_only).union(
-            get_free_symbols(self.end, unbacked_only)
+        return (
+            get_free_symbols(self.start, unbacked_only)
+            .union(get_free_symbols(self.end, unbacked_only))
+            .union(get_free_symbols(self.size, unbacked_only))
+            .union(get_free_symbols(self.step, unbacked_only))
         )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -10416,6 +10437,9 @@ class NonTensorObj(IRNode):
     ) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
+    def realize(self) -> str | None:
+        return None
+
 
 @ir_dataclass
 class TorchBindObject(NonTensorObj):
@@ -10552,11 +10576,18 @@ class _CollectiveKernel(FallbackKernel):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        device = None
         for tensor_arg in tensor_args:
+            if isinstance(tensor_arg, NonTensorObj):
+                continue
             tensor_arg.realize()
             V.graph.mark_buffer_mutated(tensor_arg.get_name())
-
-        device = tensor_args[0].get_device()
+            if device is None:
+                device = tensor_arg.get_device()
+        assert device is not None, (
+            f"In-place collective {kernel} requires at least one tensor "
+            f"argument; got only non-tensor IR nodes."
+        )
         packed = cls(
             NoneLayout(device=device),
             kernel,
