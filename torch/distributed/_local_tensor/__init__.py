@@ -1241,6 +1241,10 @@ class LocalTensorMode(TorchDispatchMode):
     functions over ranks.
     """
 
+    @classmethod
+    def ignore_compile_internals(cls) -> bool:
+        return True
+
     # What ranks this local tensor mode is operating over
     def __init__(self, ranks: int | frozenset[int]):
         if isinstance(ranks, int):
