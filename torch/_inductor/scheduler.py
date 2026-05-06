@@ -4215,6 +4215,128 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def _benchmark_fused_choices(
+        self,
+        multi_node: ir.MultiTemplateBuffer,
+        future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]],
+        device: torch.device,
+        epilogue_fusion: bool,
+    ) -> tuple[float, TritonTemplateCallerBase | None, dict[Any, float]]:
+        """
+        Benchmark compiled fused kernels and return (best_time, best_choice, timings).
+
+        Waits for each compilation future, then benchmarks the fused module
+        with the corresponding Triton caller swapped in.
+        """
+        min_ms_fused = float("inf")
+        ms_fused_choice: TritonTemplateCallerBase | None = None
+        new_timings: dict[Any, float] = {}
+        for choice, future, mod_fused in future_choices:
+            try:
+                if future is not None:
+                    future.result()
+            except Exception as e:
+                if fusion_log.isEnabledFor(logging.DEBUG):
+                    fusion_log.debug(  # noqa: G200
+                        "Exception in compiling %s: %s",
+                        "prologue" if not epilogue_fusion else "epilogue",
+                        str(e),
+                    )
+                continue
+            with multi_node.swap_as_triton_caller(choice):
+                ms_fused, path = self.benchmark_codegened_module(
+                    mod_fused,
+                    # pyrefly: ignore [bad-argument-type]
+                    device,
+                )
+                new_timings[choice] = ms_fused
+                if ms_fused < min_ms_fused:
+                    min_ms_fused = ms_fused
+                    ms_fused_choice = choice
+        return min_ms_fused, ms_fused_choice, new_timings
+
+    def _autotune_fused_epilogue(
+        self,
+        multi_node: ir.MultiTemplateBuffer,
+        node_list_fused: Sequence[BaseSchedulerNode],
+        node_list_2: Sequence[BaseSchedulerNode],
+        device: torch.device,
+        log_fusion: Callable[[float, float, float], None],
+    ) -> FusionResult:
+        """
+        Autotune all Triton configs at fusion time: benchmark each
+        config fused with the epilogue, comparing against extern baseline.
+        """
+        from torch._inductor.codegen.simd import CantSplit
+
+        # Benchmark extern callers (cuBLAS) directly via bmreq,
+        # bypassing the autotuning pipeline.
+        extern_time = float("inf")
+        for choice in multi_node.choices:
+            if not isinstance(choice, TritonTemplateCallerBase):
+                # pyrefly: ignore [missing-attribute]
+                assert choice.bmreq is not None
+                # pyrefly: ignore [missing-attribute]
+                timing = choice.bmreq.benchmark()
+                extern_time = min(extern_time, timing)
+
+        if extern_time == float("inf"):
+            fusion_log.debug("No extern callers found, skipping fusion-time autotuning")
+            return FusionResult.fuse(False)
+
+        ms2, _ = self.benchmark_fused_nodes(node_list_2)
+
+        # Compile all Triton choices with fusion
+        future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
+        for choice in multi_node.choices:
+            if not isinstance(choice, TritonTemplateCallerBase):
+                continue
+            with multi_node.swap_as_triton_caller(choice):
+                try:
+                    future_choices.append(
+                        (
+                            choice,
+                            *self.compile_kernel(node_list_fused),
+                        )
+                    )
+                except CantSplit:
+                    continue
+
+        if not future_choices:
+            return FusionResult.fuse(False)
+
+        def benchmark_fused_autotune() -> bool:
+            assert isinstance(multi_node, ir.MultiTemplateBuffer)
+            min_ms_fused, ms_fused_choice, new_timings = self._benchmark_fused_choices(
+                multi_node,
+                future_choices,
+                # pyrefly: ignore [bad-argument-type]
+                device,
+                epilogue_fusion=True,
+            )
+
+            baseline_time = extern_time
+            if (
+                config.autotune_at_fusion_time_compare_unfused
+                and ms_fused_choice is not None
+            ):
+                assert hasattr(ms_fused_choice, "bmreq")
+                unfused_triton_time = ms_fused_choice.bmreq.benchmark()
+                baseline_time = min(extern_time, unfused_triton_time)
+
+            log_fusion(min_ms_fused, baseline_time, ms2)
+
+            if min_ms_fused < (baseline_time + ms2) and ms_fused_choice is not None:
+                # pyrefly: ignore [missing-attribute]
+                multi_node.finalize_as_triton_caller(ms_fused_choice)
+                multi_node._choice_timings[None] = new_timings
+                return True
+            return False
+
+        return FusionResult.from_callable(
+            benchmark_fused_autotune, future_choices[0][1]
+        )
+
     def _has_layout_conflict_for_template(
         self, multi_node: ir.MultiTemplateBuffer
     ) -> bool:
@@ -4490,6 +4612,15 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            if config.autotune_at_fusion_time and epilogue_fusion:
+                return self._autotune_fused_epilogue(
+                    multi_node,
+                    node_list_fused,
+                    node_list_2,
+                    device,
+                    log_fusion,
+                )
+
             hint_override_best_fusion_choice: dict[
                 int | None, TritonTemplateCallerBase
             ] = {}
@@ -4511,29 +4642,11 @@ class Scheduler:
                             )
                         )
 
-                min_ms_fused = float("inf")
-                ms_fused_choice: TritonTemplateCallerBase | None = None
-                new_timings = {}
-                for choice, future, mod_fused in future_choices:
-                    try:
-                        if future is not None:
-                            future.result()
-                    except Exception as e:
-                        if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
-                                e,
-                            )
-                        continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, device
-                        )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
-                            ms_fused_choice = choice
+                min_ms_fused, ms_fused_choice, new_timings = (
+                    self._benchmark_fused_choices(
+                        multi_node, future_choices, device, epilogue_fusion
+                    )
+                )
                 multi_node._choice_timings[hint_override] = new_timings
                 assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
                 hint_override_best_fusion_choice[hint_override] = ms_fused_choice
