@@ -452,7 +452,6 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.mtia.memory
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
