@@ -125,9 +125,9 @@ __global__ void vectorized_scatter_add_kernel(
   scalar_t* dst_slice = reinterpret_cast<scalar_t*>(
       reinterpret_cast<char*>(self_data) + ind * self_stride_bytes);
 
-  for (int32_t off = lane * Alignment;
+  for (int32_t off = (blockIdx.y * threads_per_entry + lane) * Alignment;
        off < slice_size_bytes;
-       off += threads_per_entry * Alignment) {
+       off += gridDim.y * threads_per_entry * Alignment) {
 
     auto vec = at::native::memory::ld_vec<Alignment>(
         reinterpret_cast<const char*>(src_data) + entry_id * static_cast<int32_t>(src_stride_bytes) + off);
@@ -150,10 +150,15 @@ void vectorized_scatter_add_kernel_launch(
   int64_t threads_per_entry = std::min(num_vectors, max_num_threads);
   int64_t entries_per_block = max_num_threads / threads_per_entry;
   int64_t block_size = entries_per_block * threads_per_entry;
-  int64_t num_blocks = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
+  int64_t grid_x = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
+  uint32_t grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+  grid_y = std::min(
+      static_cast<uint32_t>(at::ceil_div(num_vectors, threads_per_entry)),
+      grid_y);
 
+  dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
   vectorized_scatter_add_kernel<Alignment, scalar_t, index_t>
-      <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
+      <<<grid, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
       self_data, src_data, idx, num_ind, slice_size_in_bytes,
       self_dim_size, self_stride_bytes, src_stride_bytes,
       static_cast<int>(threads_per_entry), static_cast<int>(entries_per_block));

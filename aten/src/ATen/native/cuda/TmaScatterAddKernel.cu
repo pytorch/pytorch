@@ -123,7 +123,7 @@ void tma_scatter_add_kernel_launch(
     constexpr int threads_per_entry = 32;
     int chunk_elems = std::min(D, static_cast<int>(512 / sizeof(scalar_t)));
 
-    int entries_per_block = max_threads / threads_per_entry;
+    int entries_per_block = std::min(max_threads / threads_per_entry, num_ind);
     int block_size = entries_per_block * threads_per_entry;
 
     int buf_elems = 2 * chunk_elems;
