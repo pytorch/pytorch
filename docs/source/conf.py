@@ -617,6 +617,7 @@ coverage_ignore_functions = [
     "get_tensor_meta",
     # torch.fx.passes.split_module
     "split_module",
+    "split_module_simple",
     # torch.fx.passes.split_utils
     "getattr_recursive",
     "split_by_tags",
@@ -1119,7 +1120,6 @@ coverage_ignore_functions = [
     # torch.utils.mkldnn
     "to_mkldnn",
     # torch.utils.mobile_optimizer
-    "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",

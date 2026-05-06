@@ -1,11 +1,10 @@
 """Functional interface."""
 
-import dataclasses
 import importlib
 import math
 import warnings
 from collections.abc import Callable
-from typing import Any as _Any, Literal, Optional, TYPE_CHECKING
+from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -37,6 +36,7 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3654,172 +3654,6 @@ def binary_cross_entropy_with_logits(
     )
 
 
-@dataclasses.dataclass(slots=True, frozen=True)
-class LinearCrossEntropyOptions:
-    """Configuration for the chunked implementation of
-    :func:`linear_cross_entropy`.
-
-    The chunked implementation processes the batch dimension in
-    pieces, so the full ``(num_batches, num_classes)`` logits tensor
-    is never materialized at once. The trade-off is a small amount of
-    kernel-launch overhead in exchange for substantially lower peak
-    memory — useful when ``num_classes`` is large relative to
-    ``in_features`` (e.g. an LLM vocabulary head against a
-    comparatively small hidden state).
-
-    Pass ``options=None`` to :func:`linear_cross_entropy` to use the
-    reference implementation (full ``logits = linear(input, weight)``
-    followed by :func:`cross_entropy`). Pass an instance of this class
-    to opt into the chunked path.
-
-    The chunked path supports a subset of
-    :func:`linear_cross_entropy`'s features: ``reduction`` must be
-    ``"mean"`` or ``"sum"``, ``label_smoothing`` must be ``0.0``,
-    ``target`` must contain class indices (``torch.int64``), and the
-    loss must be 2-D (no ``out_features``). If any of those does not
-    hold, the call falls through to the reference implementation
-    regardless of ``options``.
-
-    Example::
-
-        options = LinearCrossEntropyOptions(
-            chunking_method="aspect_ratio:2",
-            acc_dtype=torch.float32,
-        )
-        loss = linear_cross_entropy(
-            input,
-            weight,
-            target,
-            reduction="sum",
-            options=options,
-        )
-    """
-
-    allow_retain_graph: bool = False
-    """Allow ``retain_graph=True`` on backward.
-
-    When ``False`` (default), backward consumes pre-computed gradient
-    buffers in place; a second ``.backward()`` raises ``RuntimeError``.
-
-    When ``True``, the buffers are preserved at the cost of one extra
-    gradient-sized allocation per call.
-
-    Higher-order autograd (gradgrad, forward-mode AD) is unsupported.
-    """
-
-    batch_chunk_size: int | None = None
-    """Number of batch rows processed per chunk.
-
-    The op loops over ``ceil(num_batches / batch_chunk_size)`` chunks.
-    Smaller values reduce peak memory but launch more kernels; the
-    default ``None`` means a single chunk (no actual chunking).
-
-    Cannot be combined with :attr:`chunking_method`: if both are set
-    and the heuristic-computed chunk size disagrees with this value, a
-    ``ValueError`` is raised. Pass only one.
-    """
-
-    chunking_method: str | None = None
-    """Heuristic for selecting :attr:`batch_chunk_size` from input sizes.
-
-    Supported methods:
-
-    - "aspect_ratio" — sizes each chunk so its ``(batch_chunk_size,
-      num_classes)`` logits buffer uses about the same memory as the
-      full ``(num_batches, in_features)`` input.  Computed as
-      ``batch_chunk_size = next_pow2(ceil(num_batches /
-      ceil(num_classes / in_features)))``.  Suitable when
-      ``num_classes`` is much larger than ``in_features`` (LLM
-      vocabulary heads); reduces to ``next_pow2(num_batches)`` when
-      ``num_classes <= in_features``.
-    - ``"aspect_ratio:N"`` for ``N >= 1`` — same heuristic, then
-      divides the batch chunk size by ``N``. Reduces peak memory
-      roughly by a factor of ``N`` at the cost of more chunks.
-    - ``None`` (default) — use :attr:`batch_chunk_size` directly.
-    """
-
-    acc_policy: Literal["memory", "accurate"] = "memory"
-    """Internal-precision policy when :attr:`acc_dtype` differs from
-    the input dtype.
-
-    Controls which intermediate tensors (softmax workspace,
-    input-gradient accumulator) are stored in :attr:`acc_dtype` versus
-    the input dtype:
-
-    - ``"memory"`` (default) — uses :attr:`acc_dtype` only where it's
-      needed for gradient correctness. Lower peak memory.
-    - ``"accurate"`` — uses :attr:`acc_dtype` for more intermediates,
-      noticeably improving input-gradient accuracy when the chunk size
-      is large relative to ``num_classes``. Higher peak memory.
-
-    Has no effect when :attr:`acc_dtype` equals the input dtype.
-    """
-
-    acc_dtype: torch.dtype | None = None
-    """Dtype for internal accumulation. Defaults to the input dtype.
-
-    Mixed-precision is currently limited to ``torch.float16``
-    or ``torch.bfloat16`` input and ``acc_dtype=torch.float32``.
-    """
-
-    def __post_init__(self):
-        if self.acc_policy not in {"memory", "accurate"}:
-            raise ValueError(
-                f"acc_policy must be 'memory' or 'accurate', got {self.acc_policy!r}"
-            )
-        if self.chunking_method is not None:
-            if ":" in self.chunking_method:
-                name, factor = self.chunking_method.split(":", 1)
-            else:
-                name, factor = self.chunking_method, "1"
-            if not (name == "aspect_ratio" and factor.isdigit() and int(factor) > 0):
-                raise ValueError(
-                    f"chunking_method must be 'aspect_ratio', 'aspect_ratio:N' for a positive integer N, or None, "
-                    f"got {self.chunking_method!r}"
-                )
-
-    def _adjust(self, num_batches, in_features, num_classes, dtype):
-        """Adjust options to input sizes and dtype.
-
-        Return a new LinearCrossEntropyOptions object with default
-        chunk sizes adjusted to the actual input sizes.
-        """
-        if self.batch_chunk_size is None:
-            batch_chunk_size = num_batches
-        else:
-            batch_chunk_size = min(self.batch_chunk_size, num_batches)
-
-        if self.chunking_method is not None:
-            if ":" in self.chunking_method:
-                factor = int(self.chunking_method.split(":", 1)[1])
-            else:
-                factor = 1
-
-            batch_chunk_size = (
-                1 << (-(num_batches // (num_classes // -in_features)) - 1).bit_length()
-            )
-            batch_chunk_size = min(batch_chunk_size // factor, num_batches)
-
-            if (
-                self.batch_chunk_size is not None
-                and self.batch_chunk_size != batch_chunk_size
-            ):
-                raise ValueError(
-                    f"batch_chunk_size (={self.batch_chunk_size}) and "
-                    f"chunking_method ('{self.chunking_method}') give different "
-                    f"chunk sizes ({self.batch_chunk_size} vs {batch_chunk_size}); "
-                    f"pass only one."
-                )
-
-        if self.acc_dtype is None:
-            acc_dtype = dtype
-        else:
-            acc_dtype = self.acc_dtype
-        return dataclasses.replace(
-            self, batch_chunk_size=max(1, batch_chunk_size), acc_dtype=acc_dtype
-        )
-
-
 def linear_cross_entropy(
     input: Tensor,
     linear_weight: Tensor,
@@ -3829,7 +3663,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
-    options: LinearCrossEntropyOptions | None = None,
+    options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3982,10 +3816,13 @@ def linear_cross_entropy(
 
         options = options._adjust(num_batches, in_features, num_classes, input.dtype)
 
-        # global import would result in a likely circular import
-        import torch.nn._linear_cross_entropy as m
+        # Local import: a top-level import here would trigger
+        # a circular init through torch.library.custom_op.
+        from torch.nn.modules.linear_cross_entropy import (
+            _linear_cross_entropy_batch_chunked,
+        )
 
-        result = m._linear_cross_entropy_batch_chunked(
+        result = _linear_cross_entropy_batch_chunked(
             input,
             linear_weight,
             target,
@@ -7160,6 +6997,30 @@ def grouped_mm(
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
 
 
+def _expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+    if v is None:
+        return []
+    elif not isinstance(v, list):
+        return [v]
+    else:
+        return v
+
+
+def _list_or_empty(l: list[_Any] | None) -> list[_Any]:
+    """Convert None to a list for native_functions list arguments.
+
+    native_functions cannot pass std::optional<ArrayRef<T>>, but can pass an
+    empty vector, so None arguments for lists must be converted explicitly.
+    """
+    return l if l else []
+
+
+def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+    if not isinstance(l, list):
+        l = [l]
+    return [li.value for li in l]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -7194,47 +7055,22 @@ def scaled_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         bias,
         output_dtype,
         contraction_dim,
@@ -7280,47 +7116,22 @@ def scaled_grouped_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_grouped_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         offs,
         bias,
         output_dtype,

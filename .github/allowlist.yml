@@ -37,4 +37,4 @@
 
 L1:
   - Ascend/pytorch
-  - riseproject-dev/pytorch
+  - riseproject-dev/pytorch-ci

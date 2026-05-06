@@ -1857,7 +1857,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     weight=w,
                     ignore_index=ii,
                     label_smoothing=ls,
-                    options=F.LinearCrossEntropyOptions(allow_retain_graph=allow_retain_graph, **options) if options is not None else None
+                    options=torch.nn.LinearCrossEntropyOptions(allow_retain_graph=allow_retain_graph, **options) if options is not None else None
                 )
                 for target_dtype in [torch.int64, dtype]:
                     if target_dtype.is_floating_point:

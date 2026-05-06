@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+from typing import TYPE_CHECKING
+
+
 from torch.nn.parameter import (  # usort: skip
     Buffer as Buffer,
     Parameter as Parameter,
@@ -6,6 +9,7 @@ from torch.nn.parameter import (  # usort: skip
     UninitializedParameter as UninitializedParameter,
 )
 from torch.nn.modules import *  # usort: skip # noqa: F403
+
 from torch.nn import (
     attention as attention,
     functional as functional,
@@ -15,10 +19,19 @@ from torch.nn import (
     parameter as parameter,
     utils as utils,
 )
-from torch.nn.functional import (
-    LinearCrossEntropyOptions as LinearCrossEntropyOptions,  # pyrefly: ignore [missing-module-attribute]
-)
 from torch.nn.parallel import DataParallel as DataParallel
+
+
+if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
+
+
+def __getattr__(name: str):
+    if name == "LinearCrossEntropyOptions":
+        from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
+
+        return LinearCrossEntropyOptions
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def factory_kwargs(kwargs):

@@ -6841,7 +6841,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
     reductions = ("mean", "sum", "none")
     chunked_reductions = ("mean", "sum")
 
-    LinearCrossEntropyOptions = torch.nn.functional.LinearCrossEntropyOptions
+    LinearCrossEntropyOptions = torch.nn.LinearCrossEntropyOptions
     # Samples with non-zero label_smoothing are not generated because
     # linear_cross_entropy relies on cross_entropy that fails on
     # composite-compliance tests (cross_entropy calls `masked_fill_`
@@ -22280,7 +22280,11 @@ op_db: list[OpInfo] = [
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.complex64),
+        # The MPS kernel handles complex64 (matching the forward dropout op),
+        # but autograd does not support complex backward of
+        # native_dropout_backward, so OpInfo tests cannot exercise it through
+        # the standard requires_grad path.
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(

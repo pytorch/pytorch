@@ -1,18 +1,19 @@
 # mypy: allow-untyped-defs
 import math
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
-from torch.nn.functional import (
-    LinearCrossEntropyOptions,  # pyrefly: ignore [missing-module-attribute]
-)
 
 from .distance import PairwiseDistance
 from .linear import Linear
 from .module import Module
 
+
+if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
 
 __all__ = [
     "L1Loss",
@@ -1504,7 +1505,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
     reduction: str
     ignore_index: int | None
     label_smoothing: float
-    options: LinearCrossEntropyOptions | None
+    options: "LinearCrossEntropyOptions | None"
 
     def __init__(
         self,
@@ -1518,7 +1519,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         weight: Tensor | None = None,
         ignore_index: int | None = None,
         label_smoothing: float = 0.0,
-        options: LinearCrossEntropyOptions | None = None,
+        options: "LinearCrossEntropyOptions | None" = None,
     ) -> None:
         if weight is not None and weight.shape != (num_classes,):
             raise RuntimeError(
@@ -1562,7 +1563,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
-            options=self.options,  # pyrefly: ignore [unexpected-keyword]
+            options=self.options,
         )
 
     def extra_repr(self) -> str:

@@ -3,7 +3,7 @@
 
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, Literal, overload, TypeAlias
+from typing import Any, Literal, overload, TypeAlias, TYPE_CHECKING
 
 from torch import Tensor
 from torch.types import _dtype, _int, _size
@@ -17,6 +17,9 @@ from .common_types import (
     _size_3_t,
     _size_any_t,
 )
+
+if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy import LinearCrossEntropyOptions
 
 __all__ = [
     "GRID_SAMPLE_INTERPOLATION_MODES",
@@ -465,6 +468,7 @@ def linear_cross_entropy(
     reduction: str = ...,
     ignore_index: int | None = ...,
     label_smoothing: float = ...,
+    options: "LinearCrossEntropyOptions | None" = ...,
 ) -> Tensor: ...
 
 __all__ += ["linear_cross_entropy"]
