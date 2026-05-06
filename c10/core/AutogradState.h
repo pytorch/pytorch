@@ -21,9 +21,7 @@ struct C10_API AutogradState {
         grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
-        multithreading_enabled_(multithreading_enabled),
-        view_replay_enabled_(false),
-        grad_layout_enforcement_enabled_(true) {}
+        multithreading_enabled_(multithreading_enabled) {}
 
   void set_grad_mode(bool enabled) {
     grad_mode_ = enabled;
@@ -87,8 +85,8 @@ struct C10_API AutogradState {
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
   bool multithreading_enabled_ : 1;
-  bool view_replay_enabled_;
-  bool grad_layout_enforcement_enabled_;
+  bool view_replay_enabled_ : 1 = false;
+  bool grad_layout_enforcement_enabled_ : 1 = true;
 };
 
 } // namespace c10
