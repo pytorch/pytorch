@@ -3231,7 +3231,8 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
         # Realize non-constant lazy args; LazyConstantVariable.python_type()
         # installs only a TYPE_MATCH guard, which is what isinstance() needs.
         if any(
-            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            isinstance(a, LazyVariableTracker)
+            and not isinstance(a, LazyConstantVariable)
             for a in args
         ):
             args = [
