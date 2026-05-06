@@ -7,6 +7,10 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // Users of this macro are expected to include cuda_runtime.h
@@ -33,7 +37,62 @@
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
+// Fallback for functions that produce const char* types, returns a nullptr.
+[[maybe_unused]] static const char* torch_shim_bc_const_char_ptr(...) {
+  return nullptr;
+}
+HIDDEN_NAMESPACE_END(torch, stable, detail)
+
+// This macro allows for an at-runtime lookup of a symbol, this is relatively
+// expensive and should only be done in exceptional circumstances, it only
+// supports platforms that have dlsym available.
+//
+// We structure these macro's as immediately invoked lambda's to be able to
+// 'return' a value from the macro call.
+//
+// Return type is inferred from the return value of FALLBACK_FUNCTION.
+#if !defined(C10_MOBILE) && !defined(_WIN32)
+#define TORCH_DYNAMIC_VERSION_CALL(                                   \
+    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...)      \
+  ([]() {                                                             \
+    if (aoti_torch_abi_version() >= VERSION_SHIM_PRESENT) {           \
+      const auto fn_ptr = dlsym(RTLD_DEFAULT, #SHIM_FUNCTION);        \
+      if (fn_ptr) {                                                   \
+        using ReturnType =                                            \
+            std::invoke_result_t<decltype(&FALLBACK_FUNCTION), void>; \
+        const auto typed_ptr =                                        \
+            reinterpret_cast<ReturnType (*)(__VA_ARGS__)>(fn_ptr);    \
+        return (typed_ptr)(__VA_ARGS__);                              \
+      }                                                               \
+    }                                                                 \
+    return FALLBACK_FUNCTION(__VA_ARGS__);                            \
+  })()
+#else
+// On a platform without dlsym, so immediately call the fallback function.
+#define TORCH_DYNAMIC_VERSION_CALL(                              \
+    VERSION_SHIM_PRESENT, FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
+  ([]() { return FALLBACK_FUNCTION(__VA_ARGS__); })()
+#endif
+
+// Entry point for dynamic version calls that exist from 2.13.0 and onward.
+// Putting the version expectation in the macro ensures we can bypass the symbol
+// lookup if the target version exceeds the version in which this shim function
+// was added.
+#if TORCH_TARGET_VERSION >= TORCH_VERSION_2_13_0
+// Target version is greater than version that added the method, we can call the
+// shim.
+#define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
+    FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
+  ([]() { return SHIM_FUNCTION(__VA_ARGS__); })()
+#else
+// Target version is less than the version that added the shim, try a dynamic
+// lookup.
+#define TORCH_DYNAMIC_VERSION_CALL_2_13_0( \
+    FALLBACK_FUNCTION, SHIM_FUNCTION, ...) \
+  TORCH_DYNAMIC_VERSION_CALL(              \
+      TORCH_VERSION_2_13_0, FALLBACK_FUNCTION, SHIM_FUNCTION, __VA_ARGS__)
+#endif
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 [[maybe_unused]] C10_NOINLINE static void throw_exception(
@@ -42,13 +101,22 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     int64_t line) {
   std::stringstream ss;
   ss << call << " API call failed at " << file << ", line " << line;
-  ss << ", with: " << torch_exception_get_what_without_backtrace();
+  const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
+      torch_shim_bc_const_char_ptr, torch_exception_get_what_without_backtrace);
+  if (error_msg_without) {
+    ss << ", with: " << error_msg_without;
+  }
 
   std::time_t t = std::time(nullptr);
   std::tm tm = *std::localtime(&t);
   std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
-            << line
-            << "] Exception in aoti_torch: " << torch_exception_get_what();
+            << line;
+
+  const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
+      torch_shim_bc_const_char_ptr, torch_exception_get_what);
+  if (error_msg) {
+    std::cerr << "] Exception in aoti_torch: " << error_msg;
+  }
   throw std::runtime_error(ss.str());
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
@@ -61,7 +129,3 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
   if ((call) != TORCH_SUCCESS) {                                       \
     torch::stable::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
-
-#else
-#define STABLE_TORCH_ERROR_CODE_CHECK(call) TORCH_ERROR_CODE_CHECK(call)
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
