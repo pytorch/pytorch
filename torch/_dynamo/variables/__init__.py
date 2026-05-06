@@ -28,6 +28,7 @@ from .builtin import (
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
+    AcceleratorDeviceIndexVariable,
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,
@@ -50,10 +51,10 @@ from .ctx_manager import (
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
     WithExitFunctionVariable,
+    XPUDeviceVariable,
 )
 from .dicts import (
     ConstDictVariable,
-    DefaultDictVariable,
     DictItemsVariable,
     DunderDictVariable,
     MappingProxyVariable,
@@ -97,7 +98,6 @@ from .iter import (
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
-    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -166,6 +166,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
     MutableMappingVariable,
@@ -187,6 +188,8 @@ from .user_defined import (
 
 
 __all__ = [
+    "XPUDeviceVariable",
+    "AcceleratorDeviceIndexVariable",
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",

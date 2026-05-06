@@ -207,35 +207,16 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   Tensor costs = at::empty({batch_size}, log_probs->options());
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // MIOpen requires labels and lengths on GPU
-  Tensor labels_gpu = targets_t.to(Device(at::kCUDA), at::kInt);
-  Tensor label_lengths_gpu = at::empty(
-      {static_cast<int64_t>(target_lengths.size())},
-      at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-  Tensor input_lengths_gpu = at::empty(
-      {static_cast<int64_t>(input_lengths.size())},
-      at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-
-  C10_CUDA_CHECK(hipMemcpy(
-      label_lengths_gpu.data_ptr<int>(),
-      target_lengths.data(),
-      target_lengths.size() * sizeof(int),
-      hipMemcpyHostToDevice));
-  C10_CUDA_CHECK(hipMemcpy(
-      input_lengths_gpu.data_ptr<int>(),
-      input_lengths.data(),
-      input_lengths.size() * sizeof(int),
-      hipMemcpyHostToDevice));
-
+  // MIOpen reads labels/lengths on the host.
   size_t workspace_size;
   (void)deterministic; // MIOpen only supports deterministic algorithm
   MIOPEN_CHECK(miopenGetCTCLossWorkspaceSize(
       handle,
       probs_desc,
       grads_desc,
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      targets_t.data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       MIOPEN_CTC_LOSS_ALGO_DETERMINISTIC,
       ctc_desc,
       &workspace_size));
@@ -246,9 +227,9 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       log_probs_t.data_ptr(),
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      targets_t.data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       costs.data_ptr(),
       grads_desc,
       grad.data_ptr(),
