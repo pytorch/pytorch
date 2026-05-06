@@ -4,15 +4,26 @@
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
 #include <iostream>
+#include <string>
 #include <vector>
+
+// Stores the last error message from a failed AOTI runtime call so that
+// callers on the other side of the C ABI boundary can retrieve it via
+// AOTInductorGetLastError(). Without this, exception messages (e.g.
+// "CUDA error: an illegal memory access was encountered") are lost when
+// CONVERT_EXCEPTION_TO_ERROR_CODE catches them and returns an error code.
+static thread_local std::string g_aoti_last_error;
 
 #define CONVERT_EXCEPTION_TO_ERROR_CODE(...)      \
   try {                                           \
+    g_aoti_last_error.clear();                    \
     __VA_ARGS__                                   \
   } catch (const std::exception& e) {             \
+    g_aoti_last_error = e.what();                 \
     std::cerr << "Error: " << e.what() << '\n';   \
     return AOTI_RUNTIME_FAILURE;                  \
   } catch (...) {                                 \
+    g_aoti_last_error = "Unknown exception";      \
     std::cerr << "Unknown exception occurred.\n"; \
     return AOTI_RUNTIME_FAILURE;                  \
   }                                               \
@@ -484,5 +495,11 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
       {container->update_constants_from_blob(weight_blob_ptr); })
     }
 
+
+AOTIRuntimeError AOTInductorGetLastError(
+    const char** error_msg) {
+  *error_msg = g_aoti_last_error.c_str();
+  return AOTI_RUNTIME_SUCCESS;
+}
 
 } // extern "C"
