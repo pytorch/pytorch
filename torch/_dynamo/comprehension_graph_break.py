@@ -37,7 +37,10 @@ log = logging.getLogger(__name__)
 def _get_comprehension_bytecode_prefix() -> list[str]:
     """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
 
-    assert sys.version_info >= (3, 12)
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension bytecode prefix requires Python 3.12+, got {sys.version_info}"
+        )
 
     def fn() -> list[int]:
         return [i for i in range(1)]  # noqa: C416
@@ -61,7 +64,10 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
         - pre_store_ops: opcodes between END_FOR and first STORE_FAST
         - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
     """
-    assert sys.version_info >= (3, 12)
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension result patterns require Python 3.12+, got {sys.version_info}"
+        )
 
     def fn_stored() -> list[int]:
         result = [i for i in range(1)]  # noqa: C416
@@ -143,9 +149,13 @@ def _is_comprehension_start(tx: InstructionTranslatorBase) -> bool:
     In Python 3.12+, comprehensions are inlined with a bytecode pattern that
     precedes BUILD_LIST/BUILD_MAP.
     """
-    assert sys.version_info >= (3, 12)
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension start detection requires Python 3.12+, got {sys.version_info}"
+        )
 
-    assert tx.instruction_pointer is not None
+    if tx.instruction_pointer is None:
+        raise AssertionError("instruction_pointer must not be None")
     ip = tx.instruction_pointer - 1
 
     pattern = _get_comprehension_bytecode_prefix()
@@ -156,8 +166,12 @@ def _is_comprehension_start(tx: InstructionTranslatorBase) -> bool:
 
 def _find_comprehension_end_for_ip(tx: InstructionTranslatorBase) -> int:
     """Find the instruction pointer of the outermost END_FOR for current comprehension."""
-    assert sys.version_info >= (3, 12)
-    assert tx.instruction_pointer is not None
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension END_FOR search requires Python 3.12+, got {sys.version_info}"
+        )
+    if tx.instruction_pointer is None:
+        raise AssertionError("instruction_pointer must not be None")
 
     nesting_depth = 0
     for search_ip in range(tx.instruction_pointer, len(tx.instructions)):
@@ -173,8 +187,12 @@ def _find_comprehension_end_for_ip(tx: InstructionTranslatorBase) -> int:
 
 def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalysis:
     """Analyze comprehension bytecode to determine result handling pattern."""
-    assert sys.version_info >= (3, 12)
-    assert tx.instruction_pointer is not None
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension analysis requires Python 3.12+, got {sys.version_info}"
+        )
+    if tx.instruction_pointer is None:
+        raise AssertionError("instruction_pointer must not be None")
 
     patterns = _get_comprehension_result_patterns()
     start_ip = tx.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
@@ -307,8 +325,12 @@ def _handle_comprehension_graph_break(
     calls it via codegen_call_resume, then chains into the resume
     function for the post-comprehension code.
     """
-    assert sys.version_info >= (3, 12)
-    assert tx.instruction_pointer is not None
+    if sys.version_info < (3, 12):
+        raise AssertionError(
+            f"comprehension graph break requires Python 3.12+, got {sys.version_info}"
+        )
+    if tx.instruction_pointer is None:
+        raise AssertionError("instruction_pointer must not be None")
 
     start_ip = tx.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
     analysis = _analyze_comprehension(tx)
@@ -688,7 +710,8 @@ def maybe_setup_comprehension_speculation(
             return True
         tx.current_speculation = speculation
     end_for_ip = _find_comprehension_end_for_ip(tx)
-    assert end_for_ip >= 0
+    if end_for_ip < 0:
+        raise AssertionError("failed to find END_FOR for comprehension")
     tx._comprehension_end_for_ips.add(end_for_ip)
     tx._comprehension_depth += 1
     return False

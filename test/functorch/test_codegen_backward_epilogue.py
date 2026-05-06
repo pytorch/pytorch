@@ -1,9 +1,9 @@
 # Owner(s): ["module: functorch"]
 
 """
-Tests for codegen'ing _backward_epilogue_functional subclass wrapping.
+Tests for codegen'd backward epilogue subclass wrapping.
 
-_backward_epilogue_functional wraps backward outputs (grad inputs) back
+The backward epilogue wraps backward outputs (grad inputs) back
 into tensor subclasses using a codegen'd wrap_fn. At compile time,
 codegen_backward_subclass_wrap() generates straight-line wrapping code
 with all subclass types and attr names baked in, replacing the generic
