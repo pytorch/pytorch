@@ -495,9 +495,9 @@ class DeviceTypeTestBase(TestCase):
         """
         Sets or resets the test configuration fields.
 
-        WARNING: This method is designed to perform a FULL replacement of the 
-        current configuration. Calling this method without any arguments will 
-        act as a "reset", clearing all stored configurations back to their 
+        WARNING: This method is designed to perform a FULL replacement of the
+        current configuration. Calling this method without any arguments will
+        act as a "reset", clearing all stored configurations back to their
         default `None` state.
         """
         cls.op_overrides = op_overrides
