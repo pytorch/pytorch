@@ -569,8 +569,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
-        # Return NotImplemented to fall back to default behavior
-        return NotImplemented
+        # Fall back to parent class reducer which handles unpicklable types
+        return super().reducer_override(obj)
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
