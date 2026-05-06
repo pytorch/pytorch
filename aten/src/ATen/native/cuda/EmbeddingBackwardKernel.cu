@@ -11,8 +11,6 @@
 
 #include <c10/macros/Macros.h>
 
-#include <thrust/iterator/counting_iterator.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -306,7 +304,7 @@ Tensor embedding_backward_cuda_kernel(
   int64_t *num_of_segments_ptr = num_of_segments_tensor.mutable_data_ptr<int64_t>();
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     cuda::cub::unique_by_key(
-      sorted_indices.const_data_ptr<index_t>(), thrust::make_counting_iterator(0),
+      sorted_indices.const_data_ptr<index_t>(), cccl_counting_iterator<index_t>{0},
       segment_offsets.mutable_data_ptr<index_t>(),
       num_of_segments_ptr, sorted_indices.numel());
   });
