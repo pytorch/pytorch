@@ -688,6 +688,11 @@ def pt_operator_query_codegen(
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_3.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_4.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_5.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_6.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_7.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_8.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_9.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_1.cpp]".format(unboxing_and_autograd_genrule),
     ] if train else []) + ([
