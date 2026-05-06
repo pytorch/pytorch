@@ -119,7 +119,6 @@ class TORCH_API AOTIModelContainerRunner {
       get_constants_blob_size_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
-  decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
