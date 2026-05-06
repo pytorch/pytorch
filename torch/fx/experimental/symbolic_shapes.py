@@ -2334,8 +2334,6 @@ class StatefulSymbolicContext(StatelessSymbolicContext[..., Any]):
         default_factory=dict
     )
     excluded_sizes: tuple[int | None, ...] | None = None
-    # Per-dim shape spec from torch.compile(shapes_spec=...).
-    tensor_spec: Any = None
 
 
 @dataclass(frozen=True, slots=True)

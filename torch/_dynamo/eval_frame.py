@@ -125,6 +125,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -781,7 +782,7 @@ class _TorchDynamoContext:
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: Any | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -807,6 +808,12 @@ class _TorchDynamoContext:
         # Save the backends so that we can reset them during torch._dynamo.reset
         backend = innermost_backend(callback)  # type: ignore[arg-type]
         cached_backends.setdefault(id(backend), backend)  # type: ignore[arg-type]
+
+        if dynamic is not None and shapes_spec is not None:
+            raise ValueError(
+                "`dynamic` and `shapes_spec` cannot both be set. "
+                "`shapes_spec` controls dynamic behavior."
+            )
 
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
@@ -1231,7 +1238,7 @@ class OptimizeContext(_TorchDynamoContext):
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: Any | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1403,7 +1410,7 @@ def _optimize_catch_errors(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: Any | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1606,7 +1613,7 @@ def _optimize(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: Any | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -2553,7 +2560,7 @@ def _optimize_assert(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: Any | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.

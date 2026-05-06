@@ -413,6 +413,88 @@ class TestShapeVarCompile(TestCase):
         # Unbacked dim 0 -> single compile
         self.assertEqual(len(backend.graphs), 1)
 
+    @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
+    def test_min_max_bypasses_dde_on_branching(self):
+        """Mirror of test_unbacked_raises_dde_on_branching: setting min/max on
+        ShapeVar constrains the symbol so the same branch is statically
+        evaluated and does NOT raise a data-dependent error."""
+
+        def fn(x):
+            if x.size(0) > 5:
+                return x + 1
+            return x - 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"x": TensorSpec([ShapeVar(min=10, max=100), None])})
+            ),
+        )
+        # min=10 > 5 → branch resolves statically, no DDE.
+        compiled(torch.randn(20, 3))
+
+    def test_shapes_spec_with_dynamic_raises(self):
+        """Setting both shapes_spec and dynamic should raise ValueError."""
+        ts = TensorSpec([ShapeVar("batch"), None])
+        for dynamic in (True, False):
+            with self.assertRaisesRegex(
+                ValueError,
+                r"`dynamic` and `shapes_spec` cannot both be set",
+            ):
+                torch.compile(
+                    lambda x: x + 1,
+                    backend="eager",
+                    dynamic=dynamic,
+                    shapes_spec=ShapesSpec(params=ParamsSpec({"x": ts})),
+                )
+
+    def test_tensor_dim_optimization_hint_in_shape_env(self):
+        """ShapeVar's optimization_hint propagates to shape_env.var_to_hint_override."""
+        backend = EagerAndRecordGraphs()
+        fn = torch.compile(
+            lambda x: x.sum(0),
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec(
+                    {"x": TensorSpec([ShapeVar("batch", optimization_hint=32), None])}
+                )
+            ),
+        )
+        fn(torch.randn(8, 3))
+        shape = _tensor_placeholder_shape(backend.graphs[0])
+        sym = shape[0]
+        self.assertIsInstance(sym, torch.SymInt)
+        expr = sym.node.expr
+        self.assertEqual(sym.node.shape_env.var_to_hint_override.get(expr), 32)
+
+    def test_scalar_int_optimization_hint_in_shape_env(self):
+        """IntVar's optimization_hint propagates to shape_env.var_to_hint_override."""
+        backend = EagerAndRecordGraphs()
+
+        def fn(x, n):
+            return x + n
+
+        compiled = torch.compile(
+            fn,
+            backend=backend,
+            shapes_spec=ShapesSpec(
+                params=ParamsSpec({"n": IntVar("size", optimization_hint=128)})
+            ),
+        )
+        compiled(torch.randn(4), 100)
+        sym = None
+        for node in backend.graphs[0].graph.nodes:
+            if node.op == "placeholder":
+                ev = node.meta.get("example_value")
+                if isinstance(ev, torch.SymInt):
+                    sym = ev
+                    break
+        self.assertIsNotNone(sym)
+        expr = sym.node.expr
+        self.assertEqual(sym.node.shape_env.var_to_hint_override.get(expr), 128)
+
 
 if __name__ == "__main__":
     run_tests()

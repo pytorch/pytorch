@@ -2252,36 +2252,42 @@ class VariableBuilder:
             assert isinstance(value, int)
 
             # Check for user-provided spec from shapes_spec.
-            int_spec = lookup_spec_from_dynamo_source(self.source, config._shapes_spec)
-
-            if config._shapes_spec is not None and int_spec is None:
-                # shapes_spec is set but this int has no spec → force static
-                self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value, source=self.source)
-
-            if isinstance(int_spec, int):
-                # Explicit static value — verify the actual matches.
-                if value != int_spec:
+            if config._shapes_spec is not None:
+                int_spec = lookup_spec_from_dynamo_source(
+                    self.source, config._shapes_spec
+                )
+                if int_spec is None:
+                    # shapes_spec is set but this int has no spec → force static
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, int):
+                    # Explicit static value — verify the actual matches.
+                    if value != int_spec:
+                        raise ValueError(
+                            f"shapes_spec declares {self.source.name} as static "
+                            f"with value {int_spec}, but got {value}"
+                        )
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, IntVar):
+                    # All IntVar specs are unbacked.
+                    result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+                    sym_val = result.sym_num  # type: ignore[attr-defined]
+                    if int_spec.min is not None:
+                        torch._check(sym_val >= int_spec.min)
+                    if int_spec.max is not None:
+                        torch._check(sym_val <= int_spec.max)
+                    if int_spec.optimization_hint is not None:
+                        expr = sym_val.node.expr
+                        sym_val.node.shape_env.var_to_hint_override[expr] = (
+                            int_spec.optimization_hint
+                        )
+                    return result
+                else:
                     raise ValueError(
-                        f"shapes_spec declares {self.source.name} as static "
-                        f"with value {int_spec}, but got {value}"
+                        f"shapes_spec for {self.source.name}: unexpected value "
+                        f"{int_spec!r} (expected int, IntVar, or None)"
                     )
-                self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value, source=self.source)
-            elif isinstance(int_spec, IntVar):
-                # All IntVar specs are unbacked.
-                result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
-                sym_val = result.sym_num  # type: ignore[attr-defined]
-                if int_spec.min is not None:
-                    torch._check(sym_val >= int_spec.min)
-                if int_spec.max is not None:
-                    torch._check(sym_val <= int_spec.max)
-                if int_spec.optimization_hint is not None:
-                    expr = sym_val.node.expr
-                    sym_val.node.shape_env.var_to_hint_override[expr] = (
-                        int_spec.optimization_hint
-                    )
-                return result
 
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -3872,18 +3878,13 @@ def _symbolic_context_from_shapes_spec(
     tensor_spec: TensorSpec | None,
     view_base_context: SymbolicContext | None,
     shape_env_to_source_to_symbol_cache: dict[Any, Any],
-    excluded_sizes: Any,
 ) -> StatefulSymbolicContext:
     dynamic_sizes = []
     dynamic_strides = []
-    constraint_sizes = []
-    constraint_strides = []
-    specialize_on = []
 
     for i in range(e.dim()):
         if tensor_spec is None:
             dynamic_sizes.append(DimDynamic.STATIC)
-            constraint_sizes.append(None)
         else:
             dim_spec = tensor_spec[i]
             if isinstance(dim_spec, int):
@@ -3894,30 +3895,24 @@ def _symbolic_context_from_shapes_spec(
                         f"{dim_spec}, but got {actual_size}"
                     )
                 dynamic_sizes.append(DimDynamic.STATIC)
-                constraint_sizes.append(None)
             elif isinstance(dim_spec, IntVar):
                 dynamic_sizes.append(DimDynamic.UNBACKED)
-                constraint_sizes.append(None)
-            else:
+            elif dim_spec is None:
                 dynamic_sizes.append(DimDynamic.STATIC)
-                constraint_sizes.append(None)
+            else:
+                raise ValueError(
+                    f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
+                    f"(expected int, IntVar, or None)"
+                )
 
         dynamic_strides.append(DimDynamic.INFER_STRIDE)
-        constraint_strides.append(None)
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
-        constraint_sizes=constraint_sizes,
-        constraint_strides=constraint_strides,
-        specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        shape_ids=getattr(e, "_dynamo_shape_ids", None),
-        unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
-        excluded_sizes=excluded_sizes,
-        tensor_spec=tensor_spec,
     )
 
 
@@ -4053,7 +4048,6 @@ def _automatic_dynamic(
             tensor_spec,
             view_base_context,
             shape_env_to_source_to_symbol_cache,
-            frame_state_entry.excluded_sizes,
         )
 
     dynamic_sizes = []
