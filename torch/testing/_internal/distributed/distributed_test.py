@@ -9566,7 +9566,7 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
 
             def buffer_comm_hook(ddp, named_buffers):
-                buffers = list(named_buffers.values())
+                buffers = [buffer for (_, buffer) in named_buffers.items()]
                 futs = [
                     dist.all_reduce(
                         buffer, group=ddp.process_group, async_op=True
@@ -9668,7 +9668,7 @@ class DistributedTest:
             def buffer_comm_hook(ddp, named_buffers):
                 # named_buffers is a Dict[str, Tensor] representing a mapping
                 # from buffer name to buffer.
-                buffers = list(named_buffers.values())
+                buffers = [buffer for (_, buffer) in named_buffers.items()]
                 ddp._default_broadcast_coalesced(buffers)
 
             model = NetWithBuffers().cuda(rank)
