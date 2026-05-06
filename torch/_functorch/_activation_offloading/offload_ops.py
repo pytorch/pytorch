@@ -10,12 +10,13 @@ module-level registry, so ``ao.wait_tensor`` takes only the tensor itself
 
 Offload pattern:
     cpu_tensor = ao.offload(gpu_tensor)
-    cpu_tensor = ao.wait_tensor(cpu_tensor, gpu_tensor)
-                               (keepalive arg extends gpu_tensor lifetime past the async D2H copy)
+    cpu_tensor = ao.wait_tensor(cpu_tensor, keepalive=gpu_tensor)
+        keepalive frees the GPU tensor's storage after the D2H copy completes.
 
 Reload pattern:
     gpu_tensor = ao.reload(cpu_tensor, device)
-    gpu_tensor = ao.wait_tensor(gpu_tensor)
+    gpu_tensor = ao.wait_tensor(gpu_tensor, keepalive=cpu_tensor)
+        keepalive frees the CPU tensor's storage after the H2D copy completes.
 """
 
 import torch
@@ -141,11 +142,13 @@ def _(
 # Synchronization details (completion event, device) are looked up from
 # ``_wait_registry`` keyed on ``tensor.data_ptr()``.
 #
-# ``keepalive`` is not read by the op — its sole purpose is to create a graph
-# dependency that extends the tensor's lifetime in the FX graph. For offload,
-# this keeps the source GPU tensor alive until the compute stream has waited
-# on the D2H completion event, preventing the allocator from reclaiming it
-# while the async copy is still in flight.
+# ``keepalive`` is the source tensor of the async transfer. It creates a
+# graph dependency that extends the source tensor's lifetime until the
+# compute stream has waited on the transfer completion event. After the
+# wait, the op frees the source tensor's storage via ``resize_(0)`` since
+# it is no longer needed:
+#   - Offload (D2H): keepalive is the GPU tensor; freed after the D2H copy.
+#   - Reload (H2D): keepalive is the CPU tensor; freed after the H2D copy.
 _lib = torch.library.Library("ao", "DEF")
 _lib.define("wait_tensor(Tensor(a) tensor, Tensor? keepalive=None) -> Tensor(a)")
 
@@ -157,7 +160,12 @@ def _ao_wait_tensor(
 ) -> torch.Tensor:
     completion_event, device = _pop_wait(tensor)
     current_stream = torch.accelerator.current_stream(device)
+
     current_stream.wait_event(completion_event)
+    if keepalive is not None:
+        storage = keepalive.untyped_storage()
+        if storage.size() > 0:
+            storage.resize_(0)
     return tensor
 
 
