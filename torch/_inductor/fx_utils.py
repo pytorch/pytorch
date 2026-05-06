@@ -77,7 +77,9 @@ def _extract_subgraphs_and_args(
     to pass to the subgraph."""
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
-        yield args[0], (*(a[0] for a in args[1]), *(a[1] for a in args[1]), *args[2])
+        # Use the same slice twice to account for cases where only a single slice is
+        # input.
+        yield args[0], (*(a[0] for a in args[1]), *(a[0] for a in args[1]), *args[2])
     elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
