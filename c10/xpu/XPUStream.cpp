@@ -375,6 +375,7 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 // Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 void syncStreamsOnDevice(DeviceIndex device) {
+#if SYCL_COMPILER_VERSION < 20260000
   initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
@@ -393,6 +394,9 @@ void syncStreamsOnDevice(DeviceIndex device) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
+#else
+  c10::xpu::device_synchronize(device);
+#endif
 }
 
 } // namespace c10::xpu
