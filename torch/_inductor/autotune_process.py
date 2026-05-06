@@ -1470,5 +1470,11 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            if choice_hash in AsyncAutotuner.choice_hash_to_future:
+                timings[choice] = AsyncAutotuner.choice_hash_to_future[
+                    choice_hash
+                ].result()
+            else:
+                # Choice was filtered out during precompilation/prescreening
+                timings[choice] = float("inf")
         return timings
