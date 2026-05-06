@@ -1392,7 +1392,8 @@ def print_n_shadows_summary(
     results = []
     for subgraph_data in results_comparison.values():
         mean_all_candidates = [
-            candidate["cmp_mean"] for candidate in subgraph_data["candidates"].values()
+            candidate["cmp_mean"]
+            for candidate_name, candidate in subgraph_data["candidates"].items()
         ]
 
         data_row = [

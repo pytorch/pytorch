@@ -22,6 +22,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 class TestConverter(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         self.torch_bind_ops = [
