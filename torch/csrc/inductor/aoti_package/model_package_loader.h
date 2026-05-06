@@ -29,11 +29,15 @@ class TORCH_API AOTIModelPackageLoader {
       void* stream_handle = nullptr);
 
   std::vector<std::string> get_call_spec();
+  // When allow_h2d_copy is true, CPU tensors in constants_map are silently
+  // copied to the model's device. allow_h2d_copy is incompatible with
+  // user_managed.
   void load_constants(
       std::unordered_map<std::string, at::Tensor>& constants_map,
       bool use_inactive,
       bool check_full_update,
-      bool user_managed = false);
+      bool user_managed = false,
+      bool allow_h2d_copy = false);
   std::vector<std::string> get_constant_fqns();
 
   void update_constant_buffer(
