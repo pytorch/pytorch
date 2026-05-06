@@ -234,9 +234,7 @@ class TestLibraryIntegration(TestCase):
     def test_library_cleanup_on_delete(self):
         """Test that deleting a Library cleans up its symm_mem_args registration."""
         lib = Library("test_lib_cleanup", "DEF")
-        lib.define(
-            "my_op(Tensor input, str reduce_op, str group_name) -> Tensor"
-        )
+        lib.define("my_op(Tensor input, str reduce_op, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_op", ["input"])
 
         qualname = "test_lib_cleanup::my_op"
