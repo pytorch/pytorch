@@ -8014,6 +8014,90 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(x.grad, y + 1)
         self.assertEqual(y.grad, x + 1)
 
+    # --- CompiledFunction.backward codegen tests ---
+
+    def test_compiled_backward_codegen_emitted(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _compiled_backward(", source)
+
+    def test_compiled_backward_no_codegen_for_inference(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_compiled_backward_elides_rng(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_rng_add_(_ctx_", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_backward_rng_codegen(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("compiled_function_backward") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_rng_add_(_ctx_", source)
+
+    def test_compiled_backward_elides_vc_check(self):
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_tensors_no_vc_check", source)
+
+    def test_compiled_backward_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y + 1
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        out = f(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
+
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):
