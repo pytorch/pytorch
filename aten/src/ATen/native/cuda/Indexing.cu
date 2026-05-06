@@ -1236,6 +1236,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
@@ -1252,7 +1258,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>    \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
         selfInfo, sourceInfo, indexInfo,                                     \
         selfAddDim, sourceAddDim, sourceTotalSize,                          \
@@ -1417,6 +1423,12 @@ void index_reduce_func_cuda_impl(
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+  #ifdef USE_ROCM
+    constexpr bool is_rocm = true;
+  #else
+    constexpr bool is_rocm = false;
+  #endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
@@ -1433,7 +1445,7 @@ void index_reduce_func_cuda_impl(
     cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
     indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
                         SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
+                        IDX_IS_MAJOR, (!is_rocm && IDX_IS_MAJOR) ? 4 : 1>                 \
       <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
         selfInfo, sourceInfo, indexInfo,                                                   \
         selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
