@@ -231,7 +231,7 @@ class NCCL_ALGO(IntEnum):
 
 
 class NCCL_PROTO(IntEnum):
-    # Matches https://github.com/NVIDIA/nccl/blob/master/src/include/devcomm.h
+    # Matches NCCL devcomm.h protocol enum
     LL = 0  # Low-latency
     LL128 = 1  # Low-latency 128-byte
     SIMPLE = 2
