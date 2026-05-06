@@ -223,6 +223,7 @@ class FakeRendezvousBackend(RendezvousBackend):
 
 class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._backend = FakeRendezvousBackend()
 
         mock_get_state = MagicMock(wraps=self._backend.get_state)
@@ -538,6 +539,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
 
 class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._state_holder = FakeRendezvousStateHolder()
@@ -1151,6 +1153,7 @@ class DummyStore(Store):
 
 class DynamicRendezvousHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._min_nodes = 1
@@ -1533,6 +1536,7 @@ class DummyRendezvousBackend(RendezvousBackend):
 
 class DynamicRendezvousHandlerFromBackendTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._run_id = "dummy_run_id"
         self._store = DummyStore()
         self._backend = DummyRendezvousBackend()
@@ -1601,6 +1605,7 @@ class DynamicRendezvousHandlerFromBackendTest(TestCase):
 
 class CreateHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = DummyStore()
 
         self._backend = DummyRendezvousBackend()
@@ -1710,6 +1715,7 @@ class _CapturingThread(threading.Thread):
 
 class IntegrationTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = HashStore()
         self._handlers = []
         self._backend = _InMemoryRendezvousBackend()
