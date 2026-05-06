@@ -64,7 +64,7 @@ class BuildType:
             # Found CMakeCache.txt. Use the build type specified in it.
             from .cmake_utils import get_cmake_cache_variables_from_file
 
-            with open(cmake_cache_txt) as f:
+            with open(cmake_cache_txt, encoding='utf-8', errors='ignore') as f:
                 cmake_cache_vars = get_cmake_cache_variables_from_file(f)
             # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
             # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
