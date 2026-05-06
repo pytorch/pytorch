@@ -1324,7 +1324,7 @@ class TestAutogradFunction(TestCase):
         def fn(x):
             return A.apply(x.clone())
 
-        err_msg = "A input that has been returned as-is"
+        err_msg = "An input that has been returned as-is"
 
         a = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
         a_t = torch.tensor(2.0, device=device, requires_grad=inner_requires_grad)
@@ -5403,12 +5403,9 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    def test_compile_dynamic_grad_stride_slice_mha(self, device):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_dynamic_grad_stride_slice_mha(self, device, backend):
         # Regression test for https://github.com/pytorch/pytorch/issues/181305
-        # torch.func.grad + torch.compile(dynamic=True) with stride-slicing
-        # and nn modules failed with "FunctionalTensor on its own" error
-        # because metadata ops on unwrapped functional tensors went through
-        # proxy tracing without proxy slots.
         linear = nn.Linear(3, 3).to(device).eval()
 
         def model(x):
@@ -5420,11 +5417,10 @@ class TestCompileTransforms(TestCase):
         x = torch.randn(4, 8, 2, 3, device=device)
         expected = grad(model)(x)
 
-        for backend in ["eager", "aot_eager"]:
-            torch._dynamo.reset()
-            compiled = torch.compile(grad(model), dynamic=True, backend=backend)
-            result = compiled(x)
-            self.assertEqual(result, expected)
+        torch._dynamo.reset()
+        compiled = torch.compile(grad(model), dynamic=True, backend=backend)
+        result = compiled(x)
+        self.assertEqual(result, expected)
 
     # torch.compile is not supported on Windows
     @torch._dynamo.config.patch(suppress_errors=False)

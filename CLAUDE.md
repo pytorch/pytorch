@@ -8,11 +8,23 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Environment
 
-If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+If any tool you're trying to use (pip, python, spin, etc) is missing, check for
+a `.venv` directory in the project root or its parent directory. If found,
+activate it and retry. If no `.venv` is found, stop and ask the user if an
+environment is needed. Do NOT try to find alternatives or install these tools.
+
+# CI Docker Images
+
+The `.ci/docker/` directory is content-hashed to determine whether Docker images
+need rebuilding. Any file change inside `.ci/docker/` (including the README)
+changes the hash and triggers a full Docker image rebuild. Do not make changes
+in this directory unless you intend to rebuild Docker images. When Docker builds
+are broken (e.g., due to an upstream Ubuntu outage), avoid touching this
+directory so you don't force a rebuild against the broken state.
 
 # Build
 
-Always ask for build configuration environment variables before running build.
+Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
 You should NEVER run any other command to build PyTorch.
 
@@ -40,6 +52,9 @@ Only use commands provided via `spin` for linting.
 Use `spin help` to list available commands.
 Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
 
+When the user asks you to commit or amend, run `lintrunner -a` before creating
+the commit. Fix any lint errors it reports, then commit.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
@@ -49,7 +64,16 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with Claude.
+Disclose that the PR was authored with an AI assistant. Do this informally in
+the commit body (e.g., "Authored by Claude." or a similar attribution for
+whichever assistant was used). NEVER add a `Co-authored-by:` trailer
+attributing the AI assistant, as it interferes with the Linux Foundation CLA
+bot.
+
+When the user asks you to amend a commit, check whether the commit message
+still accurately describes the changes. If it doesn't and the commit is not a
+ghstack commit, update the message. For ghstack commits, amending the message
+is a no-op, so just remind the user to update the PR description if needed.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
@@ -107,6 +131,10 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- ASCII only in newly added code comments. Do not introduce Unicode characters
+  (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
+  Leave preexisting Unicode in untouched comments alone; only enforce this for
+  comments you are adding or rewriting.
 
 If uncertain, choose the simpler, more concise implementation.
 

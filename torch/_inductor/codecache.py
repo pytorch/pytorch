@@ -110,7 +110,7 @@ from torch.compiler import config as cconfig
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
@@ -945,7 +945,7 @@ class CacheabilityValidator:
         from torch._inductor.compiler_bisector import CompilerBisector
 
         if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
+            log.debug("don't cache graph when bisect enabled")
             self.bypass("compiler bisector enabled")
 
     def _check_shape_env(self) -> None:
@@ -1635,6 +1635,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         inductor_meta = autotune_cache.inductor_meta_from_config()
         code = graph.source_code
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+        graph._set_compile_context_for_autotune_cache()
 
         # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
@@ -1745,10 +1746,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 cache_info["cache_status_detailed"] = "guard_miss"
                 return None, cache_info
 
-        if pickled_content is not None:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, pickled_content
-            )
+        CacheArtifactRecorder(InductorCacheArtifact.type(), key).record_if_present(
+            pickled_content
+        )
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1821,9 +1821,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             return
 
         try:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, content
-            )
+            CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
 
@@ -2072,6 +2070,45 @@ class CudaKernelParamCache:
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
         params["asm"] = asm_path
         cls.cache[key] = params
+
+    @classmethod
+    def get(cls, key: str) -> dict[str, Any] | None:
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def get_keys(cls) -> KeysView[str]:
+        return cls.cache.keys()
+
+
+@clear_on_fresh_cache
+class CpuTritonKernelCache:
+    """AOTI counterpart of CudaKernelParamCache for CPU Triton kernels."""
+
+    cache: dict[str, dict[str, Any]] = {}
+    cache_clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(
+        cls,
+        key: str,
+        kernel_bytes: bytes,
+        launcher_bytes: bytes,
+        kernel_symbol: str,
+        signature: dict[str, Any],
+    ) -> None:
+        out_dir = split_aot_inductor_output_path(config.aot_inductor.output_path)[0]
+        _, kernel_so_path = write(
+            kernel_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        _, launcher_so_path = write(
+            launcher_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        cls.cache[key] = {
+            "kernel_so_path": kernel_so_path,
+            "launcher_so_path": launcher_so_path,
+            "kernel_symbol": kernel_symbol,
+            "signature": signature,
+        }
 
     @classmethod
     def get(cls, key: str) -> dict[str, Any] | None:
@@ -4782,7 +4819,7 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
         raise NotImplementedError
 
 
@@ -4793,7 +4830,13 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
+        if timeout is not None and self.future is not None:
+            # Wait on the underlying cross-process future with the caller's
+            # timeout; raises concurrent.futures.TimeoutError if it does not
+            # resolve in time. result_fn will then consume the completed
+            # future without blocking further.
+            self.future.result(timeout=timeout)
         return self.result_fn()
 
 
@@ -4811,7 +4854,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
 
-    def result(self) -> CachingAutotuner:
+    def result(self, timeout: float | None = None) -> CachingAutotuner:
+        # timeout is accepted for interface parity with other CodeCacheFuture
+        # subclasses; this work is synchronous in-process and has no pending
+        # future to wait on.
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             self.static_autotuner.recheck_autotune_cache(
