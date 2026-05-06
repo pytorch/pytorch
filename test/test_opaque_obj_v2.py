@@ -1194,7 +1194,7 @@ def forward(self, x_1, cfg_1):
             return out
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib
+            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib, allow_override=True
         )
 
         with self.assertRaisesRegex(
@@ -1208,7 +1208,7 @@ def forward(self, x_1, cfg_1):
             return torch.empty_like(x)
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib
+            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib, allow_override=True
         )
 
         with self.assertRaisesRegex(
