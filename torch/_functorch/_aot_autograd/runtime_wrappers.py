@@ -35,7 +35,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
@@ -2408,61 +2407,6 @@ def initialize_rng_states(
         )
 
 
-# NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
-def _backward_epilogue_functional(
-    metadata: ViewAndMutationMeta,
-    maybe_subclass_metadata: SubclassMeta | None,
-    out: Any,
-    *,
-    ctx_opaque_objects: Sequence[Any] = (),
-    make_subclass_override: Callable[..., Any] | None = None,
-    codegen_wrap_fn: Callable[..., Any] | None = None,
-) -> tuple[Any, ...]:
-    # Toss out the backward output tokens
-    num_bw_tokens = metadata.num_backward_tokens
-    if num_bw_tokens > 0:
-        out = out[:-num_bw_tokens]
-
-    # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
-    out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
-        metadata, out, offset_index=len(out) - 1
-    )
-    out = tuple(out)
-
-    # Replace compile-time opaque constants in the backward output with the
-    # real runtime opaques saved from the forward pass. During joint graph
-    # tracing, backward output opaques come from tangent constants (baked at
-    # compile time). At runtime we need the actual opaque objects that were
-    # saved for backward from the forward pass.
-    if ctx_opaque_objects:
-        opaque_iter = iter(ctx_opaque_objects)
-        out = tuple(
-            next(opaque_iter) if isinstance(v, FakeScriptObject) else v for v in out
-        )
-        remaining = list(opaque_iter)
-        if remaining:
-            raise AssertionError(
-                f"ctx_opaque_objects had {len(remaining)} leftover entries "
-                "(expected all to be consumed by FakeScriptObject slots in backward output)"
-            )
-
-    # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
-    if maybe_subclass_metadata is not None:
-        if maybe_subclass_metadata.grad_input_metas is None:
-            raise AssertionError("grad_input_metas must not be None")
-        if codegen_wrap_fn is not None and make_subclass_override is None:
-            return codegen_wrap_fn(out)
-        outs_wrapped = wrap_tensor_subclasses(
-            out,
-            subclass_metas=maybe_subclass_metadata.grad_input_metas,
-            included_subclass_symints=True,
-            is_runtime=True,
-            make_subclass_override=make_subclass_override,
-        )
-        return outs_wrapped
-    return out
-
-
 def coerce_to_expected_memory_format(
     x: torch.Tensor, memory_format: MemoryFormatMeta
 ) -> torch.Tensor:
@@ -3093,6 +3037,64 @@ def _codegen_backward_prologue(
     )
 
 
+def _codegen_backward_epilogue(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: SubclassMeta | None,
+    codegen_wrap_fn: Callable[..., Any] | None,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    num_bw_tokens = fw_metadata.num_backward_tokens
+    is_rng = fw_metadata.is_rng_op_functionalized
+    has_subclass = maybe_subclass_meta is not None
+
+    if has_subclass:
+        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
+    else:
+        lines = ["def _backward_epilogue(out):"]
+    code_globals: dict[str, object] = {}
+
+    if num_bw_tokens > 0:
+        lines.append(f"    out = out[:-{num_bw_tokens}]")
+
+    if is_rng:
+        if fw_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
+            )
+        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        lines.append("    _oi = len(out) - 1")
+        lines.append("    _set_offset_(out[_oi])")
+        lines.append("    out = out[:_oi] + out[_oi + 1:]")
+
+    lines.append("    out = tuple(out)")
+
+    if has_subclass:
+        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
+        if (
+            maybe_subclass_meta.grad_input_metas is None
+        ):  # pyrefly: ignore [missing-attribute]
+            raise AssertionError("grad_input_metas must not be None")
+        code_globals["_grad_input_metas_"] = (
+            maybe_subclass_meta.grad_input_metas
+        )  # pyrefly: ignore [missing-attribute]
+        if codegen_wrap_fn is not None:
+            code_globals["_wrap_"] = codegen_wrap_fn
+            lines.append("    if make_subclass_override is None:")
+            lines.append("        return _wrap_(out)")
+        lines.append("    return _wrap_subclasses_(out,")
+        lines.append("        subclass_metas=_grad_input_metas_,")
+        lines.append("        included_subclass_symints=True, is_runtime=True,")
+        lines.append("        make_subclass_override=make_subclass_override)")
+    else:
+        lines.append("    return out")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_backward_epilogue", "backward_epilogue"
+    )
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
@@ -3140,6 +3142,12 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_unwrap_fn,
+        )
+
+        _codegen_bw_epilogue = _codegen_backward_epilogue(
+            fw_metadata,
+            maybe_subclass_meta,
+            _codegen_bw_wrap_fn,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3252,8 +3260,8 @@ class _AOTDispatchAutogradFunctionFactory:
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
-            _bw_epilogue_wrap_fn = _codegen_bw_wrap_fn
             _bw_prologue_fn = _codegen_bw_prologue
+            _bw_epilogue_fn = _codegen_bw_epilogue
             boxed_grads_call = True
 
             @staticmethod
@@ -3321,12 +3329,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
                 def impl_fn(double_ctx: Any = None) -> Any:
                     out = CompiledFunction._backward_impl(ctx, all_args)
-                    return _backward_epilogue_functional(
-                        CompiledFunction.metadata,
-                        CompiledFunction.maybe_subclass_metadata,
-                        out,
-                        codegen_wrap_fn=CompiledFunction._bw_epilogue_wrap_fn,
-                    )
+                    return CompiledFunction._bw_epilogue_fn(out)
 
                 if (
                     torch._C._is_key_in_tls("context")
