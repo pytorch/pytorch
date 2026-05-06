@@ -3121,7 +3121,8 @@ def _codegen_compiled_forward(
         lines.append(f"    _bw_state = args[{idx}]")
         lines.append("    if not isinstance(_bw_state, BackwardState):")
         lines.append("        raise AssertionError(")
-        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
+        lines.append("            f'expected BackwardState, got {type(_bw_state)}'")
+        lines.append("        )")
         lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
 
     if num_rng > 0:
