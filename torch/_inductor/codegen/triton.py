@@ -840,7 +840,7 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         Uses tl.float64 by default but falls back to tl.float32 on devices
         that lack fp64 support (e.g. Intel Arc consumer GPUs).
         """
-        if not device_supports_fp64(V.graph.get_current_device_or_throw()):
+        if not device_supports_fp64(V.graph.current_device):
             return "tl.float32"
         return "tl.float64"
 
@@ -1987,7 +1987,9 @@ class TritonOverrides(OpOverrides):
                 if low_precision_fp(result_dtype) or any_needs_upcast
                 else torch.float64
             )
-        if pow_dtype == torch.float64 and not device_supports_fp64(V.graph.get_current_device_or_throw()):
+        if pow_dtype == torch.float64 and not device_supports_fp64(
+            V.graph.current_device
+        ):
             pow_dtype = torch.float32
             if result_dtype == torch.float64:
                 result_dtype = torch.float32
