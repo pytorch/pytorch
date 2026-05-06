@@ -2413,7 +2413,7 @@ class VariableBuilder:
             TensorSpec | None,
             lookup_spec_from_dynamo_source(source, config._shapes_spec),
         )
-        if _tensor_spec and len(_tensor_spec) != value.dim():
+        if _tensor_spec is not None and len(_tensor_spec) != value.dim():
             raise ValueError(
                 f"TensorSpec has {len(_tensor_spec)} dims but tensor {source.name} "
                 f"has {value.dim()} dims"
@@ -4210,11 +4210,9 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        # TODO: read names from tensor spec and pass them as shape_ids
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
         unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
         excluded_sizes=frame_state_entry.excluded_sizes,
-        tensor_spec=tensor_spec,
     )
 
 
@@ -4296,11 +4294,9 @@ def _wrap_to_fake_tensor_and_record_impl(
                     symbolic_context=symbolic_context,
                 )
             )
-        # Apply min/max constraints and hint overrides from TensorSpec
-        _tensor_spec = getattr(symbolic_context, "tensor_spec", None)
-        if isinstance(fake_e, FakeTensor) and _tensor_spec is not None:
+        if tensor_spec is not None:
             for dim_i in range(fake_e.dim()):
-                dim_spec = _tensor_spec[dim_i]
+                dim_spec = tensor_spec[dim_i]
                 if dim_spec is None or isinstance(dim_spec, int):
                     continue
                 if not isinstance(dim_spec, IntVar):

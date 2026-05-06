@@ -29,6 +29,10 @@ def _tensor_placeholder_shape(gm):
     raise AssertionError("no tensor placeholder found")
 
 
+def _placeholders(gm):
+    return [n for n in gm.graph.nodes if n.op == "placeholder"]
+
+
 class TestShapeVarConstruction(TestCase):
     """Construction of ShapeVar."""
 
@@ -294,70 +298,69 @@ class TestShapeVarCompile(TestCase):
         fn(torch.randn(4, 5))
         fn(torch.randn(4, 7))
         self.assertEqual(len(backend.graphs), 3)
+        # dim 0 is ShapeVar -> SymInt; dim 1 is None -> static int
+        shape = _tensor_placeholder_shape(backend.graphs[0])
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertIsInstance(shape[1], int)
 
     def test_none_scalar_int_is_static(self):
         """A scalar int arg not mentioned in shapes_spec stays static (specialized).
         Each distinct value triggers a recompile."""
-        cnt = torch._dynamo.testing.CompileCounter()
+        backend = EagerAndRecordGraphs()
 
         def fn(x, n):
             return x + n
 
         compiled = torch.compile(
             fn,
-            backend=cnt,
+            backend=backend,
             shapes_spec=ShapesSpec(
                 params=ParamsSpec({"x": TensorSpec([ShapeVar("batch")])})
             ),
         )
 
         compiled(torch.randn(4), 10)
-        self.assertEqual(cnt.frame_count, 1)
-
-        compiled(torch.randn(8), 10)  # same n=10 -> no recompile
-        self.assertEqual(cnt.frame_count, 1)
-
-        compiled(torch.randn(8), 20)  # different n -> recompile (static)
-        self.assertEqual(cnt.frame_count, 2)
-
-        compiled(torch.randn(16), 20)  # same n=20 -> no recompile
-        self.assertEqual(cnt.frame_count, 2)
-
-        compiled(
-            torch.randn(16), 30
-        )  # different n=30 -> recompile (stays static, no auto-dynamic)
-        self.assertEqual(cnt.frame_count, 3)
+        compiled(torch.randn(8), 10)
+        compiled(torch.randn(8), 20)
+        compiled(torch.randn(16), 20)
+        compiled(torch.randn(16), 30)
+        self.assertEqual(len(backend.graphs), 3)
+        # n is specialized -> not a placeholder; x dim 0 is SymInt (ShapeVar)
+        phs = _placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 1)
+        self.assertIsInstance(phs[0].meta["example_value"].shape[0], torch.SymInt)
 
     def test_unspecified_tensor_is_all_static(self):
         """A tensor not mentioned in shapes_spec has all dims static when
         shapes_spec is provided."""
-        cnt = torch._dynamo.testing.CompileCounter()
+        backend = EagerAndRecordGraphs()
 
         def fn(x, y):
             return x + y
 
         compiled = torch.compile(
             fn,
-            backend=cnt,
+            backend=backend,
             shapes_spec=ShapesSpec(
                 params=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])})
             ),
         )
 
         compiled(torch.randn(4, 3), torch.randn(4, 3))
-        self.assertEqual(cnt.frame_count, 1)
-
-        # y not in spec -> all static; changing y's shape recompiles
-        compiled(torch.randn(8, 3), torch.randn(8, 3))  # x dim0 absorbed, y recompiles
-        self.assertEqual(cnt.frame_count, 2)
-
-        # 3rd distinct y shape -> still recompiles (auto-dynamic NOT triggered)
+        # y not in spec -> all static; changing y's shape recompiles each time
+        compiled(torch.randn(8, 3), torch.randn(8, 3))
         compiled(torch.randn(12, 3), torch.randn(12, 3))
-        self.assertEqual(cnt.frame_count, 3)
-
-        # 4th distinct y shape -> still recompiles (confirms no promotion)
         compiled(torch.randn(16, 3), torch.randn(16, 3))
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(len(backend.graphs), 4)
+        # x dim 0 is SymInt (ShapeVar), x dim 1 is static; y is fully static
+        phs = _placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 2)
+        x_shape = phs[0].meta["example_value"].shape
+        y_shape = phs[1].meta["example_value"].shape
+        self.assertIsInstance(x_shape[0], torch.SymInt)
+        self.assertIsInstance(x_shape[1], int)
+        self.assertIsInstance(y_shape[0], int)
+        self.assertIsInstance(y_shape[1], int)
 
     def test_unspecified_parameter_stays_static(self):
         """nn.Parameter arg not mentioned in shapes_spec stays fully static."""
@@ -378,6 +381,15 @@ class TestShapeVarCompile(TestCase):
         compiled(torch.randn(8, 3), torch.randn(8, 3))
         # x dim 0 is unbacked (absorbed), but w changed shape -> recompile
         self.assertEqual(len(backend.graphs), 2)
+        # x dim 0 is SymInt (ShapeVar), x dim 1 is static; w is fully static
+        phs = _placeholders(backend.graphs[0])
+        self.assertEqual(len(phs), 2)
+        x_shape = phs[0].meta["example_value"].shape
+        w_shape = phs[1].meta["example_value"].shape
+        self.assertIsInstance(x_shape[0], torch.SymInt)
+        self.assertIsInstance(x_shape[1], int)
+        self.assertIsInstance(w_shape[0], int)
+        self.assertIsInstance(w_shape[1], int)
 
     # TODO: once ObjectSpec is added, test the opposite - that specifying a
     # TensorSpec on an nn.Parameter makes it a placeholder (not inlined).

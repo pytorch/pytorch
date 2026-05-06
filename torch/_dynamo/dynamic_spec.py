@@ -144,8 +144,8 @@ class TensorSpec:
 
 
 # Type alias for leaf specs (individual argument specifications)
-LeafSpec: TypeAlias = TensorSpec | IntVar | None
-# Any spec — what public APIs accept.
+LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
+# This will include ListSpec, DictSpec and ObjectSpec
 IntermediateSpec: TypeAlias = LeafSpec
 
 
