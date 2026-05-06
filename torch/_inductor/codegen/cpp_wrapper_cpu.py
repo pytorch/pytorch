@@ -425,10 +425,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.header.writeline(f"// {name} {hashed}")
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
-        if V.graph.aot_mode:
-            return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
+    def get_device_include_path_jit(device: str) -> str:
         return f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>"
+
+    @staticmethod
+    def get_device_include_path_aot(device: str) -> str:
+        return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
 
     def add_device_include(self, device: str) -> None:
         if device in self.included_devices:
@@ -438,10 +440,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # Add the default header for this device, plus any C-shim extensions that are
         # present.
-        self.header.splice_jit(f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>")
-        self.header.splice_aot(
-            f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
-        )
+        self.header.splice_jit(self.get_device_include_path_jit(device))
+        self.header.splice_aot(self.get_device_include_path_aot(device))
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
