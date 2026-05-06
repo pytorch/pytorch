@@ -66,6 +66,7 @@ from ..scheduler import (
     SchedulerNode,
 )
 from ..shape_propagation import get_broadcasted_shape
+from ..stream_utils import get_raw_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
@@ -839,7 +840,7 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         Uses tl.float64 by default but falls back to tl.float32 on devices
         that lack fp64 support (e.g. Intel Arc consumer GPUs).
         """
-        if not device_supports_fp64(V.graph.device_type):
+        if not device_supports_fp64(V.graph.get_current_device_or_throw()):
             return "tl.float32"
         return "tl.float64"
 
@@ -1986,7 +1987,7 @@ class TritonOverrides(OpOverrides):
                 if low_precision_fp(result_dtype) or any_needs_upcast
                 else torch.float64
             )
-        if pow_dtype == torch.float64 and not device_supports_fp64(V.graph.device_type):
+        if pow_dtype == torch.float64 and not device_supports_fp64(V.graph.get_current_device_or_throw()):
             pow_dtype = torch.float32
             if result_dtype == torch.float64:
                 result_dtype = torch.float32
@@ -5485,7 +5486,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -6968,6 +6969,8 @@ class TritonScheduling(SIMDScheduling):
             total_ms += ms
             total_clone_ms += ms_clone
             file_list.append(mod.__file__)
+            args = call = wrapped_jit_function = None
+            torch.accelerator.empty_cache()
         V.graph.removed_buffers = removed_buffers_orig
         V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
