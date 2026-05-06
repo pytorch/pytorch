@@ -3413,6 +3413,8 @@ make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
 make_fallback(aten._grouped_mm, require_dense)
+if hasattr(aten, '_foreach_mm'):
+    make_fallback(aten._foreach_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)

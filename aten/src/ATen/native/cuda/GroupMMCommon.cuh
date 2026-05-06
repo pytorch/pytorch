@@ -153,4 +153,29 @@ __global__ void prepare_grouped_gemm_data(
   stride_output[tid] =
       cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
 }
+
+template <
+    typename ProblemShape,
+    typename StrideA,
+    typename StrideB,
+    typename StrideOutput>
+__global__ void prepare_foreach_mm_data(
+    ProblemShape* problem_sizes,
+    StrideA* stride_A,
+    StrideB* stride_B,
+    StrideOutput* stride_output,
+    int32_t M,
+    int32_t N,
+    int32_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldoutput) {
+  int32_t tid = threadIdx.x;
+  problem_sizes[tid] = ProblemShape(M, N, K);
+  stride_A[tid] = cutlass::make_cute_packed_stride(StrideA{}, {lda, lda, 1});
+  stride_B[tid] = cutlass::make_cute_packed_stride(StrideB{}, {ldb, ldb, 1});
+  stride_output[tid] =
+      cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
+}
+
 } // namespace at::cuda::detail

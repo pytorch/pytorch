@@ -37,6 +37,11 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_foreach_add.h>
+#include <ATen/ops/_foreach_addmm_native.h>
+#include <ATen/ops/_foreach_mm.h>
+#include <ATen/ops/_foreach_mm_native.h>
+#include <ATen/ops/_foreach_mul.h>
 #include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
@@ -727,6 +732,107 @@ std::optional<c10::ScalarType> out_dtype) {
   }
 #endif //ifndef USE_ROCM
   return out;
+}
+
+std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
+    at::TensorList self_list,
+    at::TensorList mat2_list) {
+  const int64_t group_count = self_list.size();
+  TORCH_CHECK(group_count > 0, "_foreach_mm requires non-empty tensor lists");
+  TORCH_CHECK(
+      group_count == static_cast<int64_t>(mat2_list.size()),
+      "_foreach_mm: self and mat2 must have the same number of tensors, got ",
+      group_count, " and ", mat2_list.size());
+
+  const auto& first_a = self_list[0];
+  const auto& first_b = mat2_list[0];
+  TORCH_CHECK(first_a.dim() == 2, "_foreach_mm: tensors in self must be 2D");
+  TORCH_CHECK(first_b.dim() == 2, "_foreach_mm: tensors in mat2 must be 2D");
+
+  const int64_t M = first_a.size(0);
+  const int64_t K = first_a.size(1);
+  const int64_t N = first_b.size(1);
+  TORCH_CHECK(
+      first_b.size(0) == K,
+      "_foreach_mm: contraction dimension mismatch");
+
+  for (int64_t i = 1; i < group_count; i++) {
+    TORCH_CHECK(self_list[i].dim() == 2 && mat2_list[i].dim() == 2,
+        "_foreach_mm: all tensors must be 2D");
+    TORCH_CHECK(
+        self_list[i].size(0) == M && self_list[i].size(1) == K,
+        "_foreach_mm: all tensors in self must have shape [", M, ", ", K, "]");
+    TORCH_CHECK(
+        mat2_list[i].size(0) == K && mat2_list[i].size(1) == N,
+        "_foreach_mm: all tensors in mat2 must have shape [", K, ", ", N, "]");
+    TORCH_CHECK(
+        self_list[i].dtype() == first_a.dtype() &&
+        mat2_list[i].dtype() == first_b.dtype(),
+        "_foreach_mm: all tensors must have the same dtype");
+  }
+
+  const auto out_dtype = first_a.scalar_type();
+  const auto alignment = static_cast<int64_t>(16 / c10::elementSize(out_dtype));
+  const int64_t N_padded = (N + alignment - 1) / alignment * alignment;
+
+  std::vector<at::Tensor> outputs;
+  outputs.reserve(group_count);
+  for (int64_t i = 0; i < group_count; i++) {
+    outputs.push_back(at::empty_strided(
+        {M, N}, {N_padded, 1}, first_a.options().dtype(out_dtype)));
+  }
+
+  bool use_fast_path =
+      _scaled_mm_allowed_device(/*sm90_only=*/true, /*sm100_only=*/true) &&
+      first_a.dtype() == at::kBFloat16 &&
+      first_b.dtype() == at::kBFloat16;
+
+  if (use_fast_path) {
+    at::cuda::detail::bf16bf16_foreach_mm(self_list, mat2_list, outputs);
+  } else {
+    for (int64_t i = 0; i < group_count; i++) {
+      at::mm_out(outputs[i], self_list[i], mat2_list[i]);
+    }
+  }
+
+  return outputs;
+}
+
+std::vector<at::Tensor> foreach_tensor_addmm_kernel_cuda(
+    at::TensorList self_list,
+    at::TensorList mat1_list,
+    at::TensorList mat2_list,
+    const at::Scalar& beta,
+    const at::Scalar& alpha) {
+  const int64_t group_count = self_list.size();
+  TORCH_CHECK(group_count > 0, "_foreach_addmm requires non-empty tensor lists");
+  TORCH_CHECK(
+      group_count == static_cast<int64_t>(mat1_list.size()) &&
+      group_count == static_cast<int64_t>(mat2_list.size()),
+      "_foreach_addmm: all lists must have the same number of tensors");
+
+  // Decompose: result = beta * self + alpha * (mat1 @ mat2)
+  // Use _foreach_mm for the batched matmul, then elementwise for bias.
+  auto mm_results = at::_foreach_mm(mat1_list, mat2_list);
+
+  double alpha_val = alpha.toDouble();
+  double beta_val = beta.toDouble();
+
+  if (alpha_val != 1.0) {
+    at::_foreach_mul_(mm_results, alpha);
+  }
+
+  if (beta_val == 0.0) {
+    return mm_results;
+  }
+
+  if (beta_val == 1.0) {
+    return at::_foreach_add(mm_results, self_list);
+  }
+
+  // General case: beta * self + mm_results
+  auto scaled_self = at::_foreach_mul(self_list, beta);
+  return at::_foreach_add(scaled_self, mm_results);
 }
 
 } // namespace at::native

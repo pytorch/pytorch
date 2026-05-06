@@ -11876,6 +11876,20 @@
     CompositeExplicitAutograd: _foreach_copy
     MTIA: foreach_tensor_copy_list_kernel_mtia
 
+- func: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_mm_list_kernel_slow
+    CUDA: foreach_tensor_mm_list_kernel_cuda
+
+- func: _foreach_addmm(Tensor[] self, Tensor[] mat1, Tensor[] mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_addmm_kernel_slow
+    CUDA: foreach_tensor_addmm_kernel_cuda
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
