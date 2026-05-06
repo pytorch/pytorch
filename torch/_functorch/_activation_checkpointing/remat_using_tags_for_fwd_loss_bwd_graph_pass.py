@@ -154,16 +154,37 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     for node in itertools.islice(gm.graph.nodes, 0, bwd_start):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
+    def _ensure_in_env(node: fx.Node) -> fx.Node:
+        """Eagerly copy a backward node and its dependencies into the new graph.
+
+        The CPU offloading pass must run before remat. Offloaded forward nodes
+        carry ``cpu_offload_reload_node`` metadata pointing to their backward
+        reload chain (ao.reload -> ao.wait_tensor). Recomputed nodes need the
+        reloaded tensor, but the reload chain may not have been copied into
+        ``env`` yet (e.g. layer-boundary nodes whose reload is in a later
+        backward region). This helper copies the chain on demand.
+        """
+        if node in env:
+            return env[node]
+        for dep in node.all_input_nodes:
+            _ensure_in_env(dep)
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
+        return env[node]
+
     @overload
     def remat_input(x: fx.Node) -> fx.Node: ...
     @overload
     def remat_input(x: Any) -> Any: ...
 
     def remat_input(x: object) -> object:
-        # fx.Node can have args that are primitive types (e.g. int, float, bool)
         if not isinstance(x, fx.Node):
             return x
-        return recomputed_nodes.get(x, env[x])
+        if x in recomputed_nodes:
+            return recomputed_nodes[x]
+        reload_node = x.meta.get("cpu_offload_reload_node")
+        if reload_node is not None:
+            return _ensure_in_env(reload_node)
+        return env[x]
 
     def gather_recompute_deps(node: fx.Node) -> set[fx.Node]:
         deps: set[fx.Node] = set()
@@ -202,10 +223,14 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
             dup.meta["autograd_backward"] = True
             recomputed_nodes[dep] = dup
 
-        env[node] = new_graph.node_copy(node, remat_input)
+        # Skip nodes already copied by _ensure_in_env (offload reload chains)
+        # to avoid duplicating H2D transfers.
+        if node not in env:
+            env[node] = new_graph.node_copy(node, remat_input)
 
     for node in itertools.islice(gm.graph.nodes, bwd_end, None):
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
+        if node not in env:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
