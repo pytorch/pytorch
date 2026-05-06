@@ -1540,6 +1540,15 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
+    def test_deterministic_replication_pad_tensor_padding(self, device):
+        # gh-182339: 0-d int64 tensor in padding tuple should not crash
+        x = torch.randn(2, 1, 16, device=device)
+        extra_padding = torch.tensor(4, dtype=torch.int64, device=device)
+        with DeterministicGuard(True):
+            result = torch.nn.functional.pad(x, (4, extra_padding), mode='replicate')
+        expected = torch.nn.functional.pad(x, (4, 4), mode='replicate')
+        self.assertEqual(result, expected)
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
