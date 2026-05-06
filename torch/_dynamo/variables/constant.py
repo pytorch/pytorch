@@ -553,6 +553,9 @@ class FakeIdVariable(VariableTracker):
                 )
         return super().call_method(tx, name, args, kwargs)
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        return (False, False, None)
+
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
             gb_type="Reconstruction of FakeIdVariable",
