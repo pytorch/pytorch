@@ -289,7 +289,7 @@ def lower_cpu(
         input_nodes += [
             value
             for value in kernel_input_name_to_buffer.values()
-            if not isinstance(value, sympy.Symbol)
+            if not isinstance(value, sympy.Expr)
         ]
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
