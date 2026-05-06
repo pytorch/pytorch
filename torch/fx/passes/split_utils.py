@@ -87,7 +87,9 @@ def split_by_tags(
     the initial submodules in the order of "a", "b", "c".
 
     To set a tag:
+    ```python
     gm.graph.nodes[idx].tag = "mytag"
+    ```
 
     This will result in all nodes with the same tag being extracted and placed in their
     own submodule. For placeholder, output and get_attr node, the tag is ignored. placeholder
@@ -96,6 +98,7 @@ def split_by_tags(
 
     Given the following module def:
 
+    ```python
     class SimpleModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -108,29 +111,36 @@ def split_by_tags(
             r2 = self.linear2(in2)
             r3 = torch.cat([r1, r2])
             return self.linear3(r3)
+    ```
 
     Marking the node corresponding to in1 with the tag sc.REQUEST_ONLY.lower() results in the following split:
 
     ro:
+    ```python
     def forward(self, in1):
         self = self.root
         linear1 = self.linear1(in1)
         return linear1
+    ```
 
     main:
+    ```python
     def forward(self, in2, linear1):
         self = self.root
         linear2 = self.linear2(in2)
         cat_1 = torch.cat([linear1, linear2])
         linear3 = self.linear3(cat_1)
         return linear3
+    ```
 
     main:
+    ```python
     def forward(self, in1, in2):
         self = self.root
         ro_0 = self.ro_0(in1)
         main_1 = self.main_1(in2, ro_0)
         return main_1
+    ```
 
     Returns:
         split_gm: torch fx graph after split
