@@ -1032,8 +1032,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    "set_checkpoint_early_stop",
-    "set_device_states",
     # torch.utils.cpp_backtrace
     "get_cpp_backtrace",
     # torch.utils.cpp_extension
