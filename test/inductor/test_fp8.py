@@ -592,7 +592,13 @@ class TestFP8Lowering(TestCase):
 
         from torch._inductor import config
 
-        with config.patch(post_grad_custom_post_pass=stride_pass):
+        with config.patch(
+            {
+                "post_grad_custom_post_pass": stride_pass,
+                # Force cache miss so our post-grad pass actually runs
+                "force_disable_caches": True,
+            }
+        ):
             f_compiled = torch.compile(f, dynamic=False)
             result = f_compiled(a, b, scale_a, scale_b)
 
