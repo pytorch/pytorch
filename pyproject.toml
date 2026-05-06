@@ -350,7 +350,6 @@ select = [
 ]
 
 # torch/ folders still needing S101 migration
-"torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 
 [tool.codespell]
