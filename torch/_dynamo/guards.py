@@ -100,6 +100,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -472,6 +473,15 @@ class GuardManagerWrapper:
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
                     if node.has_no_accessors() and not node.has_object_aliasing_guard():
                         node.mark_tag_safe()
+                elif any(
+                    a.repr() == "PythonLambdaGuardAccessor"
+                    for a in node.get_accessors()
+                ):
+                    # PythonLambdaGuardAccessor produces ephemeral objects
+                    # (e.g., ___from_numpy converts np.float64 to a temporary
+                    # tensor). These must not be stashed by the tag-safe
+                    # recording pass since they are freed after each check.
+                    pass
                 else:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), dict):
@@ -504,7 +514,7 @@ class GuardManagerWrapper:
                 )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # Assumption: callers will not reassignthe attributes
+                # Assumption: callers will not reassign the attributes
                 #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
                 # Mutating the objects those attributes point to is fine;
                 # rebinding the attribute itself is not.
@@ -2148,6 +2158,43 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: type(
+            value.real_obj if isinstance(value, FakeScriptObject) else value
+        ),
+        eval_fn=lambda value, metadata: type(
+            value.real_obj if isinstance(value, FakeScriptObject) else value
+        )
+        is metadata,
+    )
+    def FAKE_SCRIPT_TYPE_MATCH(self, guard: Guard) -> None:
+        # Like TYPE_MATCH, but for sources that may resolve to either a
+        # FakeScriptObject (during outer AOTAutograd tracing) or the
+        # underlying real opaque object (at runtime). The C++ leaf guard
+        # unwraps FakeScriptObject before comparing types.
+        value = self.get(guard)
+        if isinstance(value, FakeScriptObject):
+            t = type(value.real_obj)
+        else:
+            t = type(value)
+
+        if t.__qualname__ != t.__name__:
+            guard._unserializable = True
+
+        obj_id = self.id_ref(t, f"type({guard.name})")
+        type_repr = repr(t)
+        code = f"___check_fake_script_type({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_fake_script_type_match_guard(
+            FakeScriptObject,
+            obj_id,
+            get_verbose_code_parts(
+                code, guard, recompile_hint=f"type {t.__qualname__}"
+            ),
+            guard.user_stack,
+        )
+
     # Dict versions change on any mutation, so a version captured during one
     # trace is meaningless for a later subgraph reuse check.
     @unsupported_guard_check_spec
@@ -3494,10 +3541,11 @@ class GuardBuilder(GuardBuilderBase):
                 "_dynamo_dynamic_indices",
                 "_dynamo_weak_dynamic_indices",
                 "_dynamo_unbacked_indices",
+                "_dynamo_strict_unbacked_indices",
                 "_dynamo_static_indices",
             )
 
-            expected_attrs: dict[str, Any] = {}
+            expected_attrs: dict[str, set[int]] = {}
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
@@ -3510,7 +3558,7 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(code_part)
 
             # Dependent attributes: checked only when _dynamo_unbacked_indices is present.
-            dependent_attrs: dict[str, tuple[Any, str]] = {}
+            dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]] = {}
             dep_attr_names = ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")
             gate_attr = "_dynamo_unbacked_indices"
             if hasattr(value, gate_attr):
@@ -4202,7 +4250,7 @@ class CheckFunctionManager:
         self,
         f_code: types.CodeType,
         output_graph: OutputGraphCommon,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         guard_fail_fn: Callable[[GuardFail], None] | None = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
@@ -4215,7 +4263,7 @@ class CheckFunctionManager:
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
         existing_diff_guard_sources = (
-            update_diff_guard_managers_for_existing_cache_entries(cache_entry)
+            update_diff_guard_managers_for_existing_cache_entries(cache_entries or [])
         )
         self.output_graph: OutputGraphCommon | None = output_graph
         assert self.output_graph is not None
@@ -4976,6 +5024,49 @@ def format_user_stack_trace(
     return "\n".join(lines)
 
 
+def describe_backend(backend: Callable[..., object] | None) -> str:
+    """Return a human-readable string describing a backend callable for debugging."""
+    if backend is None:
+        return "None"
+
+    # _TorchCompileWrapper is the internal wrapper created by torch.compile().
+    # It has structured fields that are more informative than generic introspection.
+    from torch import _TorchCompileWrapper
+
+    if isinstance(backend, _TorchCompileWrapper):
+        details = f"compiler={backend.compiler_name!r}, dynamic={backend.dynamic!r}"
+        if backend.kwargs:
+            details += f", kwargs={backend.kwargs!r}"
+        return f"_TorchCompileWrapper({details}) (id={id(backend):#x})"
+
+    actual = backend
+    prefix = ""
+    if isinstance(actual, functools.partial):
+        prefix = "functools.partial wrapping "
+        actual = actual.func
+
+    qualname = getattr(actual, "__qualname__", None)
+    module = getattr(actual, "__module__", None)
+
+    if qualname and module:
+        name = f"{module}.{qualname}"
+    elif qualname:
+        name = qualname
+    elif hasattr(actual, "__name__"):
+        name = actual.__name__
+    else:
+        name = type(actual).__name__
+
+    code = getattr(actual, "__code__", None)
+    location = (
+        f" defined at {code.co_filename}:{code.co_firstlineno}"
+        if code is not None
+        else ""
+    )
+
+    return f"{prefix}{name}{location} (id={id(backend):#x})"
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
@@ -5029,8 +5120,12 @@ def get_guard_fail_reason_helper(
             user_stack_str = format_user_stack_trace(guard_debug_info.user_stack)
     elif cache_entry_backend != backend:
         # None of the guard entries failed - a backend match issue
+        cached_desc = describe_backend(cache_entry_backend)
+        new_desc = describe_backend(backend)
         reason = (
-            "BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f"BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f" Cached backend: {cached_desc}."
+            f" New backend: {new_desc}."
             " If this is unexpected, wrap your backend in functools.partial (or reuse the"
             " same cached backend) to avoid creating a new backend function each time."
             " More details: https://github.com/pytorch/pytorch/issues/168373"
@@ -5115,20 +5210,20 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reasons(
-    cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
     frame: DynamoFrameType,
     # pyrefly: ignore [implicit-any]
     backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
     """
-    Return the list of guard failure reasons using cache_entry.
+    Return the list of guard failure reasons using cache entries.
     Logs the recompilation reason if `recompiles` logging is enabled.
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
     # pyrefly: ignore [implicit-any]
     reasons = []
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         reason = get_guard_fail_reason(
             cache_entry.guard_manager,
             cache_entry.code,
@@ -5139,7 +5234,6 @@ def get_and_maybe_log_recompilation_reasons(
         )
         if reason:
             reasons.append(reason)
-        cache_entry = cache_entry.next
 
     code = frame.f_code
 
@@ -5184,27 +5278,22 @@ def get_and_maybe_log_recompilation_reasons(
 
 
 def update_diff_guard_managers_for_existing_cache_entries(
-    cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
 ) -> OrderedSet[str]:
-    first_cache_entry = cache_entry
-
     # On the first pass, go through the cache entries and accumulate the diff
     # guard sources. Different guard managers can fail with different sources.
     # So, we collect all of them first.
     acc_diff_guard_sources: OrderedSet[str] = OrderedSet()
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         acc_diff_guard_sources.update(
             cache_entry.guard_manager.collect_diff_guard_sources()
         )
-        cache_entry = cache_entry.next  # type: ignore[assignment]
 
     # On the second pass, set the diff_guard_sources for each cache line to the
     # accumulated value. And the re-populate the diff guard manager.
-    cache_entry = first_cache_entry
-    while cache_entry is not None:
+    for cache_entry in cache_entries:
         cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
         cache_entry.guard_manager.populate_diff_guard_manager()
-        cache_entry = cache_entry.next  # type: ignore[assignment]
 
     # return the accumulated sources to set up the new cache line.
     return acc_diff_guard_sources

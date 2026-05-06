@@ -34,7 +34,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
-**Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, and deprecated labels.
+**Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
 
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
@@ -66,6 +66,7 @@ Use these GitHub MCP tools for triage:
 | `ci-*`, `ci:*` | CI infrastructure controls |
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
+| `actionable` | Requires human decision |
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
@@ -172,7 +173,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | Label | When to use |
 |-------|-------------|
 | `oncall: jit` | TorchScript issues |
-| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining) |
+| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after applying this label, invoke the distributed triage sub-skill (`/distributed-triage` on this issue) for second-level triage — it will route to a sub-oncall, add module labels, and mark triaged. |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
