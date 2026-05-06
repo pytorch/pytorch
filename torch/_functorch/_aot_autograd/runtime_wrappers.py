@@ -3107,10 +3107,10 @@ def _codegen_compiled_forward(
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
 
-    L: list[str] = [
+    lines: list[str] = [
         "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
     ]
-    G: dict[str, object] = {
+    code_globals: dict[str, object] = {
         "torch": torch,
         "BackwardState": BackwardState,
         "_normalize_as_list_": normalize_as_list,
@@ -3118,28 +3118,28 @@ def _codegen_compiled_forward(
 
     if backward_state_indices:
         idx = backward_state_indices[0]
-        L.append(f"    _bw_state = args[{idx}]")
-        L.append("    if not isinstance(_bw_state, BackwardState):")
-        L.append("        raise AssertionError(")
-        L.append("            f'expected BackwardState, got {type(_bw_state)}')")
-        L.append("    ctx._compiled_autograd_backward_state = _bw_state")
+        lines.append(f"    _bw_state = args[{idx}]")
+        lines.append("    if not isinstance(_bw_state, BackwardState):")
+        lines.append("        raise AssertionError(")
+        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
+        lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
 
     if num_rng > 0:
-        L.append("    args = _rng_add_(ctx, args)")
+        lines.append("    args = _rng_add_(ctx, args)")
 
     if disable_amp:
-        G["_DisableAutocast_"] = torch._C._DisableAutocast
-        L.append("    with _DisableAutocast_():")
-        L.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+        lines.append("    with _DisableAutocast_():")
+        lines.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
     else:
-        L.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        lines.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
 
-    L.append("    _save_(ctx, fw_outs)")
-    L.append("    return _finalize_(ctx, fw_outs)")
+    lines.append("    _save_(ctx, fw_outs)")
+    lines.append("    return _finalize_(ctx, fw_outs)")
 
-    source = "\n".join(L)
+    source = "\n".join(lines)
     return _compile_and_exec_source(
-        source, G, "_compiled_forward", "compiled_function_forward"
+        source, code_globals, "_compiled_forward", "compiled_function_forward"
     )
 
 
