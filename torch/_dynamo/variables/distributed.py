@@ -20,7 +20,7 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -70,11 +70,8 @@ class DistributedVariable(VariableTracker):
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -134,12 +131,18 @@ class WorldMetaClassVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for WORLD attribute"
+                )
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.WORLD, source)
         elif name == "NON_GROUP_MEMBER":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
+                )
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)

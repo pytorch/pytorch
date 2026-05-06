@@ -18,8 +18,8 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
-import linecache
 import logging
+import textwrap
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
@@ -30,7 +30,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, istype
+from ..utils import cmp_name_to_op_mapping, format_source_range, istype
 
 
 if TYPE_CHECKING:
@@ -58,13 +58,16 @@ class SourceLocation:
     end_col_offset: int | None = None
 
     def format(self) -> str:
-        line = linecache.getline(self.filename, self.lineno).rstrip()
         result = f'  File "{self.filename}", line {self.lineno}\n'
-        if line:
-            result += f"    {line}\n"
-        if line and self.col_offset is not None and self.end_col_offset is not None:
-            num_carets = max(1, self.end_col_offset - self.col_offset)
-            result += "    " + " " * self.col_offset + "^" * num_carets + "\n"
+        source = format_source_range(
+            self.filename,
+            self.lineno,
+            self.end_lineno,
+            self.col_offset,
+            self.end_col_offset,
+        )
+        if source:
+            result += textwrap.indent(source.rstrip("\n"), "    ") + "\n"
         return result
 
 
@@ -449,6 +452,54 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # fall through to length check, then truthy default.
         return None
 
+    def is_hashable(self) -> bool:
+        """Whether the underlying Python object is hashable.
+
+        Defaults to True — in CPython, all objects are hashable unless the type
+        explicitly sets __hash__ = None (PyObject_HashNotImplemented).
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L7288
+
+        Subclasses override to return False for unhashable types (list, dict,
+        set, etc.).  This is a fast, side-effect-free check used by
+        HashableTracker and __contains__ before attempting to hash.
+        """
+        return True
+
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
+
+        PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
+        Assigned on object: https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L7288
+
+        Returns (hash_value, is_fake).  is_fake=True means the hash depends on
+        a sourceless object's identity and must not escape into output bytecode.
+
+        VT subclasses override this for types with their own C tp_hash.
+        UserDefinedObjectVariable.hash_impl handles the MRO walk for custom
+        Python __hash__, builtin-inherited C hash, and unknown C tp_hash.
+        """
+        # object.__hash__ = Py_HashPointer(obj) — identity hash.
+        if self.source:
+            real_val = tx.output.resolve_source_value(self.source)
+            if type(real_val).__hash__ is not object.__hash__:
+                unimplemented(
+                    gb_type="Missing hash_impl override",
+                    context=f"hash_impl {self}",
+                    explanation=f"{type(self).__name__} wraps "
+                    f"{type(real_val).__name__} which has a non-default "
+                    f"tp_hash. Add a hash_impl override to "
+                    f"{type(self).__name__}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+            # object.__hash__ = id(obj), so the hash is identity-based.
+            # Return is_fake=True so the hash is only usable internally
+            # (dict keys, set membership) and doesn't escape into bytecode
+            # — avoids installing an ID_MATCH guard just for hashing.
+            # TODO when LazyConstants are fully landed, we can use them here instead.
+            return hash(real_val), True
+        # Sourceless: no real object to hash — fake id.
+        return id(self), True
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -482,6 +533,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_tensor(self) -> bool:
         """Return True for TensorVariable instances"""
         return False
+
+    def get_handler_type_for_dispatch(self) -> type[VariableTracker]:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        This is used by BuiltinVariable to look up the appropriate handler for
+        a given set of arguments. Most VariableTrackers just return their own
+        type, but LazyConstantVariable returns ConstantVariable since it can
+        be treated as a constant for most builtin operations.
+
+        Subclasses that override this should install appropriate guards to
+        ensure the dispatched handler remains valid.
+        """
+        return type(self)
 
     def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
@@ -564,7 +628,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def force_apply_to_var_sequence(
         self, tx: Any, fn: Callable[[VariableTracker], Any]
     ) -> None:
-        assert self.has_force_unpack_var_sequence(tx)
+        if not self.has_force_unpack_var_sequence(tx):
+            raise AssertionError(
+                "force_apply_to_var_sequence requires has_force_unpack_var_sequence(tx) == True"
+            )
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
@@ -700,6 +767,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_int_impl(tx)
         elif name == "__float__" and not args and not kwargs:
             return self.nb_float_impl(tx)
+        elif name == "__or__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_or_impl(tx, args[0])
+        elif name == "__ror__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_or_impl(tx, args[0], reverse=True)
+        elif name == "__ior__":
+            return self.nb_inplace_or_impl(tx, args[0])
+        elif name == "__hash__" and not args and not kwargs:
+            from .object_protocol import generic_hash
+
+            return generic_hash(tx, self)
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1004,51 +1084,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self) -> bool:
-        """
-        Unlike the variable tracker's own __hash__, this method checks whether
-        the underlying Python object referenced by this variable tracker is hashable.
-        """
-        try:
-            type_self = self.python_type()
-        except NotImplementedError:
-            type_self = type(self)
-
-        unimplemented(
-            gb_type="Dynamo cannot determine whether the underlying object is hashable",
-            context=f"is_python_hashable {self}",
-            explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {type_self}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def get_python_hash(self) -> int:
-        """
-        Unlike the variable tracker’s own __hash__, this method is used by
-        ConstDictVariableTracker to compute the hash of the underlying key object.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the hash of an object",
-            context=f"get_python_hash {self}",
-            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def get_id(self, tx: InstructionTranslator) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.
 
         The base implementation uses source resolution for sourceful VTs.
         Subclasses override for special cases (e.g. NNModuleVariable uses
         get_submodule, ConstantVariable handles singletons).
+
+        Returns None for sourceless VTs — callers use FakeIdVariable in
+        that case (see generic_id in object_protocol.py).
         """
         if self.source:
             return id(tx.output.resolve_source_value(self.source))
@@ -1136,6 +1180,57 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def _nb_slot_not_implemented(
+        self,
+        tp_slot_name: str,
+        other: VariableTracker,
+        reverse: bool = False,
+    ):
+        unimplemented(
+            gb_type="tp_as_number slot not implemented",
+            context=f"{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
+            explanation=f"The type {self.python_type_name()} does not implement the {tp_slot_name}",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_or slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__ror__`` instead of ``__or__``).
+        """
+        return self._nb_slot_not_implemented("nb_or_impl", other, reverse=reverse)
+
+    def nb_inplace_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
+        return self._nb_slot_not_implemented("nb_inplace_or", other)
+
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_negative slot.
+
+        Called when type_implements_nb_negative returns True for this type.
+        Subclasses override to provide the actual negation.
+        """
+        unimplemented(
+            gb_type="nb_negative_impl not implemented",
+            context=f"{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_negative C slot but "
+            "the corresponding VariableTracker doesn't implement nb_negative_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,
@@ -1155,15 +1250,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # If this fails, it's either
                 # 1. one mistakenly passed in a source
                 # 2. `mutation_type` is incorrect
-                assert source is None
+                if source is not None:
+                    raise AssertionError(
+                        "source must be None for ValueMutationNew/AttributeMutationNew"
+                    )
             else:
-                assert isinstance(
+                if not isinstance(
                     mutation_type, (ValueMutationExisting, AttributeMutationExisting)
-                )
+                ):
+                    raise AssertionError(
+                        f"Expected ValueMutationExisting or AttributeMutationExisting, "
+                        f"got {type(mutation_type)}"
+                    )
                 # If this fails, it's either
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
-                assert source is not None
+                if source is None:
+                    raise AssertionError(
+                        "source must not be None for ValueMutationExisting/AttributeMutationExisting"
+                    )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
