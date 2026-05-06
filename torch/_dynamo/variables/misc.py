@@ -1409,6 +1409,23 @@ class GetAttrVariable(VariableTracker):
         except AttributeError:
             raise NotImplementedError(f"{self} is not a constant") from None
 
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # GetAttrVariable can wrap various types (bound methods, descriptors,
+        # etc.) with different C tp_hash.  Resolve to the actual value and hash.
+        try:
+            val = self.as_python_constant()
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            from ..exc import unimplemented
+
+            unimplemented(
+                gb_type="Non-constant GetAttrVariable hash",
+                context=f"hash_impl {self}",
+                explanation=f"Cannot hash {self} because Dynamo doesn't know how to represent "
+                "the type of the getattr() result, which is not a constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return hash(val), False
+
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError
@@ -1569,11 +1586,9 @@ class MethodWrapperVariable(VariableTracker):
     def as_python_constant(self) -> types.MethodWrapperType:
         return self.method_wrapper
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # CPython wrapper_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1347
+        return hash(self.method_wrapper), False
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -1737,6 +1752,9 @@ class TypingVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
+
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
@@ -1767,12 +1785,6 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
-
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -1979,12 +1991,6 @@ class NumpyVariable(VariableTracker):
                 return self.value.__name__
 
         return super().as_proxy()
-
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -2297,6 +2303,9 @@ class ConstantLikeVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        return hash(self.value), False
 
     def call_method(
         self,
@@ -2611,12 +2620,12 @@ class WeakRefVariable(VariableTracker):
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
 
-    def is_python_hashable(self) -> bool:
-        return self.referent_vt.is_python_hashable()
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # CPython weakref_hash: hash(referent)
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/weakrefobject.c#L186
+        from .object_protocol import generic_hash_impl
 
-    def get_python_hash(self) -> int:
-        # weakref relies on the referent's hash
-        return self.referent_vt.get_python_hash()
+        return generic_hash_impl(tx, self.referent_vt)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):

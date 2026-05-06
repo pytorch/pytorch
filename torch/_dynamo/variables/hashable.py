@@ -27,32 +27,69 @@ def raise_unhashable(
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
+
     try:
         arg_type = arg.python_type()
     except Exception:
-        arg_type = type(arg)
+        arg_type = None
 
+    # Safety check: if we know the real Python type and it IS hashable,
+    # our is_hashable() disagrees with CPython. Graph-break rather than
+    # raising a wrong TypeError.
+    if arg_type is not None and arg_type.__hash__ is not None:
+        from .. import graph_break_hints
+        from ..exc import unimplemented
+
+        unimplemented(
+            gb_type="Hashability mismatch",
+            context=f"raise_unhashable {arg}",
+            explanation=f"Dynamo thinks {arg_type.__name__} is unhashable, "
+            f"but its __hash__ is not None. This likely indicates a missing "
+            f"or incorrect is_hashable() override.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
+    type_name = arg_type.__name__ if arg_type is not None else type(arg).__name__
     raise_observed_exception(
         TypeError,
         tx,
         args=[
-            f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}",
+            f"unhashable type: '{type_name}'",
         ],
     )
 
 
 def is_hashable(x: VariableTracker) -> bool:
-    # NB - performing isinstance check on a LazVT realizes the VT, accidentally
-    # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
-    # the underlying value without realizing the VT. Consider updating the
-    # lazyVT `is_hashable` method if you see unnecessary guarding for a key VT.
+    # LazyVT optimization: check hashability without realizing the VT to avoid
+    # accidentally inserting guards.
     if (
         isinstance(x, variables.LazyVariableTracker)
         and not x.is_realized()
-        and x.is_hashable()
+        and x.is_hashable_lazy()
     ):
         return True
-    return x.is_python_hashable()
+
+    return x.is_hashable()
+
+
+class RawHash:
+    """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
+
+    When building a tuple/frozenset of per-item hashes, using bare ints would
+    apply long_hash (mod sys.hash_info.modulus), corrupting the values.
+    Wrapping in RawHash makes tuplehash/frozenset_hash see the original hash.
+    """
+
+    __slots__ = ("h",)
+
+    def __init__(self, h: int) -> None:
+        self.h = h
+
+    def __hash__(self) -> int:
+        return self.h
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, RawHash) and self.h == other.h
 
 
 class HashableTracker:
@@ -68,11 +105,26 @@ class HashableTracker:
         # We specialize SymNodes
         vt = specialize_symnode(vt)
 
-        # If Dynamo does not know the hashability of the vt, it will raise unsupported here
-        # TODO(follow-up): check tp_hash via C-level slot detection — unhashable keys
-        # (e.g. list) should raise TypeError, not graph break via is_python_hashable/unimplemented.
-        if not is_hashable(vt):
-            raise_unhashable(vt)
+        # Fast path for unrealized LazyVariableTrackers: check and hash without
+        # realizing, to avoid inserting guards.  If the fast-path check fails,
+        # fall through to realize the VT and try the full is_hashable check.
+        if (
+            isinstance(vt, variables.LazyVariableTracker)
+            and not vt.is_realized()
+            and vt.is_hashable_lazy()
+        ):
+            self._hash = hash(vt.original_value())
+            self.vt = vt
+            return
+
+        # Compute hash via the tp_hash slot (generic_hash_impl).
+        # For unhashable types, hash_impl raises ObservedTypeError.
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        from .object_protocol import generic_hash_impl
+
+        tx = InstructionTranslator.current_tx()
+        self._hash, _ = generic_hash_impl(tx, vt)
         self.vt = vt
 
     @classmethod
@@ -114,28 +166,7 @@ class HashableTracker:
         return torch.Size(items)
 
     def __hash__(self) -> int:
-        """
-        Computes the hash value for the wrapped VariableTracker.
-
-        For unrealized LazyVariableTrackers, uses the hash of the original value
-        to avoid realizing the tracker and inserting unnecessary guards.
-        For all other cases, delegates to the VariableTracker's get_python_hash method.
-
-        Returns:
-            The hash value of the underlying variable tracker
-        """
-        if (
-            isinstance(self.vt, variables.LazyVariableTracker)
-            and not self.vt.is_realized()
-            and self.vt.is_hashable()
-        ):
-            return hash(self.vt.original_value())
-
-        maybe_constant = self._maybe_constant_torch_size(self.vt)
-        if maybe_constant is not self._MISSING:
-            return hash(maybe_constant)
-
-        return self.vt.get_python_hash()
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         """

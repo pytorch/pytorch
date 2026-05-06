@@ -18,7 +18,7 @@ dictionaries with None values.
 import functools
 import operator
 from collections.abc import Iterable, Sequence
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -30,7 +30,7 @@ from ..source import AttrSource, is_constant_source, is_from_local_source
 from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable, raise_unhashable
+from .hashable import HashableTracker, is_hashable
 
 
 if TYPE_CHECKING:
@@ -127,6 +127,9 @@ class SetVariable(VariableTracker):
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
+        # Use is_hashable as a side-effect-free pre-check.  We can't catch
+        # ObservedTypeError from HashableTracker because it modifies
+        # tx.exn_vt_stack as a side effect.
         if not is_hashable(vt):
             return False
         key = HashableTracker(vt)
@@ -134,6 +137,7 @@ class SetVariable(VariableTracker):
 
     def has_new_items(self) -> bool:
         return self.should_reconstruct_all or any(
+            # pyrefly: ignore [bad-argument-type]
             self.is_new_item(self.original_items.get(key.vt), value)
             for key, value in self.items.items()
         )
@@ -157,8 +161,13 @@ class SetVariable(VariableTracker):
             kwargs["source"] = None
         return super().clone(**kwargs)
 
-    def is_python_hashable(self) -> bool:
+    def is_hashable(self) -> bool:
         return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__class__":
@@ -254,8 +263,6 @@ class SetVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             # Convert add to __setitem__ with None value
-            if not is_hashable(args[0]):
-                raise_unhashable(args[0], tx)
             tx.output.side_effects.mutation(self)
             self.items[HashableTracker(args[0])] = SetVariable._default_value()
             return ConstantVariable.create(None)
@@ -516,8 +523,10 @@ class SetVariable(VariableTracker):
                     "more than 1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if not (args and is_hashable(args[0])):
-                raise_unhashable(args[0], tx)
+            # Trigger ObservedTypeError for unhashable items so that
+            # CONTAINS_OP can catch it and fall back to __iter__.
+            # (CPython's set.__contains__ does this for e.g. set-in-frozenset.)
+            HashableTracker(args[0])
             self.install_set_contains_guard(tx, args)
             contains = args[0] in self
             return VariableTracker.build(tx, contains)
@@ -781,14 +790,24 @@ class FrozensetVariable(SetVariable):
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
 
-    def is_python_hashable(self) -> Literal[True]:
-        """
-        Frozensets are immutable and hashable in Python.
-        """
+    def is_hashable(self) -> bool:
         return True
 
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # Overrides SetVariable.hash_impl (which raises TypeError for mutable sets).
+        # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
+        from .hashable import RawHash
+        from .object_protocol import generic_hash_impl
+
+        if self.is_python_constant():
+            return hash(self.as_python_constant()), False
+        is_fake = False
+        raw_hashes = []
+        for item in self.set_items:
+            h, fake = generic_hash_impl(tx, item.vt)
+            is_fake = is_fake or fake
+            raw_hashes.append(RawHash(h))
+        return hash(frozenset(raw_hashes)), is_fake
 
     def is_python_equal(self, other: object) -> bool:
         return (

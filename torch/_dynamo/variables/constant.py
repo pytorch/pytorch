@@ -202,6 +202,10 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        return hash(self.value), False
+
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
@@ -402,12 +406,6 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
     def is_python_equal(self, other: object) -> bool:
         from .tensor import SymNodeVariable
 
@@ -525,11 +523,8 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), True
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
