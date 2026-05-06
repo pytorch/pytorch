@@ -489,7 +489,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 // helpers for converting between StableIValue and actual IValues
 using StableIValue = uint64_t;
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // Disable clang format for these two functions, else it breaks the line just
 // before the function name, which causes a failure in the preprocessor parser
@@ -509,7 +509,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_delete_stable_ivalue(StableIValue* v
 
 // clang-format on
 //
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 class TorchLibraryOpaque;
 using TorchLibraryHandle = TorchLibraryOpaque*;
