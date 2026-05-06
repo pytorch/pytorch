@@ -88,7 +88,6 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
 
 register_op_strategy(
     [
-        aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
         aten.detach_.default,
@@ -99,6 +98,21 @@ register_op_strategy(
         prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
+
+
+@register_single_dim_strategy(aten.clone.default)
+def clone_single_dim_strategy(
+    op: OpOverload, args: ArgsType, kwargs: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
+    for reduce_op in ("sum", "avg", "max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
+    return strategies
 
 
 def _partial_needs_reduce_for_dtype_cast(
