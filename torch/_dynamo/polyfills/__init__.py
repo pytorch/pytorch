@@ -165,7 +165,8 @@ def impl_MATCH_CLASS(
 
 
 def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
-    assert isinstance(obj, Mapping)
+    if not isinstance(obj, Mapping):
+        raise AssertionError(f"Expected a Mapping, got {type(obj)}")
     if all(key in obj for key in keys):
         return tuple(obj[key] for key in keys)
     else:
