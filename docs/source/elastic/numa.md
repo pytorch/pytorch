@@ -1,8 +1,8 @@
-.. _numa-api:
+(numa-api)=
 
-NUMA Binding
-============
+# NUMA Binding
 
+```{eval-rst}
 .. automodule:: torch.numa
    :members:
 
@@ -10,3 +10,4 @@ NUMA Binding
    :members:
    :undoc-members:
    :member-order: bysource
+```
