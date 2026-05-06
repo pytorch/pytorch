@@ -532,7 +532,8 @@ def create_aot_state(
     # that we generate in torch.compile.
     stack.enter_context(torch.autograd.set_multithreading_enabled(False))
     stack.enter_context(preserve_rng_state())
-    stack.enter_context(fake_mode)
+    if not torch._C._is_cpp_fake_tensor_mode_active():
+        stack.enter_context(fake_mode)
     stack.enter_context(python_dispatcher_mode)
     stack.enter_context(PhiloxStateTracker())
     stack.enter_context(
@@ -1022,6 +1023,10 @@ def prepare_aot_module_simplified(
     for x in full_args:
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
+            break
+        if isinstance(x, torch.Tensor) and torch._C._is_fake_tensor(x):
+            if tracing_context := torch._guards.TracingContext.try_get():
+                dynamic_shapes = tracing_context.fake_mode.shape_env is not None
             break
 
     aot_config = AOTConfig(

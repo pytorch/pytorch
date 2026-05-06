@@ -380,10 +380,25 @@ c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
-          has_symbolic_sizes_strides_)) {
+  // python faketensor path
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
+  }
+  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (auto* interp = pyobj_slot_.pyobj_interpreter()) { // let python handle this if interpretor exists
+      return (*interp)->sizes(this);
+    }
+    // interpretor wouldn't exist if c++ made a new FakeTensor
+    auto& sym = symbolic_shape_meta();
+    if (!sym.sizes_materialized_) {
+      sym.materialized_sizes_.resize(sym.sizes_.size());
+      for (size_t i = 0; i < sym.sizes_.size(); i++) {
+        sym.materialized_sizes_[i] =
+            sym.sizes_[i].guard_int(__FILE__, __LINE__);
+      }
+      sym.sizes_materialized_ = true;
+    }
+    return IntArrayRef(sym.materialized_sizes_);
   }
   return sizes_default();
 }
@@ -423,10 +438,23 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
-          has_symbolic_sizes_strides_)) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->strides(this);
+  }
+  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      return (*interp)->strides(this);
+    }
+    auto& sym = symbolic_shape_meta();
+    if (!sym.strides_materialized_) {
+      sym.materialized_strides_.resize(sym.strides_.size());
+      for (size_t i = 0; i < sym.strides_.size(); i++) {
+        sym.materialized_strides_[i] =
+            sym.strides_[i].guard_int(__FILE__, __LINE__);
+      }
+      sym.strides_materialized_ = true;
+    }
+    return IntArrayRef(sym.materialized_strides_);
   }
   return strides_default();
 }

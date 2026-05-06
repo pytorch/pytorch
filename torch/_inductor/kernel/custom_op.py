@@ -510,7 +510,9 @@ def autotune_custom_op(
 
     fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
-    with V.fake_mode:
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         # pyrefly: ignore [no-matching-overload]
         fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
         fake_output = op_overload(*fake_inputs, **fallback_kwargs)
@@ -612,7 +614,9 @@ def _generate_dynamic_configs(
     schema = op_overload._schema
     param_names = [arg.name for arg in schema.arguments if not arg.kwarg_only]
 
-    with V.fake_mode:
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
 
     fake_tensors_dict = dict(zip(param_names, fake_tensors))
@@ -767,9 +771,12 @@ def _lower_single_impl(
     def impl_wrapper(*tensors):
         return impl(*tensors, **merged_kwargs)
 
-    shape_env = V.fake_mode.shape_env
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+    from torch._inductor.fx_utils import _get_shape_env
 
-    with V.fake_mode:
+    shape_env = _get_shape_env()
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
 
@@ -985,10 +992,13 @@ def _range_based_lowering_fn(
 
         return build_nested_cond(0)(*fake_tensors)
 
-    with V.fake_mode:
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+    from torch._inductor.fx_utils import _get_shape_env
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
-        shape_env = V.fake_mode.shape_env
+        shape_env = _get_shape_env()
 
         log.info("Tracing torch.cond dispatch with symbolic shapes...")
 

@@ -83,6 +83,8 @@ class FakeTensorProp(torch.fx.Interpreter):
             if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
+                if torch._C._is_fake_tensor(obj):
+                    return snapshot_fake(obj)
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
@@ -109,5 +111,13 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args):
+        import torch._C
+
+        if torch._C._is_cpp_fake_tensor_mode_active():
+            torch._C._activate_cpp_fake_tensor_mode()
+            try:
+                return super().run(*args)
+            finally:
+                torch._C._deactivate_cpp_fake_tensor_mode()
         with self._mode:
             return super().run(*args)

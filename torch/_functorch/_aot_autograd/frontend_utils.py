@@ -66,6 +66,8 @@ def process_inputs(
                 if x.fake_mode is not fake_mode:
                     return fake_mode.from_tensor(x)
                 return x
+            if torch._C._is_fake_tensor(x):
+                return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 # See if all inner tensors are FakeTensors from this mode
@@ -102,6 +104,13 @@ def process_inputs(
                     # We already fakeified this tensor in Dynamo, don't
                     # dump the trace for it again
                     trace = False
+            if torch._C._is_cpp_fake_tensor_mode_active():
+                return torch._C._make_fake_tensor(
+                    x,
+                    source=source,
+                    symbolic_context=symbolic_context,
+                )
+
             if (
                 idx < aot_config.num_params_buffers
                 and config.static_weight_shapes

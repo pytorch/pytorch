@@ -123,17 +123,24 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
+    _cpp_fake = torch._C._is_cpp_fake_tensor_mode_active()
+    if _cpp_fake:
+        torch._C._activate_cpp_fake_tensor_mode()
     with (
         enable_python_dispatcher(),
         ctx,
     ):
-        fx_g = make_fx(
-            inner_f,
-            decomposition_table=aot_config.decompositions,
-            record_module_stack=True,
-            pre_dispatch=aot_config.pre_dispatch,
-            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
-        )(*args)
+        try:
+            fx_g = make_fx(
+                inner_f,
+                decomposition_table=aot_config.decompositions,
+                record_module_stack=True,
+                pre_dispatch=aot_config.pre_dispatch,
+                _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
+            )(*args)
+        finally:
+            if _cpp_fake:
+                torch._C._deactivate_cpp_fake_tensor_mode()
 
         if args_descs is not None:
             flat_args_descs, _ = pytree.tree_flatten(args_descs)

@@ -66,7 +66,9 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
         lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
         (args, kwargs),
     )
-    with V.fake_mode:
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         fake_result = fn(*fake_args, **fake_kwargs)
 
     node = graph.call_function(fn, args, kwargs)
@@ -94,10 +96,12 @@ def _inplace_generalized_scatter(
         )
         # slice and select can allocate new unbacked symints, but those won't be reflected
         # in the output of this function, hence shall be ignored.
-        fake_mode = detect_fake_mode(fake_args)
+        from torch._inductor.fx_utils import _get_shape_env
+
+        _shape_env = _get_shape_env()
         with (
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode and fake_mode.shape_env
+            _shape_env.ignore_fresh_unbacked_symbols()
+            if _shape_env
             else nullcontext()
         ):
             tmp = view.target(tmp, *fake_args, **fake_kwargs)
@@ -184,9 +188,11 @@ def _decompose_scatter_mutating(
     for view in view_ops:  # type: ignore[union-attr]
         tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)  # type: ignore[union-attr]
         # we need to set unbacked bindings that could have been created in the view ops.
-        if (V.fake_mode.shape_env) and (
+        from torch._inductor.fx_utils import _get_shape_env
+
+        if (_shape_env := _get_shape_env()) and (
             symbol_to_path := compute_unbacked_bindings(
-                V.fake_mode.shape_env, tmp.meta["val"]
+                _shape_env, tmp.meta["val"]
             )
         ):
             tmp.meta["unbacked_bindings"] = symbol_to_path

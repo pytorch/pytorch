@@ -2726,7 +2726,10 @@ class _MakefxTracer:
         )
         with ExitStack() as stack:
             stack.enter_context(decompose(self.decomposition_table))
-            if self.fake_tensor_mode:
+            if self.fake_tensor_mode and not (
+                _has_cpp_fake_tensor
+                and torch._C._is_cpp_fake_tensor_mode_active()
+            ):
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
             stack.enter_context(self.proxy_function_mode)

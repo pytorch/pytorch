@@ -219,7 +219,14 @@ def run_functionalized_fw_and_collect_metadata(
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
-            flat_f_outs = f(*flat_f_args)
+            _cpp_fake = torch._C._is_cpp_fake_tensor_mode_active()
+            if _cpp_fake:
+                torch._C._activate_cpp_fake_tensor_mode()
+            try:
+                flat_f_outs = f(*flat_f_args)
+            finally:
+                if _cpp_fake:
+                    torch._C._deactivate_cpp_fake_tensor_mode()
 
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this

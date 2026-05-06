@@ -710,6 +710,40 @@ def maybe_disable_graph_partition(
         return contextlib.nullcontext()
 
 
+@contextlib.contextmanager
+def _cpp_fake_mode_ctx():
+    """Enable the C++ Fake dispatch key in TLS.
+
+    Use this instead of ``with fake_mode:`` when C++ fake tensor mode is
+    active.  It enables the Fake dispatch key so that the C++ fake-tensor
+    kernel handles operations, without ever entering a Python FakeTensorMode.
+    """
+    torch._C._activate_cpp_fake_tensor_mode()
+    try:
+        yield
+    finally:
+        torch._C._deactivate_cpp_fake_tensor_mode()
+
+
+def maybe_cpp_fake_mode_ctx(
+    fake_mode: torch._subclasses.FakeTensorMode,
+) -> AbstractContextManager[None]:
+    """Return the right fake-mode context manager.
+
+    When C++ fake tensor mode is active, returns ``_cpp_fake_mode_ctx()``
+    (enables the Fake dispatch key).  Otherwise returns the Python
+    ``fake_mode`` so it is entered on the TorchDispatchMode stack as usual.
+    """
+    if torch._C._is_cpp_fake_tensor_mode_active():
+        return _cpp_fake_mode_ctx()
+    return fake_mode
+
+
+def cpp_fake_mode_shape_env():
+    """Return the ShapeEnv from the active C++ FakeTensorMode, or None."""
+    return torch._C._get_cpp_fake_mode_shape_env()
+
+
 def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],

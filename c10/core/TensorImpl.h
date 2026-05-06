@@ -250,6 +250,10 @@ struct C10_API FakeTensorMode {
   // Returns true if a decomposition was found and executed.
   std::function<bool(const void* op, void* stack)> decomp_fn_;
 
+  // this is only used rn to guard re-entry for decomps
+  // idk if this is right should i rename it
+  bool in_kernel_invocation_ = false;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter)

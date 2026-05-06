@@ -50,7 +50,9 @@ def call_function(
         raise RuntimeError(f"Call function should not get a str target {target=}")
     node = graph.call_function(target, args, kwargs)
     _, args, kwargs = get_fake_args_kwargs(node)
-    with V.fake_mode:
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+    with maybe_cpp_fake_mode_ctx(V.fake_mode):
         node.meta["val"] = target(*args, **kwargs)
         # node.meta["val"] may be a container. So we use tree_map here
         # to recursively extract the tensor metadata.

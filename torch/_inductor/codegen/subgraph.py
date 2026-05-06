@@ -77,7 +77,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         #   or concrete inputs from ir_node_to_tensor with guard_shape=False.
         trace_inputs = []
         self.benchmark_inputs = []
-        with V.fake_mode:
+        from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+        with maybe_cpp_fake_mode_ctx(V.fake_mode):
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
                 assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
@@ -393,7 +395,9 @@ class SubgraphTemplate(KernelTemplate):
                 from ..decomposition import select_decomp_table
 
                 decomposition_table = select_decomp_table()
-                shape_env = V.fake_mode.shape_env
+                from torch._inductor.fx_utils import _get_shape_env
+
+                shape_env = _get_shape_env()
 
                 # Use error_on_new_guards to detect impls that add guards during tracing
                 guard_ctx = (
@@ -516,7 +520,9 @@ class SubgraphTemplate(KernelTemplate):
         # Assert kwargs contain only non-tensor arguments
         self._validate_non_tensor_kwargs(kwargs)
 
-        with V.fake_mode:
+        from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+        with maybe_cpp_fake_mode_ctx(V.fake_mode):
             example_inputs = []
             for i, inp in enumerate(input_nodes):
                 if input_gen_fns and i in input_gen_fns:

@@ -1255,7 +1255,9 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
             return x
 
     fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-    with fake_mode, config.patch("save_args", False):
+    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
+
+    with maybe_cpp_fake_mode_ctx(fake_mode), config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
 

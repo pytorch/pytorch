@@ -257,7 +257,9 @@ def has_metadata_mutation(
             raise AssertionError(
                 f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
             )
-        if not isinstance(arg, FakeTensor):
+        if not isinstance(arg, FakeTensor) and not (
+            isinstance(arg, torch.Tensor) and torch._C._is_fake_tensor(arg)
+        ):
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
