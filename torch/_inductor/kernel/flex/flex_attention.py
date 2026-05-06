@@ -15,6 +15,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
+from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import FloorDiv, Mod
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
@@ -180,6 +181,23 @@ def flex_attention(
                 "value as a tensor on device instead of capturing a Python scalar."
             )
 
+    # Materialize captures as fresh ComputedBuffers before build_subgraph_buffer
+    # so the modification subgraph and the runtime tensor agree on rank/layout.
+    def _realize_captures_fresh(buffers):
+        return tree_map(
+            lambda x: (
+                ExternKernel.copy_input(ExternKernel.realize_input(x))
+                if x is not None and not isinstance(x, sympy.Symbol)
+                else x
+            ),
+            buffers,
+        )
+
+    score_mod_other_buffers = _realize_captures_fresh(score_mod_other_buffers)
+    mask_mod_other_buffers = _realize_captures_fresh(mask_mod_other_buffers)
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
+
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -298,12 +316,6 @@ def flex_attention(
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
-
-    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
-    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
-
-    freeze_irnodes(score_mod_other_buffers)
-    freeze_irnodes(mask_mod_other_buffers)
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
