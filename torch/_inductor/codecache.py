@@ -628,9 +628,14 @@ class FxGraphCachePickler(pickle.Pickler):
         # First encounter: probe whether the default reduce protocol works.
         try:
             result = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
-        except (TypeError, AttributeError, pickle.PicklingError, RuntimeError):
+        except (TypeError, AttributeError, pickle.PicklingError):
             self._pickleable_type_cache[t] = False
             return self._reduce_unpicklable(obj)
+        except RuntimeError as e:
+            if "is not pickleable" in str(e):
+                self._pickleable_type_cache[t] = False
+                return self._reduce_unpicklable(obj)
+            raise
         # Default pickling works – let pickle handle it.
         self._pickleable_type_cache[t] = True
         return result
