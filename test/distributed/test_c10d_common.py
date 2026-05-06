@@ -36,6 +36,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -65,7 +66,7 @@ else:
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 def gpus_for_rank(world_size):

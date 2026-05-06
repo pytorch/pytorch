@@ -27,13 +27,14 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
 
 

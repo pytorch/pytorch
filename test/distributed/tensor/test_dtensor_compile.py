@@ -51,6 +51,7 @@ from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -183,9 +184,7 @@ aot_eager_graph = aot_autograd(
     partition_fn=min_cut_rematerialization_partition,
 )
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):

@@ -47,7 +47,11 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
@@ -62,7 +66,7 @@ from torch.testing._internal.distributed.common_state_dict import (
 from torch.utils._pytree import tree_all, tree_all_only
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 if not dist.is_available():

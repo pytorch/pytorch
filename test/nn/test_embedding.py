@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
+    ACCELERATOR_TYPE,
     dtype2prec_DONTUSE,
     instantiate_parametrized_tests,
     IS_JETSON,
@@ -35,9 +36,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestEmbeddingNN(NNTestCase):

@@ -41,6 +41,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -54,7 +55,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 # Simple and boring model

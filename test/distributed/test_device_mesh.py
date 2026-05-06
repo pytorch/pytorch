@@ -32,7 +32,13 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
+    run_tests,
+    TEST_HPU,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -41,11 +47,8 @@ from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeSt
 from torch.utils._typing_utils import not_none
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
+
 device_count = torch.accelerator.device_count()
 
 try:

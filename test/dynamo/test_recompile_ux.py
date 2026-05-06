@@ -15,15 +15,14 @@ from torch._dynamo.eval_frame import (
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):

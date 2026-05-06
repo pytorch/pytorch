@@ -59,6 +59,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_samples,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     gradcheck,
     iter_indices,
     numpy_to_torch_dtype_dict,
@@ -77,9 +78,7 @@ if TEST_SCIPY:
     import scipy.integrate
     import scipy.special
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
