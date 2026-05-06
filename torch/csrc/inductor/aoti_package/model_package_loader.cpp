@@ -91,11 +91,10 @@ std::string create_temp_dir() {
     fs::path temp_dir = fs::temp_directory_path();
     return temp_dir.string();
   } catch (const fs::filesystem_error& e) {
-    throw std::runtime_error(
-        "Failed to get temporary directory: " + std::string(e.what()));
+    TORCH_CHECK(false, "Failed to get temporary directory: ", e.what());
   } catch (...) {
-    throw std::runtime_error(
-        "Unknown error occurred while getting temporary directory");
+    TORCH_CHECK(
+        false, "Unknown error occurred while getting temporary directory");
   }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
@@ -863,7 +862,11 @@ void AOTIModelPackageLoader::load_constants(
     std::unordered_map<std::string, at::Tensor>& constants_map,
     bool use_inactive,
     bool check_full_update,
-    bool user_managed) {
+    bool user_managed,
+    bool allow_h2d_copy) {
+  TORCH_CHECK(
+      !(allow_h2d_copy && user_managed),
+      "load_constants: allow_h2d_copy is not supported with user_managed");
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::unordered_map<std::string, std::string> fqn_to_constant_name;
@@ -880,6 +883,10 @@ void AOTIModelPackageLoader::load_constants(
     }
   }
 
+  if (allow_h2d_copy) {
+    return runner_->update_constant_buffer_from_cpu(
+        updated_constants_map, use_inactive, check_full_update);
+  }
   return runner_->update_constant_buffer(
       updated_constants_map, use_inactive, check_full_update, user_managed);
 }

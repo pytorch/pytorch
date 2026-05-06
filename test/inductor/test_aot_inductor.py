@@ -7283,6 +7283,54 @@ class AOTInductorTestsTemplate:
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
+    def test_load_constants_allow_h2d_copy(self):
+        # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
+        # accepts a CPU state_dict for a non-CPU model, the way a typical user
+        # would after torch.load(..., map_location="cpu").
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k, device=device))
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        compiled = torch._inductor.aoti_load_package(package_path)
+
+        (weight_fqn,) = compiled.get_constant_fqns()
+        cpu_state_dict = {weight_fqn: torch.randn(N, K, device="cpu")}
+        compiled.load_constants(
+            cpu_state_dict, check_full_update=True, allow_h2d_copy=True
+        )
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = torch.nn.functional.linear(
+            test_inputs, cpu_state_dict[weight_fqn].to(self.device)
+        )
+        self.assertEqual(expected, compiled(test_inputs))
+
+        # Without allow_h2d_copy, the same call must error out.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(cpu_state_dict, check_full_update=True)
+
+        # allow_h2d_copy + user_managed must be rejected up-front.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(
+                cpu_state_dict,
+                check_full_update=True,
+                user_managed=True,
+                allow_h2d_copy=True,
+            )
+
     def test_cond_share_predicate(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):

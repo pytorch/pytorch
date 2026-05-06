@@ -101,6 +101,9 @@ consider rebuild your model with the latest AOTInductor.");
       update_user_managed_constant_buffer_func_,
       "AOTInductorModelContainerUpdateUserManagedConstantBuffer")
   TRY_LOAD_SYMBOL(
+      update_constant_buffer_from_cpu_func_,
+      "AOTInductorModelContainerUpdateConstantBufferFromCpu")
+  TRY_LOAD_SYMBOL(
       get_constants_blob_size_func_,
       "AOTInductorModelContainerGetConstantsBlobSize")
   TRY_LOAD_SYMBOL(
@@ -290,6 +293,31 @@ void AOTIModelContainerRunner::update_constant_buffer(
   }
 }
 
+void AOTIModelContainerRunner::update_constant_buffer_from_cpu(
+    const TensorConstantMap& const_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TORCH_CHECK(
+      update_constant_buffer_from_cpu_func_ != nullptr,
+      "No update_constant_buffer_from_cpu in .so! Consider rebuild your model with the latest AOTInductor.");
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_from_cpu_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
+}
+
+void AOTIModelContainerRunner::update_constant_buffer_from_cpu(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TensorConstantMap const_map;
+  for (auto& [k, v] : tensor_map) {
+    const_map.emplace(k, &v);
+  }
+  update_constant_buffer_from_cpu(const_map, use_inactive, check_full_update);
+}
+
 void AOTIModelContainerRunner::update_constant_buffer_from_blob(
     const std::string& weights_path) {
   uint64_t weights_size;
@@ -309,27 +337,26 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
       NULL);
 
   if (hFile == INVALID_HANDLE_VALUE) {
-    throw std::runtime_error(
-        "Failed to open external weights file: " + weights_path);
+    TORCH_CHECK(false, "Failed to open external weights file: ", weights_path);
   }
 
   // Get actual file size for validation
   LARGE_INTEGER fileSize;
   if (!GetFileSizeEx(hFile, &fileSize)) {
     CloseHandle(hFile);
-    throw std::runtime_error("Failed to get file size");
+    TORCH_CHECK(false, "Failed to get file size");
   }
 
   if (static_cast<uint64_t>(fileSize.QuadPart) < weights_size) {
     CloseHandle(hFile);
-    throw std::runtime_error("File size smaller than expected weights size");
+    TORCH_CHECK(false, "File size smaller than expected weights size");
   }
 
   HANDLE hMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
   CloseHandle(hFile); // Close file handle, keep mapping handle
 
   if (hMapping == NULL) {
-    throw std::runtime_error("CreateFileMapping failed");
+    TORCH_CHECK(false, "CreateFileMapping failed");
   }
 
   uint8_t* ptr = static_cast<uint8_t*>(
@@ -337,7 +364,7 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
 
   if (ptr == NULL) {
     CloseHandle(hMapping);
-    throw std::runtime_error("MapViewOfFile failed");
+    TORCH_CHECK(false, "MapViewOfFile failed");
   }
 
 #else
