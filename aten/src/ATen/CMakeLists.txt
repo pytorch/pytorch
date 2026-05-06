@@ -295,9 +295,23 @@ if(USE_FLASH_ATTENTION)
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    # ck_sdpa: strip all --offload-arch from HIP_CLANG_FLAGS, then re-append one flag per
+    # PYTORCH_ROCM_ARCH entry except a small denylist (Vega/gfx9 "0x" family). Same save/restore
+    # pattern as the mslk ROCm path so global HIP_CLANG_FLAGS is unchanged afterward.
+    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
+    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
+    set(CK_SDPA_HIP_EXCLUDE_OFFLOAD_ARCHS gfx900 gfx906 gfx90c)
+    foreach(ARCH ${PYTORCH_ROCM_ARCH})
+      if(NOT "${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_OFFLOAD_ARCHS)
+        list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=${ARCH})
+      endif()
+    endforeach()
+    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
+
     hip_add_library(ck_sdpa STATIC
                     ${ck_sdpa_sources_hip}
                     HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${CK_SDPA_EXTRA_HIPCC_FLAGS})
+    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
     set_target_properties(ck_sdpa PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
