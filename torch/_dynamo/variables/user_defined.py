@@ -1559,7 +1559,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "VariableTracker | None":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
-        type_attr, _ = self._lookup_slot_type_attr(tx, "__bool__")
+        none_error = "'NoneType' object is not callable"
+        if sys.version_info >= (3, 14):
+            none_error = (
+                f"'{self.python_type_name()}' cannot be interpreted as a boolean"
+            )
+        type_attr, _ = self._lookup_slot_type_attr(
+            tx, "__bool__", none_error=none_error
+        )
         if type_attr is NO_SUCH_SUBOBJ:
             return None
 

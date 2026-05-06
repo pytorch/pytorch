@@ -245,13 +245,20 @@ class NbBoolTests(TestCase):
         class NoBool:
             __bool__ = None
 
-        def fn(x, obj):
-            return x + 1 if bool(obj) else x - 1
+        obj = NoBool()
 
-        with self.assertRaisesRegex(TypeError, "'NoneType' object is not callable"):
-            bool(NoBool())
-        with self.assertRaisesRegex(TypeError, "'NoneType' object is not callable"):
-            torch.compile(fn, backend="eager")(torch.randn(4), NoBool())
+        def fn(x):
+            try:
+                return str(bool(obj))
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertTrue(
+            "NoneType" in result or "cannot be interpreted as a boolean" in result
+        )
+        self.assertEqual(result, eager_result)
 
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
 
