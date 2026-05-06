@@ -76,7 +76,8 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("constants_map"),
           py::arg("use_inactive"),
           py::arg("check_full_update"),
-          py::arg("user_managed") = false)
+          py::arg("user_managed") = false,
+          py::arg("allow_h2d_copy") = false)
       .def(
           "update_constant_buffer",
           &AOTIModelPackageLoaderPybind::update_constant_buffer,
