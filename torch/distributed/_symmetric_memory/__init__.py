@@ -2207,7 +2207,7 @@ def get(
             raise ValueError("get: invalid peer")
         if hdl.offset % src.element_size() != 0:
             raise RuntimeError("get: source storage offset is not element-aligned")
-        storage_offset = hdl.offset // src.element_size() + src.storage_offset()
+        storage_offset = hdl.offset // src.element_size() + int(src.storage_offset())
         remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
         dst.copy_(remote_src)
         return dst
