@@ -212,17 +212,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
-        # NB: A new item on this ConstDictVariable is replayed against the
-        # live param_group dict at end-of-compile by SideEffects (see the
-        # ConstDictVariable branch in torch/_dynamo/side_effects.py).  We
-        # therefore guard with the same safe_to_set_capturable check used
-        # above so the in-trace VT view and the live Python dict agree.
-        for group, param_group_vt in zip(
-            self.value.param_groups, param_groups_vt.items
-        ):
-            if safe_to_set_capturable(group):
-                key = HashableTracker(ConstantVariable.create("capturable"))
-                param_group_vt.items[key] = ConstantVariable.create(True)
+        for param_group_vt in param_groups_vt.items:
+            key = HashableTracker(ConstantVariable.create("capturable"))
+            param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(
         self, *args: Any, **kwargs: Any

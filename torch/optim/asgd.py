@@ -258,9 +258,7 @@ def _single_tensor_asgd(
             param.add_(grad, alpha=-eta_value)  # update parameter
 
         # averaging
-        # When compiling, avoid the data-dependent ``mu.item()`` branch — the
-        # general formula degenerates to ``ax.copy_(param)`` when ``mu == 1``.
-        if capturable or torch.compiler.is_compiling() or mu.item() != 1:
+        if capturable or mu.item() != 1:
             ax.add_(param.sub(ax).mul_(mu))
         else:
             ax.copy_(param)

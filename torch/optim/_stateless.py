@@ -13,7 +13,7 @@ def _prepare_optimizer_reparametrization(
     optimizer_state_dict: dict[str, Any],
 ):
     """
-    Validate and normalize optimizer state for ``_reparametrize_optimizer``.
+    Validate and normalize optimizer state for ``reparametrize_optimizer_for_tracing``.
 
     This follows the same structural assumptions as DCP-compatible optimizers,
     but consumes the raw ``optimizer.state_dict()`` format:
@@ -23,29 +23,29 @@ def _prepare_optimizer_reparametrization(
     """
     if not optimizer.state:
         raise RuntimeError(
-            "_reparametrize_optimizer requires initialized optimizer state."
+            "reparametrize_optimizer_for_tracing requires initialized optimizer state."
         )
     if not isinstance(optimizer_state_dict, dict):
         raise RuntimeError(
-            "_reparametrize_optimizer requires a DCP-style optimizer state_dict."
+            "reparametrize_optimizer_for_tracing requires a DCP-style optimizer state_dict."
         )
 
     state = optimizer_state_dict.get("state")
     if not isinstance(state, dict):
         raise RuntimeError(
-            "_reparametrize_optimizer requires optimizer_state_dict['state'] to "
+            "reparametrize_optimizer_for_tracing requires optimizer_state_dict['state'] to "
             "be a dict mapping packed parameter ids to per-param state dicts, "
             f"got {type(state).__name__}."
         )
     param_groups = optimizer_state_dict.get("param_groups")
     if not isinstance(param_groups, list):
         raise RuntimeError(
-            "_reparametrize_optimizer requires optimizer_state_dict['param_groups'] "
+            "reparametrize_optimizer_for_tracing requires optimizer_state_dict['param_groups'] "
             f"to be a list of param-group dicts, got {type(param_groups).__name__}."
         )
     if any(isinstance(name, torch.Tensor) for name in state):
         raise RuntimeError(
-            "_reparametrize_optimizer requires optimizer.state_dict()-style "
+            "reparametrize_optimizer_for_tracing requires optimizer.state_dict()-style "
             "state keyed by packed parameter ids."
         )
     if len(optimizer.param_groups) != len(param_groups):
@@ -69,7 +69,7 @@ def _prepare_optimizer_reparametrization(
     ):
         if not isinstance(saved_group, dict):
             raise RuntimeError(
-                "_reparametrize_optimizer requires each optimizer param group "
+                "reparametrize_optimizer_for_tracing requires each optimizer param group "
                 "to be a dictionary."
             )
         names = saved_group.get("params")
@@ -77,7 +77,7 @@ def _prepare_optimizer_reparametrization(
             isinstance(param_id, int) for param_id in names
         ):
             raise RuntimeError(
-                "_reparametrize_optimizer requires optimizer.state_dict()-style "
+                "reparametrize_optimizer_for_tracing requires optimizer.state_dict()-style "
                 "param_groups[*]['params'] entries keyed by packed parameter ids."
             )
         if len(group["params"]) != len(names):
@@ -88,7 +88,7 @@ def _prepare_optimizer_reparametrization(
         next_offset = flat_param_offset + len(names)
         if next_offset > len(flat_parameters):
             raise RuntimeError(
-                "_reparametrize_optimizer requires the explicit parameter state to "
+                "reparametrize_optimizer_for_tracing requires the explicit parameter state to "
                 "match optimizer.param_groups ordering."
             )
         # Slice out the explicit tensors that should back this optimizer group.
@@ -100,7 +100,7 @@ def _prepare_optimizer_reparametrization(
             param_state = state.get(param_id, {})
             if not isinstance(param_state, dict):
                 raise RuntimeError(
-                    "_reparametrize_optimizer requires per-parameter optimizer "
+                    "reparametrize_optimizer_for_tracing requires per-parameter optimizer "
                     "state entries to be dictionaries."
                 )
 
@@ -109,7 +109,7 @@ def _prepare_optimizer_reparametrization(
         ]
         if missing_group_keys:
             raise RuntimeError(
-                "_reparametrize_optimizer requires optimizer.state_dict()-style "
+                "reparametrize_optimizer_for_tracing requires optimizer.state_dict()-style "
                 "param group keys to match the live optimizer group keys. "
                 f"Missing live keys for group {idx}: {missing_group_keys}"
             )
@@ -127,14 +127,14 @@ def _prepare_optimizer_reparametrization(
 
     if flat_param_offset != len(flat_parameters):
         raise RuntimeError(
-            "_reparametrize_optimizer requires the explicit parameter state to "
+            "reparametrize_optimizer_for_tracing requires the explicit parameter state to "
             "match optimizer.param_groups ordering."
         )
 
     extra_keys = [key for key in state if key not in packed_param_ids]
     if extra_keys:
         raise RuntimeError(
-            "_reparametrize_optimizer requires optimizer_state_dict['state'] to "
+            "reparametrize_optimizer_for_tracing requires optimizer_state_dict['state'] to "
             "be keyed only by packed parameter ids from "
             f"param_groups[*]['params']; got extra keys {extra_keys!r}."
         )
@@ -142,23 +142,26 @@ def _prepare_optimizer_reparametrization(
 
 
 @contextlib.contextmanager
-def _reparametrize_optimizer(
+def reparametrize_optimizer_for_tracing(
     optimizer: "torch.optim.Optimizer",
     parameters_and_buffers: dict[str, Tensor],
     optimizer_state_dict: dict[str, Any],
 ):
-    """
-    Temporarily rebind an optimizer to explicit parameter tensors.
+    """Temporarily rebind ``optimizer`` to explicit tensors for tracing.
 
-    ``optimizer_state_dict`` must be in the raw ``optimizer.state_dict()``
-    format. This helper assumes a DCP-compatible optimizer structure, but it
-    consumes the optimizer-native packed-param-id representation rather than
-    DCP's FQN-keyed exported state.
-    Tensor values in the per-parameter optimizer state are shared (not cloned),
-    so in-place ops on existing entries (e.g. ``exp_avg.add_(...)``) propagate
-    back to ``optimizer_state_dict``. The per-parameter state dicts themselves
-    are shallow-copied, so structural changes made during the trace (new keys,
-    re-bound tensors) stay local and do not pollute ``optimizer_state_dict``.
+    Args:
+        optimizer: Live ``torch.optim.Optimizer``. Its ``state`` and each
+            ``param_groups[i]["params"]`` are swapped for the duration of the
+            context and restored on exit. Must already have initialized state
+            (i.e. have been stepped at least once).
+        parameters_and_buffers: Parameters and buffers of the module
+            associated with ``optimizer``. Order must match the live
+            ``optimizer.param_groups[*]["params"]``.
+        optimizer_state_dict: Raw ``optimizer.state_dict()``-format dict, i.e.
+            ``{"state": {<packed_id>: {...}, ...}, "param_groups": [...]}``.
+            Per-param state dicts are shallow-copied (tensor values shared
+            with the input — in-place ops on existing entries propagate back;
+            structural changes stay local).
     """
     state, group_rebind_infos = _prepare_optimizer_reparametrization(
         optimizer, parameters_and_buffers, optimizer_state_dict
