@@ -2,6 +2,7 @@
 # flake8: noqa: E731
 
 import contextlib
+import re
 import unittest
 import unittest.mock as mock
 
@@ -240,7 +241,9 @@ class TestInvokeSubgraphCompile(TestCase):
         for node in invoke_subgraph_nodes:
             stack_trace = node.meta["stack_trace"]
             if not TEST_WITH_CROSSREF:
-                self.assertTrue(stack_trace.endswith("return mod(x, y) + mod(x, y)\n"))
+                # Strip caret lines (e.g. "  ~~~^^^^") that 3.13+ appends
+                clean = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", stack_trace)
+                self.assertTrue(clean.endswith("return mod(x, y) + mod(x, y)\n"))
 
     def test_gen_schema(self):
         class Mod(torch.nn.Module):
