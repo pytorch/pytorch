@@ -1025,7 +1025,11 @@ combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
-combo_kernel_per_subkernel_blocks = True
+combo_kernel_per_subkernel_blocks: bool = Config(
+    justknob="pytorch/inductor:combo_kernel_per_subkernel_blocks",
+    env_name_force="TORCHINDUCTOR_COMBO_KERNEL_PER_SUBKERNEL_BLOCKS",
+    default=True,
+)
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = False
