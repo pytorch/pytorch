@@ -154,7 +154,7 @@ torch.int32
 torch.float32
 ```
 
-**When the output tensor of an arithmetic operation is specified, we allow casting to its *dtype* except that:**
+When the output tensor of an arithmetic operation is specified, we allow casting to its *dtype* except that:
   * An integral output tensor cannot accept a floating point tensor.
   * A boolean output tensor cannot accept a non-boolean tensor.
   * A non-complex output tensor cannot accept a complex tensor
