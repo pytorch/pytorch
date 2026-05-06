@@ -2161,7 +2161,10 @@ def cat(inputs, dim=0):
     # past a certain threshold of inputs we only fuse if the input kernels
     # are simple
     # not sure if we want to expose to users via config since logic may change in future
-    MAX_COMPLEX_POINTWISE_CAT = 8
+    # Lowered from 8 to 5: cat with >= 6 inputs generates excessive branching
+    # (7+ comparisons per element) that destroys warp coherence and memory
+    # coalescing when fused into reduction inner loops (e.g., cat + layer_norm).
+    MAX_COMPLEX_POINTWISE_CAT = 5
     MAX_SIMPLE_OP_COUNT = 2
 
     def additional_pointwise_ops(op: torch._ops.OpOverload):
