@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         sys as sys,
         torch_c_nn as torch_c_nn,
         traceback as traceback,
+        typing as typing,
     )
 
 from torch.overrides import BaseTorchFunctionMode

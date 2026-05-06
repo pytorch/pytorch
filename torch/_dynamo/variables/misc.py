@@ -16,6 +16,7 @@ Key classes include:
 """
 
 import builtins
+import collections
 import dataclasses
 import enum
 import functools
@@ -60,7 +61,6 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
     istype,
@@ -1563,20 +1563,18 @@ class PythonModuleVariable(VariableTracker):
         return VariableTracker.build(tx, attr_value, source)
 
 
-class TypingVariable(VariableTracker):
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+class UnionVariable(VariableTracker):
+    """Represents instances of types.UnionType
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/unionobject.c#L365-L384
+    """
+
+    def __init__(self, value: types.UnionType, **kwargs: Any):
         super().__init__(**kwargs)
         self.value = value
 
-    def mp_subscript_impl(
-        self,
-        tx: "InstructionTranslator",
-        key: VariableTracker,
-    ) -> VariableTracker:
-        # e.g., List[int] → typing.List[int]
-        # TODO(follow-up): add test for invalid subscript type
-        new_typing = self.value[key.as_python_constant()]
-        return TypingVariable(new_typing)
+    def as_python_constant(self) -> types.UnionType:
+        return self.value
 
     def call_method(
         self,
@@ -1586,82 +1584,41 @@ class TypingVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__eq__":
-            if len(args) == 1 and not kwargs:
-                result = istype(args[0], TypingVariable) and self.value == args[0].value
-                return variables.ConstantVariable.create(result)
-        unimplemented(
-            gb_type="unsupported method call on `typing` variable",
-            context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
-            explanation=f"`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
-            hints=[
-                f"Avoid calling the {name} method on {self.value}.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+            other = args[0]
+            if isinstance(other, UnionVariable):
+                return VariableTracker.build(tx, self.value == other.value)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        from .builder import SourcelessBuilder, VariableBuilder
+        if name == "__args__":
+            return VariableTracker.build(tx, self.value.__args__)
+        return super().var_getattr(tx, name)
 
-        if name in cmp_name_to_op_mapping:
-            return variables.GetAttrVariable(
-                self, name, py_type=type(getattr(self.value, name))
-            )
 
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+class CallableGenericAliasVariable(VariableTracker):
+    """Represents collections.abc._CallableGenericAlias
 
-        value = getattr(self.value, name)
-        if self.source:
-            attr_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, attr_source)(value)
-        else:
-            return SourcelessBuilder.create(tx, value)
+    This is used to implement __class_getitem__ on Callable[...] types.  Can't be traced directly because it has a
+    builtin __getattribute__
+    """
 
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def get_real_python_backed_value(self) -> Any:
-        return self.value
+    def __init__(
+        self,
+        value: collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        **kwargs: Any,
+    ):
+        assert isinstance(
+            value,
+            collections.abc._CallableGenericAlias,  # pyrefly: ignore[missing-attribute]
+        )
+        super().__init__(**kwargs)
+        self.value = value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if not isinstance(self.value, types.GenericAlias):
-            return super().reconstruct(codegen)
-        # We're just trying to load the type here. Reconstructing the type from
-        # scratch is tricky - for a type like `typing.List[int]` we'd need to
-        # deconstruct the origin and args.  The origin for `List[int]` is `list`
-        # and the args is `(int,)`. When we recombine those we get the parts
-        # back and need to emit code for:
-        #
-        #     `typing.List[int]`
-        #
-        # But it's # worse than that - what if `typing` isn't in the globals (or
-        # was loaded like `import typing as _typing ; _typing.List[int]`?) so we
-        # really need to do something like:
-        #
-        #   `sys.modules["typing"].List[int]`
-        #
-        # Argh - but what if they rewrote the global `int`?  So we have to do:
-        #
-        #   `sys.modules["typing"].List[sys.modules["builtins"].int]`
-        #
-        # But where do we get `sys`? What if they never imported it or have
-        # something ELSE called `sys`?
-        #
-        # Let's skip all that noise and just emit it as a simple const.
-        #
         codegen.append_output(codegen.create_load_const(self.value))
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+    def as_python_constant(self):
+        return self.value
 
 
 @functools.lru_cache(maxsize=1)

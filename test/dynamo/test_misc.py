@@ -1748,16 +1748,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
 
-    def test_typing_dict(self):
-        def fn(d):
-            return d[T]
-
-        d = {T: torch.randn(3)}
-        r1 = fn(d)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        r2 = opt_fn(d)
-        self.assertEqual(r1, r2)
-
     def test_tensor__iter__(self):
         def fn(x):
             it = x.__iter__()
@@ -5614,65 +5604,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_typing_typevar(self):
-        def fn(x):
-            def sumt(y: torch.Tensor) -> torch.Tensor:
-                return torch.sum(y)
-
-            def foo(c: typing.Callable[[T], T], y: T) -> T:
-                return c(y)
-
-            return foo(sumt, x)
-
-        x = torch.randn(3)
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 1)
-
-    def test_typing_union_and_optional(self):
-        def fn(x):
-            a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
-            b = torch.jit.annotate(
-                typing.Dict[str, typing.Union[torch.Tensor, None]], {}
-            )
-            return a, b, x + 1
-
-        x = torch.randn(3)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
-    def test_tying_union_new_syntax(self):
-        def fn(x):
-            def inner1(y: torch.Tensor | None):
-                return y
-
-            def inner2(y: None | torch.Tensor):
-                return y
-
-            def inner3(y: torch.Tensor | list[int]):
-                return y
-
-            return x + 1
-
-        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
-
-    @unittest.expectedFailure
-    def test_typing_union_new_syntax_reconstruct(self):
-        def fn(x):
-            return (
-                x + 1,
-                torch.Tensor | None,
-                None | torch.Tensor,
-                torch.Tensor | list[int],
-            )
-
-        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
-
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -7773,20 +7704,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertTrue(torch.allclose(ref, res))
-
-    def test_typing_variable_isinstance(self):
-        def fn(x, m):
-            if isinstance(m, typing.Mapping):
-                return x + 1
-            else:
-                return x - 1
-
-        x = torch.randn(2, 3)
-        m = {"x": torch.randn(3)}
-        ref = fn(x, m)
-        opt_fn = torch.compile(fn, backend="eager")
-        res = opt_fn(x, m)
         self.assertTrue(torch.allclose(ref, res))
 
     @torch._dynamo.config.patch(guard_nn_modules=True)

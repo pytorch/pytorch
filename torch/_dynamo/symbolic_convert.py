@@ -45,7 +45,7 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 
 import torch
@@ -4352,7 +4352,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = variables.TypingVariable(TypeVar(v))
+            tv = VariableTracker.build(self, v)
             self.push(tv)
         else:
             unimplemented(
