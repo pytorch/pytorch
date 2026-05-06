@@ -193,8 +193,6 @@
 .. currentmodule:: torch.cuda
 ```
 
-```
-
 ## NVIDIA Tools Extension (NVTX)
 
 ```{eval-rst}
