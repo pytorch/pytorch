@@ -79,6 +79,7 @@ class Dirichlet(ExponentialFamily):
         new = self._get_checked_instance(Dirichlet, _instance)
         batch_shape = torch.Size(batch_shape)
         new.concentration = self.concentration.expand(batch_shape + self.event_shape)
+        new.generator = self.generator
         super(Dirichlet, new).__init__(
             batch_shape, self.event_shape, validate_args=False
         )
