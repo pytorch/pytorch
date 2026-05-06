@@ -313,12 +313,7 @@ from tools.build_pytorch_libs import build_pytorch
 from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
-from tools.setup_helpers.env import (
-    build_type,
-    IS_DARWIN,
-    IS_LINUX,
-    IS_WINDOWS,
-)
+from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 
 
 def str2bool(value: str | None) -> bool:
