@@ -32,6 +32,7 @@ _test_lib.impl("add_", lambda self_, other: self_, "Meta")
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestInplaceTag(TestCase):
     def setUp(self):
+        super().setUp()
         self.lib = torch.library.Library("_TestInplaceTag", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 
     def tearDown(self):
