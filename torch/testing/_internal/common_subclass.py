@@ -256,7 +256,7 @@ class RedispatchTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args, kwargs=None):
-        call_log_entry = (func.__qualname__, types, args, kwargs)
+        call_log_entry = (func.__qualname__, types)
 
         call_log = None
 

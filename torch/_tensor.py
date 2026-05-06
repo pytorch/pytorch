@@ -251,11 +251,6 @@ class Tensor(torch._C.TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            # Register the new tensor in the memo before recursing into
-            # slot/dict deepcopy so self-referential state on subclasses
-            # terminates instead of looping back through __deepcopy__.
-            memo[id(self)] = new_tensor
-
             if type(self) is not Tensor:
                 if type(new_tensor) is not type(self):
                     raise RuntimeError(
@@ -273,6 +268,7 @@ class Tensor(torch._C.TensorBase):
             self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
+            memo[id(self)] = new_tensor
             return new_tensor
 
     def __reduce_ex__(self, proto):
@@ -617,10 +613,12 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other tensors will be ignored. If not
-                provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the :attr:`tensors`. Defaults to ``None``.
+            inputs (Sequence[Tensor] or dict[str, Tensor], optional): Inputs w.r.t. which
+                the gradient will be accumulated into ``.grad``. All other tensors will be
+                ignored. If not provided, the gradient is accumulated into all the leaf
+                Tensors that were used to compute the :attr:`tensors`. A dict of tensors
+                (e.g. ``dict(model.named_parameters())``) is also accepted.
+                Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(

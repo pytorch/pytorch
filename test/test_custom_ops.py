@@ -1900,6 +1900,34 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
             torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
+    def test_register_fake_does_not_leak_on_failure(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        # CompositeImplicitAutograd kernel makes lib.impl(..., "Meta", ...)
+        # inside FakeImplHolder.register raise *after* the kernel has been
+        # appended to the holder's singleton kernel list.
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
+        # allow_override=True bypasses the early guard and exercises the
+        # exception-safety path in FakeImplHolder.register.
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=True
+            )
+
+        # The failed registration must not leave a dangling kernel in the
+        # process-wide FakeImplHolder; otherwise teardown leaks it and
+        # corrupts subsequent register_fake() calls for the same qualname.
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
