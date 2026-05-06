@@ -494,11 +494,11 @@ struct ExpandableSegment {
             size_t device_free = 0;
             size_t device_total = 0;
             (void)cudaMemGetInfo(&device_free, &device_total);
-            LOG(WARNING) << "expandable_segments: memory mapping failed with OOM on device "
-                        << static_cast<int>(device_)
-                        << " while trying to map " << segment_size_
-                        << " bytes (free: " << device_free
-                        << ", total: " << device_total << ").";
+            LOG(WARNING)
+                << "expandable_segments: memory mapping failed with OOM on device "
+                << static_cast<int>(device_) << " while trying to map "
+                << segment_size_ << " bytes (free: " << device_free
+                << ", total: " << device_total << ").";
           }
 #ifdef USE_ROCM
           // hipMemCreate above returned hipErrorOutOfMemory and treated it
@@ -3685,10 +3685,10 @@ class DeviceCachingAllocator {
             size_t device_total = 0;
             (void)cudaMemGetInfo(&device_free, &device_total);
             LOG(WARNING) << "memory allocation failed with OOM on device "
-                        << static_cast<int>(device_id)
-                        << " while trying to allocate " << size
-                        << " bytes (free: " << device_free
-                        << ", total: " << device_total << ").";
+                         << static_cast<int>(device_id)
+                         << " while trying to allocate " << size
+                         << " bytes (free: " << device_free
+                         << ", total: " << device_total << ").";
           }
           // If this is the first attempt (!isRetry), we can forgive and clear
           // CUDA's internal error state.
