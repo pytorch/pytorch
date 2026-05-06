@@ -790,8 +790,8 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 #ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
   auto aligned_row_indices_buffer = [&]() -> Tensor {
     if (dim_k == 1) { // implies cusparseSpMV
-      const auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
-      const auto* mat_end_offsets_ptr = mat_el_end_indices_host.data_ptr<int64_t>();
+      const auto* row_indices_start_ptr = indices_dim1.const_data_ptr<int64_t>();
+      const auto* mat_end_offsets_ptr = mat_el_end_indices_host.const_data_ptr<int64_t>();
       int64_t max_nnz = 0;
       int64_t start_offset = 0;
       for (const auto i : c10::irange(num_matrices)) {
