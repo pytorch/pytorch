@@ -2988,6 +2988,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
 
+    def test_vector_norm_negative_dim_size_one(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/182181
+        def fn(x):
+            return x.norm(dim=-1)
+
+        x = torch.rand(8, 3, 1, device=device_type)
+        self.common(fn, [x])
+
+        # Multiple negative dims, all size 1
+        def fn2(x):
+            return x.norm(dim=(-2, -1))
+
+        y = torch.rand(8, 1, 1, device=device_type)
+        self.common(fn2, [y])
+
+        # torch.linalg.vector_norm directly
+        def fn3(x):
+            return torch.linalg.vector_norm(x, dim=-1)
+
+        self.common(fn3, [x])
+
+        def fn4(x):
+            return torch.linalg.vector_norm(x, dim=(-2, -1))
+
+        self.common(fn4, [y])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
