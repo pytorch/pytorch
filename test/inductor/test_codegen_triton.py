@@ -336,12 +336,18 @@ class TestCodegenTriton(InductorTestCase):
         _, kernels = run_and_get_kernels(compiled, x, remove_quote=True)
         # Extract only the function body (after ``def triton_...:``) to avoid
         # matching metadata like ``'has_fp64': True`` in DeviceProperties.
+        matched_kernel_body = False
         for kernel in kernels:
             m = re.search(r"def triton_\w+\([^)]*\):\n(.*)", kernel, re.DOTALL)
             if m:
+                matched_kernel_body = True
                 body = m.group(1)
                 self.assertNotIn("tl.float64", body)
                 self.assertIn("tl.float32", body)
+        self.assertTrue(
+            matched_kernel_body,
+            "Expected at least one generated Triton kernel body to match",
+        )
 
 
 if __name__ == "__main__":

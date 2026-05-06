@@ -2814,7 +2814,7 @@ def get_benchmark_name() -> str | None:
     It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
     scripts, this function may return None.
 
-    There are 2 flavors of --only argument we need handle:
+    There are 2 flavors of --only argument we need to handle:
     1. --only model_name
     2. --only=model_name
     """
@@ -3786,10 +3786,10 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
-def device_supports_fp64(device_type: str) -> bool:
-    """Check if the given device type supports float64."""
-    if device_type == "xpu":
-        return torch.xpu.get_device_properties().has_fp64
+def device_supports_fp64(device: torch.device) -> bool:
+    """Check if the given device supports float64."""
+    if device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
     return True
 
 

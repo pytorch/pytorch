@@ -2402,7 +2402,7 @@ class TestMaxAutotune(TestCase):
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                         'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'OUT_DTYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
                         'hint_override':None,'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -2443,7 +2443,7 @@ class TestMaxAutotune(TestCase):
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'transpose_discontiguous_tensor_descriptors_override':None,
-                    'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','OUT_DTYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
+                    'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
                     'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None,'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -3078,6 +3078,35 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check("triton_tem_fused").run(code[0])
 
+    @config.patch(
+        {
+            "max_autotune": True,
+        }
+    )
+    def test_deffered_layout_constraint_mm_cat_mm(self):
+        def mm_cat_mm(t1, t2, t3, t4):
+            add = t2 + 1
+            matmul1 = torch.matmul(t1, add)
+            cat = torch.cat((t3, add), dim=1)
+            matmul2 = torch.matmul(t4, add)
+            return matmul1, cat, matmul2
+
+        B = 3072
+        M = 128
+        K = 144
+        N = 160
+        P = 96
+        t1 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+        t2 = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float16)
+        t3 = torch.randn(B, P, N, device=GPU_TYPE, dtype=torch.float16)
+        t4 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+
+        args = (t1, t2, t3, t4)
+
+        compiled_fn = torch.compile(mm_cat_mm)
+
+        run_and_get_code(compiled_fn, *args)
+
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
@@ -3293,6 +3322,149 @@ class TestMaxAutotune(TestCase):
             compiled_fn = torch.compile(fn)
             _, code = run_and_get_code(compiled_fn, a, b, c, idx0, idx1, value)
             FileCheck().check("triton_tem_fused").run(code[0])
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("use_addmm", (False, True))
+    def test_triton_gemm_epilogue_fusion_truncates_accumulator(self, dtype, use_addmm):
+        """
+        Verify that Triton GEMM epilogue fusion properly truncates the fp32
+        accumulator to the output dtype before performing epilogue operations.
+
+        When epilogue fusion is enabled and acc_dtype (fp32) differs from
+        output_dtype (fp16/bf16), the generated code should:
+        1. Downcast from fp32 to output dtype (truncation)
+        2. Upcast back to fp32 for epilogue computation
+
+        For float32, acc_dtype equals output_dtype so no truncation is needed.
+
+        For addmm, verify that the bias addition happens in full precision
+        BEFORE truncation (truncation should NOT be on acc directly).
+        """
+        if use_addmm:
+
+            def fn(x, bias):
+                return torch.addmm(bias, x, x).relu() - 1.0
+        else:
+
+            def fn(x):
+                return (x @ x).relu() - 1.0
+
+        x = torch.randn(128, 128, dtype=dtype, device=GPU_TYPE)
+        bias = torch.randn(128, dtype=dtype, device=GPU_TYPE) if use_addmm else None
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+                "epilogue_fusion": True,
+                "benchmark_epilogue_fusion": False,
+            }
+        ):
+            if use_addmm:
+                out, code = run_and_get_code(torch.compile(fn), x, bias)
+                expected = fn(x, bias)
+            else:
+                out, code = run_and_get_code(torch.compile(fn), x)
+                expected = fn(x)
+
+        tol = 5e-2 if dtype == torch.float32 else 1e-2
+        torch.testing.assert_close(out, expected, atol=tol, rtol=tol)
+
+        kernel_name = (
+            "triton_tem_fused_addmm_relu_sub"
+            if use_addmm
+            else "triton_tem_fused_mm_relu_sub"
+        )
+        FileCheck().check(kernel_name).run(code[0])
+
+        # Verify the epilogue has the downcast (fp32 -> fp16/bf16) followed
+        # by upcast (fp16/bf16 -> fp32) pattern for proper truncation.
+        # For addmm, truncation should happen AFTER bias add, not on acc directly.
+        triton_dtype = "tl.float16" if dtype == torch.float16 else "tl.bfloat16"
+        if dtype in (torch.float16, torch.bfloat16):
+            if use_addmm:
+                # For addmm: truncation should happen on result of bias add,
+                # NOT on acc directly (which would mean truncation before bias add)
+                self.assertNotIn(f"acc.to({triton_dtype})", code[0])
+                FileCheck().check(f".to({triton_dtype})").check(".to(tl.float32)").run(
+                    code[0]
+                )
+            else:
+                FileCheck().check(f"acc.to({triton_dtype})").check(
+                    ".to(tl.float32)"
+                ).run(code[0])
+        else:
+            # float32: no truncation casts since acc_dtype == output_dtype
+            self.assertNotIn("acc.to(tl.float16)", code[0])
+            self.assertNotIn("acc.to(tl.bfloat16)", code[0])
+
+        # Verify that fused epilogue produces bitwise identical results to unfused
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+                "epilogue_fusion": False,
+                "benchmark_epilogue_fusion": False,
+            }
+        ):
+            if use_addmm:
+                out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x, bias)
+            else:
+                out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x)
+
+        FileCheck().check_not(kernel_name).run(code_unfused[0])
+        self.assertEqual(out, out_unfused)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("use_addmm", (False, True))
+    def test_triton_gemm_no_epilogue_no_truncation_casts(self, dtype, use_addmm):
+        """
+        Verify that Triton GEMM without epilogue fusion does not have
+        truncation casts in the epilogue.
+
+        When there are no fused epilogue operations, the accumulator should
+        be stored directly without explicit truncation/upcast pattern.
+        """
+        if use_addmm:
+
+            def fn(x, bias):
+                return torch.addmm(bias, x, x)
+
+        else:
+
+            def fn(x):
+                return x @ x
+
+        x = torch.randn(128, 128, dtype=dtype, device=GPU_TYPE)
+        bias = torch.randn(128, dtype=dtype, device=GPU_TYPE) if use_addmm else None
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+                "epilogue_fusion": True,
+                "benchmark_epilogue_fusion": False,
+            }
+        ):
+            if use_addmm:
+                out, code = run_and_get_code(torch.compile(fn), x, bias)
+                expected = fn(x, bias)
+            else:
+                out, code = run_and_get_code(torch.compile(fn), x)
+                expected = fn(x)
+
+        # float32 needs looser tolerance due to TF32 precision differences
+        tol = 5e-2 if dtype == torch.float32 else 1e-2
+        torch.testing.assert_close(out, expected, atol=tol, rtol=tol)
+
+        # Verify we got a Triton template
+        kernel_name = "triton_tem_fused_addmm" if use_addmm else "triton_tem_fused_mm"
+        FileCheck().check(kernel_name).run(code[0])
+
+        # No truncation casts should exist since there are no fused epilogue ops
+        self.assertNotIn("acc.to(tl.float16)", code[0])
+        self.assertNotIn("acc.to(tl.bfloat16)", code[0])
 
 
 @instantiate_parametrized_tests
@@ -5098,6 +5270,8 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 aten_time=aten_time,
                 triton_time=triton_time,
                 epilogue_runtime=epilogue_runtime,
+                mock_fused_n_regs=32,
+                mock_n_spills=0,
             ):
                 compiled_fn = torch.compile(fn)
                 _, code = run_and_get_code(compiled_fn, x, w, bias, scale)

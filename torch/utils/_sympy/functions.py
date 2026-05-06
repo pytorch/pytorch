@@ -32,6 +32,24 @@ if TYPE_CHECKING:
 _T = TypeVar("_T", bound=SupportsFloat)
 _Ts = TypeVarTuple("_Ts")
 
+# sympy.gcd on wide Add expressions triggers expensive polynomial-GCD
+# (dmp_sqr / dmp_rr_div) that scales poorly in the number of symbols.
+# safe_gcd() falls back to simple_floordiv_gcd past this threshold.
+_MAX_ADD_TERMS_FOR_POLY_GCD = 20
+
+
+def _is_wide_add(expr: sympy.Basic) -> bool:
+    return isinstance(expr, sympy.Add) and len(expr.args) > _MAX_ADD_TERMS_FOR_POLY_GCD
+
+
+def safe_gcd(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+    """Like sympy.gcd but avoids polynomial-GCD on wide Add expressions,
+    falling back to simple_floordiv_gcd instead."""
+    if _is_wide_add(a) or _is_wide_add(b):
+        return simple_floordiv_gcd(a, b)
+    return sympy.gcd(a, b)
+
+
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
 #
@@ -292,7 +310,7 @@ class FloorDiv(sympy.Function):
         try:
             gcd = simple_floordiv_gcd(base, divisor)
             if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
-                gcd = sympy.gcd(base, divisor)
+                gcd = safe_gcd(base, divisor)
             if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
@@ -333,7 +351,7 @@ class ModularIndexing(sympy.Function):
 
         try:
             if divisor != 1:
-                gcd = sympy.gcd(base, divisor)
+                gcd = safe_gcd(base, divisor)
                 if gcd != 1:
                     return ModularIndexing(
                         sympy.simplify(base / gcd),
@@ -343,11 +361,14 @@ class ModularIndexing(sympy.Function):
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
-        if isinstance(base, sympy.Add):
+        # Guard on width: the per-term gcd calls are cheap (via safe_gcd),
+        # but the result feeds into downstream sympy.expand() which blows up
+        # on wide Add expressions (e.g. in sizevars.simplify).
+        if isinstance(base, sympy.Add) and not _is_wide_add(base):
             new_terms: list[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
-                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
+                if safe_gcd(term, modulus * divisor) != modulus * divisor:
                     if (isinstance(term, sympy.Integer) and term < 0) or (
                         isinstance(term, sympy.Mul)
                         and isinstance(term.args[0], sympy.Integer)
