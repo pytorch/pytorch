@@ -3188,7 +3188,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
-<<<<<<< conv_backward
 def convolution_backward_xpu_constraint(fx_node, *args, **kwargs):
     """Normalise mixed channels-last/contiguous 4-D inputs for XPU correctness.
 
@@ -3251,12 +3250,12 @@ def convolution_backward_xpu_constraint(fx_node, *args, **kwargs):
         args = tuple(new_args)
 
     return args, kwargs
-=======
+
+
 def constrain_to_fx_strides_if_fallback_random(fx_node, *args, **kwargs):
     if not config.fallback_random:
         return args, kwargs
     return constrain_to_fx_strides(fx_node, *args, **kwargs)
->>>>>>> main
 
 
 # native_dropout uses empty_like(input) internally, so bernoulli_ consumes
