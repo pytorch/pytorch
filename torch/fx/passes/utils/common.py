@@ -29,13 +29,13 @@ def lift_subgraph_as_module(
     class_name: str = "GraphModule",
 ) -> tuple[GraphModule, dict[str, str]]:
     """
-    Create a GraphModule for subgraph, which copies the necessary attributes 
+    Create a GraphModule for subgraph, which copies the necessary attributes
     from the original parent graph_module.
 
     Args:
         ``gm`` (GraphModule): parent graph module
 
-        ``subgraph`` (:class:`torch.fx.Graph`): a valid subgraph that contains copied nodes from the 
+        ``subgraph`` (:class:`torch.fx.Graph`): a valid subgraph that contains copied nodes from the
         parent graph
 
         ``comp_name`` (str): name for the new component
