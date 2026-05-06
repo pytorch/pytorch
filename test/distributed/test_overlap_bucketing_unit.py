@@ -1864,11 +1864,10 @@ def _load_pge_profile(data):
 class TestProfileGuidedEstimation(TestCase):
     def test_profile_loading_and_lookup(self):
         """Load a trace with collectives, aten ops, and a custom op; verify lookups."""
-        lib = torch.library.Library("test_pge", "DEF")
-        lib.define("my_op(Tensor x, Tensor w) -> Tensor")
-        lib.impl("my_op", lambda x, w: x @ w, "CPU")
-        lib.impl("my_op", lambda x, w: x @ w, "Meta")
-        try:
+        with torch.library._scoped_library("test_pge", "DEF") as lib:
+            lib.define("my_op(Tensor x, Tensor w) -> Tensor")
+            lib.impl("my_op", lambda x, w: x @ w, "CPU")
+            lib.impl("my_op", lambda x, w: x @ w, "Meta")
             trace = _make_pge_trace(
                 collectives=[
                     {
@@ -1987,8 +1986,6 @@ class TestProfileGuidedEstimation(TestCase):
                 )
             finally:
                 os.unlink(trace_path)
-        finally:
-            del lib
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
