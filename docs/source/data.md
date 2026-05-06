@@ -4,6 +4,42 @@
 .. automodule:: torch.utils.data
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils.data.dataset
+```
+
+```{eval-rst}
+.. autofunction:: random_split
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.decoder
+```
+
+```{eval-rst}
+.. autofunction:: basichandlers
+```
+
+```{eval-rst}
+.. autofunction:: handle_extension
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.graph
+```
+
+```{eval-rst}
+.. autofunction:: traverse
+```
+
+```{eval-rst}
+.. autofunction:: traverse_dps
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data
+```
+
 At the heart of PyTorch data loading utility is the {class}`torch.utils.data.DataLoader`
 class. It represents a Python iterable over a dataset, with support for
 
@@ -548,6 +584,8 @@ for batch_ndx, sample in enumerate(loader):
 .. automodule:: torch.utils.data.datapipes.utils.common
 
 .. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autofunction:: validate_input_col
 
 .. autosummary::
     :toctree: generated

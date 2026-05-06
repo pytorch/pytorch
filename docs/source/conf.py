@@ -1085,21 +1085,21 @@ coverage_ignore_functions = [
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
-    "validate_input_col",
+    # "validate_input_col",
     "validate_pathname_binary_tuple",
     # torch.utils.data.datapipes.utils.decoder
     "audiohandler",
-    "basichandlers",
+    # "basichandlers",
     "extension_extract_fn",
-    "handle_extension",
+    # "handle_extension",
     "imagehandler",
     "mathandler",
     "videohandler",
     # torch.utils.data.dataset
-    "random_split",
+    # "random_split",
     # torch.utils.data.graph
-    "traverse",
-    "traverse_dps",
+    # "traverse",
+    # "traverse_dps",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
