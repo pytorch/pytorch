@@ -1339,6 +1339,32 @@ class TestMPS(TestCaseMPS):
         x_cpu = torch.randn(1)
         y_mps = x_cpu.to("mps")
         torch.testing.assert_close(x_cpu.item(), y_mps.item())
+    def test_item_uma_fast_path(self):
+        # UMA fast path: direct CPU read from shared MTLBuffer via getSharedBufferPtr()
+        dtypes = [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64, torch.bool]
+        for dtype in dtypes:
+            if dtype == torch.bool:
+                x_cpu = torch.tensor([True, False, True], dtype=dtype)
+            elif dtype.is_floating_point:
+                x_cpu = torch.tensor([1.5, -2.5, 0.0], dtype=dtype)
+            else:
+                x_cpu = torch.tensor([42, -7, 0], dtype=dtype)
+            x_mps = x_cpu.to("mps")
+            for i in range(len(x_cpu)):
+                self.assertEqual(x_cpu[i].item(), x_mps[i].item(), msg=f"dtype={dtype}, idx={i}")
+
+        # Non-contiguous tensor with storage offset
+        base = torch.arange(10, dtype=torch.float32, device="mps")
+        view = base[3]  # scalar tensor with offset
+        self.assertEqual(3.0, view.item())
+
+        # After GPU computation: sync must flush pending writes before CPU read
+        a = torch.ones(4, device="mps")
+        b = torch.ones(4, device="mps")
+        c = a + b  # GPU op, writes 2.0
+        self.assertEqual(2.0, c[0].item())
+
+
 
     def test_linear_1d_weight(self):
         device = 'cpu'
