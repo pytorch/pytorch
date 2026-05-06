@@ -493,10 +493,12 @@ class DeviceTypeTestBase(TestCase):
         test_exclusions=None,
     ):
         """
-        Sets the test configuration fields (op_overrides, op_allowlist, test_exclusions).
+        Sets or resets the test configuration fields.
 
-        This API replaces the full configuration in one call. Unspecified arguments
-        default to None, and all values overwrite any previously stored configuration.
+        WARNING: This method is designed to perform a FULL replacement of the 
+        current configuration. Calling this method without any arguments will 
+        act as a "reset", clearing all stored configurations back to their 
+        default `None` state.
         """
         cls.op_overrides = op_overrides
         cls.op_allowlist = op_allowlist
