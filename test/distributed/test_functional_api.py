@@ -426,6 +426,7 @@ class TestGradCollectives(MultiThreadedTestCase):
 
 class TestMakeFx(TestCase):
     def setUp(self):
+        super().setUp()
         # make_fx is not thread-safe due to patching nd mutating global states
         # so create a fake_pg.
         self.rank = 0
@@ -472,6 +473,7 @@ class TestAllGatherViewOptimization(TestCase):
     applies and calls wait() early when the fallback path is needed."""
 
     def setUp(self):
+        super().setUp()
         self.world_size = 4
         if dist.is_initialized():
             dist.destroy_process_group()

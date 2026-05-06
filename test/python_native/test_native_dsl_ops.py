@@ -44,6 +44,7 @@ class TestNativeDSLOps(TestCase):
 
     def setUp(self):
         """Clear all caches before each test to ensure test isolation."""
+        super().setUp()
         self._cache_functions_to_clear = [
             (
                 "torch._native.common_utils",

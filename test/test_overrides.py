@@ -11,7 +11,7 @@ import collections
 import unittest
 import os
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -1450,6 +1450,7 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182317")
     def test_factory_override(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1804,6 +1805,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertFalse(called)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182318")
     def test_disable_enable_subclass(self):
         class A(torch.Tensor):
             pass

@@ -25,6 +25,11 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that crash on torchbind static methods (can't downcast to
+        # GraphFunction). Record state baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         load_torchbind_test_lib()
 
     def test_torchbind(self):
