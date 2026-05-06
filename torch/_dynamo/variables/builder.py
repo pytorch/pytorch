@@ -3869,6 +3869,61 @@ def is_unbacked_source(source_name: str) -> bool:
     return False
 
 
+def _symbolic_context_from_shapes_spec(
+    e: Any,
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
+    shape_env_to_source_to_symbol_cache: dict[Any, Any],
+    excluded_sizes: Any,
+) -> StatefulSymbolicContext:
+    dynamic_sizes = []
+    dynamic_strides = []
+    constraint_sizes = []
+    constraint_strides = []
+    specialize_on = []
+
+    for i in range(e.dim()):
+        if tensor_spec is None:
+            dynamic_sizes.append(DimDynamic.STATIC)
+            constraint_sizes.append(None)
+        else:
+            dim_spec = tensor_spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                dynamic_sizes.append(DimDynamic.STATIC)
+                constraint_sizes.append(None)
+            elif isinstance(dim_spec, IntVar):
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+                constraint_sizes.append(None)
+            else:
+                dynamic_sizes.append(DimDynamic.STATIC)
+                constraint_sizes.append(None)
+
+        dynamic_strides.append(DimDynamic.INFER_STRIDE)
+        constraint_strides.append(None)
+
+    return StatefulSymbolicContext(
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        constraint_sizes=constraint_sizes,
+        constraint_strides=constraint_strides,
+        specialize_on=specialize_on,
+        view_base_context=view_base_context,
+        tensor_source=source,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        shape_ids=getattr(e, "_dynamo_shape_ids", None),
+        unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
+        excluded_sizes=excluded_sizes,
+        tensor_spec=tensor_spec,
+    )
+
+
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -3937,43 +3992,6 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    # If the user provided any spec for this source, fall through to
-    # per-dim dispatch below so the spec can override the all-static
-    # fast path. ``tensor_spec`` is only set when it's specifically a
-    # TensorSpec — that's what the per-dim loop indexes — but the
-    # bypass condition checks for *any* spec so a mis-typed user spec
-    # still opts out of the fast path instead of being silently
-    # specialized.
-    # tensor_spec is passed from wrap_tensor (already looked up).
-    # If not passed (recursive calls), look it up.
-    if tensor_spec is None:
-        _spec_lookup = lookup_spec_from_dynamo_source(source, config._shapes_spec)
-        tensor_spec = _spec_lookup if isinstance(_spec_lookup, TensorSpec) else None
-
-    if tensor_spec is None and static_shapes and not is_dynamic_source(name):
-        return StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
-            constraint_sizes=[None] * e.dim(),
-            constraint_strides=[None] * e.dim(),
-            view_base_context=view_base_context,
-            tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        )
-
-    # If shapes_spec is provided but this tensor has no spec (None),
-    # force all dims static — "unspecified = static" when a spec is set.
-    if config._shapes_spec is not None and tensor_spec is None:
-        return StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
-            constraint_sizes=[None] * e.dim(),
-            constraint_strides=[None] * e.dim(),
-            view_base_context=view_base_context,
-            tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        )
-
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -4031,6 +4049,16 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
+    if config._shapes_spec is not None:
+        return _symbolic_context_from_shapes_spec(
+            e,
+            source,
+            tensor_spec,
+            view_base_context,
+            shape_env_to_source_to_symbol_cache,
+            frame_state_entry.excluded_sizes,
+        )
+
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []
@@ -4048,45 +4076,6 @@ def _automatic_dynamic(
         marked_static = i in getattr(e, "_dynamo_static_indices", ())
 
         specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
-
-        # If user provided a TensorSpec with a spec for this dim, use it
-        # and skip the existing heuristics.
-        if tensor_spec is not None and tensor_spec[i] is not None:
-            if any(
-                [
-                    marked_strict_unbacked,
-                    marked_unbacked,
-                    marked_dynamic,
-                    marked_weak_dynamic,
-                    marked_static,
-                ]
-            ):
-                raise ValueError(
-                    f"Dimension {i} has both a TensorSpec and a mark_dynamic/mark_static "
-                    f"annotation. Use one or the other, not both."
-                )
-            dim_spec = tensor_spec[i]
-            if isinstance(dim_spec, int):
-                # Explicit static value — verify the actual matches.
-                actual_size = e.size(i)
-                if actual_size != dim_spec:
-                    raise ValueError(
-                        f"shapes_spec declares dim {i} as static with value "
-                        f"{dim_spec}, but got {actual_size}"
-                    )
-                dynamic_sizes.append(DimDynamic.STATIC)
-                constraint_sizes.append(None)
-            elif isinstance(dim_spec, IntVar):
-                # All IntVar/ShapeVar specs are unbacked
-                dynamic_sizes.append(DimDynamic.UNBACKED)
-                constraint_sizes.append(None)
-            else:
-                # None = not specified and shall be static.
-                dynamic_sizes.append(DimDynamic.STATIC)
-                constraint_sizes.append(None)
-            dynamic_strides.append(DimDynamic.INFER_STRIDE)
-            constraint_strides.append(None)
-            continue
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always

@@ -59,6 +59,15 @@ class IntVar:
             parts.append(f"optimization_hint={self.optimization_hint}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": type(self).__name__,
+            "name": self.name,
+            "min": self.min,
+            "max": self.max,
+            "optimization_hint": self.optimization_hint,
+        }
+
 
 class ShapeVar(IntVar):
     """Indicates that a dimension size is dynamic and is >= 0.
@@ -124,6 +133,15 @@ class TensorSpec:
             lines.append(f"  {i}: {spec!r}")
         return "\n".join(lines)
 
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "TensorSpec",
+            "dims": [
+                spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for spec in self._specs
+            ],
+        }
+
 
 # Type alias for leaf specs (individual argument specifications)
 LeafSpec: TypeAlias = TensorSpec | IntVar | None
@@ -173,6 +191,15 @@ class ParamsSpec:
                 lines.append(f"{k}: {v_repr}")
         return "\n".join(lines)
 
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "ParamsSpec",
+            "named_args": {
+                name: value.to_jsonable() if hasattr(value, "to_jsonable") else value
+                for name, value in self._named_args.items()
+            },
+        }
+
 
 class ShapesSpec:
     """Top-level shape specification for a ``torch.compile`` call.
@@ -213,6 +240,12 @@ class ShapesSpec:
             for line in param_repr.splitlines():
                 lines.append("    " + line)
         return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "ShapesSpec",
+            "params": None if self._params is None else self._params.to_jsonable(),
+        }
 
 
 def lookup_spec_from_dynamo_source(source, shapes_spec: ShapesSpec | None) -> LeafSpec:
