@@ -872,10 +872,18 @@ User code traceback:
 """,
         )
 
+        # macOS produces NullVariable; Linux produces
+        # LazyVariableTracker(realized: SkipFunctionVariable()).
+        var_attribution = (
+            "NullVariable"
+            if IS_MACOS
+            else "LazyVariableTracker(realized: SkipFunctionVariable())"
+        )
+
         if sys.version_info >= (3, 14) or sys.version_info < (3, 11):
             self.assertExpectedInline(
                 post_munge(_munge_graph_break_message(records[1].getMessage())),
-                """\
+                f"""\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
@@ -890,7 +898,7 @@ Reconstruction failure
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
 Stack variable source attribution:
-  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:
+  {var_attribution} originated from:
   File "test_error_messages.py", line N
                 torch._dynamo.graph_break()
 
@@ -904,7 +912,7 @@ User code traceback:
         elif _load_global_has_positions():
             self.assertExpectedInline(
                 post_munge(_munge_graph_break_message(records[1].getMessage())),
-                """\
+                f"""\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
@@ -919,7 +927,7 @@ Reconstruction failure
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
 Stack variable source attribution:
-  LazyVariableTracker(realized: SkipFunctionVariable()) originated from:
+  {var_attribution} originated from:
   File "test_error_messages.py", line N
                 torch._dynamo.graph_break()
 
