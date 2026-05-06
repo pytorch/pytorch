@@ -262,11 +262,6 @@ dtensor_fails = {
 dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
-    xfail("nn.functional.huber_loss"),
-    skip("nn.functional.max_unpool1d", "grad"),
-    skip("nn.functional.max_unpool2d", "grad"),
-    xfail("nn.functional.max_unpool3d", "grad"),
-    xfail("nn.functional.threshold"),
     skip("nn.functional.multi_head_attention_forward"),
     xfail("multinomial"),
 }
