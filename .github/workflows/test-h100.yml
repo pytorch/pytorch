@@ -35,6 +35,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-build:
     name: linux-jammy-cuda13.0-py3.10-gcc11-sm90
@@ -49,6 +50,10 @@ jobs:
         { include: [
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-test:
@@ -56,10 +61,15 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-cuda13_0-py3_10-gcc11-sm90-build
+      - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-FA3-ABI-stable-test:
@@ -67,9 +77,15 @@ jobs:
     uses: ./.github/workflows/_linux-test-stable-fa3.yml
     needs:
       - linux-jammy-cuda13_0-py3_10-gcc11-sm90-build
+      - get-label-type
     with:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
       timeout-minutes: 30
       s3-bucket: gha-artifacts
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
