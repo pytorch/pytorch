@@ -68,6 +68,7 @@ class MockException(Exception):
 
 class ElasticLaunchTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables
