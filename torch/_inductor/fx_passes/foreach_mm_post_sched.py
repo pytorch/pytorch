@@ -21,19 +21,35 @@ log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
-_COMM_OP_NAMES = frozenset(
-    [
-        "all_reduce",
-        "all_gather",
-        "reduce_scatter",
-        "wait_tensor",
-        "all_gather_into_tensor",
-        "reduce_scatter_tensor",
-    ]
-)
+# Comm op targets to check against (not string matching)
+_COMM_TARGETS: set[torch._ops.OpOverload] = set()
+
+
+def _get_comm_targets() -> set[torch._ops.OpOverload]:
+    """Lazily build the set of comm op targets."""
+    global _COMM_TARGETS
+    if _COMM_TARGETS:
+        return _COMM_TARGETS
+    try:
+        funcol = torch.ops._c10d_functional
+        _COMM_TARGETS = {
+            funcol.all_reduce.default,
+            funcol.all_gather_into_tensor.default,
+            funcol.reduce_scatter_tensor.default,
+            funcol.wait_tensor.default,
+        }
+        # Also add inplace/out variants if they exist
+        for name in ["all_reduce_", "all_gather_into_tensor_out", "reduce_scatter_tensor_out"]:
+            op = getattr(funcol, name, None)
+            if op is not None:
+                _COMM_TARGETS.add(op.default)
+    except AttributeError:
+        pass
+    return _COMM_TARGETS
 
 
 def _is_mm_control_deps(node: fx.Node) -> bool:
+    """Check if node is a control_deps wrapping an mm op."""
     if node.op != "call_function":
         return False
     if node.target is not torch.ops.higher_order.control_deps:
@@ -43,26 +59,34 @@ def _is_mm_control_deps(node: fx.Node) -> bool:
     subgraph = node.args[1]
     if not isinstance(subgraph, fx.Node):
         return False
+    # Check the subgraph module contains a single mm op
     sg_name = getattr(subgraph, "target", "") or getattr(subgraph, "name", "")
     if not isinstance(sg_name, str):
         sg_name = str(sg_name)
     if not sg_name.startswith("subgraph_mm"):
         return False
-    rest = sg_name[len("subgraph_mm") :]
+    rest = sg_name[len("subgraph_mm"):]
     return rest == "" or rest[0] in ("_", " ")
 
 
 def _involves_comm(node: fx.Node) -> bool:
-    """Check if a node is a comm op or a control_deps wrapping a comm op."""
-    name = node.name if hasattr(node, "name") else ""
-    for comm in _COMM_OP_NAMES:
-        if comm in name:
-            return True
-    if node.op == "call_function" and hasattr(node.target, "__name__"):
-        tname = node.target.__name__
-        for comm in _COMM_OP_NAMES:
-            if comm in tname:
-                return True
+    """Check if a node is a comm op by matching its target."""
+    comm_targets = _get_comm_targets()
+    if node.op == "call_function" and node.target in comm_targets:
+        return True
+    # Also check control_deps wrapping comm ops (by subgraph name)
+    if (
+        node.op == "call_function"
+        and node.target is torch.ops.higher_order.control_deps
+        and len(node.args) >= 2
+    ):
+        sg = node.args[1]
+        sg_name = getattr(sg, "target", "") if isinstance(sg, fx.Node) else ""
+        if isinstance(sg_name, str):
+            for comm_prefix in ("subgraph_all_reduce", "subgraph_all_gather",
+                                "subgraph_reduce_scatter", "subgraph_wait_tensor"):
+                if sg_name.startswith(comm_prefix):
+                    return True
     return False
 
 
@@ -87,11 +111,9 @@ def foreach_mm_post_scheduling_pass(gm: torch.fx.GraphModule) -> bool:
         if not _is_mm_control_deps(node):
             continue
 
-        # Keep control_deps if scheduling deps involve comm ops
         if _sched_deps_involve_comm(node):
             continue
 
-        # Unwrap: replace control_deps(sched_deps, subgraph, lhs, rhs) → mm(lhs, rhs)
         lhs = node.args[2]
         rhs = node.args[3]
 
@@ -101,10 +123,14 @@ def foreach_mm_post_scheduling_pass(gm: torch.fx.GraphModule) -> bool:
 
         node.replace_all_uses_with(mm_node)
 
+        # Clean up: erase control_deps node, its get_attr, and the submodule
         subgraph_node = node.args[1]
         graph.erase_node(node)
         if isinstance(subgraph_node, fx.Node) and len(subgraph_node.users) == 0:
+            sg_name = subgraph_node.target
             graph.erase_node(subgraph_node)
+            if isinstance(sg_name, str) and hasattr(gm, sg_name):
+                delattr(gm, sg_name)
 
         unwrapped += 1
         changed = True
@@ -114,6 +140,7 @@ def foreach_mm_post_scheduling_pass(gm: torch.fx.GraphModule) -> bool:
 
         stable_topological_sort(graph)
         graph.eliminate_dead_code()
+        graph.lint()
         log.info(
             "foreach_mm_post_sched: unwrapped %d control_deps(mm) to bare mm",
             unwrapped,

@@ -11883,9 +11883,6 @@
     CompositeExplicitAutograd: foreach_tensor_mm_list_kernel_slow
     CUDA: foreach_tensor_mm_list_kernel_cuda
 
-  dispatch:
-    CompositeExplicitAutograd: foreach_tensor_addmm_kernel_slow
-    CUDA: foreach_tensor_addmm_kernel_cuda
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:

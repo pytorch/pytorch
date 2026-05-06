@@ -768,6 +768,18 @@ std::vector<at::Tensor> foreach_tensor_mm_list_kernel_cuda(
         self_list[i].dtype() == first_a.dtype() &&
         mat2_list[i].dtype() == first_b.dtype(),
         "_foreach_mm: all tensors must have the same dtype");
+    TORCH_CHECK(
+        self_list[i].device() == first_a.device() &&
+        mat2_list[i].device() == first_b.device(),
+        "_foreach_mm: all tensors must be on the same device");
+    TORCH_CHECK(
+        self_list[i].stride(0) == first_a.stride(0) &&
+        self_list[i].stride(1) == first_a.stride(1),
+        "_foreach_mm: all tensors in self must have the same strides");
+    TORCH_CHECK(
+        mat2_list[i].stride(0) == first_b.stride(0) &&
+        mat2_list[i].stride(1) == first_b.stride(1),
+        "_foreach_mm: all tensors in mat2 must have the same strides");
   }
 
   const auto out_dtype = first_a.scalar_type();

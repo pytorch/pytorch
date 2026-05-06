@@ -1222,16 +1222,14 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: bool | None = None
 
-    # Batch independent same-shape aten.mm calls into aten._foreach_mm
-    # using CUTLASS grouped GEMM. Reduces kernel launch count.
-    foreach_mm: bool = False
-    foreach_mm_min_group_size: int = 3
-
-    # Post-scheduling foreach_mm: unwrap control_deps(mm) that don't
-    # depend on collectives, then batch the unwrapped mm ops.
+    # Post-scheduling foreach_mm: after overlap scheduling, unwrap
+    # control_deps(mm) that don't depend on collectives, then batch
+    # the unwrapped mm ops into aten._foreach_mm (CUTLASS grouped GEMM).
     # Preserves overlap scheduling while enabling cascading fusion
     # of pointwise ops between the batched mm nodes.
-    foreach_mm_post_scheduling: bool = False
+    # Requires aten._foreach_mm to be available (compiled with CUTLASS).
+    foreach_mm: bool = False
+    foreach_mm_min_group_size: int = 3
 
     # Default bucketing mode for auto and manual overlap scheduling
     # "default": traced bucketing, fully lowered by inductor during compilation
