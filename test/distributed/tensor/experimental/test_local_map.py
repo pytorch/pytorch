@@ -6,7 +6,11 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.spmd_types as spmd
+
+
+if dist.is_spmd_types_available():
+    import spmd_types as spmd
+
 from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
@@ -434,7 +438,7 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt.device_mesh, mesh_2d)
 
 
-@unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+@unittest.skipUnless(dist.is_spmd_types_available(), "requires spmd_types")
 class TestLocalMapSpmdTypes(TestCase):
     """Single-process tests for local_map with spmd_types type checking."""
 
@@ -690,7 +694,7 @@ class TestLocalMapSpmdTypes(TestCase):
         )
 
 
-@unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+@unittest.skipUnless(dist.is_spmd_types_available(), "requires spmd_types")
 class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
     """Multi-GPU tests for local_map with spmd_types type checking."""
 
@@ -897,7 +901,7 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
         self.assertGreater(comm_mode.get_total_counts(), 0)
 
 
-@unittest.skipUnless(spmd.is_available(), "requires spmd_types")
+@unittest.skipUnless(dist.is_spmd_types_available(), "requires spmd_types")
 class TestLocalMapSpmdTypesMesh(TestCase):
     """Tests for local_map spmd_types with multi-dimensional meshes."""
 

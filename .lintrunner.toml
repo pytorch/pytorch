@@ -877,28 +877,6 @@ command = [
 ]
 
 [[linter]]
-code = 'DIRECT_SPMD_TYPES_IMPORT'
-include_patterns = [
-    'torch/**/*.py',
-]
-exclude_patterns = [
-    'torch/distributed/spmd_types/__init__.py',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=(^|\\s)(import spmd_types|from spmd_types)',
-    '--linter-name=DIRECT_SPMD_TYPES_IMPORT',
-    '--error-name=direct import of spmd_types',
-    """--error-description=\
-        Do not import spmd_types directly; use 'import torch.distributed.spmd_types as spmd' \
-        and guard attribute access with spmd.is_available().
-    """,
-    '--',
-    '@{{PATHSFILE}}'
-]
-
-[[linter]]
 code = 'DEPLOY_DETECTION'
 include_patterns = [
     '**/*.py',
