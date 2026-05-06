@@ -930,6 +930,55 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mm_nodes[1].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[2].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[3].meta["custom"]["inside_local_map"], 0)
+        for node in joint_gm_inlined.graph.nodes:
+            if node.meta.get("partitioner_tag") == "is_backward":
+                self.assertTrue(node.meta.get("autograd_backward", False))
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_no_autograd_backward_metadata_on_inlined_forward_nodes(self):
+        placements = (Replicate(), Replicate(), Replicate(), Replicate())
+
+        @local_map(
+            out_placements=(placements,),
+            in_placements=(placements, placements),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def fn(x, w):
+            y = x @ w
+            y = y.view(2, 4, 16).permute(1, 0, 2).permute(1, 0, 2).reshape(8, 16)
+            return y + x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(16, 16))
+
+            def forward(self, x):
+                return fn(x, self.w).sum()
+
+        def inputs_fn():
+            return (torch.randn(8, 16),)
+
+        with fx_traceback.preserve_node_meta():
+            joint_gm_deferred = ap_style_initial_capture(MyModule(), inputs_fn)
+            joint_inputs = [
+                n.meta["val"]
+                for n in joint_gm_deferred.graph.nodes
+                if n.op == "placeholder"
+            ]
+            joint_gm_inlined = make_fx(torch.fx.Interpreter(joint_gm_deferred).run)(
+                *joint_inputs
+            )
+
+        bad_nodes = [
+            n
+            for n in joint_gm_inlined.graph.nodes
+            if n.meta.get("partitioner_tag") == "is_forward"
+            and n.meta.get("autograd_backward", False)
+        ]
+        self.assertEqual(bad_nodes, [])
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_make_contiguous_strides_for(self):

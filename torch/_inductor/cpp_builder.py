@@ -70,7 +70,9 @@ _IS_WINDOWS = sys.platform == "win32"
 
 MINGW_GXX = "x86_64-w64-mingw32-g++"
 
-SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (
+    (locale.getpreferredencoding(), "replace") if _IS_WINDOWS else ()
+)
 
 log = logging.getLogger(__name__)
 
@@ -1357,8 +1359,8 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implemented more math libraries than clang, for performance proposal.
-    We need preload them like openmp library.
+    Intel Compiler implemented more math libraries than clang, for performance purposes.
+    We need to preload them like openmp library.
     """
     preload_list = [
         "libiomp5md.dll",  # openmp
