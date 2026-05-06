@@ -10,6 +10,8 @@ from collections import defaultdict
 
 import torch
 import torch.fx as fx
+from torch.utils._ordered_set import OrderedSet
+
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +61,10 @@ def _are_independent(nodes: list[fx.Node]) -> list[fx.Node]:
         return nodes
 
     selected: list[fx.Node] = []
-    selected_forward: set[fx.Node] = set()
-    selected_backward: set[fx.Node] = set()
+    selected_forward: OrderedSet[fx.Node] = OrderedSet()
+    selected_backward: OrderedSet[fx.Node] = OrderedSet()
 
-    def _flood(start: fx.Node, visited: set[fx.Node], forward: bool) -> None:
+    def _flood(start: fx.Node, visited: OrderedSet[fx.Node], forward: bool) -> None:
         stack = [start]
         while stack:
             cur = stack.pop()
@@ -74,7 +76,7 @@ def _are_independent(nodes: list[fx.Node]) -> list[fx.Node]:
     for node in nodes:
         if node in selected_forward or node in selected_backward:
             continue
-        all_inputs = set(node.all_input_nodes)
+        all_inputs = OrderedSet(node.all_input_nodes)
         if all_inputs & selected_forward or all_inputs & selected_backward:
             continue
 
@@ -103,9 +105,7 @@ def _fuse_mm_group(graph: fx.Graph, nodes: list[fx.Node]) -> None:
 
         for i, node in enumerate(nodes):
             with graph.inserting_after(result):
-                getitem = graph.call_function(
-                    operator.getitem, args=(result, i)
-                )
+                getitem = graph.call_function(operator.getitem, args=(result, i))
                 getitem.meta.update(node.meta)
             node.replace_all_uses_with(getitem)
 
