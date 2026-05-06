@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -47,6 +48,8 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
+    CachingAutotunerPlugin,
+    DEFER,
     template,
     triton_config,
 )
@@ -302,6 +305,173 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+
+_PLUGIN_FACTORY_PATH = (
+    "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
+)
+
+
+# Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
+# attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
+# used by these tests. CUDA paths are unaffected.
+@skipIfRocm
+class TestCachingAutotunerPlugin(TestCase):
+    device_type = GPU_TYPE
+
+    @staticmethod
+    def _make_kernel_inputs():
+        in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+        return (in_ptr, out_ptr, 16)
+
+    def _make_autotuner(self, plugins, configs=None):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        if configs is not None:
+            args["configs"] = configs
+        with patch(_PLUGIN_FACTORY_PATH, return_value=list(plugins)):
+            return CachingAutotuner(**args)
+
+    def test_pre_dispatch_runs_before_precompile_and_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with (
+            patch.object(autotuner, "precompile") as mock_precompile,
+            patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
+        ):
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_precompile.assert_not_called()
+        mock_autotune.assert_not_called()
+
+    def test_pre_autotune_runs_before_default_autotune(self):
+        sentinel = object()
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_autotune(self, autotuner, *args, stream, **kwargs):
+                return sentinel
+
+        autotuner = self._make_autotuner([_Plugin()])
+        with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
+            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        mock_autotune.assert_not_called()
+
+    def test_hooks_fire_in_registration_order(self):
+        sentinel = object()
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def __init__(self, name, return_value=DEFER):
+                self.name = name
+                self.return_value = return_value
+
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append(self.name)
+                return self.return_value
+
+        autotuner = self._make_autotuner(
+            [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
+        )
+        result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(seen, ["a", "b", "c"])
+
+    def test_defer_falls_through_to_default(self):
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_dispatch(self, autotuner, *args, stream, **kwargs):
+                seen.append("pre_dispatch")
+                return DEFER
+
+        # Single config so precompile produces one launcher and the kernel
+        # runs to completion without the autotune branch firing.
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+
+        autotuner.run(*self._make_kernel_inputs(), stream=0)
+
+        self.assertEqual(seen, ["pre_dispatch"])
+        self.assertEqual(len(autotuner.launchers), 1)
+
+    def test_pre_compile_defer_runs_default_precompile_flow(self):
+        """``DEFER`` from pre_compile lets the standard precompile flow
+        run (``_precompile_worker`` → ``_make_launchers`` →
+        ``_dynamic_scale_rblock``)."""
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_compile(self, autotuner):
+                return DEFER
+
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        with (
+            patch.object(autotuner, "_precompile_worker") as mock_pcw,
+            patch.object(autotuner, "_make_launchers") as mock_mkl,
+            patch.object(autotuner, "_dynamic_scale_rblock") as mock_dsr,
+        ):
+            autotuner.precompile()
+        mock_pcw.assert_called_once()
+        mock_mkl.assert_called_once()
+        mock_dsr.assert_called_once()
+
+    def test_pre_compile_non_defer_short_circuits_precompile(self):
+        """A non-``DEFER`` return from pre_compile means the plugin
+        owns the entire compile pipeline; ``precompile`` returns early
+        without running ``_precompile_worker`` / ``_make_launchers`` /
+        ``_dynamic_scale_rblock``."""
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_compile(self, autotuner):
+                return object()  # any non-DEFER value
+
+        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        with (
+            patch.object(autotuner, "_precompile_worker") as mock_pcw,
+            patch.object(autotuner, "_make_launchers") as mock_mkl,
+            patch.object(autotuner, "_dynamic_scale_rblock") as mock_dsr,
+        ):
+            autotuner.precompile()
+        mock_pcw.assert_not_called()
+        mock_mkl.assert_not_called()
+        mock_dsr.assert_not_called()
+
+    def test_getstate_clears_plugins_setstate_invokes_factory(self):
+        """``__getstate__`` drops the live plugin instances so they
+        don't pickle into workers; ``__setstate__`` re-runs
+        ``get_caching_autotuner_plugins`` so the revived autotuner
+        gets a fresh, factory-driven list (whose contents reflect the
+        unpickling process's config flags, not the pickling process's)."""
+
+        class _PluginA(CachingAutotunerPlugin):
+            pass
+
+        class _PluginB(CachingAutotunerPlugin):
+            pass
+
+        autotuner = self._make_autotuner([_PluginA(), _PluginB()])
+        self.assertEqual(len(autotuner._plugins), 2)
+
+        # State excludes the live plugin instances.
+        state = autotuner.__getstate__()
+        self.assertEqual(state["_plugins"], [])
+
+        # __setstate__ re-invokes the factory; with no patch active the
+        # default factory returns an empty list.
+        revived = CachingAutotuner.__new__(CachingAutotuner)
+        revived.__setstate__(state)
+        self.assertEqual(revived._plugins, [])
 
 
 class TestArgumentCloneAndRestore(TestCase):
@@ -757,6 +927,202 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+class TestDynamicScaleRblockCacheInteraction(TestCase):
+    """Tests for _dynamic_scale_rblock + autotune cache interaction.
+
+    _dynamic_scale_rblock can add configs that aren't in the original
+    config list. When such a config wins autotuning and gets cached,
+    the warm-start path must still be able to load it from the cache
+    and skip re-autotuning.
+    """
+
+    @staticmethod
+    def _make_compile_result(cfg):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+
+        result = MagicMock(spec=StaticTritonCompileResult)
+        result.config = cfg
+        return result
+
+    @staticmethod
+    def _make_autotuner_with_results(configs, compile_results):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["configs"] = configs
+        autotuner = CachingAutotuner(**args)
+        autotuner.compile_results = compile_results
+        return autotuner
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_dynamic_scale_rblock_skipped_on_cache_hit(self):
+        """
+        _dynamic_scale_rblock must be a no-op when the autotune cache
+        already determined the best config (cache_state == 'hit').
+        """
+        cfg = triton_config({"x": 16}, 64)
+        result = self._make_compile_result(cfg)
+        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner.autotune_cache_info = {"autotune_cache_state": "hit"}
+
+        n_before = len(autotuner.compile_results)
+        autotuner._dynamic_scale_rblock()
+        n_after = len(autotuner.compile_results)
+
+        self.assertEqual(n_before, n_after)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_dynamic_scale_rblock_runs_on_cache_miss(self):
+        """
+        _dynamic_scale_rblock should not be skipped when the autotune
+        cache missed — this is a cold-start scenario.
+        """
+        cfg = triton_config({"x": 16}, 64)
+        result = self._make_compile_result(cfg)
+        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner.autotune_cache_info = {"autotune_cache_state": "miss"}
+
+        autotuner._dynamic_scale_rblock()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_dynamic_scale_rblock_runs_when_cache_info_none(self):
+        """
+        _dynamic_scale_rblock should not be skipped when
+        autotune_cache_info is None (e.g. loaded from old pickle).
+        """
+        cfg = triton_config({"x": 16}, 64)
+        result = self._make_compile_result(cfg)
+        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner.autotune_cache_info = None
+
+        autotuner._dynamic_scale_rblock()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_load_cached_autotuning_reconstructs_unknown_config(self):
+        """
+        When the cached best config is not in the original configs list
+        (e.g. it was added by _dynamic_scale_rblock), _load_cached_autotuning
+        must reconstruct it from the cached data instead of returning None.
+        """
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        original_configs = [
+            triton_config({"x": 1}, 16, num_stages=1),
+            triton_config({"x": 8}, 4, num_stages=1),
+        ]
+        configs_hash = hash_configs(original_configs)
+
+        best_config_data = {
+            "XBLOCK": 1,
+            "R0_BLOCK": 1024,
+            "num_warps": 8,
+            "num_stages": 1,
+            "configs_hash": configs_hash,
+            "found_by_coordesc": False,
+            "time_taken_ms": 42,
+        }
+
+        result = _load_cached_autotuning(
+            best_config_data, configs_hash, original_configs, {}
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kwargs["XBLOCK"], 1)
+        self.assertEqual(result.kwargs["R0_BLOCK"], 1024)
+        self.assertEqual(result.num_warps, 8)
+        self.assertEqual(result.num_stages, 1)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_load_cached_autotuning_still_matches_known_config(self):
+        """
+        When the cached best config IS in the original configs list,
+        _load_cached_autotuning must return that same config object.
+        """
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        cfg_a = triton_config({"x": 1}, 16, num_stages=1)
+        cfg_b = triton_config({"x": 8}, 4, num_stages=1)
+        original_configs = [cfg_a, cfg_b]
+        configs_hash = hash_configs(original_configs)
+
+        best_config_data = {
+            **cfg_b.kwargs,
+            "num_warps": cfg_b.num_warps,
+            "num_stages": cfg_b.num_stages,
+            "configs_hash": configs_hash,
+            "found_by_coordesc": False,
+            "time_taken_ms": 42,
+        }
+
+        result = _load_cached_autotuning(
+            best_config_data, configs_hash, original_configs, {}
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIs(result, cfg_b)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_load_cached_autotuning_rejects_hash_mismatch(self):
+        """
+        When configs_hash doesn't match, _load_cached_autotuning must
+        return None regardless of whether the config matches.
+        """
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        original_configs = [triton_config({"x": 1}, 16, num_stages=1)]
+
+        best_config_data = {
+            "XBLOCK": 1,
+            "num_warps": 1,
+            "num_stages": 1,
+            "configs_hash": "wrong_hash",
+            "found_by_coordesc": False,
+        }
+
+        result = _load_cached_autotuning(
+            best_config_data, "correct_hash", original_configs, {}
+        )
+
+        self.assertIsNone(result)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_autotune_cache_compiles_dynamic_config(self):
+        """
+        When the cached best config was added by _dynamic_scale_rblock
+        and isn't in compile_results, recheck_autotune_cache must compile
+        it (not silently drop it, leaving all original configs active).
+        """
+        from triton import Config
+
+        cfg_a = Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16, num_stages=1)
+        cfg_b = Config({"XBLOCK": 8, "R0_BLOCK": 512}, num_warps=4, num_stages=1)
+        result_a = self._make_compile_result(cfg_a)
+        result_b = self._make_compile_result(cfg_b)
+
+        autotuner = self._make_autotuner_with_results(
+            [cfg_a, cfg_b], [result_a, result_b]
+        )
+
+        dynamic_cfg = Config(
+            {"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16, num_stages=1
+        )
+
+        mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
+        autotuner._precompile_config = mock_precompile
+
+        reload_fn = MagicMock()
+        reload_fn.return_value.fn = MagicMock()
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        mock_precompile.assert_called_once_with(dynamic_cfg)
 
 
 if __name__ == "__main__":
