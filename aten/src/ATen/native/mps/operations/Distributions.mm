@@ -177,41 +177,60 @@ Tensor& random_mps_impl(Tensor& self,
 
 } // namespace mps
 
-static Tensor& distribution_kernel_mps_impl(Tensor& self,
-                                            double param1,
-                                            double param2,
-                                            const std::string& kernel_name,
-                                            int64_t randoms_per_thread,
-                                            std::optional<Generator> gen,
-                                            int64_t elements_per_thread = 4);
-
 // `randoms_per_thread` is the number of Philox-4x32-10 calls each thread
 // makes; `elements_per_thread` is how many output elements that thread
 // writes. The host advances the generator offset by exactly the number of
 // philox indices the kernel consumes (`randoms_per_thread * threads`),
 // rather than by `randoms_per_element * numel` as before, which could
 // over-advance by 4x for kernels that pack 4 elements per thread.
-static Tensor& distribution_kernel_mps_impl(Tensor& self,
-                                            double param1,
-                                            double param2,
-                                            const std::string& kernel_name,
-                                            int64_t randoms_per_thread,
-                                            std::optional<Generator> gen,
-                                            int64_t elements_per_thread) {
-  if (self.numel() == 0) {
-    return self;
+//
+// Decomposes tensors that exceed 32-bit indexing into sub-iters first; each
+// sub-dispatch pulls a fresh philox offset chunk so the chunks sample
+// disjoint streams of the same seed. The kernel itself takes `numel` as
+// `uint32_t`, so the splitting is what keeps it correct for >2^31-element
+// tensors instead of silently wrapping.
+static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
+                                         double param1,
+                                         double param2,
+                                         const std::string& kernel_name,
+                                         int64_t randoms_per_thread,
+                                         std::optional<Generator> gen,
+                                         int64_t elements_per_thread = 4) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      distribution_kernel_mps_impl(sub_iter, param1, param2, kernel_name, randoms_per_thread, gen, elements_per_thread);
+    }
+    return;
   }
 
   using namespace mps;
 
+  // Non-contiguous outputs can't go through the linear-index kernel: write
+  // into a contiguous temp first, then scatter back through the iter.
+  if (!iter.is_contiguous()) {
+    Tensor tmp = at::empty(iter.tensor(0).sizes(), iter.tensor(0).options());
+    auto tmp_iter = at::TensorIterator::borrowing_nullary_op(tmp);
+    distribution_kernel_mps_impl(tmp_iter, param1, param2, kernel_name, randoms_per_thread, gen, elements_per_thread);
+    iter.tensor(0).copy_(tmp);
+    return;
+  }
+
+  // After `with_32bit_indexing` decomposition `iter.numel()` fits in uint32,
+  // but `checked_convert` keeps us honest if anything ever reaches the kernel
+  // with a count that would silently truncate.
+  const uint32_t numel = c10::checked_convert<uint32_t>(iter.numel(), "uint32_t");
+  const int64_t threads = (numel + elements_per_thread - 1) / elements_per_thread;
+
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
   auto stream = getCurrentMPSStream();
-  const auto needs_copy = !self.is_contiguous();
-  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
-  const int64_t threads = (output.numel() + elements_per_thread - 1) / elements_per_thread;
 
   @autoreleasepool {
-    auto pso = lib.getPipelineStateForFunc(kernel_name + "_" + scalarToMetalTypeString(output));
+    // Sub-iters share the original tensor's storage but have their own
+    // `data_ptr` offset; `bind_iter_tensors` computes that for buffer 0.
+    auto pso = lib.getPipelineStateForFunc(kernel_name + "_" + scalarToMetalTypeString(iter.tensor(0)));
 
     int64_t seed;
     int64_t base_offset;
@@ -227,36 +246,17 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
-        auto numel = static_cast<uint32_t>(output.numel());
-        mtl_setArgs(computeEncoder,
-                    output,
-                    std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
-                    std::array<long, 2>{seed, base_offset});
+        bind_iter_tensors(computeEncoder, iter, /*ntensors=*/1);
+        mtl_setBytes(computeEncoder, std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)}, 1);
+        mtl_setBytes(computeEncoder, std::array<long, 2>{seed, base_offset}, 2);
         mtl_setBytes(computeEncoder, numel, 3);
         mtl_dispatch1DJob(computeEncoder, pso, threads);
       }
     });
   }
-
-  if (needs_copy) {
-    self.copy_(output);
-  }
-
-  return self;
 }
 
 // Helpers extract the (writable) tensor backing a TensorIteratorBase /
-// TensorBase reference. The shared CPU/CUDA `*_impl_` templates take care of
-// argument validation (bounds, complex via `view_as_real`, broadcasting tensor
-// mean/std into the output) before dispatching here.
-static Tensor& output_tensor_from_iter(TensorIteratorBase& iter) {
-  return const_cast<Tensor&>(static_cast<const Tensor&>(iter.tensor(0)));
-}
-
-static Tensor& output_tensor_from_base(const TensorBase& self) {
-  return const_cast<Tensor&>(static_cast<const Tensor&>(self));
-}
-
 // Tensor-p Bernoulli: dispatches the Metal `bernoulli_tensor` kernel with a
 // flat float32 probability buffer matching `self.numel()`.
 static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
@@ -272,7 +272,9 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
   if (p_.dim() == 0) {
     double p_val = p_.item<double>();
     TORCH_CHECK(0.0 <= p_val && p_val <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p_val);
-    return distribution_kernel_mps_impl(self, p_val, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+    auto iter = at::TensorIterator::borrowing_nullary_op(self);
+    distribution_kernel_mps_impl(iter, p_val, 0.0, "bernoulli_scalar", 1, gen);
+    return self;
   }
 
   // Both `to` and `contiguous` short-circuit when no work is needed.
@@ -318,8 +320,8 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
 // still the inplace target (TensorIterator uses the same idiom).
 static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
   // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
-  Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
-  distribution_kernel_mps_impl(self_t, p, 0.0, "bernoulli_scalar", 1, gen, /*elements_per_thread=*/4);
+  auto iter = at::TensorIterator::borrowing_nullary_op(self);
+  distribution_kernel_mps_impl(iter, p, 0.0, "bernoulli_scalar", 1, gen);
 }
 
 static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
@@ -332,35 +334,30 @@ REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
 REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
-  Tensor& self = output_tensor_from_iter(iter);
-  distribution_kernel_mps_impl(self, from, to, "uniform_dist", 1, gen);
+  distribution_kernel_mps_impl(iter, from, to, "uniform_dist", 1, gen);
 }
 
 static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {
-  Tensor& self_t = output_tensor_from_base(self);
-  distribution_kernel_mps_impl(self_t, mean, std, "normal", 1, gen);
+  auto iter = at::TensorIterator::borrowing_nullary_op(self);
+  distribution_kernel_mps_impl(iter, mean, std, "normal", 1, gen);
 }
 
 static void cauchy_kernel_mps(TensorIteratorBase& iter, double median, double sigma, std::optional<Generator> gen) {
-  Tensor& self = output_tensor_from_iter(iter);
-  distribution_kernel_mps_impl(self, median, sigma, "cauchy", 1, gen);
+  distribution_kernel_mps_impl(iter, median, sigma, "cauchy", 1, gen);
 }
 
 static void exponential_kernel_mps(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
-  Tensor& self = output_tensor_from_iter(iter);
-  distribution_kernel_mps_impl(self, lambda, 0.0, "exponential", 1, gen, /*elements_per_thread=*/4);
+  distribution_kernel_mps_impl(iter, lambda, 0.0, "exponential", 1, gen);
 }
 
 static void log_normal_kernel_mps(TensorIteratorBase& iter, double mean, double std, std::optional<Generator> gen) {
-  Tensor& self = output_tensor_from_iter(iter);
-  distribution_kernel_mps_impl(self, mean, std, "log_normal", 1, gen);
+  distribution_kernel_mps_impl(iter, mean, std, "log_normal", 1, gen);
 }
 
 static void geometric_kernel_mps(TensorIteratorBase& iter, double p, std::optional<Generator> gen) {
   // `geometric_impl_` already enforces 0 < p < 1; we pass `log1p(-p)` so the
   // kernel can apply the inverse-CDF (`floor(log(u) / log1p(-p))`) directly.
-  Tensor& self = output_tensor_from_iter(iter);
-  distribution_kernel_mps_impl(self, std::log1p(-p), 0.0, "geometric", 1, gen);
+  distribution_kernel_mps_impl(iter, std::log1p(-p), 0.0, "geometric", 1, gen);
 }
 
 // Implements both `random_stub` (full dtype range) and the `from`-only branches
@@ -370,10 +367,9 @@ static void geometric_kernel_mps(TensorIteratorBase& iter, double p, std::option
 // 24-bit float mantissa for ranges that exceed it (this matches the previous
 // MPS behavior).
 static void random_kernel_mps_impl(TensorIteratorBase& iter, int64_t from, int64_t to, std::optional<Generator> gen) {
-  Tensor& self = output_tensor_from_iter(iter);
   const double low = static_cast<double>(from);
   const double range = static_cast<double>(to - from);
-  distribution_kernel_mps_impl(self, low, range, "random_int", 1, gen);
+  distribution_kernel_mps_impl(iter, low, range, "random_int", 1, gen);
 }
 
 static void random_from_to_kernel_mps(TensorIteratorBase& iter,

@@ -8850,13 +8850,38 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @serialTest()
-    def test_rand_2b_raises(self):
+    def test_rand_2b(self):
+        # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
+        # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
+        # `numel = 2**31` already exceeds the iterator's signed-32-bit
+        # threshold (INT32_MAX = 2**31 - 1) so the splitting path is taken
+        # even though the kernel's `uint32_t` numel could still fit. Above
+        # 2**32 the kernel-level cast would silently truncate; the
+        # `distribution_kernel_mps_impl` check guards that case.
         int32_max = torch.iinfo(torch.int32).max
-        with self.assertRaises(RuntimeError):
-            # This used to crash with NDArray dimension length > INT_MAX
-            x = torch.randint(0, 10, (int32_max + 1,), dtype=torch.int8, device='mps')
-        x = torch.randint(0, 10, (int32_max,), dtype=torch.int8, device='mps')
-        self.assertEqual(x.numel(), int32_max)
+        n = int32_max + 1  # 2**31
+
+        torch.mps.manual_seed(42)
+        g = torch.mps._get_default_mps_generator()
+        before = g.get_offset()
+        x = torch.randint(0, 100, (n,), dtype=torch.int8, device='mps')
+        after = g.get_offset()
+        self.assertEqual(x.numel(), n)
+        # Each sub-iter dispatch consumes `ceil(sub_numel / 4)` philox slots,
+        # so the total advance is at least `ceil(n / 4)`. If the second
+        # sub-iter never ran, this would be roughly half.
+        self.assertGreaterEqual(after - before, (n + 3) // 4)
+
+        # Re-seeding and drawing 1024 elements walks the same philox prefix
+        # the first sub-iter used, so it must match `x[:1024]` byte-for-byte.
+        torch.mps.manual_seed(42)
+        head_ref = torch.randint(0, 100, (1024,), dtype=torch.int8, device='mps')
+        self.assertTrue(torch.equal(x[:1024], head_ref))
+
+        # The tail must look like a uniform draw, not `empty_like` garbage:
+        # if the second sub-iter never ran, the tail would be all zeros.
+        tail = x[-1024:]
+        self.assertGreater(tail.unique().numel(), 50)
         del x
 
 
