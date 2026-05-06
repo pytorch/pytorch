@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -105,6 +106,28 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   size_t dst_tensor_nbytes = dst.nbytes();
+
+  // Fast path: on Apple Silicon (unified memory), MPS tensors use MTLStorageModeShared --
+  // the CPU can read the buffer directly after syncing, with no blit copy needed.
+  if (!non_blocking && src_.dtype() == dst_.dtype()) {
+    auto [cpu_ptr, _unused] = getIMPSAllocator()->getSharedBufferPtr(src.storage().data());
+    if (cpu_ptr) {
+      // Serialize on the stream queue so the COMMIT_AND_WAIT + direct CPU read do
+      // not race a concurrent encoder on the same command buffer from another
+      // thread. Without this, multi-threaded copy_from_mps_ aborts with
+      // "setCurrentCommandEncoder after committed" (mirrors the CPU->MPS fast path).
+      const char* src_byte_ptr = static_cast<const char*>(cpu_ptr) + storage_byte_offset;
+      char* dst_byte_ptr = static_cast<char*>(dst.data_ptr());
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        std::memcpy(dst_byte_ptr, src_byte_ptr, dst_tensor_nbytes);
+      });
+      if (!dst.is_same(dst_)) {
+        dst_.copy_(dst, non_blocking);
+      }
+      return dst_;
+    }
+  }
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
