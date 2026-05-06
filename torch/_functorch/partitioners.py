@@ -1054,7 +1054,7 @@ def _extract_fwd_bwd_modules(
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
-        # we need to peak one node further to see if this wait_tensor is dead as well.
+        # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
             n.target is torch.ops._c10d_functional.wait_tensor.default
             and len(n.users) == 0
@@ -1209,6 +1209,10 @@ def _extract_fwd_bwd_modules(
             "backward",
             ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
         )
+
+    for node in bwd_graph.nodes:
+        if node.op in ("call_function", "get_attr"):
+            node.meta["autograd_backward"] = True
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
@@ -1480,7 +1484,7 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, (list, tuple)):
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for _, n in val.items())
+            return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
@@ -2030,7 +2034,7 @@ def cleanup_recompute_tags(
                 must_recompute(user) for user in node.users
             ):
                 # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
-                # This is to work around circular dependencies in Traceable FSDP2+AC.
+                # This is to work around circular dependencies with backward hooks + AC.
                 # Example:
                 # ```
                 # out = fully_shard(utils.checkpoint(module))(x)
@@ -3141,7 +3145,9 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
+        aggressive_recomputation_saved_values
+    )
     if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 
