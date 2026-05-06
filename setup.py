@@ -1134,7 +1134,6 @@ class clean(Command):
         _clean()
 
 
-
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
     try:
         return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
