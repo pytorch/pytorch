@@ -440,7 +440,7 @@ class MetaTensorDescriber:
             stride=stride,
             # pyrefly: ignore [bad-argument-type]
             storage_offset=storage_offset,
-            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
+            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", ())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
@@ -868,7 +868,7 @@ def _grad_context_compatible(
 # one of these, and then call it repeatedly on all the tensors you want to
 # convert.  It's important to use the same object for tensors you want to
 # share storage because this is how we correlate shared storages to the same
-# meta storages. This class will hold weak references to cached tenosrs
+# meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
     def __init__(self, *, copy_data: bool = False) -> None:

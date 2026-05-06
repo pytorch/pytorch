@@ -162,6 +162,48 @@ else:
         pass
 
 
+def _build_estimated_effective_users(gm: GraphModule) -> dict[Node, tuple[int, bool]]:
+    """Precompute effective users for all nodes in one linear scan.
+
+    Adjacent fusible nodes get the same span ID.  Users sharing a span
+    are counted once because they will almost certainly fuse together.
+    """
+    from torch._inductor.fx_passes.fusion_regions import is_fusible_node
+
+    span_of: dict[Node, int] = {}
+    span_id = -1
+    prev_fusible = False
+    for node in gm.graph.nodes:
+        if is_fusible_node(node):
+            if not prev_fusible:
+                span_id += 1
+            span_of[node] = span_id
+            prev_fusible = True
+        else:
+            prev_fusible = False
+
+    # map from node to (num_effective_users, has_non_fusible_user)
+    counts: dict[Node, tuple[int, bool]] = {}
+    for n in gm.graph.nodes:
+        if len(n.users) <= 1:
+            counts[n] = (len(n.users), False)
+            continue
+        seen_spans: OrderedSet[int] = OrderedSet()
+        effective = 0
+        has_non_fusible_user = False
+        for user in n.users:
+            sid = span_of.get(user)
+            if sid is None:
+                effective += 1
+                has_non_fusible_user = True
+            elif sid not in seen_spans:
+                seen_spans.add(sid)
+                effective += 1
+        counts[n] = (effective, has_non_fusible_user)
+
+    return counts
+
+
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> torch.dtype | None:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
@@ -329,7 +371,15 @@ def mark_nodes_dislike_padding(
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
         if not config.pad_outputs and cur in extended_user_visible_nodes:
-            cur.meta["dislike_padding"] = True
+            # Reductions (ops_like_padding) produce new output buffers with
+            # fresh strides, so their output stride constraint is already
+            # enforced by allow_padding=False in as_exact_strides. Setting
+            # dislike_padding here would suppress input padding during
+            # freeze, causing a stride mismatch when an earlier lowering
+            # step (e.g. is_contiguous_storage_and_layout) already mutated
+            # the input layout to padded strides.
+            if op not in ops_like_padding:
+                cur.meta["dislike_padding"] = True
 
 
 def is_mkldnn_conv(node: Node) -> bool:
@@ -396,6 +446,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.const_module = const_module
         self.inputs_to_check = inputs_to_check
         self._defers_input_alignment = False
+        self._estimated_effective_users: dict[Node, tuple[int, bool]] | None = None
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -427,6 +478,10 @@ class GraphLowering(torch.fx.Interpreter):
             OrderedSet
         )
         self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
+        # Maps control_deps FX node to operation names created when lowering it,
+        # for void ops (e.g. record_event) that return None and therefore cannot
+        # be referenced by name in subsequent control_deps ordering constraints.
+        self._void_ctrl_dep_op_names: dict[torch.fx.Node, list[str]] = {}
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -569,6 +624,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Cache for dep size hints to avoid expensive recomputation
         self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
+
+    def _count_effective_users(self, n: Node) -> tuple[int, bool]:
+        if self._estimated_effective_users is None:
+            self._estimated_effective_users = _build_estimated_effective_users(
+                self.orig_gm
+            )
+        return self._estimated_effective_users.get(n, (0, False))
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -918,8 +980,8 @@ class GraphLowering(torch.fx.Interpreter):
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
-           We need convert it to channels last layout which results in the second copy.
-        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
+           We need to convert it to channels last layout which results in the second copy.
+        With rule 2, we make sure all the tensors in the chain use channels last layout. So both copies
         can be saved.
         """
         last_conv = None
@@ -1906,7 +1968,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # 2: as_strided ops, we need to make sure its input has same size/stride with
             # eager model to align with eager behavior.
             as_strided_ops = [
                 torch.ops.aten.as_strided.default,
@@ -2074,13 +2136,16 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     _data = _data.data
 
+                _num_effective_users, has_non_fusible_users = (
+                    self._count_effective_users(n)
+                )
                 if isinstance(_data, StorageBox) and _data.should_realize_on_reuse(
-                    len(n.users)
+                    _num_effective_users, has_non_fusible_users
                 ):
                     result = maybe_apply_channels_last_stride_order(result, n)
 
                 # TODO(jansel): introduce a store vs inline choice
-                result.mark_reuse(len(n.users))
+                result.mark_reuse(_num_effective_users, has_non_fusible_users)
 
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
