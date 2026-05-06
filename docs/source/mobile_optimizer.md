@@ -22,3 +22,7 @@ and [Vulkan](https://pytorch.org/executorch/stable/native-delegates-executorch-v
 ```{eval-rst}
 .. autofunction:: optimize_for_mobile
 ```
+
+```{eval-rst}
+.. autofunction:: generate_mobile_module_lints
+```
