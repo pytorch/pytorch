@@ -1550,6 +1550,25 @@ def define_buck_targets(
         ],
     )
 
+    # Standalone target for the C++ API enum tag definitions
+    # (torch/csrc/api/src/enum.cpp). Lets consumers link only the enum
+    # globals without pulling in the full torch C++ API.
+    # @lint-ignore BUCKLINT link_whole
+    pt_xplat_cxx_library(
+        name = "torch_enum",
+        srcs = ["torch/csrc/api/src/enum.cpp"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        link_whole = True,
+        linker_flags = get_no_as_needed_linker_flag(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":aten_cpu",
+            ":torch_headers",
+            C10,
+        ],
+    )
+
     pt_xplat_cxx_library(
         name = "torch_core",
         srcs = core_sources_full_mobile_no_backend_interface_xplat,
