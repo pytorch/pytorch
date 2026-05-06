@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 
+# Because this file is run as a script, we need to add the repo root to the
+# path to be able to import tools.strtobool.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from tools.strtobool import strtobool
