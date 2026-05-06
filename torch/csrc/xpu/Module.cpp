@@ -349,6 +349,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
+#if SYCL_COMPILER_VERSION >= 20260000
+      .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
+#endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
 #if SYCL_COMPILER_VERSION >= 20250000
@@ -382,7 +385,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
-                   << ", has_atomic64=" << prop.has_atomic64 << ')';
+                   << ", has_atomic64=" << prop.has_atomic64
+#if SYCL_COMPILER_VERSION >= 20260000
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
+#endif
+                   << ")";
             return stream.str();
           });
 }
