@@ -187,18 +187,14 @@
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.profiler
-```
 
-```{eval-rst}
-.. autofunction:: profile
-```
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-```{eval-rst}
-.. autofunction:: start
-```
-
-```{eval-rst}
-.. autofunction:: stop
+    profile
+    start
+    stop
 ```
 
 ```{eval-rst}
