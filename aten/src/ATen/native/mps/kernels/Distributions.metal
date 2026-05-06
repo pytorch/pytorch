@@ -140,57 +140,62 @@ kernel void normal(
   }
 }
 
-// Random integer in [low, high). `params.x` carries `low`, `params.y` carries
-// the range `(high - low)`. Ranges that exceed 2^24 lose precision through the
-// uniform-float conversion; this is the same simplification the previous
-// `c10::metal::randint64` helper used.
+// Random integer in `[base, base + range)`. `params.x` is `base`, `params.y` is
+// the range. `range == 0` is the sentinel for "full T-bit-width range" which
+// we use both for the int64 `[int64_min, int64_max]` case (range = 2^64
+// doesn't fit in any signed type) and for `random_(self)` on any integer dtype
+// when the caller wants the full uniform output domain.
+//
+// Per Salmon, Moraes, Dror, Shaw, "Parallel Random Numbers: As Easy as 1, 2, 3"
+// (Random123, SC '11), the 128 bits a single Philox-4x32-10 round emits can be
+// consumed as 4 x uint32, 2 x uint64, 8 x uint16, or 16 x uint8 - the per-bit
+// uniformity is preserved at every projection (BigCrush + Diehard pass at all
+// four widths). We follow that recommendation and pack `16 / sizeof(T)`
+// outputs per thread:
+//  - `T = int64 / uint64` (8 B): 2 outputs per round, two `uint32`s combined.
+//  - `T = int32 / uint32 / float` (4 B): 4 outputs, one `uint32` each.
+//  - `T = int16 / half / bfloat` (2 B): 8 outputs, two `uint16` halves of each
+//    `uint32`.
+//  - `T = int8 / uint8 / bool` (1 B): 16 outputs, four byte slices of each
+//    `uint32`.
 template <typename T>
 kernel void random_int(
-    device T* output [[buffer(0)]],
-    constant float2& params [[buffer(1)]],
-    constant long2& seed_base_offset [[buffer(2)]],
-    constant uint& numel [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  uint base = tid * 4;
-  uint4 raw =
-      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  float low = params.x;
-  float range = params.y;
-  uint count = min(4u, numel - base);
-  for (uint i = 0; i < count; ++i) {
-    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(static_cast<long>(low + range * u));
-  }
-}
-
-// Random integer with full int64 precision: combines two uint32 Philox words
-// into one uint64 per output. `params.x` is the additive base; `params.y` is
-// the range (`high - low`) interpreted as `uint64_t`, where `0` is the
-// sentinel for the full `2^64` range that doesn't fit in any signed type.
-// One Philox round (4 uint32) gives 2 int64 outputs per thread.
-template <typename T>
-kernel void random_int_full(
     device T* output [[buffer(0)]],
     constant long2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  uint base = tid * 2;
+  constexpr uint kBytes = sizeof(T);
+  constexpr uint kElts = 16u / kBytes;
+
+  uint base_idx = tid * kElts;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
   long add = params.x;
-  ulong range = static_cast<ulong>(params.y);
-  uint count = min(2u, numel - base);
+  long range = params.y;
+  uint count = min(kElts, numel - base_idx);
+
   for (uint i = 0; i < count; ++i) {
-    ulong v = (static_cast<ulong>(raw[2 * i]) << 32) |
-        static_cast<ulong>(raw[2 * i + 1]);
-    // `range == 0` is the sentinel for the full 2^64 range: emit raw bits and
-    // shift by `add` (modular addition keeps the distribution uniform). Other
-    // ranges go through `% range` which is unbiased enough for any range that
-    // fits in uint64.
-    long out =
-        (range == 0) ? static_cast<long>(v) : static_cast<long>(v % range);
-    output[base + i] = static_cast<T>(out + add);
+    long out;
+    if IF_CONSTEXPR (kBytes == 8) {
+      ulong v = (static_cast<ulong>(raw[2 * i]) << 32) |
+          static_cast<ulong>(raw[2 * i + 1]);
+      out = (range == 0) ? static_cast<long>(v)
+                         : static_cast<long>(v % static_cast<ulong>(range));
+    } else if IF_CONSTEXPR (kBytes == 4) {
+      uint v = raw[i];
+      out = (range == 0) ? static_cast<long>(static_cast<int>(v))
+                         : static_cast<long>(v % static_cast<uint>(range));
+    } else if IF_CONSTEXPR (kBytes == 2) {
+      ushort v = static_cast<ushort>(raw[i / 2] >> ((i & 1u) * 16u));
+      out = (range == 0) ? static_cast<long>(static_cast<short>(v))
+                         : static_cast<long>(v % static_cast<ushort>(range));
+    } else { // kBytes == 1
+      uchar v = static_cast<uchar>(raw[i / 4] >> ((i & 3u) * 8u));
+      out = (range == 0) ? static_cast<long>(static_cast<char>(v))
+                         : static_cast<long>(v % static_cast<uchar>(range));
+    }
+    output[base_idx + i] = static_cast<T>(out + add);
   }
 }
 
@@ -223,28 +228,21 @@ REGISTER_OP(normal, float);
 REGISTER_OP(normal, half);
 REGISTER_OP(normal, bfloat);
 
-REGISTER_OP(random_int, int);
-REGISTER_OP(random_int, long);
-REGISTER_OP(random_int, short);
-REGISTER_OP(random_int, char);
-REGISTER_OP(random_int, uchar);
-REGISTER_OP(random_int, bool);
-REGISTER_OP(random_int, float);
-REGISTER_OP(random_int, half);
-REGISTER_OP(random_int, bfloat);
-
-// `random_int_full` takes `long2` params instead of `float2` (different buffer
-// layout) so it can't go through `REGISTER_OP`.
-#define REGISTER_INT_FULL(DTYPE)                                \
-  template [[host_name("random_int_full_" #DTYPE)]] kernel void \
-  random_int_full<DTYPE>(                                       \
+// `random_int` takes `long2` params (different buffer layout from the float-
+// param distributions above), so it can't go through `REGISTER_OP`.
+#define REGISTER_RANDOM_INT(DTYPE)                                            \
+  template [[host_name("random_int_" #DTYPE)]] kernel void random_int<DTYPE>( \
       device DTYPE*, constant long2&, constant long2&, constant uint&, uint)
 
-REGISTER_INT_FULL(int);
-REGISTER_INT_FULL(long);
-REGISTER_INT_FULL(short);
-REGISTER_INT_FULL(char);
-REGISTER_INT_FULL(uchar);
+REGISTER_RANDOM_INT(int);
+REGISTER_RANDOM_INT(long);
+REGISTER_RANDOM_INT(short);
+REGISTER_RANDOM_INT(char);
+REGISTER_RANDOM_INT(uchar);
+REGISTER_RANDOM_INT(bool);
+REGISTER_RANDOM_INT(float);
+REGISTER_RANDOM_INT(half);
+REGISTER_RANDOM_INT(bfloat);
 
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
