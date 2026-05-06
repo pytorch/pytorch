@@ -7,10 +7,6 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
 ```
 
 ```{eval-rst}
-.. autofunction:: reset_peak_memory_stats
-```
-
-```{eval-rst}
 .. currentmodule:: torch.mtia.memory
 ```
 
@@ -19,6 +15,7 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
     :toctree: generated
     :nosignatures:
 
+    reset_peak_memory_stats
     max_memory_allocated
     memory_stats
     memory_allocated
