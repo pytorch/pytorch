@@ -167,7 +167,7 @@ void destroy_extra_state(void* obj);
 //  set_extra_state responsibility to clean it up. It will be deleted during
 //  the reset_code, when the set_extra_state is called with NULL.
 
-// Invariant - Dont set the extra state for the extra state that is already on
+// Invariant - Don't set the extra state for the extra state that is already on
 // the code object. Otherwise, we will first free up the old extra state
 // (which is also the new extra state) and write something invalid on the
 // scratch space.
