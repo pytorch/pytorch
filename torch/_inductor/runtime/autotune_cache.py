@@ -629,6 +629,30 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
     )
 
 
+def _reconstruct_triton_config(
+    best_config: dict[str, Any],
+    extra_options: JsonDataTy | None,
+) -> Config:
+    num_warps = best_config.pop("num_warps")
+    num_stages = best_config.pop("num_stages")
+    config_args: dict[str, Any] = {
+        "num_warps": num_warps,
+        "num_stages": num_stages,
+    }
+    if HAS_WARP_SPEC:
+        config_args.update(
+            {
+                "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
+                "num_buffers_warp_spec": best_config.pop("num_buffers_warp_spec", 0),
+            }
+        )
+    # pyrefly: ignore [bad-argument-count, unexpected-keyword]
+    triton_config = Config(best_config, **config_args)
+    # pyrefly: ignore [missing-attribute]
+    triton_config.extra_options = extra_options
+    return triton_config
+
+
 def _load_cached_autotuning(
     best_config: dict[str, JsonDataTy],
     configs_hash: str,
@@ -649,56 +673,36 @@ def _load_cached_autotuning(
     # to restore custom tuned options from the cache.
     extra_options = best_config.pop("extra_options", None)
 
-    if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
-        "found_by_coordesc", False
-    ):
-        num_warps = best_config.pop("num_warps")
-        num_stages = best_config.pop("num_stages")
+    found_by_coordesc = inductor_meta.get(
+        "coordinate_descent_tuning"
+    ) and best_config.pop("found_by_coordesc", False)
 
-        # Extract common arguments
-        config_args = {
-            "num_warps": num_warps,
-            "num_stages": num_stages,
-        }
+    if not found_by_coordesc:
+        matching_configs = [
+            cfg
+            for cfg in configs
+            # pyrefly: ignore [missing-attribute]
+            if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+            # pyrefly: ignore [missing-attribute]
+            and cfg.num_warps == best_config.get("num_warps")
+            # pyrefly: ignore [missing-attribute]
+            and cfg.num_stages == best_config.get("num_stages")
+        ]
+        if len(matching_configs) == 1:
+            matched_config = matching_configs[0]
+            # pyrefly: ignore [missing-attribute]
+            matched_config.extra_options = extra_options
+            return matched_config
 
-        if HAS_WARP_SPEC:
-            config_args.update(
-                {
-                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
-                    "num_buffers_warp_spec": best_config.pop(
-                        "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
-
-        # Create the triton_config with the appropriate arguments
-        # pyrefly: ignore [bad-argument-count, unexpected-keyword]
-        triton_config = Config(best_config, **config_args)
+    # Reconstruct Config from cached data. This handles both coordesc
+    # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
+    # that aren't in the original config list.
+    best_config.pop("found_by_coordesc", None)
+    triton_config = _reconstruct_triton_config(best_config, extra_options)
+    if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
-        # Restore extra_options (may be None if not used by backend)
-        # pyrefly: ignore [missing-attribute]
-        triton_config.extra_options = extra_options
-        return triton_config
-
-    matching_configs = [
-        cfg
-        for cfg in configs
-        # pyrefly: ignore [missing-attribute]
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-        # pyrefly: ignore [missing-attribute]
-        and cfg.num_warps == best_config.get("num_warps")
-        # pyrefly: ignore [missing-attribute]
-        and cfg.num_stages == best_config.get("num_stages")
-    ]
-    if len(matching_configs) != 1:
-        return None
-
-    matched_config = matching_configs[0]
-    # Restore extra_options (may be None if not used by backend)
-    # pyrefly: ignore [missing-attribute]
-    matched_config.extra_options = extra_options
-    return matched_config
+    return triton_config
 
 
 def _splitext_nodot(basename: str) -> tuple[str, str]:
