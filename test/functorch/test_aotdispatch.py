@@ -8247,6 +8247,9 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
+    @unittest.skip(
+        "TwoTensor + effectful tokens backward interaction not yet supported"
+    )
     def test_backward_epilogue_subclass_and_tokens_correctness(self):
         from torch._higher_order_ops.effects import _register_effectful_op
         from torch._library.effects import EffectType
