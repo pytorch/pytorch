@@ -2587,11 +2587,6 @@ class _AutogradSavedState:
             )
         ctx.opaque_objects = opaque_object_outs
 
-    def load_tensors(self, ctx: Any) -> Sequence[torch.Tensor]:
-        if len(ctx._tensors_no_vc_check) > 0:
-            return list(ctx.saved_tensors) + ctx._tensors_no_vc_check
-        return ctx.saved_tensors
-
 
 @dataclass
 class _AutogradForwardEpilogue:
@@ -3151,7 +3146,7 @@ def _codegen_compiled_backward(
 
     lines: list[str] = [
         "def _compiled_backward("
-        "flat_args, _load_, _ctx_, _prologue_,"
+        "_flat_args_, _ctx_, _prologue_,"
         " _rng_add_, _impl_, _epilogue_, _double_bw_):"
     ]
     code_globals: dict[str, object] = {
@@ -3159,17 +3154,22 @@ def _codegen_compiled_backward(
         "functools": functools,
     }
 
-    lines.append("    if len(flat_args) != 1 or not isinstance(flat_args[0], list):")
+    lines.append("    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):")
     lines.append("        raise AssertionError(")
     lines.append(
-        "            'boxed_grads_call backward expects a single list argument')"
-    )
-    lines.append("    grad_args = flat_args[0]")
-    lines.append("    del flat_args")
+        "            'Compiled backward expects grads as a single mutable list '")
+    lines.append(
+        "            f'argument, but got {len(_flat_args_)} args. '")
+    lines.append(
+        "            'Grads must be passed as [grad0, grad1, ...] to allow '")
+    lines.append(
+        "            'freeing individual grads mid-backward.')")
+    lines.append("    grad_args = _flat_args_[0]")
+    lines.append("    del _flat_args_")
 
-    if num_tensors_no_vc_check and num_tensors_no_vc_check > 0:
+    if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
         lines.append(
-            "    _saved = list(_ctx_.saved_tensors) + _ctx_._tensors_no_vc_check"
+            "    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)"
         )
     else:
         lines.append("    _saved = _ctx_.saved_tensors")
@@ -3409,7 +3409,6 @@ class _AOTDispatchAutogradFunctionFactory:
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
                 return CompiledFunction._bwd_fn(
                     flat_args,
-                    saved_state.load_tensors,
                     ctx,
                     CompiledFunction._bw_prologue_fn,
                     rng_state.add_backward_args,

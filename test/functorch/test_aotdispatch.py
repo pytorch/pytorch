@@ -8098,6 +8098,98 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
 
+    def test_compiled_backward_vc_check_codegen(self):
+        class VcCheckFn(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.out = output
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * ctx.out
+
+        with capture_codegen_source("compiled_function_backward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return VcCheckFn.apply(x)
+
+            x = torch.randn(4, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_tensors_no_vc_check", source)
+        self.assertEqual(x.grad, 2 * x)
+
+    def test_compiled_backward_double_backward(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * x
+
+        x = torch.randn(4, requires_grad=True)
+        out = f(x)
+        (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        self.assertEqual(grad_x, 2 * x)
+
+    def test_compiled_backward_multiple_outputs(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2, x * x, x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        a, b, c = f(x)
+        (a + b + c).sum().backward()
+        self.assertEqual(x.grad, 2 + 2 * x + 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_backward_rng_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x) + x
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+    def test_compiled_backward_dynamic_shapes(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x):
+            return x * x
+
+        for n in [4, 8, 16]:
+            x = torch.randn(n, requires_grad=True)
+            f(x).sum().backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    def test_compiled_backward_rejects_non_list_args(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_compiled_backward,
+        )
+
+        bwd_fn = _codegen_compiled_backward(
+            num_rng=0, num_tensors_no_vc_check=None
+        )
+        noop = lambda *a, **kw: None
+        with self.assertRaisesRegex(AssertionError, "single mutable list"):
+            bwd_fn(
+                (torch.tensor(1.0),),
+                None, noop, noop, noop, noop, noop,
+            )
+        with self.assertRaisesRegex(AssertionError, "single mutable list"):
+            bwd_fn(
+                (torch.tensor(1.0), torch.tensor(2.0)),
+                None, noop, noop, noop, noop, noop,
+            )
+
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):
