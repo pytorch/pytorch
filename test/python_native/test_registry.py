@@ -14,6 +14,7 @@ class TestRegistry(TestCase):
 
     def setUp(self):
         """Clean up registry state before each test."""
+        super().setUp()
         self.registry = registry_module
 
         # Store original state for restoration
@@ -326,6 +327,7 @@ class TestRegistryRuntime(TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         self.registry = registry_module
 
         self._saved = {
