@@ -219,7 +219,7 @@ class _InverseTransform(Transform):
 
     def __init__(self, transform: Transform) -> None:
         super().__init__(cache_size=transform._cache_size)
-        self._inv: Transform = transform
+        self._inv: Transform | None = transform
 
     @constraints.dependent_property(is_discrete=False)
     # pyrefly: ignore [bad-override]
@@ -249,7 +249,7 @@ class _InverseTransform(Transform):
 
     @property
     def inv(self) -> Transform:
-        return self._inv
+        return self._inv  # pyrefly: ignore[bad-return]
 
     def with_cache(self, cache_size=1):
         if self._inv is None:
@@ -277,10 +277,10 @@ class _InverseTransform(Transform):
         return -self._inv.log_abs_det_jacobian(y, x)
 
     def forward_shape(self, shape):
-        return self._inv.inverse_shape(shape)
+        return self._inv.inverse_shape(shape)  # pyrefly: ignore[missing-attribute]
 
     def inverse_shape(self, shape):
-        return self._inv.forward_shape(shape)
+        return self._inv.forward_shape(shape)  # pyrefly: ignore[missing-attribute]
 
 
 class ComposeTransform(Transform):

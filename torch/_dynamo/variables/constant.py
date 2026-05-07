@@ -162,7 +162,7 @@ class ConstantVariable(VariableTracker):
             container_name = "string" if isinstance(self.value, str) else "bytes"
             arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
-            self.value[arg.as_python_constant()],
+            self.value[arg.as_python_constant()],  # pyrefly: ignore[bad-index]
         )
 
     def sq_item_impl(
@@ -174,7 +174,9 @@ class ConstantVariable(VariableTracker):
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
-            return ConstantVariable.create(self.value[index])
+            return ConstantVariable.create(
+                self.value[index]  # pyrefly: ignore[bad-index]
+            )
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
 
@@ -202,9 +204,14 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        return hash(self.value), False
+
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
+            # pyrefly: ignore[bad-argument-type]
             return ConstantVariable.create(len(self.value))
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
@@ -326,7 +333,11 @@ class ConstantVariable(VariableTracker):
         if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
-                    round(self.value, args[0].as_python_constant())
+                    # pyrefly: ignore[no-matching-overload]
+                    round(
+                        self.value,
+                        args[0].as_python_constant(),
+                    )
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
@@ -402,12 +413,6 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
     def is_python_equal(self, other: object) -> bool:
         from .tensor import SymNodeVariable
 
@@ -448,6 +453,7 @@ class ConstantVariable(VariableTracker):
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
+        # pyrefly: ignore[bad-argument-type]
         return ConstantVariable.create(int(self.value))
 
     def nb_float_impl(
@@ -457,6 +463,7 @@ class ConstantVariable(VariableTracker):
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
+        # pyrefly: ignore[bad-argument-type]
         return ConstantVariable.create(float(self.value))
 
     def nb_or_impl(
@@ -525,11 +532,8 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), True
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):

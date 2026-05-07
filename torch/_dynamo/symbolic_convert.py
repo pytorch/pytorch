@@ -4361,12 +4361,16 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
+            # pyrefly: ignore[bad-argument-type]
             args = args + contents[2 : -len(kw_names)]
 
+            # pyrefly: ignore[bad-argument-type]
             kwargs_list = contents[-len(kw_names) :]
 
+            # pyrefly: ignore[bad-argument-type]
             kwargs = dict(zip(kw_names, kwargs_list))
 
+            # pyrefly: ignore[bad-argument-type]
             if len(kwargs) != len(kw_names):
                 raise AssertionError("expected len(kwargs) == len(kw_names) to be true")
         else:
