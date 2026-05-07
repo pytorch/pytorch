@@ -1263,5 +1263,87 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
 
+class TestFlexAttentionEstimation(TestCase):
+    def test_flex_attention_flop_registration(self):
+        """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
+        from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
+        from torch.utils.flop_counter import flop_registry
+
+        # Registered in flop_registry like sdpa
+        self.assertIn(torch.ops.higher_order.flex_attention, flop_registry)
+        self.assertIn(torch.ops.higher_order.flex_attention_backward, flop_registry)
+
+        # GQA: 16 query heads, 4 kv heads
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        # Realistic output: (out_bf16, logsumexp_fp32, max_scores_fp32)
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+        mm = graph.call_function(torch.ops.aten.mm.default, args=(q, q))
+
+        # is_compute_node recognizes flex_attention alongside mm
+        self.assertTrue(is_compute_node(fwd))
+        self.assertTrue(is_compute_node(mm))
+        self.assertFalse(is_compute_node(q))
+
+        # Flops match sdpa_flop_count
+        fwd_flops = flop_registry[torch.ops.higher_order.flex_attention](
+            q.meta["val"], k.meta["val"], v.meta["val"], out_val=fwd.meta["val"]
+        )
+        expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
+        self.assertEqual(fwd_flops, expected_flops)
+
+    @unittest.skipIf(not HAS_CUDA, "requires CUDA")
+    def test_flex_attention_roofline_estimate(self):
+        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+
+        est_ms = estimate_roofline_runtime_ms(fwd)
+        self.assertGreater(est_ms, 0.0)
+
+
 if __name__ == "__main__":
     run_tests()
