@@ -200,6 +200,7 @@ class dtype:
     is_complex: _bool
     is_signed: _bool
     itemsize: _int
+    abbr: str
     def to_real(self) -> dtype: ...
     def to_complex(self) -> dtype: ...
 
@@ -1355,6 +1356,7 @@ def _get_cpp_backtrace(
 ) -> str: ...  # THPModule_getCppBacktrace
 def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
 def get_default_dtype() -> _dtype: ...  # THPModule_getDefaultDtype
+def _get_all_dtypes() -> list[_dtype]: ...  # THPModule_getAllDtypes
 def _get_default_device() -> str: ...  # THPModule_getDefaultDevice
 def _get_qengine() -> _int: ...  # THPModule_qEngine
 def _set_qengine(qengine: _int) -> None: ...  # THPModule_setQEngine
