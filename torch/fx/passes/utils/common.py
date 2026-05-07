@@ -33,14 +33,14 @@ def lift_subgraph_as_module(
     from the original parent graph_module.
 
     Args:
-        ``gm`` (GraphModule): parent graph module
+        gm (GraphModule): parent graph module
 
-        ``subgraph`` (:class:`torch.fx.Graph`): a valid subgraph that contains copied nodes from the
-        parent graph
+        subgraph (:class:`torch.fx.Graph`): a valid subgraph that contains copied nodes from the
+            parent graph
 
-        ``comp_name`` (str): name for the new component
+        comp_name (str): name for the new component
 
-        ``class_name`` (str): name for the submodule
+        class_name (str): name for the submodule
 
     """
 

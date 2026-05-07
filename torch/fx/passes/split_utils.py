@@ -150,7 +150,7 @@ def split_by_tags(
         split_gm: torch fx graph after split
 
         orig_to_split_fqn_mapping: a map between the original fqn and the fqn
-        after split for call_module and get_attr.
+            after split for call_module and get_attr.
     """
 
     def flatten(x: torch.fx.node.Argument) -> NodeList:
