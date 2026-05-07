@@ -1222,7 +1222,8 @@ class ReplacementPatternEntry(PatternEntry):
                     )
                     # This function copy-pastes the replacement graph into
                     # the graph. If the replacement graph had any eager_input_vals,
-                    # or val/tensor_meta, we propagate those over.
+                    # we propagate those over (val/tensor_meta are handled by
+                    # _transfer_meta above).
                     if "eager_input_vals" in node.meta:
                         result.meta["eager_input_vals"] = node.meta["eager_input_vals"]
                     return result
@@ -2085,7 +2086,7 @@ class PatternMatcherPass:
             graph = gm.graph
         elif isinstance(gm, torch.fx.Graph):
             graph = gm
-            gm = graph.owning_module
+            gm = graph.owning_module  # type: ignore[assignment]
         else:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
@@ -2490,5 +2491,7 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
     """
     if node.op == "call_module":
         assert isinstance(node.target, str)
+        if node.graph.owning_module is None:
+            raise AssertionError("node.graph.owning_module must not be None")
         return _get_attr(node.graph.owning_module, node.target).__class__
     return node.target

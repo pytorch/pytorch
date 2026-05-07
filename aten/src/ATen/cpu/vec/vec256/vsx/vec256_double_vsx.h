@@ -38,7 +38,7 @@ class Vectorized<double> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() = default;
   C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2)

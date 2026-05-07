@@ -225,17 +225,16 @@ class FunctionalTensor(torch.Tensor):
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
+            storage = out.elem.untyped_storage()
             if out.is_base_tensor():
                 out._inference_mode_base = None
                 # This assumes that the FunctionalTensor.elem does not change its storage after this point.
                 # Otherwise this would be invalid.
-                mode._storage_to_base[out.elem.untyped_storage()] = out
+                mode._storage_to_base[storage] = out
             else:
-                out._inference_mode_base = mode._storage_to_base[
-                    out.elem.untyped_storage()
-                ]
+                out._inference_mode_base = mode._storage_to_base.get(storage)
                 if out._inference_mode_base is None:
-                    raise AssertionError("out._inference_mode_base must not be None")
+                    mode._storage_to_base[storage] = out
         return out
 
     def __torch_dispatch__(  # type: ignore[override]
@@ -505,12 +504,19 @@ class FunctionalTensorMode(TorchDispatchMode):
             import torch._inductor.config as inductor_config
 
             if torch.compiler.is_exporting():
+                # NB: out= ops are not yet handled here; they only go through v2 below.
                 if export_config.enable_auto_functionalized_v2_for_export:
                     return do_auto_functionalize_v2(self, func, args, kwargs)
 
                 return do_auto_functionalize(self, func, args, kwargs)
 
-            if inductor_config.enable_auto_functionalized_v2:
+            if inductor_config.enable_auto_functionalized_v2 or (
+                isinstance(func, torch._ops.OpOverload)
+                and (
+                    torch._library.utils.is_out(func)
+                    or torch._library.utils.is_inplace(func)
+                )
+            ):
                 return do_auto_functionalize_v2(self, func, args, kwargs)
             return do_auto_functionalize(self, func, args, kwargs)
 

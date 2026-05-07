@@ -87,7 +87,7 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_bw_post_order: list[str] = []
         self.total_runtime: float = 0.0
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969
     # NB: returns fake tensors
     @classmethod
     def _maybe_run_and_benchmark_fallback_kernel(  # type: ignore[no-untyped-def]
@@ -217,7 +217,7 @@ class RuntimeEstimator(TorchDispatchMode):
         res = func(*args, **kwargs or {})
         return (res, mean_op_time)
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589
     @classmethod
     def _roofline_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
@@ -361,7 +361,7 @@ class RuntimeEstimator(TorchDispatchMode):
         fake_mode = active_fake_mode()
         if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError(
-                "No FakeTensorMode found, designed to used under FakeTensorMode"
+                "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )
         RuntimeEstimator.fake_mode = fake_mode
         self.total_runtime = 0.0
