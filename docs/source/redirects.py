@@ -1,4 +1,5 @@
 redirects = {
+    "elastic/rendezvous": "elastic/rendezvous.html",
     # Redirects for deprecated TorchScript documentation
     "jit": "torch.compiler_api.html",
     "jit_language_reference": "torch.compiler_api.html",
