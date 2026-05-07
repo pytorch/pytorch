@@ -173,7 +173,8 @@ characteristics, summarized in the table below:
      - The backward pass is non-deterministic and no deterministic
        implementation is available. This backend is **disabled** when
        ``torch.use_deterministic_algorithms(True, warn_only=False)`` is set,
-       and the dispatcher falls back to another backend.
+       regardless of whether inputs require gradients or the call is
+       inside a ``torch.no_grad()`` context.
 
 When :code:`torch.use_deterministic_algorithms(True, warn_only=True)` is set,
 the fused backends (Flash, Efficient, and cuDNN) emit a one-time warning but
@@ -182,20 +183,16 @@ determinism, pass :code:`warn_only=False`.
 
 **Low-precision dtypes and numerical reproducibility**
 
-The fused SDPA backends (Flash Attention, Efficient Attention, and cuDNN)
-operate on low-precision inputs (``float16`` and ``bfloat16``) and perform
-internal accumulations in ``float32``. This gives consistent results across
-runs *when using the deterministic code paths described above*, but the results
-will differ numerically from the Math backend, which operates at the full
-precision of its inputs.
+Bitwise matching numerics across different SDPA backends are **not
+guaranteed**, even for the same inputs and dtype. Each backend performs
+floating-point accumulation in a different order, and because floating-point
+addition is not associative, the results will differ between backends.
 
-The Math backend by default also accumulates in ``float32`` even when given
+The Math backend by default accumulates in ``float32`` even when given
 ``float16`` or ``bfloat16`` inputs. The function
 :func:`torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp` can enable
-reduced-precision accumulation for higher performance, but the output may
-differ from the ``float32`` accumulation path. This setting does not affect
-determinism — results are still reproducible across runs, just computed at
-lower precision.
+reduced-precision accumulation for higher performance at the cost of
+different numerical results.
 
 **Selecting a specific backend**
 
