@@ -94,10 +94,6 @@ REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 _TARGET_CHUNK_SPEC = TensorChunkSpec(0)
 
 
-def _split_target(target: torch.Tensor, n_microbatches: int) -> list[torch.Tensor]:
-    return list(_split_tensor(target, _TARGET_CHUNK_SPEC, n_microbatches))
-
-
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
 I = BACKWARD_INPUT
@@ -770,7 +766,9 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Split target into microbatches
         targets_split = (
-            _split_target(target, self._n_microbatches) if target is not None else None
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
         )
 
         # Run microbatches
@@ -1906,7 +1904,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # Split target into microbatches
         targets_split = (
-            _split_target(target, self._n_microbatches) if target is not None else None
+            list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
+            if target is not None
+            else None
         )
 
         # Run microbatches
