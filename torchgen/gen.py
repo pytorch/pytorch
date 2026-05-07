@@ -1502,16 +1502,6 @@ def get_ns_grouped_kernels(
     for f in grouped_native_functions:
         native_function_namespaces = set()
         dispatch_keys = set()
-        # CPU is the canonical backend: if it declares a structured kernel,
-        # skip other backends sharing the same name to avoid redefinition
-        # errors when their API macro differs (e.g. TORCH_XPU_API vs TORCH_API).
-        cpu_structured_kernel_names: set[str] = set()
-        if isinstance(f, NativeFunctionsGroup):
-            cpu_idx = backend_indices.get(DispatchKey.CPU)
-            if cpu_idx is not None:
-                m = cpu_idx.get_kernel(f)
-                if m is not None and m.structured:
-                    cpu_structured_kernel_names.add(m.kernel)
         for dispatch_key, backend_idx in backend_indices.items():
             backend_metadata = backend_idx.get_kernel(f)
             if backend_metadata:
@@ -1525,14 +1515,6 @@ def get_ns_grouped_kernels(
                     f"Codegen only supports one namespace per operator, "
                     f"got {native_function_namespaces} from {dispatch_keys}"
                 )
-            if (
-                dispatch_key != DispatchKey.CPU
-                and isinstance(f, NativeFunctionsGroup)
-                and backend_metadata is not None
-                and backend_metadata.structured
-                and backend_metadata.kernel in cpu_structured_kernel_names
-            ):
-                continue
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
