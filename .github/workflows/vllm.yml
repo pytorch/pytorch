@@ -30,7 +30,6 @@ jobs:
       build-external-packages: "vllm"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0 12.0'
       runner: linux.24xlarge.memory
       test-matrix: |
@@ -62,6 +61,5 @@ jobs:
     with:
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11
       docker-image: ${{ needs.build.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
     secrets: inherit

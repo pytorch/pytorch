@@ -37,7 +37,6 @@ jobs:
     with:
       build-environment: linux-s390x-binary-manywheel
       docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.s390x
       test-matrix: |
         { include: [
@@ -63,7 +62,6 @@ jobs:
     with:
       build-environment: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.build-environment }}
       docker-image: pytorch/manylinuxs390x-builder:cpu-s390x
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
       timeout-minutes: 600
       use-gha: "yes"

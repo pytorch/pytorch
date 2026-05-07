@@ -40,7 +40,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90-dist
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -56,6 +55,5 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-dist.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-dist.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-dist.outputs.test-matrix }}
     secrets: inherit

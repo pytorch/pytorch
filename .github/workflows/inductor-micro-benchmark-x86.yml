@@ -26,7 +26,6 @@ jobs:
     with:
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # Use metal host for benchmark jobs
       test-matrix: |
         { include: [
@@ -41,7 +40,6 @@ jobs:
     with:
       build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
     secrets: inherit

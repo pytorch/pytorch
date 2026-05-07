@@ -45,7 +45,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -66,7 +65,6 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.test-matrix }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
@@ -83,7 +81,6 @@ jobs:
     with:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm90-build.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       timeout-minutes: 30
       s3-bucket: gha-artifacts
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"

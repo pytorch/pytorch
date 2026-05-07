@@ -238,7 +238,6 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       run-doxygen: true
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
