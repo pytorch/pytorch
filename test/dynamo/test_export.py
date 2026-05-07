@@ -4377,7 +4377,7 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            """x = torch.sin(l_x_)""",
+            """sin = torch.sin(l_x_)""",
             """cos = torch.cos(l_nested_frame_values_0_1_)""",
         ]
 
