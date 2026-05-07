@@ -1754,13 +1754,72 @@ class DistMathOpsTest(DTensorTestBase):
         dt_running_mean = distribute_tensor(running_mean, device_mesh, replicate)
         dt_running_var = distribute_tensor(running_var, device_mesh, replicate)
 
-        # batch_norm (eval mode with running stats) — replicate-only strategy
+        # batch_norm (eval mode) with batch-dim sharded input — falls back to replicate
         expected = F.batch_norm(inp, running_mean, running_var, weight, bias)
         result = F.batch_norm(
             dt_inp, dt_running_mean, dt_running_var, dt_weight, dt_bias
         )
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_replicate())
+
+        # batch_norm with channel-dim sharding — forward + backward
+        # Use C divisible by world_size for even channel sharding across ranks
+        C_s = self.world_size * 2
+        inp_s = torch.randn(N, C_s, H, W, device=self.device_type)
+        weight_s = torch.randn(C_s, device=self.device_type)
+        bias_s = torch.randn(C_s, device=self.device_type)
+
+        ref_inp = inp_s.clone().detach().requires_grad_(True)
+        ref_w = weight_s.clone().detach().requires_grad_(True)
+        ref_b = bias_s.clone().detach().requires_grad_(True)
+        dt_inp_c = distribute_tensor(
+            inp_s.clone().detach().requires_grad_(True), device_mesh, [Shard(1)]
+        )
+        dt_w = distribute_tensor(
+            weight_s.clone().detach().requires_grad_(True), device_mesh, [Shard(0)]
+        )
+        dt_b = distribute_tensor(
+            bias_s.clone().detach().requires_grad_(True), device_mesh, [Shard(0)]
+        )
+        dt_rmean = distribute_tensor(
+            torch.zeros(C_s, device=self.device_type), device_mesh, [Shard(0)]
+        )
+        dt_rvar = distribute_tensor(
+            torch.ones(C_s, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        expected_out = F.batch_norm(
+            ref_inp,
+            torch.zeros(C_s, device=self.device_type),
+            torch.ones(C_s, device=self.device_type),
+            ref_w,
+            ref_b,
+            training=True,
+        )
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_out = F.batch_norm(
+                dt_inp_c,
+                dt_rmean,
+                dt_rvar,
+                dt_w,
+                dt_b,
+                training=True,
+            )
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(result_out.full_tensor(), expected_out)
+        self.assertEqual(result_out.placements, dt_inp_c.placements)
+
+        expected_out.sum().backward()
+        with comm_mode:
+            result_out.sum().backward()
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(dt_inp_c.grad.full_tensor(), ref_inp.grad)
+        self.assertEqual(dt_inp_c.grad.placements, dt_inp_c.placements)
+        self.assertEqual(dt_w.grad.full_tensor(), ref_w.grad)
+        self.assertEqual(dt_w.grad.placements, dt_w.placements)
+        self.assertEqual(dt_b.grad.full_tensor(), ref_b.grad)
+        self.assertEqual(dt_b.grad.placements, dt_b.placements)
 
         # group_norm with batch-dim sharding — scalar N/C/HxW args are adjusted
         num_groups = 3
