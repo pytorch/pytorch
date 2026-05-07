@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 import tempfile
 
 import torch
@@ -24,8 +25,7 @@ except ImportError:
 load_tests = load_tests  # noqa: PLW0127
 
 if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d not available, skipping tests")
 
 
 class AbstractProcessGroupShareTensorTest:

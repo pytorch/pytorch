@@ -3,6 +3,7 @@
 import operator
 import os
 import sys
+import unittest
 import threading
 from functools import reduce
 from unittest import skip, SkipTest
@@ -14,8 +15,7 @@ from torch._C._distributed_c10d import ReduceOp
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,

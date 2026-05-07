@@ -2,6 +2,7 @@
 
 import bisect
 import sys
+import unittest
 from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
@@ -46,15 +47,10 @@ from torch.testing._internal.common_utils import (
 STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 class _OSDCommMethod(Enum):

@@ -5,14 +5,14 @@ import contextlib
 import copyreg
 import os
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 import torch.distributed.rpc as rpc
 import torch.multiprocessing.reductions as TorchMpReductions

@@ -1,0 +1,12 @@
+# Test collection dependencies (install AFTER torch)
+ml-dtypes==0.5.4
+onnx-ir==0.2.1
+onnxruntime==1.23.2
+onnxscript==0.7.0
+opencv-python-headless==4.13.0.92
+pandas==2.2.3
+parameterized==0.9.0
+tabulate==0.10.0
+torchvision==0.26.0
+transformers==5.8.0
+zstandard==0.25.0

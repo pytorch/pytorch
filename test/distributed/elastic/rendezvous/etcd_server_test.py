@@ -15,8 +15,7 @@ from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
 
 if os.getenv("CIRCLECI"):
-    print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("T85992919 temporarily disabling in circle ci")
 
 
 class EtcdServerTest(unittest.TestCase):

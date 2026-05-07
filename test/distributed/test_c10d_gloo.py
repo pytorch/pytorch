@@ -9,6 +9,7 @@ import os
 import pickle
 import random
 import sys
+import unittest
 import tempfile
 import time
 from datetime import timedelta
@@ -20,8 +21,7 @@ import torch.distributed as c10d
 
 
 if not c10d.is_available() or not c10d.is_gloo_available():
-    print("c10d GLOO not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d GLOO not available, skipping tests")
 
 import test_c10d_common
 from test_c10d_common import (

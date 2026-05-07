@@ -1,14 +1,14 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
 
 
 if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d NCCL not available, skipping tests")
 
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,

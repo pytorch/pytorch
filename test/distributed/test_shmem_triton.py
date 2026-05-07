@@ -3,6 +3,7 @@
 # python test/distributed/test_shmem_triton.py
 
 import sys
+import unittest
 
 import torch
 import torch.distributed._symmetric_memory as symm_mem
@@ -20,8 +21,7 @@ if (
     or not symm_mem.is_nvshmem_available()
     or not PLATFORM_SUPPORTS_SYMM_MEM
 ):
-    print("SHMEM backend (NVSHMEM/rocSHMEM) not available, skipping tests")
-    sys.exit(0)
+    raise unittest.SkipTest("SHMEM backend (NVSHMEM/rocSHMEM) not available, skipping tests")
 
 
 import triton.language as tl

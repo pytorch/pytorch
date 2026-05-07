@@ -5,6 +5,7 @@ import os
 import socket
 import struct
 import sys
+import unittest
 import tempfile
 import threading
 import time
@@ -22,8 +23,7 @@ from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
 if not dist.is_available():
-    print("torch.distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("torch.distributed not available, skipping tests")
 
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import (

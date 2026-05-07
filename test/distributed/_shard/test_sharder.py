@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import sys
+import unittest
 
 import torch
 import torch.nn as nn
@@ -19,11 +20,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 # a simple collection of embedding bag implementation

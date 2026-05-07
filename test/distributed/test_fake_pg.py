@@ -27,8 +27,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 device_type = get_devtype().type
 

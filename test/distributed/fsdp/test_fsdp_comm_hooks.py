@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.nn as nn
@@ -26,8 +27,7 @@ from torch.testing._internal.common_utils import (
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"

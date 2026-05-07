@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sys
+import unittest
 from functools import partial, wraps
 
 import torch
@@ -12,8 +13,7 @@ from torch.distributed.c10d_logger import _c10d_logger, _exception_logger
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
 from torch.testing._internal.common_fsdp import get_devtype
@@ -23,11 +23,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_AS
 device_type = str(get_devtype())
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 WORLD_SIZE = min(4, max(2, torch.get_device_module(device_type).device_count()))
 

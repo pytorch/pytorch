@@ -22,8 +22,7 @@ import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("distributed package not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("distributed package not available, skipping tests")
 
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.distributed_c10d as c10d
@@ -51,8 +50,7 @@ from torch.utils.checkpoint import checkpoint
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Multiprocessing spawn is not compatible with dev/dbg asan")
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

@@ -54,8 +54,7 @@ import sys
 
 
 if not dist.is_available():
-    print("distributed package not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("distributed package not available, skipping tests")
 
 
 @requires_accelerator_dist_backend()

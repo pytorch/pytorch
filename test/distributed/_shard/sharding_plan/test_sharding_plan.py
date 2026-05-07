@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -22,11 +23,7 @@ from torch.testing._internal.distributed._shard.test_common import SimpleMegatro
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 # Example ShardingPlanner that chunks every parameter in the module

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 
 import torch
 import torch.cuda
@@ -26,8 +27,7 @@ from torch.testing._internal.common_utils import (
 torch.backends.cuda.matmul.allow_tf32 = False
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
@@ -40,11 +40,7 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 BACKEND = os.environ["BACKEND"]
 if BACKEND == "gloo" or BACKEND == "nccl":

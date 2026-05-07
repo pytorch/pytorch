@@ -2,6 +2,7 @@
 
 import contextlib
 import sys
+import unittest
 from collections import Counter
 from enum import auto, Enum
 from functools import partial
@@ -40,15 +41,10 @@ from torch.testing._internal.common_utils import (
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
