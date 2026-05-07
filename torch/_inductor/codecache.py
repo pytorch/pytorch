@@ -196,57 +196,7 @@ def get_device_information(device_type: str) -> dict[str, str]:
     return metadata
 
 
-_MISSING = object()
-
-
-def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
-    """
-    Like functools.cache but with a prefetch() method that starts computing
-    the value in a background thread, and a set() method for prepopulating.
-    """
-    _cache: T | object = _MISSING
-    _lock = threading.Lock()
-    _future: Future[T] | None = None
-
-    def wrapper() -> T:
-        nonlocal _cache, _future
-        with _lock:
-            if _cache is not _MISSING:
-                return _cache  # type: ignore[return-value]
-            if _future is not None:
-                _cache = _future.result()
-                _future = None
-                return _cache  # type: ignore[return-value]
-            _cache = func()
-            return _cache  # type: ignore[return-value]
-
-    def set_val(val: T) -> None:
-        nonlocal _cache
-        with _lock:
-            assert _cache is _MISSING
-            _cache = val
-
-    def clear() -> None:
-        nonlocal _cache, _future
-        with _lock:
-            _cache = _MISSING
-            _future = None
-
-    def prefetch() -> None:
-        nonlocal _future
-        from concurrent.futures import ThreadPoolExecutor
-
-        with _lock:
-            if _cache is not _MISSING or _future is not None:
-                return
-            executor = ThreadPoolExecutor(max_workers=1)
-            _future = executor.submit(func)
-            executor.shutdown(wait=False)
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
-    return wrapper
+from torch.utils._functools import prefetchable_cache as torch_key_cache
 
 
 @torch_key_cache
