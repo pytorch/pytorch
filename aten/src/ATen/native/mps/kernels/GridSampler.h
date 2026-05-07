@@ -22,15 +22,15 @@ using at::native::GridSamplerInterpolation;
 using at::native::GridSamplerPadding;
 #endif
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename idx_t = int32_t>
 struct GridSamplerParams {
   int32_t sampler_dims;
-  ::c10::metal::array<idx_type_t, N> output_sizes;
-  ::c10::metal::array<idx_type_t, N> output_strides;
-  ::c10::metal::array<idx_type_t, N> input_sizes;
-  ::c10::metal::array<idx_type_t, N> input_strides;
-  ::c10::metal::array<idx_type_t, N> grid_sizes;
-  ::c10::metal::array<idx_type_t, N> grid_strides;
+  ::c10::metal::array<idx_t, N> output_sizes;
+  ::c10::metal::array<idx_t, N> output_strides;
+  ::c10::metal::array<idx_t, N> input_sizes;
+  ::c10::metal::array<idx_t, N> input_strides;
+  ::c10::metal::array<idx_t, N> grid_sizes;
+  ::c10::metal::array<idx_t, N> grid_strides;
   bool align_corners;
 
 #ifndef __METAL_VERSION__
@@ -42,23 +42,23 @@ struct GridSamplerParams {
       : sampler_dims(N - 2), align_corners(align_corners_) {
     using at::native::safe_downcast;
     for (unsigned dim = 0; dim < N; dim++) {
-      output_sizes[dim] = safe_downcast<idx_type_t>(output.size(dim));
-      output_strides[dim] = safe_downcast<idx_type_t>(output.stride(dim));
-      input_sizes[dim] = safe_downcast<idx_type_t>(input.size(dim));
-      input_strides[dim] = safe_downcast<idx_type_t>(input.stride(dim));
-      grid_sizes[dim] = safe_downcast<idx_type_t>(grid.size(dim));
-      grid_strides[dim] = safe_downcast<idx_type_t>(grid.stride(dim));
+      output_sizes[dim] = safe_downcast<idx_t>(output.size(dim));
+      output_strides[dim] = safe_downcast<idx_t>(output.stride(dim));
+      input_sizes[dim] = safe_downcast<idx_t>(input.size(dim));
+      input_strides[dim] = safe_downcast<idx_t>(input.stride(dim));
+      grid_sizes[dim] = safe_downcast<idx_t>(grid.size(dim));
+      grid_strides[dim] = safe_downcast<idx_t>(grid.stride(dim));
     }
   }
 #endif
 };
 
-template <unsigned N = 5, typename idx_type_t = int32_t>
+template <unsigned N = 5, typename idx_t = int32_t>
 struct GridSamplerBackwardParams {
-  GridSamplerParams<N, idx_type_t> forward;
-  ::c10::metal::array<idx_type_t, N> grad_output_strides;
-  ::c10::metal::array<idx_type_t, N> grad_input_strides;
-  ::c10::metal::array<idx_type_t, N> grad_grid_strides;
+  GridSamplerParams<N, idx_t> forward;
+  ::c10::metal::array<idx_t, N> grad_output_strides;
+  ::c10::metal::array<idx_t, N> grad_input_strides;
+  ::c10::metal::array<idx_t, N> grad_grid_strides;
   GridSamplerPadding padding_mode;
   GridSamplerInterpolation interpolation_mode;
   bool compute_grad_input;
@@ -83,11 +83,11 @@ struct GridSamplerBackwardParams {
     using at::native::safe_downcast;
     for (unsigned dim = 0; dim < N; dim++) {
       grad_output_strides[dim] =
-          safe_downcast<idx_type_t>(grad_output.stride(dim));
+          safe_downcast<idx_t>(grad_output.stride(dim));
       grad_input_strides[dim] = grad_input.defined()
-          ? safe_downcast<idx_type_t>(grad_input.stride(dim))
+          ? safe_downcast<idx_t>(grad_input.stride(dim))
           : 0;
-      grad_grid_strides[dim] = safe_downcast<idx_type_t>(grad_grid.stride(dim));
+      grad_grid_strides[dim] = safe_downcast<idx_t>(grad_grid.stride(dim));
     }
   }
 #endif
