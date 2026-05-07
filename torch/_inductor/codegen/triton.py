@@ -2817,9 +2817,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
-        # When this kernel is a sub-kernel of a ComboKernel that uses
-        # per-subkernel blocks (XBLOCK_i, YBLOCK_i) and SequentialFlattenGridDispatch.
-        # Only meaningful when is_combo_kernel=True.
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
@@ -6881,8 +6878,6 @@ class TritonScheduling(SIMDScheduling):
         V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
         enable_autotune = config.combo_kernels_autotune > 0
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
-        # custom_part_algorithm=True here, so per_subkernel_blocks follows the
-        # global config (combo-pass kernels only).
         per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes=node_list,

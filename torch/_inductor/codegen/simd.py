@@ -2446,9 +2446,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
             config.combo_kernel_allow_mixed_sizes == 1 and custom_part_algorithm
         )
-        # per_subkernel_blocks is decided at scheduler-node construction time
-        # (combo-pass kernels: True if config enabled; true foreach: always
-        # False) so codegen here just trusts the scheduler's intent.
+
         per_subkernel_blocks = combo_kernel_node.per_subkernel_blocks
 
         kernel_code_list = self.generate_combo_kernel_code(

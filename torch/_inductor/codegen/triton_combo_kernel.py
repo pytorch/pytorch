@@ -452,11 +452,6 @@ class ComboKernel(Kernel):
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
-        # When True, each sub-kernel gets its own block sizes (XBLOCK_0, etc.)
-        # and dispatch is forced to SequentialFlattenGridDispatch. Gated by
-        # caller (e.g. simd.py) so that true foreach kernels keep the legacy
-        # shared-XBLOCK + SequentialDispatch path even when the global config
-        # combo_kernel_per_subkernel_blocks is True.
         self.per_subkernel_blocks = per_subkernel_blocks
         self.dispatch_class: (
             type[
