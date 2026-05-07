@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for nb_negative / nb_positive: unary ops via PyNumber_Negative/Positive."""
+"""Tests for nb unary: unary ops via PyNumber_slot."""
 
 import operator
 import sys
@@ -686,7 +686,7 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    # --- op specific tests ---    
+    # --- op specific tests ---
 
     # --- complex abs overflow (OverflowError from _Py_c_abs) ---
     # CPython's complex_abs calls _Py_c_abs which sets errno=ERANGE when
@@ -699,10 +699,11 @@ class NbUnaryTests(TestCase):
             except OverflowError as e:
                 return str(e)
 
+        eager_result = fn(0)
         result = torch.compile(fn, backend="eager", fullgraph=True)(
             torch.tensor(0)
         )
-        self.assertEqual(result, "absolute value too large")
+        self.assertEqual(result, eager_result)
 
 
 instantiate_parametrized_tests(NbUnaryTests)
