@@ -12,14 +12,13 @@ Below is a state diagram describing how rendezvous works.
 
 ## Registry
 
-```{currentmodule} torch.distributed.elastic.rendezvous
-```
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.rendezvous
 
-```{autoclass} RendezvousParameters
-:members:
-```
+.. autoclass:: RendezvousParameters
+   :members:
 
-```{autoclass} RendezvousHandlerRegistry
+.. autoclass:: RendezvousHandlerRegistry
 ```
 
 ```{automodule} torch.distributed.elastic.rendezvous.registry
