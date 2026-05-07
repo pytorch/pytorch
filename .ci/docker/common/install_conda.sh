@@ -4,7 +4,12 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
+  # Pin miniforge to avoid regressions from conda/pip version changes.
+  # Miniforge 26.3.2-0 (2026-05-02) ships conda 26.3.2 which changed how
+  # pip-installed packages are tracked in the environment model, causing
+  # packages like numpy and transformers to go missing during later
+  # conda install / conda run operations.
+  BASE_URL="https://github.com/conda-forge/miniforge/releases/download/26.1.1-3"  # @lint-ignore
   CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
