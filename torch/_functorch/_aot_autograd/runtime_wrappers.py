@@ -1789,7 +1789,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
-    saved_synthetic_base_info: list[Any] | None = None
+    base_groups: dict[int, list[int]] = field(default_factory=dict)
+    other_arg_map: list[tuple[int, int]] = field(default_factory=list)
 
     def pre_compile(
         self,
@@ -1858,7 +1859,15 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         )
         # Save old input args for post-compile
         self.old_input_info = fw_metadata.input_info
-        self.saved_synthetic_base_info = synthetic_base_info
+        # Pre-compute base_groups and other_arg_map from synthetic_base_info.
+        # We avoid storing the raw synthetic_base_info because it contains
+        # torch.Tensors which are not picklable by the autograd cache.
+        for orig_idx, entry in enumerate(synthetic_base_info):
+            if isinstance(entry, int):
+                self.other_arg_map.append((orig_idx, entry))
+            else:
+                base_idx, _ = entry
+                self.base_groups.setdefault(base_idx, []).append(orig_idx)
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -1952,18 +1961,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         from .subclass_codegen import _compile_and_exec_source
 
-        sbi = self.saved_synthetic_base_info
-        if sbi is None:
-            raise AssertionError("saved_synthetic_base_info must not be None")
-
-        base_groups: dict[int, list[int]] = {}
-        other_map: list[tuple[int, int]] = []
-        for orig_idx, entry in enumerate(sbi):
-            if isinstance(entry, int):
-                other_map.append((orig_idx, entry))
-            else:
-                base_idx, _ = entry
-                base_groups.setdefault(base_idx, []).append(orig_idx)
+        base_groups = self.base_groups
+        other_map = self.other_arg_map
 
         num_bases = len(base_groups)
         aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
@@ -1979,7 +1978,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             lines.append("    if _a._base is not None:")
             lines.append(f"        _bases[{base_idx}] = _a._base")
             lines.append("    else:")
-            lines.append("        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)")
+            lines.append(
+                "        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)"
+            )
             lines.append("        _b.set_(_a.untyped_storage())")
             lines.append(f"        _bases[{base_idx}] = _b")
 
@@ -3115,6 +3116,64 @@ def _codegen_backward_epilogue(
     )
 
 
+def _codegen_backward_epilogue(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: SubclassMeta | None,
+    codegen_wrap_fn: Callable[..., Any] | None,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    num_bw_tokens = fw_metadata.num_backward_tokens
+    is_rng = fw_metadata.is_rng_op_functionalized
+    has_subclass = maybe_subclass_meta is not None
+
+    if has_subclass:
+        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
+    else:
+        lines = ["def _backward_epilogue(out):"]
+    code_globals: dict[str, object] = {}
+
+    if num_bw_tokens > 0:
+        lines.append(f"    out = out[:-{num_bw_tokens}]")
+
+    if is_rng:
+        if fw_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
+            )
+        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        lines.append("    _oi = len(out) - 1")
+        lines.append("    _set_offset_(out[_oi])")
+        lines.append("    out = out[:_oi] + out[_oi + 1:]")
+
+    lines.append("    out = tuple(out)")
+
+    if has_subclass:
+        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
+        if (
+            maybe_subclass_meta.grad_input_metas is None
+        ):  # pyrefly: ignore [missing-attribute]
+            raise AssertionError("grad_input_metas must not be None")
+        code_globals["_grad_input_metas_"] = (
+            maybe_subclass_meta.grad_input_metas
+        )  # pyrefly: ignore [missing-attribute]
+        if codegen_wrap_fn is not None:
+            code_globals["_wrap_"] = codegen_wrap_fn
+            lines.append("    if make_subclass_override is None:")
+            lines.append("        return _wrap_(out)")
+        lines.append("    return _wrap_subclasses_(out,")
+        lines.append("        subclass_metas=_grad_input_metas_,")
+        lines.append("        included_subclass_symints=True, is_runtime=True,")
+        lines.append("        make_subclass_override=make_subclass_override)")
+    else:
+        lines.append("    return out")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_backward_epilogue", "backward_epilogue"
+    )
+
+
 def _codegen_compiled_forward(
     fw_metadata: ViewAndMutationMeta,
     backward_state_indices: list[int],
@@ -3137,8 +3196,7 @@ def _codegen_compiled_forward(
         lines.append(f"    _bw_state = args[{idx}]")
         lines.append("    if not isinstance(_bw_state, BackwardState):")
         lines.append("        raise AssertionError(")
-        lines.append("            f'expected BackwardState, got {type(_bw_state)}'")
-        lines.append("        )")
+        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
         lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
 
     if num_rng > 0:
@@ -3176,18 +3234,15 @@ def _codegen_compiled_backward(
         "functools": functools,
     }
 
-    lines.append(
-        "    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):"
-    )
-    lines.append("        raise AssertionError(")
-    lines.append(
-        "            'Compiled backward expects grads as a single mutable list '"
-    )
-    lines.append("            f'argument, but got {len(_flat_args_)} args. '")
-    lines.append("            'Grads must be passed as [grad0, grad1, ...] to allow '")
-    lines.append("            'freeing individual grads mid-backward.')")
-    lines.append("    grad_args = _flat_args_[0]")
-    lines.append("    del _flat_args_")
+    lines.append("""\
+    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):
+        raise AssertionError(
+            'Compiled backward expects grads as a single mutable list '
+            f'argument, but got {len(_flat_args_)} args. '
+            'Grads must be passed as [grad0, grad1, ...] to allow '
+            'freeing individual grads mid-backward.')
+    grad_args = _flat_args_[0]
+    del _flat_args_""")
 
     if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
         lines.append("    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)")

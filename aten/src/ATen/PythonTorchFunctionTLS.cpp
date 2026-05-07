@@ -1,7 +1,5 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 
-#include <utility>
-
 namespace at::impl {
 
 static thread_local PythonTorchFunctionTLS pythonTorchFunctionState;
@@ -32,16 +30,6 @@ void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disab
 
 TorchFunctionDisabledState PythonTorchFunctionTLS::get_disabled_state() {
   return pythonTorchFunctionState.disabled_state_;
-}
-
-bool PythonTorchFunctionTLS::exchange_skip_next(bool new_skip_next) {
-  return std::exchange(
-    pythonTorchFunctionState.skip_next_,
-    new_skip_next);
-}
-
-bool PythonTorchFunctionTLS::peek_skip_next() {
-  return pythonTorchFunctionState.skip_next_;
 }
 
 void PythonTorchFunctionTLS::set_state(const PythonTorchFunctionTLS& state) {
