@@ -441,17 +441,17 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
-        group = c10d.group.WORLD
+        group_name = c10d.group.WORLD.group_name
 
         dtype = torch.float
         numel = 1024
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         dst = torch.empty_like(src)
-        symm_mem.rendezvous(src, group=group)
+        symm_mem.rendezvous(src, group=group_name)
         c10d.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src, group, peer=1)
+            symm_mem.get(dst, src, group_name, peer=1)
             torch.testing.assert_close(dst, torch.ones_like(dst))
 
         c10d.barrier()
@@ -463,11 +463,11 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         )
         src_view = src_base.narrow(0, numel // 2, numel)
         dst = torch.empty_like(src_view)
-        symm_mem.rendezvous(src_base, group=group)
+        symm_mem.rendezvous(src_base, group=group_name)
         c10d.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src_view, group, peer=1)
+            symm_mem.get(dst, src_view, group_name, peer=1)
             expected = (
                 torch.arange(
                     numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
@@ -480,17 +480,17 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 symm_mem.get(
                     torch.empty(numel, dtype=dtype, device=self.device),
                     src_base[::2],
-                    group,
+                    group_name,
                     peer=1,
                 )
 
             noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
             with self.assertRaisesRegex(ValueError, "contiguous"):
-                symm_mem.get(noncontig_dst, src, group, peer=1)
+                symm_mem.get(noncontig_dst, src, group_name, peer=1)
 
             with self.assertRaisesRegex(RuntimeError, "symmetric memory"):
                 symm_mem.get(
-                    torch.empty_like(src), torch.empty_like(src), group, peer=1
+                    torch.empty_like(src), torch.empty_like(src), group_name, peer=1
                 )
 
         c10d.barrier()

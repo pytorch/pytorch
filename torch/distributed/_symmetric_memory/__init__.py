@@ -2158,7 +2158,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
 def _cuda_get_out(
     dst: torch.Tensor, src: torch.Tensor, peer: int, group_name: c10d.GroupName
 ) -> None:
-    hdl = rendezvous(src, group_name)
+    hdl = _SymmetricMemory.rendezvous(src, group_name)
     if hdl is None:
         raise RuntimeError("get: src must be allocated from symmetric memory")
     if peer < 0 or peer >= hdl.world_size:
@@ -2174,7 +2174,7 @@ def _cuda_get_out(
 def get(
     dst: torch.Tensor,
     src: torch.Tensor,
-    group: c10d.GroupName | ProcessGroup,
+    group: c10d.GroupName,
     peer: int,
 ) -> None:
     r"""
@@ -2194,7 +2194,7 @@ def get(
         dst (Tensor): local destination tensor.
         src (Tensor): local symmetric-memory tensor whose peer allocation is
             the remote source.
-        group (Union[str, ProcessGroup]): process group identifying peers.
+        group (str): process group name identifying peers.
         peer (int): rank in ``group`` to copy from.
     """
     if dst.device != src.device:
@@ -2208,14 +2208,13 @@ def get(
     if not is_symm_mem_tensor(src):
         raise RuntimeError("get: src must be allocated from symmetric memory")
 
-    group_name = _resolve_group_name(group)
     backend = get_backend(src.device)
     if backend == "NVSHMEM":
-        torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group_name)
+        torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group)
     elif backend == "NCCL":
-        torch.ops.symm_mem.nccl_get_out(dst, src, peer, group_name)
+        torch.ops.symm_mem.nccl_get_out(dst, src, peer, group)
     elif backend == "CUDA":
-        _cuda_get_out(dst, src, peer, group_name)
+        _cuda_get_out(dst, src, peer, group)
     else:
         raise ValueError(f"get: unsupported backend: {backend}")
 

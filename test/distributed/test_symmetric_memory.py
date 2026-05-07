@@ -369,17 +369,17 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_get(self) -> None:
         self._init_process()
-        group = dist.group.WORLD
+        group_name = dist.group.WORLD.group_name
 
         dtype = torch.float
         numel = 1024
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         dst = torch.empty_like(src)
-        symm_mem.rendezvous(src, group=group)
+        symm_mem.rendezvous(src, group=group_name)
         dist.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src, group, peer=1)
+            symm_mem.get(dst, src, group_name, peer=1)
             torch.testing.assert_close(dst, torch.ones_like(dst))
 
         dist.barrier()
@@ -391,11 +391,11 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         )
         src_view = src_base.narrow(0, numel // 2, numel)
         dst = torch.empty_like(src_view)
-        symm_mem.rendezvous(src_base, group=group)
+        symm_mem.rendezvous(src_base, group=group_name)
         dist.barrier()
 
         if self.rank == 0:
-            symm_mem.get(dst, src_view, group, peer=1)
+            symm_mem.get(dst, src_view, group_name, peer=1)
             expected = (
                 torch.arange(
                     numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
@@ -408,17 +408,17 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 symm_mem.get(
                     torch.empty(numel, dtype=dtype, device=self.device),
                     src_base[::2],
-                    group,
+                    group_name,
                     peer=1,
                 )
 
             noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
             with self.assertRaisesRegex(ValueError, "contiguous"):
-                symm_mem.get(noncontig_dst, src, group, peer=1)
+                symm_mem.get(noncontig_dst, src, group_name, peer=1)
 
             with self.assertRaisesRegex(RuntimeError, "symmetric memory"):
                 symm_mem.get(
-                    torch.empty_like(src), torch.empty_like(src), group, peer=1
+                    torch.empty_like(src), torch.empty_like(src), group_name, peer=1
                 )
 
         dist.barrier()
