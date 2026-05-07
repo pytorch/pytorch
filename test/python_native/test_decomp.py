@@ -47,15 +47,17 @@ class TestNativeDecompTable(TestCase):
         # cannot be un-defined; instead, each test uses a fresh name.
         self.dsl_name = f"test_{uuid.uuid4().hex[:8]}"
 
-        # Snapshot state that registrations / deregistrations touch and
-        # that *can* safely be restored. We deliberately do NOT clear
-        # `_defined_native_ops` or `_def_libs` -- their contents mirror
+        # Snapshot registry state that registrations / deregistrations
+        # touch. `_graphs` is the source of truth; `_aten_override_libs`
+        # and `_libs` are derived (materialized dispatcher registrations)
+        # and get rebuilt from `_graphs` on tearDown rather than restored
+        # directly -- restoring destroyed Library objects would leave the
+        # dispatcher without live kernels. We deliberately do NOT touch
+        # `_defined_native_ops` or `_def_libs`; their contents mirror
         # permanent dispatcher state.
         self._snapshot = {
-            "libs": dict(self.registry._libs),
             "graphs": dict(self.registry._graphs),
             "decomp_overrides": dict(self.registry._native_decomp_overrides),
-            "aten_override_libs": dict(self.registry._aten_override_libs),
             "dsl_name_to_lib_graph": {
                 k: list(v) for k, v in self.registry._dsl_name_to_lib_graph.items()
             },
@@ -72,14 +74,12 @@ class TestNativeDecompTable(TestCase):
             ),
         }
 
-        # Tear down any existing aten overrides so the test's own
-        # registrations see pristine aten kernels. Restored on tearDown.
-        for lib in list(self.registry._aten_override_libs.values()):
-            lib._destroy()
-        self.registry._aten_override_libs.clear()
+        # Destroy live aten overrides and _native IMPL libs so the test's
+        # own registrations see pristine aten kernels. These are rebuilt
+        # from the snapshotted `_graphs` on tearDown.
+        self._destroy_live_libs()
 
         # Clear dicts that won't corrupt process-wide state.
-        self.registry._libs.clear()
         self.registry._graphs.clear()
         self.registry._native_decomp_overrides.clear()
         self.registry._dsl_name_to_lib_graph.clear()
@@ -89,25 +89,31 @@ class TestNativeDecompTable(TestCase):
         self.registry._filter_state._op_symbols.clear()
         self.registry._filter_state._dispatch_keys.clear()
 
-    def tearDown(self):
-        if not hasattr(self, "registry"):
-            return
-        # Destroy any aten overrides this test installed.
+    def _destroy_live_libs(self):
+        """Tear down every live aten override + _native IMPL library and
+        clear their dicts. The C++ dispatcher has no per-kernel removal,
+        so Library._destroy() is the only way to unregister."""
         for lib in list(self.registry._aten_override_libs.values()):
             lib._destroy()
         self.registry._aten_override_libs.clear()
-
-        # Restore snapshots.
+        for lib in list(self.registry._libs.values()):
+            lib._destroy()
         self.registry._libs.clear()
-        self.registry._libs.update(self._snapshot["libs"])
+
+    def tearDown(self):
+        if not hasattr(self, "registry"):
+            return
+        # Destroy whatever the test installed, then rebuild libs from the
+        # snapshotted graph state so other tests (and the rest of the
+        # process) see live dispatcher kernels matching the saved graphs.
+        self._destroy_live_libs()
+
         self.registry._graphs.clear()
         self.registry._graphs.update(self._snapshot["graphs"])
         self.registry._native_decomp_overrides.clear()
         self.registry._native_decomp_overrides.update(
             self._snapshot["decomp_overrides"]
         )
-        self.registry._aten_override_libs.clear()
-        self.registry._aten_override_libs.update(self._snapshot["aten_override_libs"])
         self.registry._dsl_name_to_lib_graph.clear()
         for k, v in self._snapshot["dsl_name_to_lib_graph"].items():
             self.registry._dsl_name_to_lib_graph[k] = list(v)
@@ -124,6 +130,9 @@ class TestNativeDecompTable(TestCase):
         self.registry._filter_state._op_symbols.update(fs[1])
         self.registry._filter_state._dispatch_keys.clear()
         self.registry._filter_state._dispatch_keys.update(fs[2])
+
+        # Rebuild live libs from the restored graphs.
+        self.registry._register_all_overrides()
 
     # ------------------------------------------------------------------
     # Test helpers.
