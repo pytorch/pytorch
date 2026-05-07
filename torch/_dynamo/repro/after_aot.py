@@ -1090,7 +1090,7 @@ def _build_symbolic_wrapper(
 
             for idx, code in sorted(derived_compiled.items()):
                 derived_positions[idx]  # keep reference
-                syms[f"_derived_{idx}"] = eval(code, {"__builtins__": {}}, syms)  # noqa: S307
+                syms[f"_derived_{idx}"] = eval(code, {"__builtins__": {}}, syms)
 
             other_iter = iter(other)
             rebuilt = []
