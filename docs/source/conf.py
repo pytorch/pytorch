@@ -11,9 +11,6 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-import pytorch_sphinx_theme
-import sys
-sys.modules['pytorch_sphinx_theme2'] = pytorch_sphinx_theme
 
 import functools
 import inspect
