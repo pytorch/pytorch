@@ -3095,64 +3095,6 @@ def _codegen_backward_epilogue(
     )
 
 
-def _codegen_backward_epilogue(
-    fw_metadata: ViewAndMutationMeta,
-    maybe_subclass_meta: SubclassMeta | None,
-    codegen_wrap_fn: Callable[..., Any] | None,
-) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
-
-    num_bw_tokens = fw_metadata.num_backward_tokens
-    is_rng = fw_metadata.is_rng_op_functionalized
-    has_subclass = maybe_subclass_meta is not None
-
-    if has_subclass:
-        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
-    else:
-        lines = ["def _backward_epilogue(out):"]
-    code_globals: dict[str, object] = {}
-
-    if num_bw_tokens > 0:
-        lines.append(f"    out = out[:-{num_bw_tokens}]")
-
-    if is_rng:
-        if fw_metadata.num_outputs_rng_offset != 1:
-            raise AssertionError(
-                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
-            )
-        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
-        lines.append("    _oi = len(out) - 1")
-        lines.append("    _set_offset_(out[_oi])")
-        lines.append("    out = out[:_oi] + out[_oi + 1:]")
-
-    lines.append("    out = tuple(out)")
-
-    if has_subclass:
-        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
-        if (
-            maybe_subclass_meta.grad_input_metas is None
-        ):  # pyrefly: ignore [missing-attribute]
-            raise AssertionError("grad_input_metas must not be None")
-        code_globals["_grad_input_metas_"] = (
-            maybe_subclass_meta.grad_input_metas
-        )  # pyrefly: ignore [missing-attribute]
-        if codegen_wrap_fn is not None:
-            code_globals["_wrap_"] = codegen_wrap_fn
-            lines.append("    if make_subclass_override is None:")
-            lines.append("        return _wrap_(out)")
-        lines.append("    return _wrap_subclasses_(out,")
-        lines.append("        subclass_metas=_grad_input_metas_,")
-        lines.append("        included_subclass_symints=True, is_runtime=True,")
-        lines.append("        make_subclass_override=make_subclass_override)")
-    else:
-        lines.append("    return out")
-
-    source = "\n".join(lines)
-    return _compile_and_exec_source(
-        source, code_globals, "_backward_epilogue", "backward_epilogue"
-    )
-
-
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
