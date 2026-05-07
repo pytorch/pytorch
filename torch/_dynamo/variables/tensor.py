@@ -1575,6 +1575,25 @@ class TensorVariable(VariableTracker):
     def method___neg__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_negative_impl(tx)
 
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.pos,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2137,14 +2156,12 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
-    def is_python_hashable(self) -> bool:
-        # Tensors are hashable if they have an example_value (a fake tensor)
-        # Most VT's should have one.
-        # It'd be nice if at some point we could assert that they all have one
-        return self.as_proxy().node.meta["example_value"] is not None
-
-    def get_python_hash(self) -> int:
-        return hash(self.as_proxy().node.meta["example_value"])
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # Tensor.__hash__ is `return id(self)`, so hash == id.
+        # Always use the FakeTensor identity so aliased tensors
+        # (e.g. y = x.add_(1)) hash consistently.
+        fake = self.as_proxy().node.meta["example_value"]
+        return id(fake), True
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
@@ -2347,6 +2364,24 @@ class SymNodeVariable(VariableTracker):
     ) -> VariableTracker:
         return self.nb_negative_impl(tx)
 
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        return hash(self.evaluate_expr()), False
+
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.pos(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___pos__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
     def is_python_hashable(self) -> bool:
         return True
 
@@ -2383,6 +2418,14 @@ class NumpyNdarrayVariable(TensorVariable):
             proxy=proxy,
             **options,
         )
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, "unhashable type: 'numpy.ndarray'")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is

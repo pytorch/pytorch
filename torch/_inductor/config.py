@@ -468,13 +468,13 @@ estimate_op_runtime = "default"
 
 runtime_estimations_mms_benchmark: bool = False
 
-# unit: GB/s, uni-directional P2P bandwidth per card
-# default value is NVLink
-intra_node_bw = 300
+# unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
+# None = auto-detect from GPU generation; set to override.
+intra_node_bw: int | None = None
 
-# unit: GB/s, uni-directional P2P bandwidth per node
-# default value is InfiniBand
-inter_node_bw = 25
+# unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
+# None = auto-detect from GPU generation; set to override.
+inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
 # default value is PCIe; modify for your hardware or measured bandwidth
@@ -951,7 +951,14 @@ max_fusion_buffer_group_pairwise_attempts = 64
 # The check is disabled if set to None.
 max_fusion_unique_io_buffers: int | None = None
 
-# max number of inputs to generate cat as a pointwise op with masked loads
+# max number of inputs to always fuse cat as a pointwise op regardless of
+# per-input op complexity. Beyond this limit (up to max_pointwise_cat_inputs),
+# fusion is only applied when every input has a low op count.
+max_complex_pointwise_cat_inputs = 8
+
+# max number of inputs to generate cat as a pointwise op with masked loads.
+# Inputs beyond max_complex_pointwise_cat_inputs but within this limit are
+# only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -1028,7 +1035,7 @@ combo_kernel_max_num_nodes = 8
 combo_kernel_per_subkernel_blocks = False
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
-combo_kernel_autotune_grouping = False
+combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
 # Memory-aware combo kernel gating.
@@ -1240,7 +1247,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
