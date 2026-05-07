@@ -90,9 +90,12 @@ void OpenRegActivityProfilerSession::convertRecords(
     act.endTime   = endUs;
     act.device    = rec.device_id;
     act.resource  = rec.stream_id;
-    act.id        = static_cast<int32_t>(rec.correlation_id);
 
-    // flow links this device event back to the CPU-side op that launched it.
+    // correlation_id is uint64_t; Kineto's GenericTraceActivity uses int32_t
+    // for act.id and uint32_t for act.flow.id — both a Kineto API constraint.
+    // The casts produce identical bit patterns; safe because PyTorch correlation
+    // IDs never approach INT32_MAX in practice.    
+    act.id        = static_cast<int32_t>(rec.correlation_id);
     act.flow.id    = static_cast<uint32_t>(rec.correlation_id);
     act.flow.type  = libkineto::kLinkAsyncCpuGpu;
     act.flow.start = 0; // device side = end of the async CPU→device flow
