@@ -1652,7 +1652,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
-    @skip_unless_torch_gpu
     def test_interpolation_upsample_ops(self):
         """Test forward and backward for F.interpolate with DTensor.
 
