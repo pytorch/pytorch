@@ -3969,6 +3969,44 @@ class TestMPS(TestCaseMPS):
             ),
         )
 
+    # Regression test for uint32 element-offset wrap in MPS scatter/gather kernels
+    # (aten/src/ATen/mps/IndexKernels.h): a strided view whose storage-relative
+    # element offset crossed 2^32 routed writes/reads to (offset mod 2^32).
+    # uint8 chosen for memory economy; the bug is in element-offset arithmetic
+    # and is dtype-independent. Minimum 5-D shape that crosses 2^32 elements:
+    # max view offset is 8 * 2^29 + 1 * 2^28 = 2^32 + 2^28.
+    _OVERFLOW_SHAPE = (9, 1, 2, 1, 1 << 28)  # uint8, 4.5 GiB
+
+    def test_copy_strided_scatter_offset_overflow_n(self):
+        shape = self._OVERFLOW_SHAPE
+        required_memory = 1.05 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        x_cpu = torch.zeros(shape, dtype=torch.uint8)
+        x_mps = x_cpu.to('mps')
+
+        # 18 distinct markers, one per (dim-0, dim-2) position.
+        update = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
+
+        x_cpu[:, :, :, :, 0:1] = update
+        x_mps[:, :, :, :, 0:1] = update.to('mps')  # aten::slice + aten::copy_ -> scatter_kernel_n
+
+        self.assertEqual(x_mps.cpu(), x_cpu)
+
+    def test_copy_strided_gather_offset_overflow_n(self):
+        shape = self._OVERFLOW_SHAPE
+        required_memory = 1.05 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        x_cpu = torch.zeros(shape, dtype=torch.uint8)
+        markers = torch.arange(1, 19, dtype=torch.uint8).view(shape[0], 1, shape[2], 1, 1)
+        x_cpu[:, :, :, :, 0:1] = markers
+        x_mps = x_cpu.to('mps')
+
+        gathered_mps = x_mps[:, :, :, :, 0:1].contiguous().cpu()
+        gathered_cpu = x_cpu[:, :, :, :, 0:1].contiguous()
+        self.assertEqual(gathered_mps, gathered_cpu)
+
     # See https://github.com/pytorch/pytorch/issues/152701
     def test_jacfwd_cat(self):
         def fn(x, y):
@@ -5070,6 +5108,13 @@ class TestMPS(TestCaseMPS):
 
     # TODO: fold into OpInfo-based consistency tests once there's a hook to
     # exercise the two-pass reduction path for scalar outputs.
+    def test_sum_full_reduction_non_contiguous(self):
+        x = torch.randn((2, 4, 256, 64), device="mps")
+        for s in (x[:, :, 128:, :], x.transpose(-1, -2), x[::2]):
+            self.assertEqual(s.sum().cpu(), s.cpu().sum())
+            self.assertEqual(s.mean().cpu(), s.cpu().mean())
+            self.assertEqual(s.count_nonzero().cpu(), s.cpu().count_nonzero())
+
     def test_sum_full_reduction_repeated(self):
         """Regression test for the two-pass full reduction: when
         reduction_size doesn't divide evenly into num_groups, the last TG
@@ -6226,6 +6271,24 @@ class TestMPS(TestCaseMPS):
             # duplicate keys must not duplicate indices
             sorted_mi, _ = torch.sort(mi, dim=-1)
             self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(-1)).expand_as(mi))
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
+    @parametrize("descending", [False, True])
+    @parametrize("stable", [True, False])
+    def test_sort_single_block_stable(self, dtype, descending, stable):
+        max_ss = 1024 if dtype == torch.int64 else 4096
+
+        def make(shape):
+            return torch.randint(0, 4, shape).to(dtype)
+        for cpu in [make((4, 4)), make((8, max_ss)), make((16, 32, 64)),
+                    make((8, 2048))[:, ::2], make((1024, 8)).t()]:
+            mps = cpu.to("mps")
+            cv, ci = torch.sort(cpu, stable=stable, dim=-1, descending=descending)
+            mv, mi = torch.sort(mps, stable=stable, dim=-1, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, -1, mi).cpu(), mv.cpu())
+            if stable:
+                self.assertEqual(ci, mi.cpu())
 
     def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -8808,6 +8871,28 @@ class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    def test_bitwise_unaligned_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/182822
+        # Metal `setBuffer:offset:` requires the offset to be 4-byte aligned;
+        # the old custom bitwise kernels passed `storage_offset * element_size`
+        # directly, which dropped sub-4-byte offsets to 0 and read the wrong
+        # element. The TensorIterator-based path uses `device T*` array indexing
+        # which is offset-tolerant.
+        torch.manual_seed(0)
+        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            # Sliced tensor with a non-aligned start (offset 22 bytes for int8/bool, etc.)
+            high = 2 if dtype == torch.bool else 100
+            a_full = torch.randint(0, high, (123,), dtype=dtype, device='mps')
+            b_full = torch.randint(0, high, (101,), dtype=dtype, device='mps')
+            a = a_full[22:101]      # 79 elements, storage_offset=22
+            b = b_full[:79]         # 79 elements, contiguous from offset 0
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, b).cpu(), op(a.cpu(), b.cpu()))
+            # 0-d view (storage_offset=1) - the original bug repro
+            scalar_view = b_full[1]
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, scalar_view).cpu(), op(a.cpu(), scalar_view.cpu()))
+
     def test_logical_not(self):
         def helper(x):
             cpu_x = x
@@ -10142,6 +10227,22 @@ class TestSDPA(TestCaseMPS):
         out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
         self._compare_tensors(out_mps.cpu(), out_cpu)
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_sdpa_math_mps_bool_mask_1pass(self, dtype):
+        torch.manual_seed(0)
+        q = torch.randn(1, 1, 8, 64, dtype=dtype, device='mps')
+        k = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
+        v = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
+        mask = torch.eye(8, 512, dtype=torch.bool, device='mps')
+
+        out_mps, _ = torch.ops.aten._scaled_dot_product_attention_math_for_mps(
+            q, k, v, mask
+        )
+        out_cpu = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu()
+        )
+        self._compare_tensors(out_mps.cpu(), out_cpu)
+
     @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float])
     def test_sdpa_2pass(self, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/174861
@@ -10350,29 +10451,39 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float16, torch.float32])
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
-    @parametrize("head_dim", [64, 96, 128])  # 64, 96, 128 are for the fast kernel
+    @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
-    def test_fast_vector_attention(self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool):
+    @parametrize("is_causal", [False, True])
+    def test_fast_vector_attention(
+        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool
+    ):
+        if is_causal and with_mask:
+            self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
         batch = 1
         NH = 2
         q_len = 4  # <8 so that vector fast is eligible
         s_len = 16  # smaller than 1024 so that we use the one–pass variant
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
-        self.run_fast_attention_test(q, k, v, with_mask)
+        self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal)
 
     @parametrize("dtype", [torch.float32])  # float16 underflows sometimes, which leads to flaky tests
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
+    @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
-    def test_fast_vector_attention_2pass(self, dtype: torch.dtype, layout: str, with_mask: bool):
+    @parametrize("is_causal", [False, True])
+    def test_fast_vector_attention_2pass(
+        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool
+    ):
+        if is_causal and with_mask:
+            self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
         batch = 1
         NH = 32
         q_len = 8
         s_len = 1024  # large enough to trigger the two–pass path
-        head_dim = 64  # supported head dimension for vector attention
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
-        self.run_fast_attention_test(q, k, v, with_mask)
+        self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal)
 
     def test_fast_vector_permuted_inputs_regression(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/181133
@@ -10393,6 +10504,21 @@ class TestSDPA(TestCaseMPS):
         y_mps = F.scaled_dot_product_attention(q_mps, k_mps, v_mps)
         y_cpu = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu)
         self._compare_tensors(y_mps.cpu(), y_cpu)
+
+    def test_sdpa_causal_with_attn_mask_raises(self):
+        # Passing both is_causal=True and an explicit attn_mask is ill-defined
+        # input and must raise rather than crash
+        torch.manual_seed(0)
+        q = torch.randn(1, 2, 4, 64, device="mps")
+        k = torch.randn(1, 2, 16, 64, device="mps")
+        v = torch.randn(1, 2, 16, 64, device="mps")
+        mask = torch.zeros(1, 2, 4, 16, dtype=torch.bool, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
+            ):
+                F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=True)
 
     @unittest.skip("Full attention fast kernel not implemented yet")
     @parametrize("dtype", [torch.float16, torch.float32])
