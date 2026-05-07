@@ -1,0 +1,30 @@
+--- a/rms_final_reduce.py
++++ b/rms_final_reduce.py
+@@ -134,11 +134,6 @@
+     )
+ 
+ 
+-@torch.library.custom_op(
+-    "quack::rms_final_reduce_out",
+-    mutates_args=("rstd",),
+-    device_types="cuda",
+-)
+ def _rms_final_reduce_out(
+     x: Tensor,
+     rstd: Tensor,
+@@ -152,15 +147,6 @@
+     compiled_fn(x, rstd, scale, eps)
+ 
+ 
+-@_rms_final_reduce_out.register_fake
+-def _rms_final_reduce_out_fake(x, rstd, scale, eps):
+-    from quack.cache_utils import COMPILE_ONLY
+-
+-    if COMPILE_ONLY and not isinstance(x.shape[0], torch.SymInt):
+-        x_dtype = torch2cute_dtype_map[x.dtype]
+-        _compile_rms_final_reduce(x_dtype, x.shape[1])
+-
+-
+ def rms_final_reduce(
+     x: Tensor,  # (M, N) partial squared sums
+     scale: float,  # typically 1.0 / total_columns
