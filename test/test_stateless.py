@@ -715,7 +715,6 @@ class TestStatelessFunctionalAPI(TestCase):
             out = functional_call(mod, a, torch.ones(()), strict=True)
         self.assertTrue(not hasattr(mod, 'extra'))
 
-
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
