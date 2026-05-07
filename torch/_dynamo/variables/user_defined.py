@@ -1324,6 +1324,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.value is other.value
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented yet for sourceless UserDefinedClassVariable."
+        )
+
     def get_real_python_backed_value(self) -> object:
         return self.value
 

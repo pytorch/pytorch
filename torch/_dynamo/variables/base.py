@@ -600,7 +600,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def reconstruct_pycode(self, codegen: PyCodegen) -> str:
-        raise NotImplementedError
+        raise NotImplementedError(f"reconstruct_pycode not implemented for {self}")
 
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
