@@ -2155,6 +2155,21 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     return _symm_mem_pools[device]
 
 
+def _cuda_get_out(
+    dst: torch.Tensor, src: torch.Tensor, peer: int, group_name: c10d.GroupName
+) -> None:
+    hdl = rendezvous(src, group_name)
+    if hdl is None:
+        raise RuntimeError("get: src must be allocated from symmetric memory")
+    if peer < 0 or peer >= hdl.world_size:
+        raise ValueError("get: invalid peer")
+    if hdl.offset % src.element_size() != 0:
+        raise RuntimeError("get: source storage offset is not element-aligned")
+    storage_offset = hdl.offset // src.element_size() + int(src.storage_offset())
+    remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
+    dst.copy_(remote_src)
+
+
 # One-sided communication APIs.
 def get(
     dst: torch.Tensor,
@@ -2200,16 +2215,7 @@ def get(
     elif backend == "NCCL":
         torch.ops.symm_mem.nccl_get_out(dst, src, peer, group_name)
     elif backend == "CUDA":
-        hdl = rendezvous(src, group_name)
-        if hdl is None:
-            raise RuntimeError("get: src must be allocated from symmetric memory")
-        if peer < 0 or peer >= hdl.world_size:
-            raise ValueError("get: invalid peer")
-        if hdl.offset % src.element_size() != 0:
-            raise RuntimeError("get: source storage offset is not element-aligned")
-        storage_offset = hdl.offset // src.element_size() + int(src.storage_offset())
-        remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
-        dst.copy_(remote_src)
+        _cuda_get_out(dst, src, peer, group_name)
     else:
         raise ValueError(f"get: unsupported backend: {backend}")
 
