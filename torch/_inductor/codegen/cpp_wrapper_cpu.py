@@ -3239,6 +3239,9 @@ if (!custom_op_wrapper) {
         int_call_str = self._generate_temporary_array_pointer(
             "int64_t", int_call_args, force_mutable=True
         )
+        tensor_call_args = self.codegen_runtime_lookup_tensor_call_args(
+            tensor_call_args
+        )
         tensor_call_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", tensor_call_args, force_mutable=True
         )
@@ -3252,6 +3255,11 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        return tensor_call_args
 
     def generate_reset_kernel_saved_flags(self):
         pass
