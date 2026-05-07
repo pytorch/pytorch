@@ -196,18 +196,79 @@ def get_device_information(device_type: str) -> dict[str, str]:
     return metadata
 
 
+_MISSING = object()
+
+
+def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
+    """
+    Like functools.cache but with a prefetch() method that starts computing
+    the value in a background thread, and a set() method for prepopulating.
+    """
+    _cache: T | object = _MISSING
+    _lock = threading.Lock()
+    _future: Future[T] | None = None
+
+    def wrapper() -> T:
+        nonlocal _cache, _future
+        with _lock:
+            if _cache is not _MISSING:
+                return _cache  # type: ignore[return-value]
+            if _future is not None:
+                _cache = _future.result()
+                _future = None
+                return _cache  # type: ignore[return-value]
+            _cache = func()
+            return _cache  # type: ignore[return-value]
+
+    def set_val(val: T) -> None:
+        nonlocal _cache
+        with _lock:
+            assert _cache is _MISSING
+            _cache = val
+
+    def clear() -> None:
+        nonlocal _cache, _future
+        with _lock:
+            _cache = _MISSING
+            _future = None
+
+    def prefetch() -> None:
+        nonlocal _future
+        from concurrent.futures import ThreadPoolExecutor
+
+        with _lock:
+            if _cache is not _MISSING or _future is not None:
+                return
+            executor = ThreadPoolExecutor(max_workers=1)
+            _future = executor.submit(func)
+            executor.shutdown(wait=False)
+
+    wrapper.set = set_val  # type: ignore[attr-defined]
+    wrapper.clear = clear  # type: ignore[attr-defined]
+    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
+    return wrapper
+
+
+@torch_key_cache
+def triton_key() -> str | None:
+    from torch._inductor.runtime.triton_compat import (
+        HAS_TRITON,
+        triton_key as _triton_key_impl,
+    )
+
+    # Use triton_key instead of triton.__version__ as the version
+    # is not updated with each code change
+    if HAS_TRITON:
+        return _triton_key_impl()
+    return None
+
+
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
-
-        if HAS_TRITON:
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
+        with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
-        else:
-            triton_version = None
 
         try:
             system: dict[str, Any] = {
@@ -877,59 +938,6 @@ def build_code_hash(
     per_file_hashes.sort()
     for _name, digest in per_file_hashes:
         hasher.update(digest)
-
-
-_MISSING = object()
-
-
-def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
-    """
-    Like functools.cache but with a prefetch() method that starts computing
-    the value in a background thread, and a set() method for prepopulating.
-    """
-    _cache: T | object = _MISSING
-    _lock = threading.Lock()
-    _future: Future[T] | None = None
-
-    def wrapper() -> T:
-        nonlocal _cache, _future
-        with _lock:
-            if _cache is not _MISSING:
-                return _cache  # type: ignore[return-value]
-            if _future is not None:
-                _cache = _future.result()
-                _future = None
-                return _cache  # type: ignore[return-value]
-            _cache = func()
-            return _cache  # type: ignore[return-value]
-
-    def set_val(val: T) -> None:
-        nonlocal _cache
-        with _lock:
-            assert _cache is _MISSING
-            _cache = val
-
-    def clear() -> None:
-        nonlocal _cache, _future
-        with _lock:
-            _cache = _MISSING
-            _future = None
-
-    def prefetch() -> None:
-        nonlocal _future
-        from concurrent.futures import ThreadPoolExecutor
-
-        with _lock:
-            if _cache is not _MISSING or _future is not None:
-                return
-            executor = ThreadPoolExecutor(max_workers=1)
-            _future = executor.submit(func)
-            executor.shutdown(wait=False)
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
-    return wrapper
 
 
 @torch_key_cache
