@@ -683,7 +683,8 @@ def _get_compare_op_arg(op_str: str) -> int:
     code = compile(f"a {op_str} b", "<compare>", "eval")
     for instr in dis.get_instructions(code):
         if instr.opname == "COMPARE_OP":
-            assert instr.arg is not None
+            if instr.arg is None:
+                raise RuntimeError(f"COMPARE_OP for {op_str} has no arg")
             return instr.arg
     raise RuntimeError(f"Could not find COMPARE_OP for {op_str}")
 
