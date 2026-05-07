@@ -3059,12 +3059,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        # Ops that consume scalar values from tensors (via .item()) for computation only,
-        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
-        # create unbacked symbols that are not in the outputs, causing
-        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
-        # since they only affect tensor values, not shapes.
+        # Ops that consume scalar values from tensors (via .item()) for computation
+        # only, not for output shapes. When capture_scalar_outputs is enabled,
+        # these ops would create unbacked symbols that don't affect the outputs,
+        # causing PendingUnbackedSymbolNotFound errors. We ignore these fresh
+        # unbacked symbols since they only affect tensor values, not shapes.
+        # When a 0-d tensor is passed for a Scalar argument, the C++ arg parser
+        # (python_arg_parser.cpp:scalar_slow) calls .item() on it, creating an
+        # unbacked symbol consumed for arithmetic only.
+        #
+        # We use an explicit allowlist rather than generically suppressing for
+        # any 0-d tensor argument because an op could legitimately create
+        # unbacked symbols for data-dependent output shapes (e.g., nonzero).
+        # Suppressing those would silently drop binding information.
+        # See also: [Note: 0-d tensor Scalar args and unbacked symbols] in tensor.py.
         ops_consuming_unbacked_scalars = {
+            # ops with Scalar alpha/beta/value arguments
+            torch.add,
+            torch.sub,
+            torch.addmm,
+            torch.addmv,
+            torch.addr,
+            torch.addbmm,
+            torch.baddbmm,
+            torch.addcmul,
+            torch.addcdiv,
             # foreach ops with scalar/alpha arguments
             torch._foreach_add,
             torch._foreach_add_,
