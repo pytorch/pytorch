@@ -1239,6 +1239,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_as_number->nb_positive slot.
+
+        Called when type_implements_nb_positive returns True for this type.
+        Subclasses override to provide the actual positive.
+        """
+        unimplemented(
+            gb_type="nb_positive_impl not implemented",
+            context=f"{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
+            explanation=f"The type {self.python_type_name()} has an nb_positive C slot but "
+            "the corresponding VariableTracker doesn't implement nb_positive_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def __init__(
         self,
         *,
