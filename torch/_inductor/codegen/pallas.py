@@ -3310,7 +3310,7 @@ class PallasKernel(SIMDKernel):
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
         n_reduction_dims = sum(
-            1 for entry in self.range_tree_nodes.values() if entry.is_reduction
+            1 for var, entry in self.range_tree_nodes.items() if entry.is_reduction
         )
 
         is_partial_reduction = (
@@ -4095,7 +4095,7 @@ from torch._inductor.runtime.runtime_utils import (
         """
         pw_idx = 0
         r_idx = 0
-        n_pw = sum(1 for e in self.range_tree_nodes.values() if not e.is_reduction)
+        n_pw = sum(1 for _, e in self.range_tree_nodes.items() if not e.is_reduction)
         for sym, entry in self.range_tree_nodes.items():
             if sym == var_sym:
                 return pw_idx if not entry.is_reduction else n_pw + r_idx
