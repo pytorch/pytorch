@@ -72,6 +72,8 @@ struct AllocatorConfigInfo {
   bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
+  size_t max_round_threshold;
+  size_t max_cached_size;
 };
 
 struct SnapshotInfo {

@@ -85,6 +85,15 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  TORCH_CHECK(
+      result_shape.size() >= (size_t)self.dim(),
+      "The number of sizes provided (",
+      result_shape.size(),
+      ") ",
+      "must be greater or equal to the number of dimensions in the tensor (",
+      self.dim(),
+      ")");
+
   // Bypass OneDNN optimization path for float64 due to lack of full double
   // precision support.
   if (mat1.scalar_type() == at::kDouble) {
@@ -328,12 +337,6 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   return result;
 }
 
-Tensor bmm(const Tensor& self, const Tensor& batch2) {
-  auto result = at::empty({0}, self.options());
-  at::native::xpu::bmm_out(self, batch2, result);
-  return result;
-}
-
 Tensor& addmv_out(
     const Tensor& self,
     const Tensor& mat,
@@ -573,13 +576,17 @@ Tensor& _int_mm_out_xpu(
       mat2.size(0));
 
   TORCH_CHECK(
-      self.dtype() == at::kChar,
-      "Expected self dtype to be of type int8 but got ",
-      self.dtype());
+      self.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      self.scalar_type());
   TORCH_CHECK(
-      mat2.dtype() == at::kChar,
-      "Expected mat2 dtype to be of type int8 but got ",
-      mat2.dtype());
+      mat2.scalar_type() == at::kChar,
+      "expected scalar type ",
+      at::kChar,
+      " but found ",
+      mat2.scalar_type());
   TORCH_CHECK(
       result.dtype() == at::kInt,
       "Expected result dtype to be of type kInt but got ",

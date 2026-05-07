@@ -32,7 +32,7 @@ def get_cudnn_mode(mode):
         # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.gru)
     else:
-        raise ValueError(f"Unknown mode: {mode}")  # noqa: TRY002
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 # NB: We don't actually need this class anymore (in fact, we could serialize the
