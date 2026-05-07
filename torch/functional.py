@@ -783,24 +783,6 @@ else:
     _unique_impl_out = tuple[Tensor, Tensor, Tensor]
 
 
-def _unique_torch_function(
-    input: Tensor,
-    sorted: bool = True,
-    return_inverse: bool = False,
-    return_counts: bool = False,
-    dim: int | None = None,
-) -> Any:
-    return handle_torch_function(
-        unique,
-        (input,),
-        input,
-        sorted=sorted,
-        return_inverse=return_inverse,
-        return_counts=return_counts,
-        dim=dim,
-    )
-
-
 def _unique_impl(
     input: Tensor,
     sorted: bool = True,
@@ -962,6 +944,17 @@ def _unique_impl(
                  [0, 1],
                  [1, 0]]])
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            unique,
+            (input,),
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+            return_counts=return_counts,
+            dim=dim,
+        )
+
     if dim is not None:
         output, inverse_indices, counts = _VF.unique_dim(
             input,
@@ -978,22 +971,6 @@ def _unique_impl(
             return_counts=return_counts,
         )
     return output, inverse_indices, counts
-
-
-def _unique_consecutive_torch_function(
-    input: Tensor,
-    return_inverse: bool = False,
-    return_counts: bool = False,
-    dim: int | None = None,
-) -> Any:
-    return handle_torch_function(
-        unique_consecutive,
-        (input,),
-        input,
-        return_inverse=return_inverse,
-        return_counts=return_counts,
-        dim=dim,
-    )
 
 
 def _unique_consecutive_impl(
@@ -1051,25 +1028,19 @@ def _unique_consecutive_impl(
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            unique_consecutive,
+            (input,),
+            input,
+            return_inverse=return_inverse,
+            return_counts=return_counts,
+            dim=dim,
+        )
     output, inverse_indices, counts = _VF.unique_consecutive(  # type: ignore[attr-defined]
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim
     )
     return output, inverse_indices, counts
-
-
-def _return_inverse_and_counts(
-    input,
-    sorted=True,
-    return_inverse=False,
-    return_counts=False,
-    dim=None,
-):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor, Tensor]
-
-    if has_torch_function_unary(input):
-        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
-
-    return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
 
 def _return_counts(
@@ -1082,7 +1053,7 @@ def _return_counts(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
+        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, _, counts = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output, counts
@@ -1098,7 +1069,7 @@ def _return_output(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
 
     if has_torch_function_unary(input):
-        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
+        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, _, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output
@@ -1114,7 +1085,7 @@ def _return_inverse(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
+        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, inverse_indices, _ = _unique_impl(
         input, sorted, return_inverse, return_counts, dim
@@ -1136,7 +1107,7 @@ _return_inverse_true = boolean_dispatch(
     arg_name="return_counts",
     arg_index=3,
     default=False,
-    if_true=_return_inverse_and_counts,
+    if_true=_unique_impl,
     if_false=_return_inverse,
     module_name=__name__,
     func_name="unique",
@@ -1157,21 +1128,6 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
-def _consecutive_return_inverse_and_counts(
-    input,
-    return_inverse=False,
-    return_counts=False,
-    dim=None,
-):
-    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor]
-    if has_torch_function_unary(input):
-        return _unique_consecutive_torch_function(
-            input, return_inverse, return_counts, dim
-        )
-
-    return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
-
-
 def _consecutive_return_counts(
     input,
     return_inverse=False,
@@ -1181,9 +1137,7 @@ def _consecutive_return_counts(
     # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_torch_function(
-            input, return_inverse, return_counts, dim
-        )
+        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, _, counts = _unique_consecutive_impl(
         input, return_inverse, return_counts, dim
@@ -1200,9 +1154,7 @@ def _consecutive_return_output(
     # type: (Tensor, bool, bool, Optional[int]) -> Tensor
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_torch_function(
-            input, return_inverse, return_counts, dim
-        )
+        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, _, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
     return output
@@ -1217,9 +1169,7 @@ def _consecutive_return_inverse(
     # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_torch_function(
-            input, return_inverse, return_counts, dim
-        )
+        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, inverse_indices, _ = _unique_consecutive_impl(
         input, return_inverse, return_counts, dim
@@ -1241,7 +1191,7 @@ _consecutive_return_inverse_true = boolean_dispatch(
     arg_name="return_counts",
     arg_index=1,
     default=False,
-    if_true=_consecutive_return_inverse_and_counts,
+    if_true=_unique_consecutive_impl,
     if_false=_consecutive_return_inverse,
     module_name=__name__,
     func_name="unique_consecutive",
