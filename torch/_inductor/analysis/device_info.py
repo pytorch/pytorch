@@ -201,8 +201,28 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     """
     return _device_mapping.get(name.upper())
 
+def _get_device_name(device: torch.device | None = None) -> str | None:
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            device = torch.device("xpu")
+        else:
+            return None
 
-def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
+    if device.type == "cuda":
+        return torch.cuda.get_device_name(device)
+
+    if device.type == "xpu" and hasattr(torch, "xpu"):
+        get_name = getattr(torch.xpu, "get_device_name", None)
+        if get_name is not None:
+            if device.index is None:
+                return get_name()
+            return get_name(device.index)
+
+    return None
+
+def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False, device: torch.device | None = None)-> float | None:
     """
     Get the theoretical *dense* TFLOPS of the device for a given dtype.
 
@@ -211,10 +231,11 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     callers always receive the throughput achievable by cuBLAS/cuDNN on
     non-sparse data.
     """
-    name: str | None = torch.cuda.get_device_name()
+    name = _get_device_name(device)
     if name is None:
-        log.info("No device found, returning None")
+        log.info("No datasheet device name found for %s, returning None", device)
         return None
+
     device_info = lookup_device_info(name)
     if device_info is None:
         log_str = f"Device {name} not in datasheet, returning None"

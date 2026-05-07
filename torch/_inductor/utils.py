@@ -3056,7 +3056,7 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
+def get_device_tflops(dtype: torch.dtype, device: torch.device | None = None,) -> float:
     """
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
@@ -3066,6 +3066,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     )
     if ds_tops is not None:
         return ds_tops
+
+    if device is not None and device.type != "cuda":
+        return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
