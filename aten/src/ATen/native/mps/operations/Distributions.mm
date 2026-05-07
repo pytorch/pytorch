@@ -384,13 +384,19 @@ Tensor& random_mps_(Tensor& self, std::optional<Generator> gen) {
   return random_mps_(self, 0, std::nullopt, gen);
 }
 
+// `randoms_per_thread` is the number of Philox-4x32-10 calls each thread
+// makes; `elements_per_thread` is how many output elements that thread
+// writes. The host advances the generator offset by exactly the number of
+// philox indices the kernel consumes (`randoms_per_thread * threads`),
+// rather than by `randoms_per_element * numel` as before, which could
+// over-advance by 4x for kernels that pack 4 elements per thread.
 static Tensor& distribution_kernel_mps_impl(Tensor& self,
                                             double param1,
                                             double param2,
                                             const std::string& kernel_name,
-                                            int64_t randoms_per_element,
+                                            int64_t randoms_per_thread,
                                             std::optional<Generator> gen,
-                                            int64_t elements_per_thread = 1) {
+                                            int64_t elements_per_thread = 4) {
   if (self.numel() == 0) {
     return self;
   }
@@ -401,6 +407,7 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
   auto stream = getCurrentMPSStream();
   const auto needs_copy = !self.is_contiguous();
   auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+  const int64_t threads = (output.numel() + elements_per_thread - 1) / elements_per_thread;
 
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc(kernel_name + "_" + scalarToMetalTypeString(output));
@@ -412,24 +419,20 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
       std::lock_guard<std::mutex> lock(mps_gen->mutex_);
       seed = static_cast<int64_t>(mps_gen->current_seed());
       base_offset = static_cast<int64_t>(mps_gen->get_offset());
-      mps_gen->set_offset(base_offset + randoms_per_element * output.numel());
+      mps_gen->set_offset(base_offset + randoms_per_thread * threads);
     }
 
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
+        auto numel = static_cast<uint32_t>(output.numel());
         mtl_setArgs(computeEncoder,
                     output,
                     std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
                     std::array<long, 2>{seed, base_offset});
-        if (elements_per_thread > 1) {
-          auto numel = static_cast<uint32_t>(output.numel());
-          mtl_setBytes(computeEncoder, numel, 3);
-          mtl_dispatch1DJob(computeEncoder, pso, (numel + elements_per_thread - 1) / elements_per_thread);
-        } else {
-          mtl_dispatch1DJob(computeEncoder, pso, output.numel());
-        }
+        mtl_setBytes(computeEncoder, numel, 3);
+        mtl_dispatch1DJob(computeEncoder, pso, threads);
       }
     });
   }
@@ -527,7 +530,7 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
 
 Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
-  return distribution_kernel_mps_impl(self, mean, std, "log_normal", 2, gen);
+  return distribution_kernel_mps_impl(self, mean, std, "log_normal", 1, gen);
 }
 
 Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {

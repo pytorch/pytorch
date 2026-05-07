@@ -4612,7 +4612,15 @@ def gather(
     group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     my_group_rank = group.rank()
     _validate_output_list_for_rank(my_group_rank, group_dst, gather_list)
-    output_tensors = [gather_list] if group_dst == my_group_rank else []
+    if group_dst == my_group_rank:
+        output_tensors = [gather_list]
+    elif _use_torchcomms_enabled():
+        # TorchComms BackendWrapper::gather requires exactly one entry in
+        # outputTensors on all ranks (including non-dst), so we pass [[]] instead
+        # of [] to satisfy the TORCH_CHECK(outputTensors.size() == 1) guard.
+        output_tensors = [[]]
+    else:
+        output_tensors = []
     input_tensors = [tensor]
 
     opts = GatherOptions()
