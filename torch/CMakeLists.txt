@@ -526,8 +526,13 @@ else()
 endif()
 
 set(CUDA_VERSION "")
+set(CUDA_VERSION_BUILD "")
 if(CUDAToolkit_VERSION_MAJOR)
   set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}")
+  if(DEFINED CUDAToolkit_VERSION_PATCH)
+    set(CUDA_VERSION_BUILD
+        "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}.${CUDAToolkit_VERSION_PATCH}")
+  endif()
 endif()
 
 add_custom_target(
@@ -535,6 +540,7 @@ add_custom_target(
   "${Python_EXECUTABLE}" -m tools.generate_torch_version
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
+    --cuda-version-build=${CUDA_VERSION_BUILD}
     --hip-version=${HIP_VERSION_CLEAN}
     --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
