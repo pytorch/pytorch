@@ -18,7 +18,7 @@ WorkerInfo::WorkerInfo(std::string name, int64_t id)
       id <= std::numeric_limits<worker_id_t>::max(),
       "RPC worker id ",
       id,
-      " out of bound of int16_t.");
+      " out of bounds for int16_t.");
 }
 
 WorkerInfo::WorkerInfo(std::string name, worker_id_t id)

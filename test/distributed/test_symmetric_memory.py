@@ -310,6 +310,72 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_rendezvous_custom_backend(self) -> None:
+        # Simulate the ncclx multi-backend setup.  NCCLXStub wraps NCCL
+        # (CUDA-only, like ncclx) and registers via extended_api=True.
+        # When new_group() is called with "cpu:gloo,cuda:ncclx_stub",
+        # _new_process_group_helper can leave the wrapper ProcessGroup's
+        # backendType_ as UNDEFINED.  This used to crash
+        # getUsePgForSymmMemRendezvous() because getDefaultBackend() fails
+        # for UNDEFINED.  The fix looks up the CUDA backend directly, so
+        # PG-based rendezvous works even with UNDEFINED default backend.
+        self._init_process()
+
+        import pickle
+
+        from torch._C._distributed_c10d import _DistributedBackendOptions, NCCLXStub
+
+        def create_ncclx_stub(dist_opts: _DistributedBackendOptions, pg_options=None):
+            if pg_options is None:
+                pg_options = dist.ProcessGroupNCCL.Options()
+            backend = NCCLXStub(
+                dist_opts.store,
+                dist_opts.group_rank,
+                dist_opts.group_size,
+                pg_options,
+            )
+            backend.setUsePgForSymmMemRendezvous(True)
+            return backend
+
+        dist.Backend.register_backend(
+            "ncclx_stub", create_ncclx_stub, extended_api=True, devices=["cuda"]
+        )
+
+        pg = dist.new_group(
+            list(range(self.world_size)), backend="cpu:gloo,cuda:ncclx_stub"
+        )
+
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
+
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
+            "entries"
+        ]
+        ag_entries = [
+            e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
+        ]
+        self.assertGreaterEqual(
+            len(ag_entries),
+            1,
+            f"expected NCCL _all_gather_base from PG rendezvous, "
+            f"got: {[e['profiling_name'] for e in entries]}",
+        )
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_pg_rendezvous_abort_after(self) -> None:
         self._init_process()
 

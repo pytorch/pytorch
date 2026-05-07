@@ -13,9 +13,11 @@ architectures:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -69,7 +71,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
@@ -77,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.4; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -232,6 +234,70 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
             f"cuDNN version mismatch for CUDA {arch_version}: "
             f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
             f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
+        )
+
+
+_BUILD_CUDA_SH = REPO_ROOT / ".ci" / "manywheel" / "build_cuda.sh"
+_RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
+
+
+def _extract_arch_list_block() -> str:
+    """Extract the self-contained arch-list logic from build_cuda.sh."""
+    text = _BUILD_CUDA_SH.read_text()
+    start_marker = "# Function to remove architectures from a list"
+    end_marker = "export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}"
+    start = text.index(start_marker)
+    end = text.index(end_marker)
+    return text[start:end]
+
+
+def _build_arch_list(cuda_version: str, arch: str) -> set[int]:
+    """Run the build_cuda.sh arch-list logic for (cuda_version, arch)."""
+    block = _extract_arch_list_block()
+    cmd = (
+        f'CUDA_VERSION="{cuda_version}" ARCH="{arch}"\n'
+        f"{{\n{block}\n}} >/dev/null\n"
+        'printf "%s" "$TORCH_CUDA_ARCH_LIST"\n'
+    )
+    out = subprocess.run(
+        ["bash", "-c", cmd], check=True, capture_output=True, text=True
+    ).stdout
+    result: set[int] = set()
+    for part in out.split(";"):
+        part = part.strip().removesuffix("+PTX")
+        if not part:
+            continue
+        major, minor = part.split(".")
+        result.add(int(major) * 10 + int(minor))
+    return result
+
+
+def _read_runtime_release_table() -> dict[str, dict[str, set[int]]]:
+    """Parse PYTORCH_RELEASES_CODE_CC out of torch/cuda/__init__.py."""
+    tree = ast.parse(_RUNTIME_CUDA_INIT.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "PYTORCH_RELEASES_CODE_CC"
+            and node.value is not None
+        ):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py")
+
+
+def validate_runtime_release_table_consistency() -> None:
+    """Ensure torch/cuda/__init__.py recommendation table matches the build matrix."""
+    expected = {
+        cuda: {arch: _build_arch_list(cuda, arch) for arch in ("x86_64", "aarch64")}
+        for cuda in CUDA_ARCHES
+    }
+    actual = _read_runtime_release_table()
+    if actual != expected:
+        raise RuntimeError(
+            "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
+            "with .ci/manywheel/build_cuda.sh.\n"
+            f"Expected: {expected}\nActual:   {actual}"
         )
 
 
@@ -505,6 +571,7 @@ for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
 del arch_version
+validate_runtime_release_table_consistency()
 
 
 if __name__ == "__main__":

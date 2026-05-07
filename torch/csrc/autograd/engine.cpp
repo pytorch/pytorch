@@ -1318,7 +1318,7 @@ auto Engine::execute(
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
-  TORCH_CHECK_VALUE(
+  TORCH_INTERNAL_ASSERT(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");
 
   // A fresh first time Engine::execute call should start on the CPU device,
