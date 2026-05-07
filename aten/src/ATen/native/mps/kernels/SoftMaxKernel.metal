@@ -1517,7 +1517,6 @@ kernel void softmax_backward_coalesced(
 
   float local_dot = 0.0f;
   for (uint off = tid; off < total; off += lsize) {
-    uint b_idx = off / sa;
     local_dot += float(grad_output[base_a + off]) * float(output[base_b + off]);
   }
 
