@@ -78,7 +78,13 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
-from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
+from torch.fx.experimental.dynamic_spec import (
+    IntVar,
+    LeafSpec,
+    ObjectSpec,
+    ShapesSpec,
+    TensorSpec,
+)
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -135,6 +141,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -145,6 +152,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -348,16 +356,70 @@ def safe_has_grad(t: object) -> bool:
 def lookup_spec_from_dynamo_source(
     source: Source, shapes_spec: ShapesSpec | None
 ) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
-    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    Returns the leaf ``TensorSpec`` / ``IntVar`` / ``int`` at the
+    corresponding path, or ``None`` if the source isn't covered.
+    Supported source kinds:
+
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec._fields[member]``.
+    - ``NNModuleSource`` (and subclasses) — transparently unwrapped.
+      ``nn.Module`` attribute access produces
+      ``AttrSource(NNModuleSource(...))``; ``NNModuleSource`` is a
+      guard-semantics marker, not an access step, so the walk skips
+      past it.
+    - ``DictGetItemSource(UnspecializedParamBufferSource(_,
+      '_parameters' | '_buffers'), key)`` — dynamo rewrites
+      ``self.weight`` internally as ``self._parameters["weight"]``;
+      the walk collapses that pair into a single ``("attr", key)``
+      step so the user-facing attribute name matches the spec.
+
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
     if shapes_spec is None or shapes_spec._params is None:
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
+
+    # Walk source.base chain to its root, collecting (kind, key) entries.
+    path: list[tuple[str, Any]] = []
+    cur: Source = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, NNModuleSource):
+            cur = cur.base
+            continue
+        # ``self.weight`` → dynamo emits
+        # ``DictGetItemSource(UnspecializedParamBufferSource(_,
+        # '_parameters'), 'weight')``. Collapse this pair into a single
+        # ``("attr", key)`` step so the user's ``ObjectSpec({"weight":
+        # ...})`` matches.
+        if isinstance(cur, DictGetItemSource) and isinstance(
+            cur.base, UnspecializedParamBufferSource
+        ):
+            path.append(("attr", cur.index))
+            cur = cur.base.base
+            continue
+        if isinstance(cur, AttrSource):
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
+    if not cur.is_input:
         return None
-    return shapes_spec._params._named_args.get(source.local_name)
+    path.reverse()
+
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec._params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
+            return None
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    return spec
 
 
 class _missing:
@@ -2216,6 +2278,22 @@ class VariableBuilder:
             # / named buffers
             # NOTE: This is not likely to happen but worth guarding to avoid
             # exception
+            # Skip the static-mark when a spec applies — the spec
+            # routes the tensor through ``_automatic_dynamic`` and
+            # drives shape decisions there. Without this, the
+            # ``mark_static_input`` call below stamps the tensor with
+            # ``_dynamo_static_input_type = "guarded"``, and downstream
+            # paths in ``wrap_tensor`` treat it as a graph attribute
+            # regardless of spec.
+            def _has_spec_for_attr(name: str) -> bool:
+                attr_source = AttrSource(self.source, name)
+                return (
+                    lookup_spec_from_dynamo_source(
+                        attr_source, config._shapes_spec
+                    )
+                    is not None
+                )
+
             if (
                 callable(value.named_parameters)
                 # type: ignore[attr-defined]
@@ -2223,7 +2301,9 @@ class VariableBuilder:
             ):
                 try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    for _, p in value.named_parameters():
+                    for name, p in value.named_parameters():
+                        if _has_spec_for_attr(name):
+                            continue
                         self.mark_static_input(p, guard=freezing)
                 except TypeError as e:
                     raise_observed_exception(type(e), self.tx, args=list(e.args))
@@ -2235,7 +2315,9 @@ class VariableBuilder:
             ):
                 try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    for _, b in value.named_buffers():
+                    for name, b in value.named_buffers():
+                        if _has_spec_for_attr(name):
+                            continue
                         self.mark_static_input(b, guard=freezing)
                 except TypeError as e:
                     raise_observed_exception(type(e), self.tx, args=list(e.args))

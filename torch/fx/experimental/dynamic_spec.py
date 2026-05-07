@@ -19,6 +19,7 @@ __all__ = [
     "ShapeVar",
     "IntVar",
     "TensorSpec",
+    "ObjectSpec",
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
@@ -161,10 +162,73 @@ class TensorSpec:
         }
 
 
+class ObjectSpec:
+    """Spec for any Python object's attributes.
+
+    Models attribute access on a Python object (e.g., an ``nn.Module``'s
+    parameters / buffers / submodules; ``self`` inside an instance
+    method). Each field corresponds to an ``AttrSource`` in the dynamo
+    builder — when ``model.weight`` is traced, the spec walk descends
+    via ``ObjectSpec._fields["weight"]``.
+
+    Constructor::
+
+        ObjectSpec({name: IntermediateSpec, ...})
+
+    Values may be leaves (``TensorSpec`` / ``IntVar`` / ``int`` /
+    ``None``) or another ``ObjectSpec`` for recursion.
+
+    Example::
+
+        ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+        ObjectSpec({"inner": ObjectSpec({"weight": TensorSpec([ShapeVar("h")])})})
+    """
+
+    def __init__(self, fields: dict[str, IntermediateSpec] | None = None) -> None:
+        self._fields: dict[str, IntermediateSpec] = dict(fields) if fields else {}
+
+    def __getitem__(self, name: str) -> IntermediateSpec:
+        return self._fields[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def items(self) -> Any:
+        return self._fields.items()
+
+    def __repr__(self) -> str:
+        lines = ["object_spec:"]
+        for name, spec in self._fields.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}.{name}:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}.{name}: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "ObjectSpec",
+            "fields": {
+                name: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for name, spec in self._fields.items()
+            },
+        }
+
+
 # Type alias for leaf specs (individual argument specifications)
 LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
-# This will include ListSpec, DictSpec and ObjectSpec
-IntermediateSpec: TypeAlias = LeafSpec
+# Includes ``ObjectSpec`` (and future ``DictSpec`` / ``ListSpec``) for
+# nested specs reachable via dynamo source-chain walks.
+IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec
 
 
 class ParamsSpec:
