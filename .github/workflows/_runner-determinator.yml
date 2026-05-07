@@ -98,7 +98,8 @@ jobs:
         id: ci-docker-hash
         shell: bash
         run: |
-          echo "ci-docker-hash=$(git rev-parse HEAD:.ci/docker)" >> "$GITHUB_OUTPUT"
+          hash=$(git rev-parse HEAD:.ci/docker)
+          echo "ci-docker-hash=${hash}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
