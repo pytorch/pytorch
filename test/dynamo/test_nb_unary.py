@@ -703,6 +703,17 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
+    def test_complex_abs_return_type(self):
+        def fn(x):
+            return abs(x)
+
+        real = torch.rand(1, dtype=torch.float32)
+        imag = torch.rand(1, dtype=torch.float32)
+        complex = torch.complex(real, imag)
+        eager_result = fn(complex)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(complex)
+        self.assertEqual(result.dtype, eager_result.dtype)
+
 
 instantiate_parametrized_tests(NbUnaryTests)
 
