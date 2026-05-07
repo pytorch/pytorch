@@ -3159,7 +3159,7 @@ def _codegen_compiled_forward(
     disable_amp: bool,
     num_rng: int,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source  # noqa: F811
+    from .subclass_codegen import _compile_and_exec_source
 
     lines: list[str] = [
         "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
