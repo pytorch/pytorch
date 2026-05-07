@@ -129,6 +129,13 @@ class CuteDSLTemplateKernel(Kernel):
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
 
+        # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
+        # reinterpret_tensor for view captures in the python_argdefs loop.
+        self._capture_input_nodes: dict[str, Any] = {}
+
+    def set_capture_input_nodes(self, nodes_by_name: dict[str, Any]) -> None:
+        self._capture_input_nodes = nodes_by_name
+
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
         return cutedsl_pexpr(expr)
@@ -384,10 +391,14 @@ class CuteDSLTemplateKernel(Kernel):
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
         ):
-            # dedupe
-            if arg_def.full_name() not in self._seen_input_args:
+            if arg_def.full_name() in self._seen_input_args:
+                continue
+            capture_node = self._capture_input_nodes.get(call_arg)
+            if isinstance(capture_node, ReinterpretView):
+                call_args.append(capture_node.codegen_reference())
+            else:
                 call_args.append(call_arg)
-                arg_types.append(arg_type)
+            arg_types.append(arg_type)
 
         # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)

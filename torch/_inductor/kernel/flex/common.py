@@ -180,6 +180,38 @@ def maybe_realize(args: list[IRNode | None]):
     )
 
 
+def realize_captures_for_cutedsl(buffers):
+    """Realize captured buffers for CuteDSL, preserving views and plain inputs.
+
+    Unlike maybe_realize (used by the Triton path), CuteDSL needs physical
+    tensors passed at runtime. Pointwise/computed captures must be materialized
+    into a fresh buffer whose layout matches the logical shape the subgraph
+    indexes. Views (ReinterpretView) and plain InputBuffers are kept as-is
+    since CuteDSL can emit reinterpret_tensor() at the call-site.
+
+    Realized captures are registered on V.graph so the CuteDSL template can
+    resolve view nodes without explicit plumbing from callers.
+    """
+    from ...ir import ExternKernel, InputBuffer, ReinterpretView
+
+    def _realize(x):
+        if x is None or isinstance(x, sympy.Expr):
+            return x
+        realized = ExternKernel.realize_input(x)
+        if isinstance(realized, (InputBuffer, ReinterpretView)):
+            return realized
+        return ExternKernel.copy_input(realized)
+
+    buffers = tree_map(_realize, buffers)
+    freeze_irnodes(buffers)
+
+    for buf in tree_map_only(IRNode, lambda x: x, buffers) if buffers else []:
+        if buf is not None and hasattr(buf, "get_name"):
+            V.graph._cutedsl_capture_nodes[buf.get_name()] = buf
+
+    return buffers
+
+
 def freeze_irnodes(tree: Any) -> Any:
     """Freeze layouts for every IRNode contained in a pytree."""
 
