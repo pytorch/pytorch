@@ -380,7 +380,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def get_source_by_walking_mro(
         self, tx: "InstructionTranslator", name: str
     ) -> DictGetItemSource:
-        assert self.source is not None
+        source = self.source
+        if source is None:
+            raise RuntimeError("get_source_by_walking_mro requires source")
 
         for idx, klass in enumerate(self.value.__mro__):
             if name in klass.__dict__:
@@ -392,7 +394,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     if cache_key in tx.output.guarded_mro_absent_keys:
                         continue
                     tx.output.guarded_mro_absent_keys.add(cache_key)
-                    mro_source = TypeMROSource(self.source)
+                    mro_source = TypeMROSource(source)
                     klass_source: Source = GetItemSource(mro_source, absent_idx)
                     dict_source = TypeDictSource(klass_source)
                     install_guard(
@@ -407,16 +409,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     return cache[cache_key]
 
                 if idx != 0:
-                    mro_source = TypeMROSource(self.source)
+                    mro_source = TypeMROSource(source)
                     klass_source = GetItemSource(mro_source, idx)
                 else:
-                    klass_source = self.source
+                    klass_source = source
                 dict_source = TypeDictSource(klass_source)
                 out_source = DictGetItemSource(dict_source, name)
                 cache[cache_key] = out_source
                 return out_source
 
-        raise AssertionError(f"Attribute {name} not found in MRO of {self.value}")
+        raise RuntimeError(f"Attribute {name} not found in MRO of {self.value}")
 
     def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
