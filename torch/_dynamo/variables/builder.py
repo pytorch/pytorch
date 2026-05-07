@@ -4089,6 +4089,30 @@ def _automatic_dynamic(
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
+    if config._shapes_spec is not None:
+        return _symbolic_context_from_shapes_spec(
+            e,
+            source,
+            tensor_spec,
+            view_base_context,
+            shape_env_to_source_to_symbol_cache,
+        )
+
+    # Fast path: when the tensor must be static (and not in the dynamic-source
+    # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
+    # This must come before record_automatic_dynamic so we don't pollute PGO
+    # state with sizes for tensors that are forced static.
+    if static_shapes and not is_dynamic_source(name):
+        return StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
+            view_base_context=view_base_context,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        )
+
     # Prep for automatic dynamic
     frame_state_entry = record_automatic_dynamic(tx, name, e)
 
@@ -4127,28 +4151,6 @@ def _automatic_dynamic(
                 update_dim2constraint(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
-
-    if config._shapes_spec is not None:
-        return _symbolic_context_from_shapes_spec(
-            e,
-            source,
-            tensor_spec,
-            view_base_context,
-            shape_env_to_source_to_symbol_cache,
-        )
-
-    # Fast path: when the tensor must be static (and not in the dynamic-source
-    # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
-    if static_shapes and not is_dynamic_source(name):
-        return StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
-            constraint_sizes=[None] * e.dim(),
-            constraint_strides=[None] * e.dim(),
-            view_base_context=view_base_context,
-            tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        )
 
     dynamic_sizes = []
     dynamic_strides = []
