@@ -581,6 +581,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    def reconstruct_pycode(self, codegen):
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented for sourceless UserFunctionVariable"
+        )
+
     def get_real_python_backed_value(self) -> Any:
         if istype(self, UserFunctionVariable):
             return self.fn
@@ -2425,6 +2432,13 @@ class SkipFunctionVariable(VariableTracker):
                 explanation=explanation,
                 hints=hints,
             )
+
+    def reconstruct_pycode(self, codegen):
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented for sourceless SkipFunctionVariable"
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str

@@ -169,6 +169,14 @@ class TensorVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def reconstruct_pycode(self, codegen) -> str:
+        if id(self.proxy) in codegen.graph_outputs:
+            return f"__graph_out[{codegen.graph_outputs[id(self.proxy)].index}]"
+        elif self.source:
+            return self.source.reconstruct_pycode(codegen)
+        else:
+            raise RuntimeError(f"Python codegen for {self} failed with unknown source.")
+
     def get_real_value(self) -> torch.Tensor:
         """
         Get the actual value represented by this variable if computation is run

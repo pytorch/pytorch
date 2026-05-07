@@ -1410,6 +1410,12 @@ class TupleVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
 
+    def reconstruct_pycode(self, codegen):
+        if len(self.items) == 0:
+            return "()"
+        else:
+            return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
