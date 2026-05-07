@@ -484,6 +484,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for device in V.graph.device_types:
             if device != "meta":
                 self.add_device_include(device)
+        if not self.included_devices:
+            # When only meta device is present, add_device_include is never
+            # called so we need to pull in the common header explicitly.
+            if V.graph.aot_mode:
+                self.header.writeline(
+                    "#include <torch/csrc/inductor/aoti_include/common.h>"
+                )
+            else:
+                self.header.writeline(
+                    "#include <torch/csrc/inductor/cpp_wrapper/common.h>"
+                )
 
         if V.graph.aot_mode:
             self._write_aoti_interface_header()
@@ -3228,6 +3239,9 @@ if (!custom_op_wrapper) {
         int_call_str = self._generate_temporary_array_pointer(
             "int64_t", int_call_args, force_mutable=True
         )
+        tensor_call_args = self.codegen_runtime_lookup_tensor_call_args(
+            tensor_call_args
+        )
         tensor_call_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", tensor_call_args, force_mutable=True
         )
@@ -3241,6 +3255,11 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        return tensor_call_args
 
     def generate_reset_kernel_saved_flags(self):
         pass

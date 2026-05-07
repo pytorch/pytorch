@@ -91,7 +91,10 @@ class ComputedLazyCache:
         self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
-        assert self.vt is None
+        if self.vt is not None:
+            raise AssertionError(
+                "ComputedLazyCache.realize() called but vt is already set"
+            )
         from ..symbolic_convert import InstructionTranslator
         from .builtin import BuiltinVariable
         from .constant import ConstantVariable
@@ -116,8 +119,7 @@ class ComputedLazyCache:
             # All sources are constants, use the pre-computed value
             self.vt = ConstantVariable.create(self.value)
 
-        if self.name_hint is not None:
-            assert self.vt is not None
+        if self.name_hint is not None and self.vt is not None:
             self.vt.set_name_hint(self.name_hint)
 
         if self.source_location is not None and self.vt.source_location is None:
@@ -687,7 +689,8 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         )
 
     def __init__(self, _cache: ComputedLazyCache, **kwargs: Any) -> None:
-        assert isinstance(_cache, ComputedLazyCache)
+        if not isinstance(_cache, ComputedLazyCache):
+            raise TypeError(f"Expected ComputedLazyCache, got {type(_cache).__name__}")
         # Call VariableTracker.__init__ directly with no source
         VariableTracker.__init__(self, **kwargs)
         self._cache = _cache
@@ -695,8 +698,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def python_type(self) -> type:
         """Return the Python type of the computed result."""
         if self.is_realized():
-            assert self._cache.vt is not None
-            return self._cache.vt.python_type()
+            return self._cache.vt.python_type()  # pyrefly: ignore[missing-attribute]
         return type(self._cache.value)
 
     def is_tensor(self) -> bool:
@@ -705,8 +707,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
     def is_constant_none(self) -> bool:
         if self.is_realized():
-            assert self._cache.vt is not None
-            return self._cache.vt.is_constant_none()
+            return (
+                self._cache.vt.is_constant_none()  # pyrefly: ignore[missing-attribute]
+            )
         return self._cache.value is None
 
     def lazy_isinstance(self, cls: type) -> bool:
@@ -730,8 +733,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         would return stale cached values without installing any guards.
         """
         if self.is_realized():
-            assert self._cache.vt is not None
-            return self._cache.vt.as_python_constant()
+            return (
+                self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
+            )
 
         # The value depends on source lazy vars. Realize them to install guards.
         for lazy_var in self._cache.lazy_vars:
@@ -746,8 +750,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         so we can always peek without installing guards.
         """
         if self.is_realized():
-            assert self._cache.vt is not None
-            can_peek, _is_unrealized, value = self._cache.vt.try_peek_constant()
+            can_peek, _is_unrealized, value = (
+                self._cache.vt.try_peek_constant()  # pyrefly: ignore[missing-attribute]
+            )
             if not can_peek:
                 return (False, False, None)
             return (True, False, value)
@@ -763,9 +768,10 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         """
         if self.is_realized():
             # If realized, just load the constant
-            assert self._cache.vt is not None
             codegen.append_output(
-                codegen.create_load_const(self._cache.vt.as_python_constant())
+                codegen.create_load_const(
+                    self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
+                )
             )
         else:
             # Use the reconstruct function to generate bytecode

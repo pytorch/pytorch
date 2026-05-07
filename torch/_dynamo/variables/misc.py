@@ -8,7 +8,7 @@ Key classes include:
 - ExceptionVariable: Tracks exception objects
 - RandomVariable: Manages random number generators
 - GetAttrVariable: Tracks attribute access
-- MethodWrapperVariable: Handles method wrappers
+- ConstantMethodWrapperVariable: Handles method wrappers
 - PythonModuleVariable: Tracks Python modules
 - NumpyVariable: Handles numpy functions and types
 - StringFormatVariable: Manages string formatting
@@ -1459,7 +1459,7 @@ class GetAttrVariable(VariableTracker):
         return super().mp_subscript_impl(tx, key)
 
 
-class MethodWrapperVariable(VariableTracker):
+class ConstantMethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
@@ -2073,13 +2073,12 @@ class StringFormatVariable(VariableTracker):
                 from .builtin import _make_binary_op_reconstruct_fn
 
                 reconstruct_fn = _make_binary_op_reconstruct_fn(str.format)
-                assert reconstruct_fn is not None
                 fmt_str_var = variables.ConstantVariable.create(format_string)
                 try:
                     return ComputedLazyConstantVariable.create(
                         str.format,
                         [fmt_str_var] + list(sym_args),
-                        reconstruct_fn,
+                        reconstruct_fn,  # pyrefly: ignore[bad-argument-type]
                     )
                 except (TypeError, ValueError, AsPythonConstantNotImplementedError):
                     pass
@@ -2198,7 +2197,10 @@ class StringFormatVariable(VariableTracker):
 
     def get_python_hash(self) -> int:
         success, value = self._try_get_format_value()
-        assert success
+        if not success:
+            raise RuntimeError(
+                "StringFormatVariable hash failed: could not peek all args"
+            )
         return hash(value)
 
     def _realize_lazy_args(self) -> None:
