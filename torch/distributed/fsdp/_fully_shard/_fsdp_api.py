@@ -44,6 +44,8 @@ class MixedPrecisionPolicy:
             precision policies. (Default: ``None``)
         cast_forward_inputs (bool): This specifies whether FSDP should cast the
             forward's floating-point input tensors to ``param_dtype`` or not.
+            For grouped ``fully_shard([a, b, ...])``, the cast is applied per
+            module, before each module's forward.
     """
 
     param_dtype: torch.dtype | None = None

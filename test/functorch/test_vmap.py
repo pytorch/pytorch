@@ -684,8 +684,6 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
-        # noqa: F841
-
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -3286,6 +3284,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(2, 0),
         )
 
+    def test_view_dtype(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        op = torch.ops.aten.view.dtype
+
+        test(op, (torch.rand(2, 3, 4), torch.uint8), in_dims=(1, None), out_dims=1)
+        test(op, (torch.rand(5), torch.int32), in_dims=(0, None), out_dims=0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"dim\(\) cannot be 0 to view Float as Byte"
+        ):
+            vmap(op, in_dims=(0, None))(torch.rand(6), torch.uint8)
+
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
@@ -4424,9 +4433,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
@@ -4509,9 +4515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(

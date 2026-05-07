@@ -4,8 +4,8 @@
 import operator
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbIndexTests(TestCase):
