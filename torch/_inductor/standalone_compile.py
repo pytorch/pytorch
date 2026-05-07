@@ -414,6 +414,13 @@ def standalone_compile(
                 maybe_tensor = node.meta["example_value"]
                 if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
                     fake_mode = maybe_tensor.fake_mode
+                elif (
+                    isinstance(maybe_tensor, torch.Tensor)
+                    and torch._C._is_fake_tensor(maybe_tensor)
+                ):
+                    shape_env = torch._C._get_cpp_fake_mode_shape_env()
+                    if shape_env is not None:
+                        fake_mode = FakeTensorMode(shape_env=shape_env)
 
         # If gm came from Dynamo, then last_node.args[0] is always a list,
         # even in single-Tensor returns.

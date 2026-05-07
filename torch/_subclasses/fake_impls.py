@@ -831,6 +831,8 @@ def repeat_interleave_tensor(
 def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
+    from torch._subclasses.fake_tensor import FakeTensor
+    print(f"DEBUG local_scalar_dense: type={type(arg)}, isinstance_FakeTensor={isinstance(arg, FakeTensor)}, is_fake_c++={torch._C._is_fake_tensor(arg)}")
     if (r := arg.item_memo) is not None:
         return r
     if fake_mode.shape_env is None or (

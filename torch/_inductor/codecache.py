@@ -560,6 +560,9 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         from .graph import GraphLowering
 
+        if torch._C._is_fake_tensor(t):
+            return self._reduce_fake_tensor(t)
+
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling

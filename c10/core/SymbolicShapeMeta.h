@@ -22,6 +22,14 @@ class C10_API SymbolicShapeMeta {
 
   bool strides_valid_ = true; // e.g. for sparse where there are no strides
 
+  // Cached concrete sizes/strides for C++ tensors without a PyInterpreter.
+  // Populated lazily by TensorImpl::sizes_custom()/strides_custom() when
+  // the interpreter is unavailable.
+  mutable SmallVector<int64_t, 5> materialized_sizes_;
+  mutable SmallVector<int64_t, 5> materialized_strides_;
+  mutable bool sizes_materialized_ = false;
+  mutable bool strides_materialized_ = false;
+
   SymbolicShapeMeta() = default;
   ~SymbolicShapeMeta() = default;
   SymbolicShapeMeta(const SymbolicShapeMeta& other);
