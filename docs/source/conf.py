@@ -547,12 +547,6 @@ coverage_ignore_functions = [
     "synchronize",
     "store_timeout",
     # torch.distributed.fsdp.wrap
-    "always_wrap_policy",
-    "enable_wrap",
-    "lambda_auto_wrap_policy",
-    "size_based_auto_wrap_policy",
-    "transformer_auto_wrap_policy",
-    "wrap",
     # torch.distributed.nn.functional
     "all_to_all",
     "all_to_all_single",
