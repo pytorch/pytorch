@@ -26,6 +26,14 @@ struct NonZeroOp {
   }
 };
 
+
+template <>
+struct NonZeroOp<bool> {
+  __host__ __device__ __forceinline__ bool operator()(const bool& a) const {
+    return (*reinterpret_cast<const unsigned char*>(&a) != 0);
+  }
+};
+
 // TODO: actually support int64_t index_t
 template <typename index_t>
 struct TensorDims {
