@@ -6451,7 +6451,6 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
-    @expectedFailureCodegenDynamic
     def test_conv2d_backward_mixed_memory_format(self):
         # Mixed-format scenario with larger spatial dims where channels-last
         # and contiguous strides are unambiguously different.

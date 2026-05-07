@@ -146,6 +146,9 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv2d_backward_mixed_memory_format_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
