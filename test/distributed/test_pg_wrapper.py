@@ -21,7 +21,6 @@ from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
-    requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
@@ -218,8 +217,9 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 # ASAN is not safe since we are spawning processes.
 if not TEST_WITH_DEV_DBG_ASAN:
 
-    @requires_gloo()
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @unittest.skipUnless(
+        c10d.is_gloo_available(), "c10d was not compiled with the Gloo backend"
+    )
     class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
         def setUp(self):
             super(AbstractProcessGroupWrapperTest, self).setUp()
@@ -469,7 +469,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 # an unexpected NameError if not.
 
 
-@requires_gloo()
+@unittest.skipUnless(
+    c10d.is_gloo_available(), "c10d was not compiled with the Gloo backend"
+)
 class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
