@@ -78,9 +78,9 @@ from .variables import (
     SetAttrBuiltinVariable,
     SkipFunctionVariable,
     StrBuiltinVariable,
-    TypeBuiltinVariable,
     SparseTensorCreationSkipVariable,
     TorchInGraphFunctionVariable,
+    TypeBuiltinVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )

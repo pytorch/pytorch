@@ -2657,7 +2657,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     _fn = dict
 
-    def __init__(self, value: type[dict] = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: type[dict[Any, Any]] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -2836,7 +2836,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
 
     _fn = iter
 
-    def __init__(self, value: types.BuiltinFunctionType = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -2871,7 +2871,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = getattr
 
-    def __init__(self, value: types.BuiltinFunctionType = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -3082,7 +3082,7 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = hasattr
 
-    def __init__(self, value: types.BuiltinFunctionType = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -3122,7 +3122,7 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
 
     _fn = isinstance
 
-    def __init__(self, value: types.BuiltinFunctionType = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -3140,7 +3140,8 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
         # Realize non-constant lazy args; LazyConstantVariable.python_type()
         # installs only a TYPE_MATCH guard, which is what isinstance() needs.
         if any(
-            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            isinstance(a, LazyVariableTracker)
+            and not isinstance(a, LazyConstantVariable)
             for a in args
         ):
             args = [
@@ -3259,7 +3260,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = setattr
 
-    def __init__(self, value: types.BuiltinFunctionType = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
@@ -3463,8 +3464,8 @@ class StrBuiltinVariable(BaseBuiltinVariable):
 
     _fn = str
 
-    def __init__(self, value: type = _fn, **kwargs: Any) -> None:
-        assert value is str
+    def __init__(self, value: type[str] = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3566,12 +3567,14 @@ class StrBuiltinVariable(BaseBuiltinVariable):
                 except AttributeError:
                     return None
             elif is_wrapper_or_member_descriptor(str_method):
-                unimplemented(
-                    gb_type="Attempted to a str() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
-                    hints=["Write the str method in Python"],
-                )
+                if not check_unspec_or_constant_args(args, kwargs):
+                    unimplemented(
+                        gb_type="Attempted to a str() method implemented in C/C++",
+                        context="",
+                        explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
+                        hints=["Write the str method in Python"],
+                    )
+                return None
             else:
                 bound_method = str_method.__func__  # type: ignore[attr-defined]
                 try:
@@ -3588,8 +3591,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
 
     _fn = type
 
-    def __init__(self, value: type = _fn, **kwargs: Any) -> None:
-        assert value is type
+    def __init__(self, value: type[Any] = _fn, **kwargs: Any) -> None:
+        assert value is type(self)._fn
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
@@ -3601,11 +3604,20 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import LazyVariableTracker
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
-        if any(isinstance(a, LazyVariableTracker) for a in args):
+        # Realize non-constant lazy args; LazyConstantVariable.python_type()
+        # installs only a TYPE_MATCH guard, which is what type() needs.
+        if any(
+            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            for a in args
+        ):
             args = [
-                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+                a.realize()
+                if isinstance(a, LazyVariableTracker)
+                and not isinstance(a, LazyConstantVariable)
+                else a
+                for a in args
             ]
 
         if len(args) == 1 and not kwargs:
@@ -3645,9 +3657,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", args: Sequence[VariableTracker]
     ) -> VariableTracker:
         try:
-            res = type(
-                *[x.as_python_constant() for x in args],
-            )
+            name, bases, namespace = [x.as_python_constant() for x in args]
+            res = type(name, bases, namespace)
         except AsPythonConstantNotImplementedError:
             unimplemented(
                 gb_type="Failed to trace type() with 3 arguments",
@@ -3665,7 +3676,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
 
     _fn = list
 
-    def __init__(self, value: type[list] = _fn, **kwargs: Any) -> None:
+    def __init__(self, value: type[list[Any]] = _fn, **kwargs: Any) -> None:
         assert value is type(self)._fn
         super().__init__(**kwargs)
 
