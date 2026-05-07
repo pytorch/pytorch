@@ -1536,17 +1536,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
         return super().guard_as_python_constant()
 
+    def _lookup_slot_type_attr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        *,
+        none_error: str = "'NoneType' object is not callable",
+    ) -> tuple[object, Source | None]:
+        """Walk class MRO for *name*, raising TypeError when slot is blocked (= None)."""
+        type_attr = self.lookup_class_mro_attr(name)
+        if type_attr is None:
+            raise_type_error(tx, none_error)
+
+        source = None
+        if type_attr is not NO_SUCH_SUBOBJ and self.source:
+            source = self.get_source_by_walking_mro(tx, name)
+        return type_attr, source
+
     def bool_impl(
         self,
         tx: "InstructionTranslator",
     ) -> "VariableTracker | None":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
-        type_attr = self.lookup_class_mro_attr("__bool__")
+        none_error = "'NoneType' object is not callable"
+        if sys.version_info >= (3, 14):
+            none_error = (
+                f"'{self.python_type_name()}' cannot be interpreted as a boolean"
+            )
+        type_attr, _ = self._lookup_slot_type_attr(
+            tx, "__bool__", none_error=none_error
+        )
         if type_attr is NO_SUCH_SUBOBJ:
             return None
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
 
         result = self.call_method(tx, "__bool__", [], {})
         if result.python_type() is not bool:
@@ -1561,11 +1583,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslator",
     ) -> VariableTracker:
         # CPython: PyNumber_Index checks tp_as_number->nb_index.
-        # For user-defined types, __index__ in tp_dict means nb_index is set.
-        type_attr = inspect.getattr_static(type(self.value), "__index__", None)
-        if type_attr is None:
+        type_attr, source = self._lookup_slot_type_attr(tx, "__index__")
+        if type_attr is NO_SUCH_SUBOBJ:
             return super().nb_index_impl(tx)
-        source = self.source and self.get_source_by_walking_mro(tx, "__index__")
         method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
         result = method_var.call_function(tx, [], {})
         # CPython validates that __index__ returns an int.
@@ -1588,13 +1608,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
-        source = self.source and self.get_source_by_walking_mro(tx, "__int__")
-        method_var = self.resolve_type_attr(
-            tx,
-            "__int__",
-            inspect.getattr_static(type(self.value), "__int__"),
-            source,
-        )
+        type_attr, source = self._lookup_slot_type_attr(tx, "__int__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            return super().nb_int_impl(tx)
+        method_var = self.resolve_type_attr(tx, "__int__", type_attr, source)
         result = method_var.call_function(tx, [], {})
         if not issubclass(result.python_type(), int):
             raise_observed_exception(
@@ -1612,13 +1629,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
-        source = self.source and self.get_source_by_walking_mro(tx, "__float__")
-        method_var = self.resolve_type_attr(
-            tx,
-            "__float__",
-            inspect.getattr_static(type(self.value), "__float__"),
-            source,
-        )
+        type_attr, source = self._lookup_slot_type_attr(tx, "__float__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            return super().nb_float_impl(tx)
+        method_var = self.resolve_type_attr(tx, "__float__", type_attr, source)
         result = method_var.call_function(tx, [], {})
         if not issubclass(result.python_type(), float):
             raise_observed_exception(
@@ -1700,7 +1714,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().tp_iternext_impl(tx)
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__iter__")
+        method, source_fn = self._lookup_slot_type_attr(
+            tx,
+            "__iter__",
+            none_error=f"'{self.python_type_name()}' object is not iterable",
+        )
         if (
             self._base_vt is not None
             and self._base_methods is not None
@@ -1730,7 +1748,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        method = self._maybe_get_baseclass_method("__getitem__")
+        method, source_fn = self._lookup_slot_type_attr(tx, "__getitem__")
         if (
             self._base_vt is not None
             and self._base_methods is not None
@@ -1738,9 +1756,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return self._base_vt.mp_subscript_impl(tx, key)
         if isinstance(method, types.FunctionType):
-            source_fn = self.source and self.get_source_by_walking_mro(
-                tx, "__getitem__"
-            )
             return variables.UserMethodVariable(
                 method, self, source_fn=source_fn, source=self.source
             ).call_function(tx, [key], {})
@@ -1972,10 +1987,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__len__")
-        if method is not None:
-            type_attr = self.lookup_class_mro_attr("__len__")
-            source = self.source and self.get_source_by_walking_mro(tx, "__len__")
+        type_attr, source = self._lookup_slot_type_attr(tx, "__len__")
+        if type_attr is not NO_SUCH_SUBOBJ:
             method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
             if not isinstance(method_var, variables.GetAttrVariable):
                 return method_var.call_function(tx, [], {})
@@ -1997,7 +2010,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             self._base_vt is not None
             and self._base_methods is not None
-            and self._maybe_get_baseclass_method("__len__") in self._base_methods
+            and self.lookup_class_mro_attr("__len__") in self._base_methods
         ):
             return self._base_vt.sq_length(tx)
         return self.len_impl(tx)
@@ -2006,7 +2019,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             self._base_vt is not None
             and self._base_methods is not None
-            and self._maybe_get_baseclass_method("__len__") in self._base_methods
+            and self.lookup_class_mro_attr("__len__") in self._base_methods
         ):
             return self._base_vt.mp_length(tx)
         return self.len_impl(tx)
