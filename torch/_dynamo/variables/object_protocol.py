@@ -147,6 +147,12 @@ def type_implements_mp_subscript(obj_type: type) -> bool:
     return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
 
 
+def type_implements_nb_negative(obj_type: type) -> bool:
+    """Check whether obj_type implements the nb_negative slot."""
+    _, _, number_slots, _ = _get_cached_slots(obj_type)
+    return has_slot(number_slots, PyNumberSlots.NB_NEGATIVE)
+
+
 def type_implements_tp_iter(obj_type: type) -> bool:
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_ITER)
@@ -459,6 +465,26 @@ def generic_iternext(
     return obj.tp_iternext_impl(tx)
 
 
+def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """Mirrors PyNumber_Negative.
+
+    https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1392
+
+    Algorithm:
+    1. If type has nb_negative slot, call obj.nb_negative_impl(tx)
+    2. Otherwise, raise TypeError
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_nb_negative(obj_type):
+        return obj.nb_negative_impl(tx)
+
+    raise_type_error(
+        tx,
+        f"bad operand type for unary -: '{obj.python_type_name()}'",
+    )
+
+
 def generic_getiter(
     tx: "InstructionTranslator", obj: VariableTracker
 ) -> "VariableTracker":
@@ -547,10 +573,10 @@ def binary_op1(
     v_slot = getattr(type(v), impl_attr, None)
     w_slot = getattr(type(w), impl_attr, None)
 
-    # Same class → only call once (CPython: slotw = NULL if same type)
+    # Same class -> only call once (CPython: slotw = NULL if same type)
     if v.python_type() is w.python_type():
         w_slot = None
-    # Same implementation (inherited) → skip w
+    # Same implementation (inherited) -> skip w
     elif v_slot is w_slot:
         w_slot = None
 
@@ -649,3 +675,31 @@ def binary_iop(
             f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
         )
     return result
+
+
+def generic_hash_impl(
+    tx: "InstructionTranslator", obj: VariableTracker
+) -> tuple[int, bool]:
+    """Internal API: compute hash as (value, is_fake).
+
+    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    the result in a VT), container hash_impls (which propagate is_fake),
+    and HashableTracker (which just needs the int).
+    """
+    return obj.hash_impl(tx)
+
+
+def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+    """User-facing API: mirrors PyObject_Hash, returns a VariableTracker.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1101-L1115
+
+    Wraps the result in ConstantVariable or FakeIdVariable depending on
+    whether the hash depends on a sourceless object's identity.
+    """
+    from .constant import ConstantVariable, FakeIdVariable
+
+    h, is_fake = generic_hash_impl(tx, obj)
+    if is_fake:
+        return FakeIdVariable(h)
+    return ConstantVariable.create(h)

@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -49,9 +49,10 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
-from ..stream_utils import get_stream_name
+from ..stream_utils import get_raw_stream_name, get_stream_name
 from ..utils import (
     cache_on_self,
+    DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
     get_dtype_size,
@@ -59,6 +60,7 @@ from ..utils import (
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
     LineContext,
+    make_codegen_buffer,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -485,6 +487,10 @@ class MemoryPlanningState:
     ) -> None:
         assert not item.is_reused
         self.comm_buffer_reuse_pool[key].append(item)
+
+
+class HasWriteLine(Protocol):
+    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class WrapperLine:
@@ -1214,12 +1220,15 @@ class UnbackedSymbolDefsLine(WrapperLine):
 
 @dataclasses.dataclass
 class AssertSizeStrideLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
     name: str
     size: str
     stride: str
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"assert_size_stride({self.name}, {self.size}, {self.stride})")
+        self.wrapper.write_assert_size_stride(
+            self.name, self.size, self.stride, "input"
+        )
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
@@ -1246,11 +1255,11 @@ class PythonWrapperCodegen(CodeGen):
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
         ] = {}
         self.imports = IndentedBuffer()
-        self.header = IndentedBuffer()
-        self.prefix = IndentedBuffer()
+        self.header = make_codegen_buffer()
+        self.prefix = make_codegen_buffer()
         self.suffix = IndentedBuffer()
         self.kernel_declarations = IndentedBuffer()
-        self.wrapper_call = IndentedBuffer()
+        self.wrapper_call = make_codegen_buffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
@@ -1587,8 +1596,8 @@ class PythonWrapperCodegen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_python_shape_tuple(buf.get_size())
-            stride = self.codegen_python_shape_tuple(buf.get_stride())
+            size = self.codegen_shape_tuple(buf.get_size())
+            stride = self.codegen_shape_tuple(buf.get_stride())
             self._pending_input_asserts[name] = (size, stride)
 
     def codegen_input_nan_asserts(self) -> None:
@@ -1689,7 +1698,12 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(name, size, stride))
+                self.writeline(AssertSizeStrideLine(self, name, size, stride))
+
+    def write_assert_size_stride(
+        self, name: str, size: str, stride: str, op_name: str
+    ) -> None:
+        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -1727,7 +1741,7 @@ class PythonWrapperCodegen(CodeGen):
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         self.write_get_raw_stream_header()
-        name = f"stream{device_idx}"
+        name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 f"{name} = get_raw_stream({device_idx})"
@@ -1797,7 +1811,7 @@ class PythonWrapperCodegen(CodeGen):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
-                f"stream{device_idx} = get_raw_stream({device_idx})"
+                f"{get_raw_stream_name(device_idx)} = get_raw_stream({device_idx})"
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -2670,10 +2684,10 @@ class PythonWrapperCodegen(CodeGen):
         )
         with output.indent():
             output.splice(
-                """
+                f"""
                 from torch._inductor.utils import print_performance
                 fn = lambda: call(list(args))
-                return print_performance(fn, times=times, repeat=repeat)
+                return print_performance(fn, times=times, repeat=repeat, device='{V.graph.device_type}')
                 """,
                 strip=True,
             )
@@ -4382,7 +4396,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             name = f"{current_stream_name}_raw"
             self.writeline(f"{name} = {current_stream_name}.cuda_stream")
         else:
-            name = f"stream{device_idx}"
+            name = get_raw_stream_name(device_idx)
             self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
