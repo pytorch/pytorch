@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     runOnRocmArch,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
     skipIfXpu,
@@ -1189,6 +1190,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
@@ -2554,6 +2556,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_nvfp4_compile(self) -> None:
 
