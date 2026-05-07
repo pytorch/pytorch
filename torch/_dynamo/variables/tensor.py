@@ -969,50 +969,15 @@ class TensorVariable(VariableTracker):
         # We only synchronize when there's a tensor argument, since that's when
         # metadata propagation is relevant.
 
-        # [Note: 0-d tensor Scalar args and unbacked symbols]
-        # Many ATen ops accept Scalar arguments (e.g., alpha= in add/sub, beta=
-        # in addmm, value= in addcmul/addcdiv). When a 0-d tensor is passed for
-        # these arguments, the C++ arg parser (python_arg_parser.cpp:scalar_slow)
-        # calls .item() to convert it to a Scalar. During fake tensor
-        # propagation, .item() dispatches to aten._local_scalar_dense, which
-        # creates an unbacked symbol (e.g., zuf0). This symbol is consumed
-        # internally for arithmetic and doesn't affect the output tensor's
-        # shape, stride, or storage offset. Without suppression,
-        # compute_unbacked_bindings raises PendingUnbackedSymbolNotFound because
-        # it can't locate the symbol in the output. We use
-        # ignore_fresh_unbacked_symbols to suppress these value-only unbacked
-        # symbols, matching the pattern used for _foreach_* ops in
-        # TorchInGraphFunctionVariable.call_function.
-        #
-        # We use an explicit allowlist rather than generically suppressing for
-        # any 0-d tensor argument because an op could legitimately create
-        # unbacked symbols for data-dependent output shapes (e.g., nonzero).
-        # Suppressing those would silently drop binding information.
-        methods_with_scalar_args = {
-            "add",
-            "add_",
-            "sub",
-            "sub_",
-            "addcmul",
-            "addcmul_",
-            "addcdiv",
-            "addcdiv_",
-            "addmm",
-            "addmm_",
-            "addmv",
-            "addmv_",
-            "addr",
-            "addr_",
-            "addbmm",
-            "addbmm_",
-            "baddbmm",
-            "baddbmm_",
-        }
+        # See ops_consuming_unbacked_scalars in torch.py for the full allowlist
+        # and reasoning.
+        from .torch import methods_consuming_unbacked_scalars
+
         ctx = (
             tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
             if tx.fake_mode
             and tx.fake_mode.shape_env
-            and name in methods_with_scalar_args
+            and name in methods_consuming_unbacked_scalars
             and any(
                 isinstance(v, TensorVariable) and v.ndim == 0
                 for v in chain(args, kwargs.values())
