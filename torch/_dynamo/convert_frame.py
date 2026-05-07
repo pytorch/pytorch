@@ -980,6 +980,7 @@ class DynamoOutput:
 
     tracer_output: DynamoTracerOutput
     bytecode: types.CodeType
+    pycode: list[list[str] | None]
     last_attempt_start_time: float | None
 
     def build_guards(
@@ -1024,6 +1025,7 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.pycode,
             self.tracer_output.closure,
             argdefs,
             kwdefaults,
@@ -1052,6 +1054,7 @@ class BackendInput:
 @dataclass(frozen=True)
 class GraphRuntimeEnv:
     bytecode: types.CodeType
+    pycode: list[list[str] | None]
     import_sources: dict[str, str]
     used_globals: dict[str, Any]
     closure: tuple[Any, ...] | None
@@ -1065,6 +1068,7 @@ class GraphRuntimeEnv:
         compiled_fn: Callable[..., Any],
         *,
         extra_globals: dict[str, Any] | None = None,
+        use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -1080,8 +1084,13 @@ class GraphRuntimeEnv:
         # check that all external references are available
         self._check_external_refs(f_globals)
 
+        if use_python_codegen:
+            bytecode = self._build_python_wrapper(f_globals, backend_id)
+        else:
+            bytecode = self.bytecode
+
         fn = types.FunctionType(
-            self.bytecode,
+            bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
@@ -1089,6 +1098,40 @@ class GraphRuntimeEnv:
         if self.kwdefaults:
             fn.__kwdefaults__ = self.kwdefaults
         return fn
+
+    def _build_python_wrapper_source(self) -> str:
+        """Build Python source for the wrapper function from generated pycode."""
+        pycode_parts = [p for p in self.pycode if p is not None]
+        if not pycode_parts:
+            raise RuntimeError("No Python code generated from Dynamo.")
+        orig_code = self.bytecode
+        argcount = orig_code.co_argcount
+        varnames = orig_code.co_varnames[:argcount]
+        argnames = ", ".join(varnames)
+
+        func_lines = ["def __generate_func__():"]
+        func_lines.append(f"    def __dynamo_func__({argnames}):")
+        for part in pycode_parts:
+            for line in part:
+                func_lines.append(f"        {line}")
+        func_lines.append("        return __ret")
+        func_lines.append("    return __dynamo_func__")
+        func_lines.append("__dynamo_generated_func__ = __generate_func__()")
+        return "\n".join(func_lines)
+
+    def _build_python_wrapper(
+        self, f_globals: dict[str, Any], backend_id: str
+    ) -> types.CodeType:
+        """Build a Python code object from the generated pycode strings."""
+        func_source = self._build_python_wrapper_source()
+        # Execute to get the function, then extract its code
+        namespace: dict[str, Any] = f_globals.copy()
+        # exec() should be fine because we only define a function in the scope
+        # without actually running the code inside the function, so in theory
+        # it should be safe.
+        exec(func_source, namespace)
+        func = namespace["__dynamo_generated_func__"]
+        return func.__code__
 
     def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
         # pyrefly: ignore [implicit-any]
@@ -1128,6 +1171,7 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    pycode: list[list[str] | None]
     closure: tuple[Any, ...] | None
     argdefs: tuple[Any, ...] | None
     kwdefaults: dict[str, Any] | None
@@ -1180,6 +1224,7 @@ class GraphCaptureOutput:
 
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
+            pycode=self.pycode,
             import_sources=self.import_sources,
             used_globals=used_globals,
             closure=self.closure,
@@ -1229,6 +1274,7 @@ class CaptureOutput:
         *,
         compiled_fn: Callable[..., Any] | None = None,
         extra_globals: dict[str, Any] | None = None,
+        use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
         if self.backend_input is None:
@@ -1239,6 +1285,7 @@ class CaptureOutput:
             backend_id,
             compiled_fn,
             extra_globals=extra_globals,
+            use_python_codegen=use_python_codegen,
         )
 
 
@@ -1417,6 +1464,7 @@ def _fullgraph_capture_frame(
         return gm
 
     try:
+        # TODO with torch._dynamo.config.patch(generate_pycode=True):
         dynamo_output = compile_frame(
             frame.code,
             frame.globals,
@@ -1536,9 +1584,14 @@ def compile_frame(  # type: ignore[return]
                     raise AssertionError(
                         "tracer_output must not be None after transform_code_object"
                     )
+                if tracer_output.output_graph is None:
+                    raise AssertionError(
+                        "tracer_output.output_graph must not be None after transform_code_object"
+                    )
                 return DynamoOutput(
                     tracer_output=tracer_output,
                     bytecode=bytecode,
+                    pycode=tracer_output.output_graph.output_pycode,
                     last_attempt_start_time=last_attempt_start_time,
                 )
         except exc.RestartAnalysis as e:
