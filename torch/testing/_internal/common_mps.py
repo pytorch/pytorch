@@ -703,6 +703,7 @@ if torch.backends.mps.is_available():
                 torch.bfloat16,
             ],  # random results
             "uniform": [torch.float16, torch.float32, torch.bfloat16],
+            "normal": [torch.float16, torch.float32, torch.bfloat16],
             "rand_like": [torch.float16, torch.float32, torch.bfloat16],
             "randint": None,
             "randint_like": None,
@@ -945,6 +946,10 @@ if torch.backends.mps.is_available():
             "log_normal": [torch.float16, torch.float32],
             "cauchy": [torch.float16, torch.float32],
             "geometric": [torch.float16, torch.float32],
+            "normal": [torch.float16, torch.float32],
+            # topk picks different positions than CPU when the new RNG produces
+            # ties; the values still match but the index gather diverges.
+            "topk": [torch.float16],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
