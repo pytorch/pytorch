@@ -3854,8 +3854,9 @@ class GuardManager {
     if (_dict_pointers.empty() && _callback_handled_dicts.empty()) {
       return;
     }
-    dict_to_guard_managers.withLock(
-        [&](DictToGuardManagersMap& map) { unwatch_all_saved_dict_pointers(map); });
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      unwatch_all_saved_dict_pointers(map);
+    });
 #endif
   }
 
