@@ -24,7 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception
+from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
 from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
@@ -45,6 +45,11 @@ if TYPE_CHECKING:
 
 def pyanyset_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), (set, frozenset))
+
+
+def pyset_check(obj: VariableTracker) -> bool:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
+    return issubclass(obj.python_type(), set)
 
 
 class SetVariable(VariableTracker):
@@ -217,6 +222,25 @@ class SetVariable(VariableTracker):
         except Exception as exc:
             raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
+
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2131-L2149
+        if not is_hashable(item):
+            # Mirror CPython's set_contains: if hashing fails with TypeError due to
+            # an unhashable set, coerce the key to frozenset and retry.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2151-L2159
+            if not pyset_check(item):
+                raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
+            # CPython NOTE:
+            # Note that 'key' could be a set() or frozenset() object.  Unlike most
+            # container types, set allows membership testing with a set key, even
+            # though it is not hashable.
+            item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
+        self.install_set_contains_guard(tx, [item])
+        contains = item in self
+        return VariableTracker.build(tx, contains)
 
     def call_method(
         self,
@@ -515,21 +539,6 @@ class SetVariable(VariableTracker):
                 tx,
                 cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
-        elif name == "__contains__":
-            if not len(args):
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "more than 1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            # Trigger ObservedTypeError for unhashable items so that
-            # CONTAINS_OP can catch it and fall back to __iter__.
-            # (CPython's set.__contains__ does this for e.g. set-in-frozenset.)
-            HashableTracker(args[0])
-            self.install_set_contains_guard(tx, args)
-            contains = args[0] in self
-            return VariableTracker.build(tx, contains)
         elif name == "__len__":
             if args or kwargs:
                 raise_args_mismatch(
