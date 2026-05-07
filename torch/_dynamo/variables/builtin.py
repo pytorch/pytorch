@@ -3657,8 +3657,13 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", args: Sequence[VariableTracker]
     ) -> VariableTracker:
         try:
+<<<<<<< HEAD
+            name, bases, ns = (x.as_python_constant() for x in args)
+            res = type(name, bases, ns)
+=======
             name, bases, namespace = [x.as_python_constant() for x in args]
             res = type(name, bases, namespace)
+>>>>>>> aa4c830802b ([dynamo] Refactor builtins init static type check using _fn)
         except AsPythonConstantNotImplementedError:
             unimplemented(
                 gb_type="Failed to trace type() with 3 arguments",
