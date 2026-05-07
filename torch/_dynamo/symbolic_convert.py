@@ -107,7 +107,6 @@ from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
 from .polyfills import (
-    impl_CONTAINS_OP_fallback,
     impl_IS_MAPPING,
     impl_MATCH_CLASS,
     impl_MATCH_KEYS,
@@ -179,7 +178,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool
+from .variables.object_protocol import generic_bool, generic_contains
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -4095,28 +4094,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        try:
-            self.push(right.call_method(self, "__contains__", [left], {}))
-        except (
-            # right.__contains__ can raise TypeError
-            exc.ObservedTypeError,
-            # Ideally we should only capture TypeError here but some VTs don't
-            # implement hasattr(vt, "__contains__") entirely
-            Unsupported,
-        ) as excp:  # object doesn't support __contains__
-            # Use __iter__ as fallback
-            if isinstance(excp, Unsupported):
-                if excp.skip_frame:
-                    # do not absorb graph break with skip_frame set
-                    raise
-                excp.remove_from_stats()
-            self.push(
-                self.inline_user_function_return(
-                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
-                    [left, right],
-                    {},
-                )
-            )
+        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
