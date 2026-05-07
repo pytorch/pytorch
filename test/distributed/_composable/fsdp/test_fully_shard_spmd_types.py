@@ -10,8 +10,10 @@ from torch.distributed._composable import replicate
 from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
 
 
-if dist.is_spmd_types_available():
+if dist._is_spmd_types_available():
     import spmd_types as spmd
+    import spmd_types._checker
+    import spmd_types._type_attr
 
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -65,7 +67,7 @@ def _tp_init(model, tp_pg):
     model.forward = types.MethodType(_tp_forward, model)
 
 
-@unittest.skipUnless(dist.is_spmd_types_available(), "requires spmd_types")
+@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(FSDPTest):
     @property
     def world_size(self):
@@ -109,7 +111,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
                         f"{fqn} should be plain tensor at compute time",
                     )
                     self.assertTrue(
-                        spmd.has_local_type(param),
+                        spmd._checker.has_local_type(param),
                         f"{fqn} should have spmd_types annotation at compute time",
                     )
                     if fqn in expected_types:
@@ -138,7 +140,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_loss = ref_out.sum()
         ref_loss.backward()
 
-        with spmd.typecheck(strict_mode="strict", local=False):
+        with spmd._checker.typecheck(strict_mode="strict", local=False):
             spmd.assert_type(inp, input_type)
             out = model(inp)
         self.assertEqual(spmd.get_local_type(out)[fsdp_axis], spmd.V)
@@ -171,7 +173,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_model.load_state_dict(model.state_dict())
 
         for param in model.parameters():
-            spmd.set_local_type(param, {fsdp_axis: spmd.R})
+            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R})
 
         fully_shard(
             model,
@@ -225,7 +227,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            spmd.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
+            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
 
         def shard_fn(param):
             lt = spmd.get_local_type(param)

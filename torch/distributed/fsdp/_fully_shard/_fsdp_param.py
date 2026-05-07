@@ -11,8 +11,9 @@ import torch.distributed as dist
 import torch.nn as nn
 
 
-if dist.is_spmd_types_available():
+if dist._is_spmd_types_available():
     import spmd_types as spmd
+    import spmd_types._checker
 
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -268,8 +269,8 @@ class FSDPParam:
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_spmd_types = (
-            dist.is_spmd_types_available()
-            and spmd.has_local_type(param)
+            dist._is_spmd_types_available()
+            and spmd._checker.has_local_type(param)
             and not isinstance(param, DTensor)
         )
         if self.is_spmd_types:
