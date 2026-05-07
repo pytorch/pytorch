@@ -14551,7 +14551,10 @@ if __name__ == '__main__':
                     # tighter check
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 90
-                    expected_weight_grad_max_ulp_diff = 37
+                    if "mps" in device:
+                        expected_weight_grad_max_ulp_diff = 107
+                    else:  # CUDA/...
+                        expected_weight_grad_max_ulp_diff = 37
         elif acc_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:

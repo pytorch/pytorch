@@ -460,7 +460,10 @@ def _linear_cross_entropy_batch_chunked(
         if compute_input_grad or compute_linear_weight_grad:
             tmp_chunk = tmp.narrow(0, 0, bchunk_size)
             torch.div(weight_chunk, softmax_denom, out=tmp_chunk)
-            logits.mul_(tmp_chunk.unsqueeze(1))
+            # MPS workaround: in-place .mul_() on a narrow'd view
+            # doesn't propagate to logits_buf; out= dispatches
+            # differently.  Was: logits.mul_(tmp_chunk.unsqueeze(1))
+            torch.mul(logits, tmp_chunk.unsqueeze(1), out=logits)
 
         softmax_denom.log_()
         output.sub_(weight_chunk.dot(softmax_denom))
