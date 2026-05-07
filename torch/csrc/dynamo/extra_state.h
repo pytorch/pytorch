@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <unordered_map>
 
 namespace py = pybind11;
 
@@ -60,16 +61,25 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // function.
   PyCodeObject* orig_code;
   std::list<PrecompileEntry> precompile_entries;
-  // List of cache entries for compiled code objects
-  std::list<CacheEntry> cache_entry_list;
+  // Per-compile cache map: isolate_recompiles_id -> list of CacheEntry.
+  // id -1 is the default (non-isolated) bucket. id >= 0 are isolated compiles.
+  // All cache entries live in this map — there is no separate default list.
+  std::unordered_map<int64_t, std::list<CacheEntry>> cache_entry_map;
+  // Total cache entries across all compile scopes (for O(1)
+  // has_any_cache_entries)
+  size_t total_cache_entry_count{0};
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
-  // Actions to apply to all frames with this code object
+  // Actions to apply to all frames with this code object (non-isolated)
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Per-region strategies for isolated compiles. When an isolated region
+  // hits its recompile limit, only that region goes RUN_ONLY.
+  std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
 
   ExtraState(PyCodeObject* orig_code_arg);
-  CacheEntry* get_first_entry();
-  void move_to_front(CacheEntry* cache_entry);
+  std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
+  bool has_any_cache_entries() const;
+  void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
   void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
 } ExtraState;
@@ -81,13 +91,16 @@ typedef struct PrecompileEntry PrecompileEntry;
 
 #endif
 
-// Helper to extra the cache_entry from the extra state.
+// Helper to extract the first cache_entry for a given isolate_recompiles scope.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
+//  - isolate_recompiles_id: The scope to extract from (-1 = default)
 // return
 //  - CacheEntry: Borrowed.
-CacheEntry* extract_cache_entry(ExtraState* extra_state);
+CacheEntry* extract_cache_entry(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns either the previously stored frame state or an empty dict.
 // Ownership contract
@@ -108,6 +121,18 @@ FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
 // - extra_state: Borrowed
 void extra_state_set_exec_strategy(
     ExtraState* extra_state,
+    FrameExecStrategy strategy);
+
+// Get the exec strategy for a specific isolate_recompiles region.
+// Falls back to the global strategy if no per-region strategy is set.
+FrameExecStrategy extra_state_get_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
+
+// Set the exec strategy for a specific isolate_recompiles region.
+void extra_state_set_region_exec_strategy(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id,
     FrameExecStrategy strategy);
 
 // Ownership contract
@@ -171,6 +196,7 @@ void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
+    int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
@@ -197,6 +223,12 @@ PyObject* get_backend(PyObject* callback);
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
+// Returns the list of CacheEntry for a given isolate_recompiles_id bucket.
+// Warning: returns references whose lifetimes are controlled by C++
+py::list _get_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
 void _load_precompile_entry(
     const py::handle& code_obj,

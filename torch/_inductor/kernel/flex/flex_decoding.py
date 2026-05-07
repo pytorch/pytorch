@@ -87,7 +87,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and pw_of_two
     )
     log.debug(
-        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",
         out,
         force_flex,
         short_query_length,

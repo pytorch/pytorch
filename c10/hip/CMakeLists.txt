@@ -17,7 +17,7 @@ configure_file(
 
 # NB: All previous cu files are renamed into cc files.  This isn't tested at the
 # moment.
-file(GLOB C10_HIP_SRCS
+file(GLOB C10_HIP_SRCS CONFIGURE_DEPENDS
         *.cpp
         *.cc
         impl/*.cpp
@@ -26,10 +26,10 @@ file(GLOB C10_HIP_SRCS
 
 # Mark the cc files as HIP files, so we call the compiler.  (They have to be
 # suffixed with cc, because the hcc compiler won't accept them otherwise.)
-file(GLOB __c10_hip_srcs_cpp *.cc impl/*.cc)
+file(GLOB __c10_hip_srcs_cpp CONFIGURE_DEPENDS *.cc impl/*.cc)
 set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
-file(GLOB_RECURSE C10_HIP_HEADERS *.h)
+file(GLOB_RECURSE C10_HIP_HEADERS CONFIGURE_DEPENDS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
   hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})

@@ -150,7 +150,7 @@ def _resolve_mutated_flat_indices(
     indices: list[int] = []
     for expr in mutates_args:
         # Empty __builtins__ prevents access to builtins like __import__, open, exec.
-        result = eval(expr, {"__builtins__": {}}, namespace)  # noqa: S307
+        result = eval(expr, {"__builtins__": {}}, namespace)
         leaves = pytree.tree_leaves(result)
         for sentinel in leaves:
             if not isinstance(sentinel, int):
@@ -705,6 +705,41 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 requires_grad_indices=requires_grad_indices,
             )
 
+        hook_real = getattr(real_fn_callable, "_leaf_hook_real_fn", None)
+        hook_fake = getattr(real_fn_callable, "_leaf_hook_fake_fn", None)
+        if hook_real is not None:
+            assert hook_fake is not None  # noqa: S101
+            hook_captured_out_spec: list[pytree.TreeSpec | None] = [None]
+            wrapped_hook_real, wrapped_hook_fake = make_leaf_function_wrappers(
+                hook_real, hook_fake, hook_captured_out_spec
+            )
+            hook_real_callable = _LeafCallable(wrapped_hook_real)
+            hook_fake_callable = _LeafCallable(wrapped_hook_fake)
+
+            grad_tensors = [
+                arg
+                for arg in flat_args
+                if isinstance(arg, torch.Tensor) and arg.requires_grad
+            ]
+            if grad_tensors:
+
+                @torch._dynamo.disable
+                def _multi_grad_callback(
+                    grads: Sequence[torch.Tensor],
+                ) -> None:
+                    _, hook_spec = pytree.tree_flatten((tuple(grads), {}))
+                    invoke_leaf_function(
+                        hook_real_callable,
+                        hook_fake_callable,
+                        hook_spec,
+                        "",
+                        *grads,
+                    )
+
+                torch.autograd.graph.register_multi_grad_hook(
+                    grad_tensors, _multi_grad_callback
+                )
+
         ctx.real_backward = real_backward
         ctx.fake_backward = fake_backward
 
@@ -861,6 +896,20 @@ def invoke_leaf_function_fake(
         return fake_fn_callable(*args, **kwargs)
 
 
+def _detach_with_grad_dtype(arg):
+    # Tensor.detach() resets grad_dtype to the tensor's own dtype, dropping
+    # any caller-set grad_dtype (e.g. param.grad_dtype = torch.float32 on a
+    # bf16 weight). Propagate it back so the inner autograd graph accumulates
+    # the kernel's gradient at the requested dtype. grad_dtype is only
+    # meaningful on leaf tensors.
+    if not isinstance(arg, torch.Tensor):
+        return arg
+    detached = arg.detach()
+    if arg is not detached and arg.is_leaf and arg.grad_dtype != detached.grad_dtype:
+        detached.grad_dtype = arg.grad_dtype
+    return detached
+
+
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_leaf_function_dense(
     real_fn_callable,
@@ -876,9 +925,7 @@ def invoke_leaf_function_dense(
         arg._version if isinstance(arg, torch.Tensor) else 0 for arg in flat_args
     ]
 
-    flat_args = tuple(
-        arg.detach() if isinstance(arg, torch.Tensor) else arg for arg in flat_args
-    )
+    flat_args = tuple(_detach_with_grad_dtype(arg) for arg in flat_args)
     requires_grad_indices_set = _parse_mutated_arg_indices(requires_grad_indices)
     flat_args = tuple(
         arg.requires_grad_(True) if idx in requires_grad_indices_set else arg

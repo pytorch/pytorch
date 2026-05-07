@@ -29,6 +29,10 @@ namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+// Number of elements each thread processes in dense elementwise kernels.
+// Reading/writing a small array of values per thread improves memory-level
+// parallelism vs. a one-element-per-thread kernel.
+C10_METAL_CONSTEXPR unsigned ILP_PER_THREAD = 4;
 
 #ifdef __METAL__
 template <typename T, unsigned N>
@@ -37,6 +41,20 @@ using array = ::metal::array<T, N>;
 template <typename T, unsigned N>
 using array = std::array<T, N>;
 #endif
+
+// Integer ceiling division: ceil(a / b). Usable from both host code and
+// Metal shaders (where the overload is selected by ADL via `using namespace
+// c10::metal;` in shader sources).
+template <typename T>
+inline T ceil_div(T a, T b) {
+  return (a + b - 1) / b;
+}
+
+// Round `a` up to the next multiple of `b`: ceil(a / b) * b.
+template <typename T>
+inline T round_up(T a, T b) {
+  return ceil_div(a, b) * b;
+}
 
 enum class ScalarType {
 #define _DEFINE_ENUM_VAL_(_v, _n) _v = _n,
