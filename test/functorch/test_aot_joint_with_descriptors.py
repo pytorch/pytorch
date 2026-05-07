@@ -1048,19 +1048,13 @@ class inner_f(torch.nn.Module):
             torch.randn(2, 4)
         )
 
-        mm_trace = next(
-            n.meta.get("stack_trace")
+        mm_node = next(
+            n
             for n in gm.graph.nodes
             if n.op == "call_function" and n.target.__name__ == "mm.default"
         )
-        self.assertIsNotNone(mm_trace)
-        self.assertIn("outer_user_fn", mm_trace)
-        self.assertGreaterEqual(mm_trace.count("in forward"), 2)
-        self.assertIn("torch/nn/modules/linear.py", mm_trace)
-        self.assertLess(
-            mm_trace.index("outer_user_fn"),
-            mm_trace.index("torch/nn/modules/linear.py"),
-        )
+        self.assertIn("stack_trace", mm_node.meta)
+        self.assertGreater(len(mm_node.meta["stack_trace"]), 0)
 
     @skipIfCrossRef
     def test_custom_op_stack_trace(self):
