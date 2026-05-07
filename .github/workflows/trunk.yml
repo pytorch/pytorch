@@ -386,6 +386,7 @@ jobs:
     name: linux-jammy-py3-clang18-executorch
     uses: ./.github/workflows/_linux-test.yml
     needs:
+      - get-label-type
       - linux-jammy-py3-clang18-executorch-build
       - job-filter
     with:
