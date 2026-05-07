@@ -252,8 +252,89 @@ class _DTensorMeta(_TensorMeta):
         return diffs
 
 
+@dataclass(frozen=True, slots=True)
+class _SpmdTypesMeta(_TensorMeta):
+    """Metadata for spmd_types-annotated plain tensors.
+
+    Inherited fields (shape, stride, dtype, requires_grad) are the plain
+    tensor's attributes. Additional fields capture per-mesh-axis type
+    annotations needed to restore spmd_types info after P2P communication.
+
+    The DeviceMesh is not stored; it is looked up from _MeshCache using
+    (mesh_dim_names, mesh_layout) as the key.
+    """
+
+    # Per-dim-name spmd type values: {"tp": R, "dp": S(0), ...}
+    spmd_types_by_dim_name: dict[str, object] = field(default_factory=dict)
+
+    # Mesh identification (same pattern as _DTensorMeta)
+    mesh_dim_names: tuple[str, ...] = field(default=())
+    mesh_layout: _MeshLayout | None = field(default=None)
+
+    @staticmethod
+    def from_spmd_tensor(
+        tensor: torch.Tensor, device_mesh: DeviceMesh
+    ) -> _SpmdTypesMeta:
+        import spmd_types as spmd
+
+        local_type = spmd.get_local_type(tensor)
+        spmd_types_by_dim_name: dict[str, object] = {}
+        dim_names = device_mesh.mesh_dim_names or ()
+        for axis, axis_type in local_type.items():
+            for name in dim_names:
+                if spmd.MeshAxis.of(device_mesh.get_group(name)) == axis:
+                    spmd_types_by_dim_name[name] = axis_type
+                    break
+
+        return _SpmdTypesMeta(
+            shape=tensor.shape,
+            stride=tensor.stride(),
+            dtype=tensor.dtype,
+            requires_grad=tensor.requires_grad,
+            spmd_types_by_dim_name=spmd_types_by_dim_name,
+            mesh_dim_names=(
+                tuple(device_mesh.mesh_dim_names) if device_mesh.mesh_dim_names else ()
+            ),
+            mesh_layout=device_mesh._layout,
+        )
+
+    @property
+    def mesh_cache_key(self) -> MeshCacheKey:
+        return (self.mesh_dim_names, self.mesh_layout)
+
+    def reannotate(self, tensor: torch.Tensor, mesh: DeviceMesh) -> torch.Tensor:
+        """Restore spmd_types annotations on a plain tensor after recv."""
+        import spmd_types as spmd
+
+        local_type = {}
+        for name, axis_type in self.spmd_types_by_dim_name.items():
+            axis = spmd.MeshAxis.of(mesh.get_group(name))
+            local_type[axis] = axis_type
+        spmd.assert_type(tensor, local_type)
+        return tensor
+
+    def get_diff(self, other: _TensorMeta) -> list[str]:
+        if self == other:
+            return []
+        diffs = _TensorMeta.get_diff(self, other)
+        if isinstance(other, _SpmdTypesMeta):
+            if self.spmd_types_by_dim_name != other.spmd_types_by_dim_name:
+                diffs.append(
+                    f"spmd_types mismatch: {self.spmd_types_by_dim_name} "
+                    f"vs {other.spmd_types_by_dim_name}"
+                )
+            if self.mesh_dim_names != other.mesh_dim_names:
+                diffs.append(
+                    f"mesh_dim_names mismatch: {self.mesh_dim_names} "
+                    f"vs {other.mesh_dim_names}"
+                )
+        else:
+            diffs.append("type: _SpmdTypesMeta vs _TensorMeta")
+        return diffs
+
+
 # Type alias for union of tensor metadata types
-TensorMeta: TypeAlias = _TensorMeta | _DTensorMeta
+TensorMeta: TypeAlias = _TensorMeta | _DTensorMeta | _SpmdTypesMeta
 
 
 # Not frozen: fields are populated incrementally during forward and
@@ -278,6 +359,13 @@ class _StageMeta:
         """Check if any input/output metadata is DTensor type."""
         for metas in [self.inputs, self.outputs]:
             if metas and any(isinstance(m, _DTensorMeta) for m in metas if m):
+                return True
+        return False
+
+    def has_spmd_types(self) -> bool:
+        """Check if any input/output metadata is spmd_types type."""
+        for metas in [self.inputs, self.outputs]:
+            if metas and any(isinstance(m, _SpmdTypesMeta) for m in metas if m):
                 return True
         return False
 
@@ -449,8 +537,8 @@ class InferenceMode(Enum):
         if not meta.is_complete_for_forward():
             return True
 
-        # Case 2: No DTensors → STATIC is fine (bwd metadata derivable from fwd metadata)
-        if not meta.has_dtensors():
+        # Case 2: No distributed tensors → STATIC is fine (bwd metadata derivable)
+        if not meta.has_dtensors() and not meta.has_spmd_types():
             return False
 
         # Case 3: No backward needed → STATIC is fine (don't need grad metadata)
@@ -579,22 +667,36 @@ class PipeInfo:
 # ============================================================================
 
 
-def extract_tensor_meta(tensor: torch.Tensor) -> TensorMeta:
+def _has_spmd_local_type(tensor: torch.Tensor) -> bool:
+    """Check if a tensor has spmd_types annotations."""
+    try:
+        import spmd_types._checker
+
+        return spmd_types._checker.has_local_type(tensor)
+    except ImportError:
+        return False
+
+
+def extract_tensor_meta(
+    tensor: torch.Tensor,
+    device_mesh: DeviceMesh | None = None,
+) -> TensorMeta:
     """Extract metadata from a tensor.
 
-    Handles both plain Tensor and DTensor correctly: DTensors are
-    dispatched to ``_DTensorMeta.from_dtensor`` which captures local
-    shard attributes plus global shape/placement info, while plain
-    tensors use ``_TensorMeta.from_tensor``.
+    Handles DTensor, spmd_types-annotated tensors, and plain tensors.
 
     Args:
-        tensor: A plain tensor or DTensor.
+        tensor: A plain tensor, DTensor, or spmd_types-annotated tensor.
+        device_mesh: Required for spmd_types tensors (they don't carry
+            their mesh internally unlike DTensors).
 
     Returns:
-        ``_TensorMeta`` for plain tensors, ``_DTensorMeta`` for DTensors.
+        ``_DTensorMeta``, ``_SpmdTypesMeta``, or ``_TensorMeta``.
     """
     if isinstance(tensor, DTensor):
         return _DTensorMeta.from_dtensor(tensor)
+    elif device_mesh is not None and _has_spmd_local_type(tensor):
+        return _SpmdTypesMeta.from_spmd_tensor(tensor, device_mesh)
     else:
         return _TensorMeta.from_tensor(tensor)
 
@@ -604,6 +706,7 @@ def extract_tensor_metas(
     tensors: tuple[torch.Tensor, ...] | None,
     *,
     allow_none: Literal[False] = ...,
+    device_mesh: DeviceMesh | None = ...,
 ) -> tuple[TensorMeta, ...] | None: ...
 
 
@@ -612,6 +715,7 @@ def extract_tensor_metas(
     tensors: tuple[torch.Tensor | None, ...] | None,
     *,
     allow_none: Literal[True],
+    device_mesh: DeviceMesh | None = ...,
 ) -> tuple[TensorMeta | None, ...] | None: ...
 
 
@@ -619,12 +723,14 @@ def extract_tensor_metas(
     tensors: tuple[torch.Tensor | None, ...] | tuple[torch.Tensor, ...] | None,
     *,
     allow_none: bool = False,
+    device_mesh: DeviceMesh | None = None,
 ) -> tuple[TensorMeta | None, ...] | None:
     """Extract metadata from a tuple of tensors.
 
     Args:
         tensors: Tuple of tensors (may include ``None`` when ``allow_none=True``).
         allow_none: If ``True``, preserve ``None`` elements (for gradients).
+        device_mesh: Passed through to ``extract_tensor_meta`` for spmd_types.
 
     Returns:
         Tuple of ``TensorMeta``, or ``None`` if ``tensors`` is ``None``.
@@ -639,7 +745,7 @@ def extract_tensor_metas(
     has_none = False
     for t in tensors:
         if isinstance(t, torch.Tensor):
-            metas_with_none.append(extract_tensor_meta(t))
+            metas_with_none.append(extract_tensor_meta(t, device_mesh=device_mesh))
         else:
             has_none = True
             metas_with_none.append(None)
