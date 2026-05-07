@@ -3166,7 +3166,8 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
         # Realize non-constant lazy args; LazyConstantVariable.python_type()
         # installs only a TYPE_MATCH guard, which is what isinstance() needs.
         if any(
-            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            isinstance(a, LazyVariableTracker)
+            and not isinstance(a, LazyConstantVariable)
             for a in args
         ):
             args = [
@@ -3592,12 +3593,14 @@ class StrBuiltinVariable(BaseBuiltinVariable):
                 except AttributeError:
                     return None
             elif is_wrapper_or_member_descriptor(str_method):
-                unimplemented(
-                    gb_type="Attempted to a str() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
-                    hints=["Write the str method in Python"],
-                )
+                if not check_unspec_or_constant_args(args, kwargs):
+                    unimplemented(
+                        gb_type="Attempted to a str() method implemented in C/C++",
+                        context="",
+                        explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
+                        hints=["Write the str method in Python"],
+                    )
+                return None
             else:
                 bound_method = str_method.__func__  # type: ignore[attr-defined]
                 try:
