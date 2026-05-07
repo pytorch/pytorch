@@ -77,9 +77,11 @@ vllm_multi_model_processor_test:
   steps:
     - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py
     # mistralai and moonshotai ship custom tiktoken tokenizers without a tokenizer.json; transformers v5's
-    # TokenizersBackend needs Hub access to resolve tokenizer_file, so run them with OFFLINE=0.
-    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai and not moonshotai'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k 'mistralai or moonshotai'
+    # TokenizersBackend needs Hub access to resolve tokenizer_file. moondream3's HF config points at a
+    # separate language-model repo (moondream/starmie-v1) whose config.json is not in the pre-populated
+    # cache, so loading it also requires Hub access. Run all three with OFFLINE=0.
+    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai and not moonshotai and not moondream'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k 'mistralai or moonshotai or moondream'
     - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_glm4_1v.py
 
 vllm_multi_model_test_28_failure_test:
