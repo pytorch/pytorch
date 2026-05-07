@@ -11611,6 +11611,7 @@ class TestNNDeviceType(NNTestCase):
         issue_24823_2()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
@@ -11656,6 +11657,7 @@ class TestNNDeviceType(NNTestCase):
             large_view.grad.zero_()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)  # MPS doesn't support float64
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
