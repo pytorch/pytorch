@@ -16,7 +16,6 @@ bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp) {
     default:
       return false;
   }
-  return false;
 }
 
 } // namespace c10d

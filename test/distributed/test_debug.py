@@ -417,6 +417,8 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
+    import torch.distributed.debug._debug_handlers
+
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
     def test_stacks_handler_partial_dump(self, mock_fetch_all) -> None:
         from torch.distributed.debug._debug_handlers import StacksHandler

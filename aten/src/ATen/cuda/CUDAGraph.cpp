@@ -120,6 +120,16 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
+#if defined(USE_ROCM)
+  // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
+  // Ensure the handle for the intended capture stream exists before
+  // capture begins, because hipblasLtCreate performs internal allocations
+  // that are not allowed once stream capture is active.
+  if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
+    (void)at::cuda::getCurrentCUDABlasLtHandle();
+  }
+#endif
+
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
     // But only one should be nonzero.
@@ -179,10 +189,10 @@ void CUDAGraph::capture_end() {
         "capture_end() called before capture_begin().");
     _currently_capturing_graphs.erase(capture_id_);
   }
-  AT_CUDA_CHECK(endCaptureErr);
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
