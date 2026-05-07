@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -39,6 +40,28 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
   const auto stream = getCurrentMPSStream();
   const auto type_str = scalarToMetalTypeString(dtype);
   const bool can_fill_linearly = self.is_non_overlapping_and_dense();
+
+  // UMA fast path: on Apple Silicon, MTLStorageModeShared buffers are
+  // CPU-writable. Fill via memset/std::fill instead of a Metal compute dispatch.
+  if (can_fill_linearly && !at::isComplexType(dtype) && dtype != kUInt16 && dtype != kUInt32 && dtype != kUInt64) {
+    id<MTLBuffer> buffer = getMTLBufferStorage(self);
+    if ([buffer storageMode] == MTLStorageModeShared) {
+      // Flush any pending GPU writes to this buffer before the CPU fill to
+      // prevent lazy-committed GPU commands (e.g. a prior ones_() or fill_())
+      // from overwriting our memset after it returns.
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+      auto byte_offset = self.storage_offset() * self.itemsize();
+      void* ptr = static_cast<char*>([buffer contents]) + byte_offset;
+      if (value.toDouble() == 0.0) {
+        std::memset(ptr, 0, self.nbytes());
+      } else {
+        AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, dtype, "fill_mps_uma", [&] {
+          std::fill_n(static_cast<scalar_t*>(ptr), self.numel(), value.to<scalar_t>());
+        });
+      }
+      return;
+    }
+  }
 
   // For tensors with gaps or overlaps (e.g. stride-2 slices) use a 2D strided
   // kernel: tid.y indexes dim 0 directly (no division), tid.x is the linear
