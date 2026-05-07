@@ -422,7 +422,8 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
 def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
-    col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
+    with torch.fx.traceback.annotate({"fallback_to_eager": True}):
+        col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
     return (
         num_blocks_in_row.to(torch.int32, memory_format=torch.contiguous_format),
         col_indices.to(torch.int32, memory_format=torch.contiguous_format),
