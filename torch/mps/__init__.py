@@ -137,6 +137,80 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
+def set_graph_cache_policy(policy: str) -> None:
+    r"""Set the caching policy for MPS compiled graphs.
+
+    The MPS backend compiles operation graphs (via MPSGraph) for each unique
+    combination of input shapes and dtypes. By default, every compiled graph
+    is cached indefinitely. For workloads with highly variable tensor shapes
+    (e.g., graph neural networks, variable-length sequences), this leads to
+    unbounded memory growth from one-shot cache entries that are never reused.
+
+    Args:
+        policy (str): One of:
+            - ``"always"`` (default): cache every compiled graph.
+            - ``"never"``: never cache compiled graphs (always recompile).
+              Use for workloads with highly dynamic tensor shapes where
+              cached graphs are never reused (e.g., graph neural networks,
+              variable-length sequence processing).
+
+    .. note::
+       This setting takes effect immediately and persists for the lifetime of
+       the process. It can also be set via the environment variable
+       ``PYTORCH_MPS_GRAPH_CACHE_POLICY`` (values: ``always``, ``on_reuse``,
+       ``never``).
+
+    Example::
+
+        >>> # For PyG / variable-shape workloads:
+        >>> torch.mps.set_graph_cache_policy("never")
+    """
+    torch._C._mps_setGraphCachePolicy(policy)
+
+
+def freeze_graph_cache() -> None:
+    r"""Freeze the MPSGraph cache, making it read-only.
+
+    After this call, cache hits are still served from compiled graphs, but
+    new shapes are compiled on-the-fly and immediately discarded rather than
+    stored.  This is useful after a warmup phase where the most common shapes
+    have already been cached: subsequent iterations with rare shapes pay a
+    one-off recompilation cost while common shapes continue to benefit from
+    the cache.
+
+    Use :func:`set_graph_cache_policy` to return to the default
+    ``"always"`` policy, or :func:`clear_graph_cache` to flush all entries
+    before unfreezing.
+    """
+    torch._C._mps_freezeGraphCache()
+
+
+def clear_graph_cache() -> None:
+    r"""Clear the MPSGraph cache, releasing all compiled graphs.
+
+    Call after the backward pass in training loops with variable-size inputs
+    (e.g., graph neural networks) to prevent unbounded cache growth while
+    preserving forward-to-backward graph reuse within each iteration.
+
+    Example::
+        >>> for batch in loader:
+        ...     loss = model(batch).loss
+        ...     loss.backward()
+        ...     optimizer.step()
+        ...     torch.mps.clear_graph_cache()
+    """
+    torch._C._mps_clearGraphCache()
+
+
+def get_graph_cache_policy() -> str:
+    r"""Get the current MPS graph caching policy.
+
+    Returns:
+        str: ``"always"`` or ``"never"``.
+    """
+    return torch._C._mps_getGraphCachePolicy()
+
+
 def compile_shader(source: str):
     r"""Compiles compute shader from source and allows one to invoke kernels
     defined there from the comfort of Python runtime
@@ -252,4 +326,8 @@ __all__ = [
     "profiler",
     "recommended_max_memory",
     "is_available",
+    "set_graph_cache_policy",
+    "get_graph_cache_policy",
+    "clear_graph_cache",
+    "freeze_graph_cache",
 ]

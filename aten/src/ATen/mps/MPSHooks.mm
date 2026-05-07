@@ -94,6 +94,38 @@ void MPSHooks::emptyCache() const {
   at::native::mps::MPSGraphCache::getInstance()->clear();
 }
 
+void MPSHooks::setGraphCachePolicy(const std::string& policy) const {
+  using P = at::native::mps::MPSGraphCachePolicy;
+  auto* cache = at::native::mps::MPSGraphCache::getInstance();
+  if (policy == "always") {
+    cache->setCachePolicy(P::kAlways);
+  } else if (policy == "never") {
+    cache->setCachePolicy(P::kNever);
+  } else {
+    TORCH_CHECK(false, "Invalid graph cache policy: '", policy,
+                "'. Expected 'always' or 'never'.");
+  }
+}
+
+std::string MPSHooks::getGraphCachePolicy() const {
+  using P = at::native::mps::MPSGraphCachePolicy;
+  auto policy = at::native::mps::MPSGraphCache::getInstance()->getCachePolicy();
+  switch (policy) {
+    case P::kAlways: return "always";
+    case P::kNever: return "never";
+    case P::kFrozen: return "frozen";
+  }
+  return "always";
+}
+
+void MPSHooks::clearGraphCache() const {
+  at::native::mps::MPSGraphCache::getInstance()->clear();
+}
+
+void MPSHooks::freezeGraphCache() const {
+  at::native::mps::MPSGraphCache::getInstance()->freeze();
+}
+
 size_t MPSHooks::getCurrentAllocatedMemory() const {
   return at::mps::getIMPSAllocator()->getCurrentAllocatedMemory();
 }

@@ -57,6 +57,18 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual void emptyCache() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual void setGraphCachePolicy(const std::string& /*policy*/) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual std::string getGraphCachePolicy() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void clearGraphCache() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void freezeGraphCache() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual size_t getCurrentAllocatedMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
