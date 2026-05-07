@@ -31,7 +31,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     BypassAOTAutogradCache,
     sanitize_gm_for_cache,
 )
-from torch._functorch._aot_autograd.schemas import AOTConfig
+from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
@@ -3245,23 +3245,53 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
 
-    def test_identical_graphs_and_configs(self):
+    def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):
-            y = x.sin()
-            z = y.cos()
-            return z
-
-        # Make the id different, but otherwise identical
         config = self.default_config()
         config2 = self.default_config()
         config2.aot_id = 1
+        config3 = self.default_config()
+        config3.fw_compiler = lambda gm, inputs: gm
 
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
+        c3 = self.gen_cache_key(fn, config3)
         self.assertEqual(c1, c2)
+        self.assertEqual(c1, c3)
+
+    def test_to_cacheable_strips_runtime_only_fields(self):
+        config = self.default_config()
+        config.fw_compiler = lambda gm, inputs: gm
+        config.bw_compiler = lambda gm, inputs: gm
+        config.partition_fn = lambda *args: args
+        config.decompositions = None
+        config.inference_compiler = lambda gm, inputs: gm
+        config.static_input_indices = [0]
+        config.precompile_backend_id = "backend"
+
+        cacheable = config.to_cacheable()
+
+        self.assertIsInstance(cacheable, CacheableAOTConfig)
+        self.assertEqual(cacheable.static_input_indices, [0])
+        self.assertEqual(cacheable.precompile_backend_id, "backend")
+        self.assertFalse(hasattr(cacheable, "fw_compiler"))
+
+    def test_different_cacheable_configs(self):
+        def fn(x):
+            return x.sin().cos()
+
+        base_config = self.default_config()
+        base = self.gen_cache_key(fn, base_config)
+
+        config_with_static_inputs = self.default_config()
+        config_with_static_inputs.static_input_indices = [0]
+        self.assertNotEqual(base, self.gen_cache_key(fn, config_with_static_inputs))
+
+        config_with_backend = self.default_config()
+        config_with_backend.precompile_backend_id = "backend"
+        self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
     def test_different_graphs(self):
         def fn(x):
