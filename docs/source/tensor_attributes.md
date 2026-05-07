@@ -1,3 +1,9 @@
+---
+myst:
+  footnote_sort: false
+  footnote_transition: false
+---
+
 ```{eval-rst}
 .. currentmodule:: torch
 ```
@@ -19,68 +25,60 @@ Each `torch.Tensor` has a {class}`torch.dtype`, {class}`torch.device`, and {clas
 A {class}`torch.dtype` is an object that represents the data type of a
 {class}`torch.Tensor`. PyTorch has several different data types:
 
-```{eval-rst}
 **Floating point dtypes**
 
-===============================================  ===============================
-dtype                                            description
-===============================================  ===============================
-``torch.float32`` or ``torch.float``             32-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754
-``torch.float64`` or ``torch.double``            64-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754
-``torch.float16`` or ``torch.half``              16-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754, S-E-M 1-5-10
-``torch.bfloat16``                               16-bit floating point, sometimes referred to as Brain floating point, S-E-M 1-8-7
-``torch.complex32`` or ``torch.chalf``           32-bit complex with two `float16` components
-``torch.complex64`` or ``torch.cfloat``          64-bit complex with two `float32` components
-``torch.complex128`` or ``torch.cdouble``        128-bit complex with two `float64` components
-``torch.float8_e4m3fn`` [shell]_, [1]_           8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/abs/2209.05433
-``torch.float8_e5m2`` [shell]_                   8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/abs/2209.05433
-``torch.float8_e4m3fnuz`` [shell]_, [1]_         8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
-``torch.float8_e5m2fnuz`` [shell]_, [1]_         8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/pdf/2206.02915
-``torch.float8_e8m0fnu`` [shell]_, [1]_          8-bit floating point, S-E-M 0-8-0, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
-``torch.float4_e2m1fn_x2`` [shell]_, [1]_, [3]_  packed 4-bit floating point, S-E-M 1-2-1, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
-===============================================  ===============================
+| dtype | description |
+| --- | --- |
+| `torch.float32` or `torch.float` | 32-bit floating point, as defined in <https://en.wikipedia.org/wiki/IEEE_754> |
+| `torch.float64` or `torch.double` | 64-bit floating point, as defined in <https://en.wikipedia.org/wiki/IEEE_754> |
+| `torch.float16` or `torch.half` | 16-bit floating point, as defined in <https://en.wikipedia.org/wiki/IEEE_754>, S-E-M 1-5-10 |
+| `torch.bfloat16` | 16-bit floating point, sometimes referred to as Brain floating point, S-E-M 1-8-7 |
+| `torch.complex32` or `torch.chalf` | 32-bit complex with two `float16` components |
+| `torch.complex64` or `torch.cfloat` | 64-bit complex with two `float32` components |
+| `torch.complex128` or `torch.cdouble` | 128-bit complex with two `float64` components |
+| `torch.float8_e4m3fn` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/abs/2209.05433> |
+| `torch.float8_e5m2` [^shell] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/abs/2209.05433> |
+| `torch.float8_e4m3fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/pdf/2206.02915> |
+| `torch.float8_e5m2fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/pdf/2206.02915> |
+| `torch.float8_e8m0fnu` [^shell] [^1] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
+| `torch.float4_e2m1fn_x2` [^shell] [^1] [^3] | packed 4-bit floating point, S-E-M 1-2-1, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 
 **Integer dtypes**
 
-=========================================  ===============================
-dtype                                      description
-=========================================  ===============================
-``torch.uint8``                            8-bit integer (unsigned)
-``torch.int8``                             8-bit integer (signed)
-``torch.uint16`` [shell]_, [2]_            16-bit integer (unsigned)
-``torch.int16`` or ``torch.short``         16-bit integer (signed)
-``torch.uint32`` [shell]_, [2]_            32-bit integer (unsigned)
-``torch.int32`` or ``torch.int``           32-bit integer (signed)
-``torch.uint64`` [shell]_, [2]_            64-bit integer (unsigned)
-``torch.int64`` or ``torch.long``          64-bit integer (signed)
-``torch.bool``                             Boolean
-=========================================  ===============================
+| dtype | description |
+| --- | --- |
+| `torch.uint8` | 8-bit integer (unsigned) |
+| `torch.int8` | 8-bit integer (signed) |
+| `torch.uint16` [^shell] [^2] | 16-bit integer (unsigned) |
+| `torch.int16` or `torch.short` | 16-bit integer (signed) |
+| `torch.uint32` [^shell] [^2] | 32-bit integer (unsigned) |
+| `torch.int32` or `torch.int` | 32-bit integer (signed) |
+| `torch.uint64` [^shell] [^2] | 64-bit integer (unsigned) |
+| `torch.int64` or `torch.long` | 64-bit integer (signed) |
+| `torch.bool` | Boolean |
 
-.. [shell] a shell dtype is a specialized dtype with limited op and backend support.
-  Specifically, ops that support tensor creation (``torch.empty``, ``torch.fill``, ``torch.zeros``)
-  and operations which do not peek inside the data elements (``torch.cat``, ``torch.view``, ``torch.reshape``)
-  are supported.  Ops that peek inside the data elements such as casting,
-  matrix multiplication, nan/inf checks are supported only on a case by
-  case basis, depending on maturity and presence of hardware accelerated kernels
-  and established use cases.
+[^shell]: a shell dtype is a specialized dtype with limited op and backend support.
+    Specifically, ops that support tensor creation (`torch.empty`, `torch.fill`, `torch.zeros`)
+    and operations which do not peek inside the data elements (`torch.cat`, `torch.view`, `torch.reshape`)
+    are supported. Ops that peek inside the data elements such as casting,
+    matrix multiplication, nan/inf checks are supported only on a case by
+    case basis, depending on maturity and presence of hardware accelerated kernels
+    and established use cases.
 
-.. [1] The "fn", "fnu" and "fnuz" dtype suffixes mean:
-  "f" - finite value encodings only, no infinity;
-  "n" - nan value encodings differ from the IEEE spec;
-  "uz" - "unsigned zero" only, i.e. no negative zero encoding
+[^1]: The "fn", "fnu" and "fnuz" dtype suffixes mean:
+    "f" - finite value encodings only, no infinity;
+    "n" - nan value encodings differ from the IEEE spec;
+    "uz" - "unsigned zero" only, i.e. no negative zero encoding
 
-.. [2]
-  Unsigned types asides from ``uint8`` are currently planned to only have
-  limited support in eager mode (they primarily exist to assist usage with
-  torch.compile); if you need eager support and the extra range is not needed,
-  we recommend using their signed variants instead.  See
-  https://github.com/pytorch/pytorch/issues/58734 for more details.
+[^2]: Unsigned types asides from `uint8` are currently planned to only have
+    limited support in eager mode (they primarily exist to assist usage with
+    torch.compile); if you need eager support and the extra range is not needed,
+    we recommend using their signed variants instead. See
+    <https://github.com/pytorch/pytorch/issues/58734> for more details.
 
-.. [3]
-  The `torch.float4_e2m1fn_x2` dtype represents two 4-bit values packed into a byte.
-  Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
-  operate at the byte boundary and will **not** unpack/repack sub-byte values.
-```
+[^3]: The `torch.float4_e2m1fn_x2` dtype represents two 4-bit values packed into a byte.
+    Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
+    operate at the byte boundary and will **not** unpack/repack sub-byte values.
 
 **Note**: legacy constructors such as `torch.*.FloatTensor`, `torch.*.DoubleTensor`, `torch.*.HalfTensor`,
 `torch.*.BFloat16Tensor`, `torch.*.ByteTensor`, `torch.*.CharTensor`, `torch.*.ShortTensor`, `torch.*.IntTensor`,
