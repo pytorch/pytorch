@@ -7,6 +7,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from typing import Any, IO, TYPE_CHECKING, TypeAlias
+from typing_extensions import TypeIs
 
 import torch
 import torch.utils._pytree as pytree
@@ -331,7 +332,7 @@ def _package_aoti_files(
             logger.debug(weights_config)
 
 
-def _is_fake_tensor(t: torch.Tensor) -> bool:
+def _is_fake_tensor(t: torch.Tensor) -> TypeIs[FakeTensor]:
     return isinstance(t, FakeTensor)
 
 
@@ -602,6 +603,8 @@ def _package_exported_programs(
             ep,
             opset_version,
             pickle_protocol,
+            serialize_state_dict=False,
+            serialize_constants=False,
         )
 
         archive_writer.write_bytes(
@@ -742,6 +745,7 @@ class AOTICompiledModel:
         *,
         check_full_update: bool,
         user_managed: bool = False,
+        allow_h2d_copy: bool = False,
     ) -> None:
         """
         Given a mapping of constant fqns to tensors, load the constants into the model.
@@ -752,9 +756,14 @@ class AOTICompiledModel:
             constants_map: A mapping of constant fqns to tensors.
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
+            user_managed: If True, the loader stores the tensor pointers
+            directly; the caller must keep them alive.
+            allow_h2d_copy: If True, CPU tensors are silently copied to the
+            model's device. Useful for loading a CPU ``state_dict()`` into a
+            non-CPU model. Incompatible with ``user_managed``.
         """
         self.loader.load_constants(
-            constants_map, False, check_full_update, user_managed
+            constants_map, False, check_full_update, user_managed, allow_h2d_copy
         )
 
     def get_constant_fqns(self) -> list[str]:

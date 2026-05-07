@@ -17,7 +17,8 @@
 
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
@@ -163,6 +164,20 @@ at::Tensor multimem_all_reduce_(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_all_reduce",
+      input.numel(),
+      input.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "multimem_all_reduce_: input must be contiguous.");
   TORCH_CHECK(
@@ -247,6 +262,20 @@ at::Tensor multimem_one_shot_reduce_out(
     int64_t root,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_one_shot_reduce",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(),
       "multimem_one_shot_reduce: input must be contiguous.");
@@ -361,6 +390,20 @@ at::Tensor multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::multimem_all_gather",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   auto symm_mem = c10d::symmetric_memory::rendezvous(out, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
@@ -475,6 +518,20 @@ at::Tensor one_shot_all_reduce_out_impl(
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::one_shot_all_reduce",
+      input.numel(),
+      out.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "one_shot_all_reduce: input must be contiguous.");
   TORCH_CHECK(
@@ -732,6 +789,20 @@ at::Tensor two_shot_all_reduce_impl(
     std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::two_shot_all_reduce",
+      input.numel(),
+      input.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "two_shot_all_reduce: input must be contiguous.");
   TORCH_CHECK(
@@ -856,6 +927,20 @@ at::Tensor reduce_scatter_out(
     std::string group_name,
     bool split_last_dim,
     at::Tensor output) {
+  auto pg = c10d::resolve_process_group(group_name);
+  RECORD_PARAM_COMMS(
+      static_cast<int64_t>(0),
+      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
+      pg->getRank(),
+      "symm_mem::reduce_scatter",
+      input.numel(),
+      output.numel(),
+      input.scalar_type(),
+      std::vector<int64_t>(),
+      std::vector<int64_t>(),
+      -1,
+      -1,
+      pg->getSize());
   TORCH_CHECK(
       input.is_contiguous(), "reduce_scatter: input must be contiguous.");
   TORCH_CHECK(

@@ -37,8 +37,8 @@ static inline ExprPtr newBinaryOpOfType(
     case IRNodeType::kRshift:
       return alloc<Rshift>(lhs, rhs);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      TORCH_INTERNAL_ASSERT(
+          false, "unsupported expr_type: ", static_cast<int>(expr_type));
   }
 }
 

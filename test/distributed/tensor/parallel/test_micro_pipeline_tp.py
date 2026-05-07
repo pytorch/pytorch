@@ -1,6 +1,5 @@
 # Owner(s): ["module: c10d"]
 import unittest
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -63,6 +62,7 @@ def _fp8_all_gather(
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -240,12 +240,6 @@ class MicroPipelineTPTest(TestCase):
             # all_gather to be optimized away entirely, so we only check that
             # fused_all_gather_matmul is NOT used.
             self.assertNotIn("fused_all_gather_matmul", code)
-        elif gather_dim == 1:
-            # When gather_dim == 1, the view optimization in _maybe_view_chunk_cat
-            # allows the all_gather to be optimized away entirely (since there are
-            # no dimensions between dim 0 and gather_dim that need to be moved).
-            # This results in no all_gather_into_tensor appearing in the code.
-            self.assertNotIn("fused_all_gather_matmul", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
@@ -268,7 +262,7 @@ class MicroPipelineTPTest(TestCase):
             B: torch.Tensor,
             A_scale: torch.Tensor,
             B_scale: torch.Tensor,
-            out_dtype: Optional[torch.dtype],
+            out_dtype: torch.dtype | None,
         ) -> torch.Tensor:
             A = _fp8_all_gather(
                 A_shard, gather_dim=gather_dim, group_name=group.group_name
@@ -505,6 +499,7 @@ class MicroPipelineTPTest(TestCase):
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
+        super().setUp()
         torch._inductor.config._micro_pipeline_tp = True
 
         self.rank = 0
@@ -524,6 +519,7 @@ class MicroPipelineTP4GPUTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(shape_padding=False)
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
             "cuda",

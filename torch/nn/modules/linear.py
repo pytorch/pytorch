@@ -298,11 +298,11 @@ class LazyLinear(LazyModuleMixin, Linear):
         # that will soon be overwritten.
         # pyrefly: ignore [bad-argument-type]
         super().__init__(0, 0, False)
-        # pyrefly: ignore [bad-argument-type, unexpected-keyword]
+        # pyrefly: ignore [unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_features = out_features
         if bias:
-            # pyrefly: ignore [bad-argument-type, unexpected-keyword]
+            # pyrefly: ignore [unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def reset_parameters(self) -> None:

@@ -223,21 +223,6 @@ op_db: list[OpInfo] = [
                 "TestNormalizeOperators",
                 "test_normalize_operator_exhaustive",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.float32, torch.int64),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-            ),
         ),
         sample_kwargs=lambda device, dtype, input: ({"n": 0}, {"n": 0}),
         # polygamma functions have multiple singularities at x having non-positive integer value
@@ -381,7 +366,7 @@ op_db: list[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool),
-        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
+        ref=(lambda x: scipy.special.airy(x)[0]) if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -862,7 +847,7 @@ op_db: list[OpInfo] = [
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
+        ref=(lambda x: scipy.special.spherical_jn(0, x)) if TEST_SCIPY else None,
         supports_autograd=False,
         skips=(
             DecorateInfo(
@@ -893,23 +878,6 @@ python_ref_db: list[OpInfo] = [
                 },
             ),
         ),
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j1",
@@ -921,23 +889,6 @@ python_ref_db: list[OpInfo] = [
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
                 },
-            ),
-        ),
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
     ),
@@ -1010,21 +961,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_numerics_large",
                 dtypes=(torch.int8,),
             ),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -1056,23 +992,6 @@ python_ref_db: list[OpInfo] = [
         "_refs.special.ndtr",
         torch_opinfo_name="special.ndtr",
         op_db=op_db,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",

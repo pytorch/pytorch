@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -4119,7 +4119,14 @@ class TestBufferProtocol(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    return "cuda" if torch.device(device).type == "cpu" else "cpu"
+    device = torch.device(device)
+
+    if device.type != "cpu":
+        return "cpu"
+
+    acc = torch.accelerator.current_accelerator(True)
+
+    return acc.type if acc is not None else None
 
 def identity(tensor):
     return tensor
@@ -4138,7 +4145,8 @@ class TestAsArray(TestCase):
             3. Whether the result lives in the expected device
             4. Whether the result has its 'requires_grad' set or not
         """
-        result = torch.asarray(cvt(original), **kwargs)
+        converted_original = cvt(original)
+        result = torch.asarray(converted_original, **kwargs)
         self.assertTrue(isinstance(result, torch.Tensor))
 
         # 1. The storage pointers should be equal only if 'is_alias' is set
@@ -4169,8 +4177,10 @@ class TestAsArray(TestCase):
         if device.index is not None:
             self.assertEqual(device.index, result.device.index)
 
-        # 4. By default, 'requires_grad' is unset
-        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
+        # 4. By default, 'requires_grad' mirrors the original tensor's requires_grad, if
+        # present.
+        original_requires_grad = converted_original.requires_grad if isinstance(converted_original, torch.Tensor) else False
+        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", original_requires_grad))
 
     def _test_alias_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
         original = make_tensor(shape, dtype=dtype, device=device)
@@ -4230,8 +4240,16 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype, copy=True)
 
         # Copy is forced because of different device
-        if torch.cuda.is_available():
-            other = get_another_device(device)
+        other = get_another_device(device)
+        if other is not None:
+            try:
+                caps = torch.accelerator.get_device_capability(other)
+            except Exception:
+                pass
+            else:
+                if dtype not in caps["supported_dtypes"]:
+                    self.skipTest(f"{other} doesn't support {dtype}")
+
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
@@ -4303,8 +4321,8 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        if torch.cuda.is_available():
-            other_device = get_another_device(device)
+        other_device = get_another_device(device)
+        if other_device is not None:
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
@@ -4335,7 +4353,7 @@ class TestAsArray(TestCase):
 
         def check(**kwargs):
             a = torch.asarray(cloned, **kwargs)
-            requires_grad = kwargs.get("requires_grad", False)
+            requires_grad = kwargs.get("requires_grad", cloned.requires_grad)
             self.assertEqual(a.requires_grad, requires_grad)
             # Autograd history shouldn't be retained when requires_grad is False
             self.assertEqual(a.grad_fn is None, not requires_grad)
@@ -4417,15 +4435,15 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_device_without_index(self, device):
-        original = torch.arange(5, device="cuda")
+        original = torch.arange(5, device=device)
 
-        tensor = torch.asarray(original, device="cuda")
+        tensor = torch.asarray(original, device=device)
         # The storage pointers should be equal
         self.assertEqual(original.data_ptr(), tensor.data_ptr())
 
-        tensor = torch.asarray(original, copy=True, device="cuda")
+        tensor = torch.asarray(original, copy=True, device=device)
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 

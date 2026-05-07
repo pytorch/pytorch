@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import final, override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch._inductor.output_code import CompiledFxGraphConstants, OutputCode
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    CompiledFxGraphConstants,
+    OutputCode,
+)
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
 from .output_code import complex_memory_overlap  # noqa: F401
@@ -37,7 +41,7 @@ class _PostCompileData:
 class ProgressiveCompilationState:
     progression_futures: deque[Future[_WireProtocolPickledOutput]]
     callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    post_compile_data: Optional[_PostCompileData]
+    post_compile_data: _PostCompileData | None
 
     def check_and_get_ready_stage(self) -> int:
         """Check if any progression stage is ready and return its index, or -1 if none are ready."""
@@ -79,11 +83,11 @@ class ProgressiveCompilationState:
 # out-of-process compile to finish and then switching over to it.
 @final
 class _AsyncOutputCode(OutputCode):
-    _eager_fn: Optional[Callable[..., Any]]
-    _output_code: Optional[OutputCode]
-    _future: Optional[Future[_WireProtocolPickledOutput]]
+    _eager_fn: Callable[..., Any] | None
+    _output_code: OutputCode | None
+    _future: Future[_WireProtocolPickledOutput] | None
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    _post_compile_data: Optional[_PostCompileData] = None
+    _post_compile_data: _PostCompileData | None = None
     _boxed_call: bool  # Copied from the forward/output_code
 
     def __init__(
@@ -199,7 +203,9 @@ class _AsyncFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        eager_output_code = _InProcessFxCompile().codegen_and_compile(
+        eager_compile = _InProcessFxCompile()
+        eager_compile.compile_region_name = self.compile_region_name
+        eager_output_code = eager_compile.codegen_and_compile(
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
 
@@ -222,6 +228,8 @@ class _AsyncFxCompile(FxCompile):
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _AsyncFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
+            if isinstance(output.graph, CompiledFxGraph):
+                output.graph.compile_region_name = self.compile_region_name
             self._compile._postprocess(output)
             return output.graph
 
@@ -232,9 +240,9 @@ class _AsyncFxCompile(FxCompile):
 # to a more optimized version when the expensive compile finishes.
 @final
 class _ProgressiveOutputCode(OutputCode):
-    _fast_output_code: Optional[OutputCode]
-    _optimized_output_code: Optional[OutputCode]
-    _compilation_state: Optional[ProgressiveCompilationState]
+    _fast_output_code: OutputCode | None
+    _optimized_output_code: OutputCode | None
+    _compilation_state: ProgressiveCompilationState | None
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
     # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
     # is more common let's default to that and we'll convert if necessary.
@@ -392,6 +400,8 @@ class _ProgressiveFxCompile(FxCompile):
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _ProgressiveFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
+            if isinstance(output.graph, CompiledFxGraph):
+                output.graph.compile_region_name = self.compile_region_name
             self._optimized_compile._postprocess(output)
             return output.graph
 

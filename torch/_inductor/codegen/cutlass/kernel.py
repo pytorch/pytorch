@@ -5,12 +5,13 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, TYPE_CHECKING
 
 from sympy import Expr, symbols
 
 import torch._inductor.config as config
 from torch import dtype as torch_dtype
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
@@ -82,19 +83,17 @@ class CUTLASSKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
-        self.size_args: list[Union[Expr, int]] = []
+        self.size_args: list[Expr | int] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
-    def find_symbol(
-        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
-    ) -> Optional[str]:
+    def find_symbol(self, node: IRNode, attr: ValidLayoutAttrs, dim: int) -> str | None:
         arg = self.find_layout_arg(node, attr, dim)
         return arg.symbol if arg else None
 
     def find_layout_arg(
         self, node: IRNode, attr: ValidLayoutAttrs, dim: int
-    ) -> Optional[LayoutArg]:
+    ) -> LayoutArg | None:
         matches = [
             arg
             for arg in itertools.chain.from_iterable(self.layout_args.values())
@@ -113,6 +112,25 @@ class CUTLASSKernel(Kernel):
             ):
                 raise AssertionError("All matching layout args should be identical")
             return first_match
+        attr_values = node.get_size() if attr == "size" else node.get_stride()
+        if dim >= len(attr_values):
+            return None
+        expr = attr_values[dim]
+        fallback_matches = []
+        for arg in itertools.chain.from_iterable(self.layout_args.values()):
+            if arg.attr != attr:
+                continue
+            if arg.node.get_name() != node.get_name():
+                continue
+            arg_values = (
+                arg.node.get_size() if arg.attr == "size" else arg.node.get_stride()
+            )
+            if arg.dim >= len(arg_values):
+                continue
+            if arg_values[arg.dim] == expr:
+                fallback_matches.append(arg)
+        if fallback_matches:
+            return fallback_matches[0]
         return None
 
     def add_layout_arg(
@@ -151,7 +169,7 @@ class CUTLASSKernel(Kernel):
             self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
         self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Expr | int, ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
@@ -160,7 +178,7 @@ class CUTLASSKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
 
-        def get_ld(node) -> Union[Expr, int]:
+        def get_ld(node) -> Expr | int:
             dim = self.find_ld_idx(node)
             return node.get_stride()[dim]
 
@@ -174,7 +192,7 @@ class CUTLASSKernel(Kernel):
         LDD = get_ld(Y)
         return (M, N, K, B, LDA, LDB, LDC, LDD)
 
-    def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
+    def get_dynamic_shape_args(self) -> list[Expr | int]:
         return [*self.get_layout_args(), *self.size_args]
 
     def get_offset_args(self) -> list[Expr]:
@@ -196,13 +214,12 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     Template kernels defined by Cutlass in C++.
     """
 
-    _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
-
     def __init__(
         self,
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
+        device_type: str = "cuda",  # type: ignore[assignment]
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
@@ -214,6 +231,9 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         self.kernel_name = kernel_name
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
+        self.device_type = device_type
+        self.device_codegen = get_device_op_overrides(self.device_type)
+        self._EXTRA_CPP_ARGS = f"size_t* workspace_size, uint8_t* workspace, {self.device_codegen.cpp_stream_type()} stream"
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -246,12 +266,28 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     def get_signature(self) -> str:
         return self.signature
 
+    def _collect_unbound_layout_free_symbols(self, node: IRNode) -> OrderedSet[Expr]:
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for attr_name, values in (
+            ("size", node.get_size()),
+            ("stride", node.get_stride()),
+        ):
+            attr = attr_name  # help mypy narrow the Literal argument below
+            for dim, expr in enumerate(values):
+                if not isinstance(expr, Expr):
+                    continue
+                if self.find_layout_arg(node, attr, dim) is not None:
+                    continue
+                for symbol in expr.free_symbols:
+                    free_symbols.add(symbol)  # type: ignore[arg-type]
+        return free_symbols
+
     def def_kernel(
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -286,27 +322,18 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 # NB: named nodes must be populated in the order of names
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-                if name not in (
-                    "X",
-                    "W",
-                    "Bias",
-                    "Y",
-                ):  # we handle these symbolic shapes explicitly
-                    for expr in itertools.chain(node.get_size(), node.get_stride()):
-                        if isinstance(expr, Expr):
-                            for s in expr.free_symbols:
-                                free_symbols.add(s)  # type: ignore[arg-type]
-
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for node in self.named_nodes.values():
+            free_symbols |= self._collect_unbound_layout_free_symbols(node)
         size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
@@ -410,7 +437,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         if ws:
             wrapper.generate_workspace_deallocation(ws)
 
-    def dtype(self, node: IRNode) -> Optional[str]:
+    def dtype(self, node: IRNode) -> str | None:
         """
         Generates code which represents dtype of a given node.
         """
@@ -419,7 +446,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
-    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> str | None:
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
@@ -452,7 +479,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         self,
         node: IRNode,
         start_index: int,
-        end_index: Optional[int] = None,
+        end_index: int | None = None,
         default_value: int = 0,
     ) -> str:
         """
@@ -581,15 +608,13 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [CUTLASSTemplateBuffer, Optional[list[BaseSchedulerNode]]],
+            [CUTLASSTemplateBuffer, list[BaseSchedulerNode] | None],
             tuple[CUTLASSTemplateKernel, functools.partial[str]],
         ],
         bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
         template: "CUTLASSTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -645,7 +670,7 @@ class CUTLASSTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """
         Information returned here is logged to the autotune log file when that is enabled.
 

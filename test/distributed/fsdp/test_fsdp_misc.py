@@ -108,7 +108,10 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             devices = {
                 p.device for p in module.parameters() if isinstance(p, FlatParameter)
             }
-            assert len(devices) > 0
+            if not (len(devices) > 0):
+                raise AssertionError(
+                    f"Expected at least one device, but got {len(devices)}"
+                )
             self.assertEqual(1, len(devices))
             found_device = devices.pop()
             if use_index and not isinstance(device_id, torch.device):
@@ -219,8 +222,14 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            assert torch.allclose(losses[0], losses[1])
-            assert torch.allclose(grads[0], grads[1])
+            if not torch.allclose(losses[0], losses[1]):
+                raise AssertionError(
+                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
+                )
+            if not torch.allclose(grads[0], grads[1]):
+                raise AssertionError(
+                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
+                )
             losses.clear()
             grads.clear()
 
@@ -232,7 +241,10 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 y = torch.randint(low=0, high=9, size=(8,), device=device_type)
                 fsdp_loss = fsdp_model(x, y)
                 ddp_loss = ddp_model(x, y)
-                assert torch.allclose(fsdp_loss, ddp_loss)
+                if not torch.allclose(fsdp_loss, ddp_loss):
+                    raise AssertionError(
+                        f"Expected fsdp_loss and ddp_loss to be close: {fsdp_loss} vs {ddp_loss}"
+                    )
 
         fsdp_model.train()
         ddp_model.train()
@@ -249,8 +261,14 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            assert torch.allclose(losses[0], losses[1])
-            assert torch.allclose(grads[0], grads[1])
+            if not torch.allclose(losses[0], losses[1]):
+                raise AssertionError(
+                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
+                )
+            if not torch.allclose(grads[0], grads[1]):
+                raise AssertionError(
+                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
+                )
             losses.clear()
             grads.clear()
 
@@ -437,7 +455,10 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 register_hook=False,
             )
             for p in fsdp_overlap.parameters():
-                assert hasattr(p, "_in_backward_optimizers")
+                if not hasattr(p, "_in_backward_optimizers"):
+                    raise AssertionError(
+                        "Expected parameter to have '_in_backward_optimizers' attribute"
+                    )
             optim = optim_cls(fsdp.parameters(), **optim_kwargs)
 
             # Verify params initially equal

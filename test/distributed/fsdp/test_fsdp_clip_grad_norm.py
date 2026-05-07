@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import itertools
 import sys
-from typing import Union
 
 import torch
 import torch.nn as nn
@@ -94,9 +93,9 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_ddp_parity(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
-        sharding_strategy: Union[ShardingStrategy, str],
+        max_norm: float | int,
+        norm_type: float | int,
+        sharding_strategy: ShardingStrategy | str,
         use_orig_params: bool,
         offload_params: bool,
     ):
@@ -193,12 +192,18 @@ class TestClipGradNorm(FSDPTestContinuous):
         self.assertEqual(ddp_total_norm, fsdp_total_norm)
         # Check that the gradients were modified by `clip_grad_norm_()`
         for param, orig_grad in zip(ddp_model.parameters(), orig_ddp_grads):
-            assert not torch.equal(param.grad, orig_grad)
+            if torch.equal(param.grad, orig_grad):
+                raise AssertionError(
+                    "Expected gradient to be modified by clip_grad_norm_()"
+                )
         for param, orig_grad in zip(fsdp_model.parameters(), orig_fsdp_grads):
             if param.grad is None:
                 self.assertEqual(param.grad, orig_grad)  # `None`
             else:
-                assert not torch.equal(param.grad, orig_grad)
+                if torch.equal(param.grad, orig_grad):
+                    raise AssertionError(
+                        "Expected gradient to be modified by clip_grad_norm_()"
+                    )
         # Run an optimizer step to ensure gradients matched after clipping
         ddp_optim.step()
         fsdp_optim.step()
@@ -257,8 +262,8 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_low_precision_grads(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float | int,
+        norm_type: float | int,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):

@@ -96,6 +96,7 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
+                requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
             )
             for o in m.output_info
@@ -108,7 +109,6 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
-        is_train=m.is_train,
     )
 
 
@@ -224,7 +224,8 @@ def create_synthetic_base_metadata(
                 if not is_concrete_int(s)
             },
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
-            requires_grad=outer_args[outer_idx].requires_grad,
+            requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
+            requires_grad_for_backward=requires_grad,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
@@ -253,6 +254,7 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
+                requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
             )
         )
@@ -305,7 +307,6 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
-            is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )
