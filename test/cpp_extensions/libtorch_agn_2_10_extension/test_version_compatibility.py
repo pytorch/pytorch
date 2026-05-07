@@ -220,9 +220,7 @@ if not IS_WINDOWS:
             that don't.
             """
             if not self.cuda_available:
-                self.skipTest(
-                    "CUDA not available, skipping cuda_kernel.cu test"
-                )
+                self.skipTest("CUDA not available, skipping cuda_kernel.cu test")
 
             cu_file = (
                 Path(self.csrc_dir).parent
@@ -243,9 +241,7 @@ if not IS_WINDOWS:
             if not success:
                 relevant_errors = self._extract_relevant_errors(error_msg)
                 if relevant_errors:
-                    print(
-                        "\n  Unexpected compilation errors for cuda_kernel.cu:"
-                    )
+                    print("\n  Unexpected compilation errors for cuda_kernel.cu:")
                     for err in relevant_errors:
                         print(f"{err}")
 
