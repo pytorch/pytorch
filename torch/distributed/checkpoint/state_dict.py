@@ -463,7 +463,7 @@ def _get_fsdp_process_group(
         return None
 
     if isinstance(process_group, tuple):
-        return process_group[0]
+        return None
     return process_group
 
 
