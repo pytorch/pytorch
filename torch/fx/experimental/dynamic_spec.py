@@ -20,6 +20,7 @@ __all__ = [
     "IntVar",
     "TensorSpec",
     "ObjectSpec",
+    "DictSpec",
     "ParamsSpec",
     "ShapesSpec",
     "LeafSpec",
@@ -224,11 +225,78 @@ class ObjectSpec:
         }
 
 
+class DictSpec:
+    """Spec for a Python ``dict``-typed value.
+
+    Models dict-subscript access (``d["x"]``) on a value — the value
+    might be a top-level function arg that's a dict, or a dict-typed
+    attribute reached through an ``ObjectSpec`` (``obj.config["batch"]``).
+    Each entry corresponds to a ``DictGetItemSource`` (or
+    ``GetItemSource`` with a ``str`` index) in the dynamo builder.
+
+    Distinct from ``ParamsSpec``: ``ParamsSpec`` describes the
+    *function's named arguments* (signature-level identifiers);
+    ``DictSpec`` describes a runtime ``dict`` value's keys.
+
+    Constructor::
+
+        DictSpec({key: IntermediateSpec, ...})
+
+    Values may be leaves (``TensorSpec`` / ``IntVar`` / ``int`` /
+    ``None``) or another container (``ObjectSpec`` / ``DictSpec``) for
+    recursion.
+
+    Example::
+
+        DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
+        DictSpec({"config": DictSpec({"batch": IntVar()})})
+    """
+
+    def __init__(self, entries: dict[str, IntermediateSpec] | None = None) -> None:
+        self._entries: dict[str, IntermediateSpec] = dict(entries) if entries else {}
+
+    def __getitem__(self, key: str) -> IntermediateSpec:
+        return self._entries[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def items(self) -> Any:
+        return self._entries.items()
+
+    def __repr__(self) -> str:
+        lines = ["dict_spec:"]
+        for key, spec in self._entries.items():
+            spec_repr = repr(spec)
+            if "\n" in spec_repr:
+                lines.append(f"{_INDENT}[{key!r}]:")
+                for line in spec_repr.splitlines():
+                    lines.append(_INDENT * 2 + line)
+            else:
+                lines.append(f"{_INDENT}[{key!r}]: {spec_repr}")
+        return "\n".join(lines)
+
+    def to_jsonable(self) -> dict[str, Any]:
+        return {
+            "type": "DictSpec",
+            "entries": {
+                key: spec.to_jsonable() if hasattr(spec, "to_jsonable") else spec
+                for key, spec in self._entries.items()
+            },
+        }
+
+
 # Type alias for leaf specs (individual argument specifications)
 LeafSpec: TypeAlias = TensorSpec | IntVar | int | None
-# Includes ``ObjectSpec`` (and future ``DictSpec`` / ``ListSpec``) for
-# nested specs reachable via dynamo source-chain walks.
-IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec
+# Includes containers (``ObjectSpec`` / ``DictSpec``; future ``ListSpec``)
+# for nested specs reachable via dynamo source-chain walks.
+IntermediateSpec: TypeAlias = LeafSpec | ObjectSpec | DictSpec
 
 
 class ParamsSpec:

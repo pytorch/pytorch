@@ -2282,20 +2282,6 @@ class VariableBuilder:
             # / named buffers
             # NOTE: This is not likely to happen but worth guarding to avoid
             # exception
-            # Skip the static-mark when a spec applies — the spec
-            # routes the tensor through ``_automatic_dynamic`` and
-            # drives shape decisions there. Without this, the
-            # ``mark_static_input`` call below stamps the tensor with
-            # ``_dynamo_static_input_type = "guarded"``, and downstream
-            # paths in ``wrap_tensor`` treat it as a graph attribute
-            # regardless of spec.
-            def _has_spec_for_attr(name: str) -> bool:
-                attr_source = AttrSource(self.source, name)
-                return (
-                    lookup_spec_from_dynamo_source(attr_source, config._shapes_spec)
-                    is not None
-                )
-
             if (
                 callable(value.named_parameters)
                 # type: ignore[attr-defined]
@@ -2303,9 +2289,7 @@ class VariableBuilder:
             ):
                 try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    for name, p in value.named_parameters():
-                        if _has_spec_for_attr(name):
-                            continue
+                    for _, p in value.named_parameters():
                         self.mark_static_input(p, guard=freezing)
                 except TypeError as e:
                     raise_observed_exception(type(e), self.tx, args=list(e.args))
@@ -2317,9 +2301,7 @@ class VariableBuilder:
             ):
                 try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    for name, b in value.named_buffers():
-                        if _has_spec_for_attr(name):
-                            continue
+                    for _, b in value.named_buffers():
                         self.mark_static_input(b, guard=freezing)
                 except TypeError as e:
                     raise_observed_exception(type(e), self.tx, args=list(e.args))
