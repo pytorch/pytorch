@@ -13175,7 +13175,7 @@ Examples::
 add_docstr(
     torch.trapz,
     r"""
-trapz(y, x=None, *, dim=-1) -> Tensor
+trapz(y, x=None, *, dx=None, dim=-1) -> Tensor
 
 Alias for :func:`torch.trapezoid`.
 """,
