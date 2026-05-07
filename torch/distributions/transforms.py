@@ -2,7 +2,6 @@
 import functools
 import math
 import operator
-import weakref
 from collections.abc import Sequence
 
 import torch
@@ -96,7 +95,7 @@ class Transform:
 
     def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
-        self._inv: weakref.ReferenceType[Transform] | None = None
+        self._inv: Transform | None = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -122,12 +121,10 @@ class Transform:
         Returns the inverse :class:`Transform` of this transform.
         This should satisfy ``t.inv.inv is t``.
         """
-        inv = None
-        if self._inv is not None:
-            inv = self._inv()
+        inv = self._inv
         if inv is None:
             inv = _InverseTransform(self)
-            self._inv = weakref.ref(inv)
+            self._inv = inv
         return inv
 
     @property
@@ -222,7 +219,7 @@ class _InverseTransform(Transform):
 
     def __init__(self, transform: Transform) -> None:
         super().__init__(cache_size=transform._cache_size)
-        self._inv: Transform = transform  # type: ignore[assignment]
+        self._inv: Transform | None = transform
 
     @constraints.dependent_property(is_discrete=False)
     # pyrefly: ignore [bad-override]
@@ -252,7 +249,7 @@ class _InverseTransform(Transform):
 
     @property
     def inv(self) -> Transform:
-        return self._inv
+        return self._inv  # pyrefly: ignore[bad-return]
 
     def with_cache(self, cache_size=1):
         if self._inv is None:
@@ -280,10 +277,10 @@ class _InverseTransform(Transform):
         return -self._inv.log_abs_det_jacobian(y, x)
 
     def forward_shape(self, shape):
-        return self._inv.inverse_shape(shape)
+        return self._inv.inverse_shape(shape)  # pyrefly: ignore[missing-attribute]
 
     def inverse_shape(self, shape):
-        return self._inv.forward_shape(shape)
+        return self._inv.forward_shape(shape)  # pyrefly: ignore[missing-attribute]
 
 
 class ComposeTransform(Transform):
@@ -359,13 +356,11 @@ class ComposeTransform(Transform):
 
     @property
     def inv(self) -> Transform:
-        inv = None
-        if self._inv is not None:
-            inv = self._inv()
+        inv = self._inv
         if inv is None:
             inv = ComposeTransform([p.inv for p in reversed(self.parts)])
-            self._inv = weakref.ref(inv)
-            inv._inv = weakref.ref(self)
+            self._inv = inv
+            inv._inv = self
         return inv
 
     def with_cache(self, cache_size=1):
