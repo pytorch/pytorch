@@ -374,6 +374,10 @@ if(INTERN_BUILD_ATEN_OPS)
 
   if(CXX_AVX512_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
+    # HIP code also needs CPU feature defines for DispatchStub ABI compatibility
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX512_CPU_DEFINITION")
+    endif()
     list(APPEND CPU_CAPABILITY_NAMES "AVX512")
     if(MSVC)
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
@@ -384,6 +388,9 @@ if(INTERN_BUILD_ATEN_OPS)
 
   if(CXX_AVX2_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+    if(USE_ROCM)
+      string(APPEND CMAKE_HIP_FLAGS " -DHAVE_AVX2_CPU_DEFINITION")
+    endif()
 
     # Some versions of GCC pessimistically split unaligned load and store
     # instructions when using the default tuning. This is a bad choice on
