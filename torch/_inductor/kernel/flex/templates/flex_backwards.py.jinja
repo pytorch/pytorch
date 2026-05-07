@@ -480,7 +480,7 @@ def bwd_dq_block_mn(
 
 
     {# Note: Selective masking DQ
-    We load elements beyond KV_LEN w/ zero, some score mods may convert this elements to NaN
+    We load elements beyond KV_LEN w/ zero, some score mods may convert these elements to NaN
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DQ #}
@@ -665,7 +665,7 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     {# Note: Selective masking DK/DV
-    We load elements beyond Q_LEN w/ zero, some score mods may convert this elements to NaN
+    We load elements beyond Q_LEN w/ zero, some score mods may convert these elements to NaN
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DK/DV #}
