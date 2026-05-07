@@ -422,6 +422,12 @@ def _linear_cross_entropy_batch_chunked(
     # chunking along batches dimension:
     for bchunk_start, bchunk_size in _chunk_iter(num_batches, batch_chunk_size):
         input_chunk = input.narrow(0, bchunk_start, bchunk_size)
+        if is_mps and not use_acc_dtype:
+            # MPS diagnostic: test whether MPS mm/addmm misbehaves
+            # when an operand is a narrow view of an autograd-tracked
+            # tensor. Clones input_chunk so all subsequent ops in
+            # this chunk see a fresh, contiguous, non-narrow tensor.
+            input_chunk = input_chunk.clone()
         target_chunk = target.narrow(0, bchunk_start, bchunk_size)
         weight_chunk = neg_weight_target.narrow(0, bchunk_start, bchunk_size)
         logits = (
