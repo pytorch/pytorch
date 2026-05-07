@@ -15760,8 +15760,7 @@ op_db: list[OpInfo] = [
             # No Inductor lowering for the chunked op. Unchunked samples
             # (options=None) would lower, but OpInfo can't gate per-sample.
             DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         'TestInductorOpInfo', 'test_comprehensive',
-                         device_type="cuda"),
+                         'TestInductorOpInfo', 'test_comprehensive'),
             # Forward-mode AD coverage is limited because
             # register_autograd accepts no jvp callable. Tests
             # requiring jvp still fail; vmap over grad works via

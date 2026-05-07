@@ -258,6 +258,7 @@ def _linear_cross_entropy_batch_chunked(
     # CUDA gates the out_dtype= mm fast path; other accelerators take
     # the more conservative CPU path until validated.
     is_cuda = input.device.type == "cuda"
+    is_mps = input.device.type == "mps"
 
     if dtype != acc_dtype and not (
         dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
@@ -358,11 +359,16 @@ def _linear_cross_entropy_batch_chunked(
         requires_grad=False,
     )
 
-    linear_weight_ = (
-        linear_weight.to(logits_buf.dtype)
-        if use_acc_dtype and (compute_input_grad or not is_cuda)
-        else linear_weight
-    )
+    if not use_acc_dtype and is_mps:
+        # Workaround: on MPS, MPS's mm/addmm misbehaves when an
+        # operand is the user's autograd-tracked tensor
+        # directly. Forcing a fresh copy of linear_weight via clone()
+        # avoids the issue.
+        linear_weight_ = linear_weight.clone()
+    elif use_acc_dtype and (compute_input_grad or not is_cuda):
+        linear_weight_ = linear_weight.to(logits_buf.dtype)
+    else:
+        linear_weight_ = linear_weight
     grad_input_shape = input.shape if compute_input_grad else (0,)
     grad_input = torch.empty(
         grad_input_shape,

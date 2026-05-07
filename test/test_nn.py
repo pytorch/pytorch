@@ -48,8 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
@@ -14719,6 +14718,10 @@ if __name__ == '__main__':
         self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
                              msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
 
+    # ~48% relative error on input-grad vs fp64 reference; pending
+    # MPS-side investigation. Forward (loss value) is correct; the
+    # gradient diverges below the dispatch-form layer.
+    # @skipMPS
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_default(self, device, dtype):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
