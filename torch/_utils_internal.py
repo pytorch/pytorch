@@ -85,7 +85,6 @@ def compile_time_strobelight_meta(
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if "skip" in kwargs and isinstance(
-                # pyrefly: ignore [unsupported-operation]
                 skip := kwargs["skip"],
                 int,
             ):
@@ -376,3 +375,10 @@ def find_compile_subproc_binary() -> str | None:
     Allows overriding the binary used for subprocesses
     """
     return None
+
+
+def get_torch_source_version() -> str:
+    """Return the source commit hash for the current PyTorch build."""
+    import torch.version as torch_version
+
+    return getattr(torch_version, "git_version", "")

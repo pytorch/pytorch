@@ -58,16 +58,16 @@ class ComplexTensor(Tensor):
         layout = real.layout
         pin_memory = real.is_pinned()
 
-        assert shape == imag.shape, f"Expected imag shape {shape}, got {imag.shape}"
-        assert device == imag.device, (
-            f"Expected imag device {device}, got {imag.device}"
-        )
-        assert real.dtype == imag.dtype, (
-            f"Expected imag dtype {real.dtype}, got {imag.dtype}"
-        )
-        assert pin_memory == imag.is_pinned(), (
-            f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
-        )
+        if shape != imag.shape:
+            raise AssertionError(f"Expected imag shape {shape}, got {imag.shape}")
+        if device != imag.device:
+            raise AssertionError(f"Expected imag device {device}, got {imag.device}")
+        if real.dtype != imag.dtype:
+            raise AssertionError(f"Expected imag dtype {real.dtype}, got {imag.dtype}")
+        if pin_memory != imag.is_pinned():
+            raise AssertionError(
+                f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
+            )
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -93,14 +93,31 @@ class ComplexTensor(Tensor):
     def im(self) -> Tensor:
         return self._im
 
+    @property
+    def real(self) -> Tensor:  # type: ignore[bad-override]
+        return self.re
+
+    @real.setter
+    def real(self, value: Tensor) -> None:
+        self.re[...] = value
+
+    @property
+    def imag(self) -> Tensor:  # type: ignore[bad-override]
+        return self.im
+
+    @imag.setter
+    def imag(self, value: Tensor) -> None:
+        self.im[...] = value
+
     @classmethod
-    def __torch_dispatch__(
+    def __torch_dispatch__(  # type: ignore[bad-override]
         cls,
         func: OpOverload,
         types: tuple[type, ...],
+        # pyrefly: ignore [implicit-any]
         args: tuple = (),
-        kwargs: dict | None = None,
-    ):
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         from ._ops.common import lookup_complex
 
         kwargs = {} if kwargs is None else kwargs
@@ -127,14 +144,15 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        assert meta is None
+        if meta is not None:
+            raise AssertionError(f"meta must be None, got {meta}")
         re, im = inner_tensors["re"], inner_tensors["im"]
         return ComplexTensor(re, im)
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
         return ["re", "im"], None
 
-    def __repr__(self, *, tensor_contents=None) -> str:
+    def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:

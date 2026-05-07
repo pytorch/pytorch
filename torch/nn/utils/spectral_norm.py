@@ -185,8 +185,6 @@ class SpectralNorm:
         return fn
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormLoadStateDictPreHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -244,8 +242,6 @@ class SpectralNormLoadStateDictPreHook:
                 state_dict[weight_key + "_v"] = v
 
 
-# This is a top level class because Py2 pickle doesn't like inner class nor an
-# instancemethod.
 class SpectralNormStateDictHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
     def __init__(self, fn) -> None:
@@ -332,7 +328,7 @@ def spectral_norm(
         else:
             dim = 0
     SpectralNorm.apply(module, name, n_power_iterations, dim, eps)
-    # pyrefly: ignore [bad-return]
+
     return module
 
 

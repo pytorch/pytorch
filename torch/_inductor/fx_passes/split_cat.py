@@ -141,7 +141,6 @@ def _get_dim(node: Any):
     )
 
 
-# noqa: W605
 # ############The pattern to be optimized is#########
 #         unbind (dim=0)
 #       /   ...    \
@@ -290,7 +289,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
         log.debug("example value absent for node: %s", input)
         return
     ndim = input.meta["example_value"].ndim
-    # pyrefly: ignore [unsupported-operation]
+
     if dim < 0:  # Normalize unbind dim
         dim += ndim
     with graph.inserting_after(node):
@@ -340,7 +339,6 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
     )
 
-    # pyrefly: ignore [unsupported-operation]
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -1427,11 +1425,10 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
         return
     split_node = next(node for node in match.nodes if node.target is torch.split)
-    # pyrefly: ignore [bad-argument-type]
+
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
 
 
-# noqa: W605
 # ############pattern to be optimized is#########
 
 #                 split_node(dim=1)
@@ -1973,7 +1970,6 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
 
     assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
 
-    # pyrefly: ignore [unsupported-operation]
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -2005,12 +2001,15 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
     if not all(
+        # pyrefly: ignore [bad-argument-type]
         get_arg_value(unsqueeze_node, 0, "input").target is torch.ops.aten.select
         for unsqueeze_node in unsqueeze_nodes
     ):
         return
     select_nodes = [
-        get_arg_value(unsqueeze_node, 0, "input") for unsqueeze_node in unsqueeze_nodes
+        # pyrefly: ignore [bad-argument-type]
+        get_arg_value(unsqueeze_node, 0, "input")
+        for unsqueeze_node in unsqueeze_nodes
     ]
     parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
     # check the target of select_nodes are the same
@@ -2043,6 +2042,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     node.replace_all_uses_with(parent_of_select_node)
     graph.erase_node(node)
     for unsqueeze_node in unsqueeze_nodes:
+        # pyrefly: ignore [bad-argument-type]
         graph.erase_node(unsqueeze_node)
     for select_node in select_nodes:
         if len(select_node.users) == 0:

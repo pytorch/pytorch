@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import copy
-import sys
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Union
-from typing_extensions import deprecated
+from typing import Any
+from typing_extensions import deprecated, TypeAliasType
 
 import torch
 import torch.nn as nn
@@ -335,7 +334,7 @@ qconfig.
     * This qconfig uses signed activations and weights. Weights have added
     restrictions such as zero point is forced to be 0, making the weights
     symmetric, hence the name. And the 8-bit quantized values are
-    restricting to to [-127, +127], excluding -128.
+    restricting to [-127, +127], excluding -128.
 
     * xnnpack has a requantization scale value restriction, 0x1p-32 <=
     requantization_scale < 256.0 where, `requantization_scale = (input_scale
@@ -572,13 +571,7 @@ def _assert_valid_qconfig(qconfig: QConfig | None, mod: torch.nn.Module) -> None
             )
 
 
-if sys.version_info < (3, 12):
-    QConfigAny = Optional[QConfig]
-    QConfigAny.__module__ = "torch.ao.quantization.qconfig"
-else:
-    from typing import TypeAliasType
-
-    QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
+QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
 
 
 def _add_module_to_qconfig_obs_ctr(
@@ -628,9 +621,9 @@ def _add_module_to_qconfig_obs_ctr(
     return QConfig(activation, weight)
 
 
-_ObserverOrFakeQuantizeConstructor = Union[
-    _PartialWrapper, type[ObserverBase], type[FakeQuantizeBase]
-]
+_ObserverOrFakeQuantizeConstructor = (
+    _PartialWrapper | type[ObserverBase] | type[FakeQuantizeBase]
+)
 
 
 def _obs_or_fq_ctr_equals(

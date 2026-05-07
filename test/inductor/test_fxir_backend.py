@@ -7,7 +7,6 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import sympy
 
@@ -98,7 +97,7 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
-        compile_kwargs: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}
@@ -258,7 +257,8 @@ class FxirTestCase(InductorTestCase):
 
         def get_offset(node: torch.fx.Node) -> int:
             (input_, shape, stride, offset) = node.args
-            assert isinstance(offset, int)
+            if not isinstance(offset, int):
+                raise AssertionError
             return offset
 
         # Check for 2 views, one of which is offset.
@@ -394,7 +394,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
@@ -621,6 +621,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    @config.patch("partitioned_scatter_enabled", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.
@@ -1042,7 +1043,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",  # noqa: B950
+    return [buf1, buf2]""",
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):
@@ -1236,6 +1237,21 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         }
         args = (torch.randn((12, 14), device=self.device),)
         self.check(TestModule(), args, ds)
+
+    def test_extern_kernel_irnode_kwargs(self):
+        """
+        Test that IR nodes passed as kwargs to extern kernels are properly materialized.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, data, offsets):
+                return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        length = 10
+        data = torch.randn(length, device=self.device)
+        offsets = torch.tensor([0, 3, 7, length], dtype=torch.int64, device=self.device)
+
+        self.check(TestModule(), (data, offsets))
 
 
 class TestReplaceFloorDiv(InductorTestCase):

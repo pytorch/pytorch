@@ -32,23 +32,6 @@ void reset_buffers() {
   }
 }
 
-#if defined(USE_ROCM) && !defined(_WIN32)
-TEST(TestLoops, HasSameArgTypes) {
-  // This is a compile-time unit test. If this file compiles without error,
-  // then the test passes and during runtime, we just need to return.
-  using namespace at::native::modern::detail;
-  using func1_t = int (*)(float, float);
-  using func2_t = int (*)(bool, float, float);
-  using func3_t = int (*)(float);
-  using func4_t = int (*)();
-  static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
-  static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
-  static_assert(has_same_arg_types<func3_t>::value, "func3_t has the same argument types");
-  static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
-  return;
-}
-#endif
-
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
@@ -111,7 +94,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec4 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   constexpr int total_work_size = buffer_size * 4;
   vectorized_copy<double, 4><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -126,7 +109,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec2 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   vectorized_copy<double, 2><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -140,7 +123,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
 
   // vec1 copy
   reset_buffers();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   vectorized_copy<double, 1><<<total_work_size / block_work_size() , num_threads()>>>(b2, b1);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -160,9 +143,9 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
       b1 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer1) + i);
       b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
       (void)cudaGetLastError();
-      cudaDeviceSynchronize();
+      ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
       vectorized_copy<double, 4><<<1, num_threads()>>>(b2, b1);
-      cudaDeviceSynchronize();
+      ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
       auto err = cudaGetLastError();
       if (i % 16 == 0 && j % 16 == 0) {
         ASSERT_EQ(err, cudaSuccess);

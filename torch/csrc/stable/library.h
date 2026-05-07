@@ -5,6 +5,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/headeronly/core/enum_tag.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Metaprogramming.h>
 
@@ -97,6 +98,21 @@ class StableLibrary final {
     aoti_torch_library_def(lib_, schema);
     return *this;
   }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+  // corresponds to a limited, stable version of torch::library::def() with tags
+  StableLibrary& def(const char* schema, const std::vector<at::Tag>& tags) {
+    std::vector<int32_t> tag_ints;
+    tag_ints.reserve(tags.size());
+    for (auto t : tags) {
+      tag_ints.push_back(
+          torch::stable::detail::to<int32_t>(torch::stable::detail::from(t)));
+    }
+    torch_library_def_with_tags(
+        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size()));
+    return *this;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 };
 
 class StableTorchLibraryInit final {
@@ -306,35 +322,22 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
       std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
       (func)>::boxed_fn
 
-// macros copied from c10/macros/Macros.h
-#ifdef __COUNTER__
-#define STABLE_UID __COUNTER__
-#else
-#define STABLE_UID __LINE__
-#endif
-
-#define STABLE_CONCATENATE_IMPL(s1, s2) s1##s2
-#define STABLE_CONCATENATE(s1, s2) STABLE_CONCATENATE_IMPL(s1, s2)
-// end of macros copied from c10/macros/Macros.h
-
 #define STABLE_TORCH_LIBRARY_IMPL(ns, k, m) \
-  _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, STABLE_UID)
+  _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
 
 #define _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, uid)                             \
-  static void STABLE_CONCATENATE(                                             \
+  static void C10_CONCATENATE(                                                \
       STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_,                           \
       uid)(torch::stable::detail::StableLibrary&);                            \
-  static const torch::stable::detail::StableTorchLibraryInit                  \
-      STABLE_CONCATENATE(                                                     \
-          STABLE_TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(          \
-          torch::stable::detail::StableLibrary::Kind::IMPL,                   \
-          &STABLE_CONCATENATE(                                                \
-              STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),             \
-          #ns,                                                                \
-          #k,                                                                 \
-          __FILE__,                                                           \
-          __LINE__);                                                          \
-  void STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)( \
+  static const torch::stable::detail::StableTorchLibraryInit C10_CONCATENATE( \
+      STABLE_TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(              \
+      torch::stable::detail::StableLibrary::Kind::IMPL,                       \
+      &C10_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),    \
+      C10_STRINGIZE(ns),                                                      \
+      C10_STRINGIZE(k),                                                       \
+      __FILE__,                                                               \
+      __LINE__);                                                              \
+  void C10_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(    \
       torch::stable::detail::StableLibrary & m)
 
 #define STABLE_TORCH_LIBRARY(ns, m)                          \
@@ -344,28 +347,26 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
       STABLE_TORCH_LIBRARY_static_init_##ns(                 \
           torch::stable::detail::StableLibrary::Kind::DEF,   \
           &STABLE_TORCH_LIBRARY_init_##ns,                   \
-          #ns,                                               \
+          C10_STRINGIZE(ns),                                 \
           nullptr,                                           \
           __FILE__,                                          \
           __LINE__);                                         \
   void STABLE_TORCH_LIBRARY_init_##ns(torch::stable::detail::StableLibrary& m)
 
 #define STABLE_TORCH_LIBRARY_FRAGMENT(ns, m) \
-  _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, STABLE_UID)
+  _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, C10_UID)
 
-#define _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, uid)                          \
-  static void STABLE_CONCATENATE(                                           \
-      STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_,                           \
-      uid)(torch::stable::detail::StableLibrary&);                          \
-  static const torch::stable::detail::StableTorchLibraryInit                \
-      STABLE_CONCATENATE(                                                   \
-          STABLE_TORCH_LIBRARY_FRAGMENT_static_init_##ns##_, uid)(          \
-          torch::stable::detail::StableLibrary::Kind::FRAGMENT,             \
-          &STABLE_CONCATENATE(                                              \
-              STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid),             \
-          #ns,                                                              \
-          nullptr,                                                          \
-          __FILE__,                                                         \
-          __LINE__);                                                        \
-  void STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)( \
+#define _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, uid)                            \
+  static void C10_CONCATENATE(                                                \
+      STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_,                             \
+      uid)(torch::stable::detail::StableLibrary&);                            \
+  static const torch::stable::detail::StableTorchLibraryInit C10_CONCATENATE( \
+      STABLE_TORCH_LIBRARY_FRAGMENT_static_init_##ns##_, uid)(                \
+      torch::stable::detail::StableLibrary::Kind::FRAGMENT,                   \
+      &C10_CONCATENATE(STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid),      \
+      C10_STRINGIZE(ns),                                                      \
+      nullptr,                                                                \
+      __FILE__,                                                               \
+      __LINE__);                                                              \
+  void C10_CONCATENATE(STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)(      \
       torch::stable::detail::StableLibrary & m)

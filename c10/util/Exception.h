@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
@@ -618,9 +619,19 @@ namespace c10::detail {
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   while (false)                               \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+// In release: TORCH_INTERNAL_ASSERT_DEBUG_ONLY is a no-op, so return
+// __VA_ARGS__ as a fallback. In debug: crashes via
+// TORCH_INTERNAL_ASSERT(false), so no return is emitted (avoids
+// -Wunreachable-code-return).
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  do {                                             \
+    return __VA_ARGS__;                            \
+  } while (0)
 #else
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(false))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals
@@ -708,32 +719,36 @@ namespace c10::detail {
 
 #ifndef FATAL_IF
 #ifdef C10_USE_GLOG
-#define FATAL_IF(condition)                                              \
-  condition ? (void)0                                                    \
-            : ::c10::LoggerVoidify() &                                   \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::google::GLOG_FATAL) \
+#define FATAL_IF(condition)                                           \
+  condition ? (void)0                                                 \
+            : ::c10::LoggerVoidify() &                                \
+          ::c10::MessageLogger(                                       \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL) \
               .stream()
 #else
-#define FATAL_IF(condition)            \
-  condition ? (void)0                  \
-            : ::c10::LoggerVoidify() & \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
+#define FATAL_IF(condition)                                        \
+  condition ? (void)0                                              \
+            : ::c10::LoggerVoidify() &                             \
+          ::c10::MessageLogger(                                    \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL) \
+              .stream()
 #endif
 #endif
 
 #ifndef NON_FATAL_IF
 #ifdef C10_USE_GLOG
-#define NON_FATAL_IF(condition)                                \
-  condition ? (void)0                                          \
-            : ::c10::LoggerVoidify() &                         \
-          ::c10::MessageLogger(                                \
-              __FILE__, __LINE__, ::google::GLOG_FATAL, false) \
-              .stream()
-#else
 #define NON_FATAL_IF(condition)                                              \
   condition ? (void)0                                                        \
             : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL, false) \
+          ::c10::MessageLogger(                                              \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL, false) \
+              .stream()
+#else
+#define NON_FATAL_IF(condition)                                           \
+  condition ? (void)0                                                     \
+            : ::c10::LoggerVoidify() &                                    \
+          ::c10::MessageLogger(                                           \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL, false) \
               .stream()
 #endif
 #endif

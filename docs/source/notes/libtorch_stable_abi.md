@@ -25,12 +25,15 @@ discussed below.
 It consists of
 
 - torch/csrc/stable/library.h: Provides a stable version of TORCH_LIBRARY and similar macros.
-- torch/csrc/stable/tensor_struct.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
+- torch/csrc/stable/tensor.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
+- torch/csrc/stable/device.h: Provides torch::stable::Device, a stable version of c10::Device.
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
+
+For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/api/stable/index.html).
 
 ### Stable C headers
 
@@ -101,7 +104,7 @@ TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
 // (1) Don't include <torch/torch.h> <ATen/ATen.h>
 //     only include APIs from torch/csrc/stable, torch/headeronly and C-shims
 #include <torch/csrc/stable/library.h>
-#include <torch/csrc/stable/tensor_struct.h>
+#include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
@@ -121,12 +124,12 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
 }
 
 // (5) Register the operator using STABLE_TORCH_LIBRARY
-//     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY(myops, m) {
   m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
 // (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
+//     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
   m.impl("add_scalar", TORCH_BOX(&add_scalar));
 }
@@ -251,3 +254,5 @@ Extensions can select the minimum abi version to be compatible with using:
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
+
+C++ APIs in ``torch/csrc/stable`` or ``torch/headeronly`` are subject to the same FC/BC policy as the rest of PyTorch (see [policy](https://github.com/pytorch/pytorch/wiki/PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy)). LibTorch ABI stable C shim APIs are guaranteed to have at least a two year compatibility window.

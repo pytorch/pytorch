@@ -41,6 +41,23 @@ Dynamo makes a best-effort attempt to hint if a graph break is caused by your co
 But it can still sometimes be difficult to tell from the logs if the graph break is caused by an error in your code,
 is a more complicated graph break, or is a `torch.compile` bug. In order to differentiate, we recommend trying to run your code without `torch.compile` to see if you still get the error reported by the graph break.
 
+You can also use `torch.compiler.set_stance("force_eager")` to quickly disable `torch.compile` without needing to modify the `torch.compile` call:
+
+```{code-cell}
+@torch.compile
+def fn(x):
+    y = torch.sin(x, x)
+    return y
+
+try:
+    with torch.compiler.set_stance("force_eager"):
+        fn(torch.ones(3, 3))
+except Exception as e:
+    print(e)
+```
+
+See https://docs.pytorch.org/tutorials/recipes/torch_compiler_set_stance_tutorial.html#crashing-sooner for more examples of `set_stance` usage for debugging.
+
 ## Data-dependent operations
 
 `torch.compile` graph breaks on data-dependent operations such as data-dependent control flow (if-statements, loops with tensors) and direct tensor data accesses (`.item`, `.data_ptr`).
@@ -130,21 +147,6 @@ However, the logged contents may differ if, for example, a mutation occurs.
 
 Note: `reorderable_logging_functions` has restrictions, these functions must return `None`, and their arguments must be limited to tensors, constants, or format strings.
 
-You can also use `torch._dynamo.config.ignore_logging_functions` to completely skip selected logging functions during tracing.
-
-Ignored functions can take any arguments, but MUST return `None`.
-Functions should either be module-level functions, `logging.Logger.<method>` (ignores that method for all `logging.Logger` instances) or `logger_obj.<method>` (ignores that method only for the specific `logger_obj` instance).
-Other functions may or may not be ignored due to implementation details. If you want to ignore a function that `ignore_logging_functions` is failing to ignore, please submit an issue.
-
-
-```{code-cell}
-torch._dynamo.config.reorderable_logging_functions.add(print)
-
-@torch.compile
-def fn(x):
-    x += 1
-    print("log!")
-    return torch.sin(x)
-
-print(fn(torch.ones(3, 3)))
-```
+If you do not need to run the printing or logging function, then consider using
+`torch.compiler.is_compiling()` or `torch._dyanmo.config.ignore_logging_functions` to skip the function
+entirely. See [this page for more details](programming_model.fullgraph_true.skipping_functions).

@@ -1,5 +1,0 @@
-ERROR
-    tmp0 = in_ptr0[...]
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/array_methods.py", line 1141, in op
-    return getattr(self.aval, f"_{name}")(self, *args)
-jax._src.source_info_util.JaxStackTraceBeforeTransformation: ValueError: The Pallas Triton lowering currently requires that all operations have array arguments and results whose size is a power of 2. Encountered an array of shape (2, 2, 10)

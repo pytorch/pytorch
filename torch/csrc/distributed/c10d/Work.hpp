@@ -31,6 +31,7 @@ enum class OpType : std::uint8_t {
   _REDUCE_SCATTER_BASE = 16,
   COALESCED = 17,
   _ALLREDUCE_SPARSE = 18,
+  REDUCE_SCATTER_TENSOR_COALESCED = 19,
   UNKNOWN = 100,
 };
 
@@ -181,5 +182,8 @@ struct TORCH_API WorkInfo {
   std::chrono::time_point<std::chrono::steady_clock> timeFinished;
   std::chrono::duration<float> activeDuration;
 };
+
+TORCH_API void set_comm_profiling_name(const std::string& name);
+TORCH_API const std::string& get_comm_profiling_name();
 
 } // namespace c10d

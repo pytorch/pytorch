@@ -14,12 +14,10 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.accelerator.is_available():
-    def timer() -> float:
+def timer() -> float:
+    if torch.accelerator.is_available():
         torch.accelerator.synchronize()
-        return timeit.default_timer()
-else:
-    timer = timeit.default_timer
+    return timeit.default_timer()
 
 
 class Language(enum.Enum):
@@ -36,7 +34,7 @@ class CPPTimer:
         timer: Callable[[], float],
         globals: dict[str, Any],
     ) -> None:
-        if timer is not timeit.default_timer:
+        if timer is not timeit.default_timer and torch.accelerator.is_available():
             raise NotImplementedError(
                 "PyTorch was built with accelerators and an accelerator is present; however "
                 "Timer does not yet support accelerator measurements. If your "
@@ -234,7 +232,7 @@ class Timer:
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
-        # pyrefly: ignore [bad-instantiation]
+
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,

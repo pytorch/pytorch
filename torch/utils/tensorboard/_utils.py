@@ -57,14 +57,14 @@ def _prepare_video(V):
         return num != 0 and ((num & (num - 1)) == 0)
 
     # pad to nearest power of 2, all at once
-    # pyrefly: ignore [index-error]
+
     if not is_power2(V.shape[0]):
-        # pyrefly: ignore [index-error]
+
         len_addition = int(2 ** V.shape[0].bit_length() - V.shape[0])
         V = np.concatenate((V, np.zeros(shape=(len_addition, t, c, h, w))), axis=0)
 
     n_rows = 2 ** ((b.bit_length() - 1) // 2)
-    # pyrefly: ignore [index-error]
+
     n_cols = V.shape[0] // n_rows
 
     V = np.reshape(V, (n_rows, n_cols, t, c, h, w))
@@ -104,7 +104,7 @@ def make_grid(I, ncols=8):
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     if len(set(input_format)) != len(input_format):
-        raise AssertionError(f"You can not use the same dimension shordhand twice. \
+        raise AssertionError(f"You can not use the same dimension shorthand twice. \
             input_format: {input_format}")
     if len(tensor.shape) != len(input_format):
         raise AssertionError(f"size of input tensor and input format are different. \

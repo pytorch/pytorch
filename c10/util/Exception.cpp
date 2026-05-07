@@ -1,10 +1,24 @@
+// @allow-raw-throw
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
+
+// Google glog's api does not have an external function that allows one to check
+// if glog is initialized or not. It does have an internal function - so we are
+// declaring it here. This is a hack but has been used by a bunch of others too
+// (e.g. Torch, common/init). See also Logging.cpp in this directory.
+#ifdef C10_USE_GLOG
+namespace google {
+namespace glog_internal_namespace_ {
+bool IsGoogleLoggingInitialized();
+} // namespace glog_internal_namespace_
+} // namespace google
+#endif
 
 namespace c10 {
 
@@ -244,6 +258,18 @@ bool Warning::verbatim() const {
 }
 
 void WarningHandler::process(const Warning& warning) {
+#ifdef C10_USE_GLOG
+  // During static initialization (before InitGoogleLogging), glog's global
+  // flags may not be constructed yet. Accessing them causes SIOF crashes
+  // (T253115013, D96553733). Fall back to stderr in that case.
+  if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized()) {
+    std::cerr << warning.source_location().file << ':'
+              << warning.source_location().line
+              << ": Warning: " << warning.msg() << " (function "
+              << warning.source_location().function << ')' << std::endl;
+    return;
+  }
+#endif
   LOG_AT_FILE_LINE(
       WARNING, warning.source_location().file, warning.source_location().line)
       << "Warning: " << warning.msg() << " (function "

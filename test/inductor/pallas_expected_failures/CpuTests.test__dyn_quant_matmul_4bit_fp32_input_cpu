@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/ufuncs.py", line 2474, in true_divide
-    out = lax.div(x1, x2)
-          ^^^^^^^^^^^^^^^
-TypeError: div got incompatible shapes for broadcasting: (128, 128), (512, 1).

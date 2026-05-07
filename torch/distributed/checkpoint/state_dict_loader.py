@@ -173,17 +173,15 @@ def load(
         # the same order.
         keys = sorted(state_dict.keys())
 
-        statetful_sd = {}
+        stateful_sd = {}
         for key in keys:
             if key not in state_dict:
                 continue
             elem = state_dict[key]
-            statetful_sd[key] = (
-                elem.state_dict() if isinstance(elem, Stateful) else elem
-            )
+            stateful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
         _load_state_dict(
-            state_dict=statetful_sd,
+            state_dict=stateful_sd,
             storage_reader=storage_reader,
             process_group=process_group,
             no_dist=no_dist,
@@ -196,10 +194,10 @@ def load(
             if isinstance(elem, Stateful):
                 # If the state_dict is a Stateful object,
                 # DCP does an in-place load in the original state dict.
-                elem.load_state_dict(statetful_sd[key])
+                elem.load_state_dict(stateful_sd[key])
             else:
                 # Otherwise, replace the state_dict with the loaded state_dict.
-                state_dict[key] = statetful_sd[key]
+                state_dict[key] = stateful_sd[key]
 
 
 def _load_state_dict(
@@ -230,11 +228,15 @@ def _load_state_dict(
         nonlocal metadata
 
         # Use global metadata if available, otherwise fallback to rank local metadata
+        global_metadata_exc: Exception | None = None
+        rank_metadata_exc: Exception | None = None
         try:
             metadata = storage_reader.read_metadata()
-        except Exception:
-            logger.info(
-                "Global metadata is not found. Falling back to rank local metadata."
+        except Exception as e:
+            global_metadata_exc = e
+            logger.warning(
+                "Global metadata is not found. Falling back to rank local metadata.",
+                exc_info=True,
             )
 
         if (
@@ -242,15 +244,25 @@ def _load_state_dict(
             and "kwargs" in inspect.signature(storage_reader.read_metadata).parameters
         ):
             try:
-                metadata = storage_reader.read_metadata(rank=distW.rank)  # noqa: F841
+                metadata = storage_reader.read_metadata(rank=distW.rank)
                 use_collectives = False
-            except Exception:
-                logger.info("Rank local metadata is not found.")
+            except Exception as e:
+                rank_metadata_exc = e
+                logger.warning("Rank local metadata is not found.", exc_info=True)
 
         if planner is None:
             raise AssertionError("planner is None")
         if metadata is None:
-            raise AssertionError("metadata is None")
+            error_parts = ["metadata is None"]
+            if global_metadata_exc is not None:
+                error_parts.append(
+                    f"global metadata read failed: {global_metadata_exc}"
+                )
+            if rank_metadata_exc is not None:
+                error_parts.append(
+                    f"rank local metadata read failed: {rank_metadata_exc}"
+                )
+            raise AssertionError("; ".join(error_parts))
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
 
         if (

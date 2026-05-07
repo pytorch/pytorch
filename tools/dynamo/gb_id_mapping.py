@@ -114,20 +114,21 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
     - For other types, it cleans the source segment to remove formatting artifacts.
 
     """
-    param_source = get_source_segment(source, kw.value)
     if isinstance(kw.value, ast.Constant):
         return kw.value.value
     elif isinstance(kw.value, ast.JoinedStr):
         evaluated_context = []
         for value in kw.value.values:
             if isinstance(value, ast.FormattedValue):
-                # pyrefly: ignore [bad-argument-type]
                 evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
             elif isinstance(value, ast.Constant):
                 # pyrefly: ignore [bad-argument-type]
                 evaluated_context.append(value.value)
         return "".join(evaluated_context)
     else:
+        # Only call get_source_segment when actually needed (avoids expensive
+        # _splitlines_no_ff call for every keyword argument)
+        param_source = get_source_segment(source, kw.value)
         return clean_string(param_source)
 
 
@@ -170,7 +171,6 @@ def find_unimplemented_calls(
 
                         for kw in node.keywords:
                             if kw.arg in info:
-                                # pyrefly: ignore [unsupported-operation]
                                 info[kw.arg] = extract_info_from_keyword(source, kw)
 
                         if info["gb_type"] is None:

@@ -1,4 +1,4 @@
-"""Lock acquisition utilities for caching system with timeout support.
+"""Lock acquisition utilities
 
 This module provides safe and unsafe lock acquisition functions for both threading.Lock
 and FileLock objects, with configurable timeout behaviors. It supports three timeout modes:

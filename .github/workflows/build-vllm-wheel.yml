@@ -28,33 +28,24 @@ jobs:
       matrix:
         python-version: [ '3.12' ]
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu128', 'cu129', 'cu130' ]
+        device: [ 'cu130', 'cu132' ]
         include:
-          - platform: manylinux_2_28_x86_64
-            device: cu128
-            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
-            runner: linux.12xlarge.memory
-          - platform: manylinux_2_28_x86_64
-            device: cu129
-            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
-            runner: linux.12xlarge.memory
           - platform: manylinux_2_28_x86_64
             device: cu130
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
             runner: linux.12xlarge.memory
-          - platform: manylinux_2_28_aarch64
-            device: cu128
-            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.8'
-            runner: linux.arm64.r7g.12xlarge.memory
-          - platform: manylinux_2_28_aarch64
-            device: cu129
-            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
-            runner: linux.arm64.r7g.12xlarge.memory
-        exclude:
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
+          - platform: manylinux_2_28_x86_64
+            device: cu132
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.2'
+            runner: linux.12xlarge.memory
           - platform: manylinux_2_28_aarch64
             device: cu130
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.0'
+            runner: linux.arm64.r7g.12xlarge.memory
+          - platform: manylinux_2_28_aarch64
+            device: cu132
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.2'
+            runner: linux.arm64.r7g.12xlarge.memory
     name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
@@ -69,13 +60,10 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           submodules: false
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -180,12 +168,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu128', 'cu129', 'cu130' ]
-        exclude:
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
-          - platform: manylinux_2_28_aarch64
-            device: cu130
+        device: [ 'cu130', 'cu132' ]
     env:
       PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}
@@ -246,7 +229,11 @@ jobs:
           PACKAGE_TYPE: wheel
           UPLOAD_SUBFOLDER: ${{ env.BUILD_DEVICE }}
           PKG_DIR: ${{ runner.temp }}/artifacts
+          R2_UPLOAD: ${{ ((github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'true' || '' }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
           set -ex
-          bash .circleci/scripts/binary_upload.sh
+          bash .ci/pytorch/binary_upload.sh

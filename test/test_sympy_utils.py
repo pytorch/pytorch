@@ -280,6 +280,16 @@ class TestValueRanges(TestCase):
             ValueRanges.wrap(0.0),
         )
 
+    def test_trunc_infinite(self):
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('inf'))),
+            ValueRanges.wrap(sympy.Float('inf')),
+        )
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('-inf'))),
+            ValueRanges.wrap(sympy.Float('-inf')),
+        )
+
     @parametrize("fn", UNARY_BOOL_OPS)
     def test_unary_bool_ref_range(self, fn):
         vals = [sympy.false, sympy.true]
@@ -805,7 +815,8 @@ class TestSympySolve(TestCase):
             (op(a * -5, b - 5), -(b - 5) / 5),
         ]
         mirror_op = mirror_rel_op(op)
-        assert mirror_op is not None
+        if mirror_op is None:
+            raise AssertionError("mirror_op should not be None")
 
         self._test_cases(cases, a, op)
         self._test_cases(mirror_cases, a, mirror_op)

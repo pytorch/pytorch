@@ -537,7 +537,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
         weight_scales_data[0],
         reinterpret_cast<const underlying_t*>(
             xnnp_weight.template data_ptr<scalar_t>()),
-        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()),
+        reinterpret_cast<const int32_t*>(qbias.const_data_ptr<c10::qint32>()),
         output_zero_point,
         output_scale,
         output_min,
@@ -676,7 +676,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         w_zero_points.data(),
         requantization_scales.data(),
         reinterpret_cast<uint8_t*>(qnnp_w_data),
-        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
+        reinterpret_cast<const int32_t*>(qbias.const_data_ptr<c10::qint32>()));
     packB = w.get();
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
       // On mobile, we release the original weight by resetting the intrusive_ptr.
@@ -733,7 +733,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       output_zero_point,
       output_min,
       output_max,
-      (uint8_t*)input_contig.data_ptr<c10::quint8>(),
+      (uint8_t*)input_contig.const_data_ptr<c10::quint8>(),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
@@ -1300,7 +1300,9 @@ static at::Tensor linear_int8_with_onednn_weight(
     QlinearForwardParams params;
     params.primitive = primitive;
     params.packed_weight = expected_weight;
-    params.weight_scales = wei_scales_t;
+    // keep a copy rather than a view of weight scales
+    params.weight_scales = tensor(wei_scales_t.get_desc());
+    memcpy(params.weight_scales.get_data_handle(), wei_scales_t.get_data_handle(), wei_scales_t.get_desc().get_size());
     params.src_scale = input_scale != 1.0f ? std::make_optional<tensor>(src_scales_t) : std::nullopt;
     params.dst_scale = output_scale != 1.0f ? std::make_optional<tensor>(dst_scales_t) : std::nullopt;
     params.src_zero_point = input_zero_point != 0 ? std::make_optional<tensor>(src_zp_t) : std::nullopt;

@@ -8,7 +8,7 @@ import platform
 import timeit
 from collections import namedtuple
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 import benchmark_utils
 
@@ -121,7 +121,8 @@ def _build_test(
             raise ValueError("Missing tags in configs")
 
         op = bench_op()
-        assert op is not None, "Can't create test"
+        if op is None:
+            raise AssertionError("Can't create test: bench_op() returned None")
         # op_name_function is a dictionary which has op_name and op_function.
         # an example of op_name_function is:
         # {'op_name' : 'abs', 'op_function' : torch.abs}
@@ -308,9 +309,10 @@ class BenchmarkRunner:
                 if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
-                    assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
-                        "ERROR: not able to parse the string!"
-                    )
+                    if not curr_brackets or open_to_close[curr_brackets[-1]] != c:
+                        raise AssertionError(
+                            f"ERROR: not able to parse the string! Mismatched bracket '{c}'"
+                        )
                     curr_brackets.pop()
                 elif c == "," and (not curr_brackets):
                     break_idxs.append(i)
@@ -380,12 +382,21 @@ class BenchmarkRunner:
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
+        cuda_sync = "cuda" in test_case.test_config.test_name
+        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=cuda_sync)
         test_case._output_mean()
-        backward_time = timeit.timeit(
-            functools.partial(test_case.run_backward, iters, print_per_iter), number=1
+
+        timer = Timer(
+            stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
+            globals={
+                "test_case": test_case,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "cuda_sync": cuda_sync,
+            },
         )
-        return backward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
@@ -596,7 +607,7 @@ class BenchmarkRunner:
             @dataclass
             class BenchmarkInfo:
                 name: str
-                mode: Optional[str]
+                mode: str | None
                 dtype: str
                 extra_info: dict[str, Any]
 
@@ -612,7 +623,7 @@ class BenchmarkRunner:
                 name: str
                 unit: str
                 benchmark_values: list[float]
-                target_value: Optional[float]
+                target_value: float | None
 
             @dataclass
             class BenchmarkRecord:

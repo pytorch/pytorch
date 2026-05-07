@@ -41,7 +41,24 @@ jobs:
       jobs: ${{ steps.set.outputs.jobs }}
     steps:
       - id: set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
         run: |
+          # Log dispatch context for debugging and future restriction of unlimited dispatches
+          echo "::group::Workflow dispatch context"
+          echo "event_name: $EVENT_NAME"
+          echo "actor: $ACTOR"
+          echo "triggering_actor: $TRIGGERING_ACTOR"
+          echo "run_id: $RUN_ID"
+          echo "repository: $REPOSITORY"
+          echo "ref: $REF"
+          echo "::endgroup::"
+
           jobs="${{ inputs.jobs-to-include }}"
           if [ -n "$jobs" ]; then
             echo "jobs= ${jobs} " >> "$GITHUB_OUTPUT"

@@ -10,6 +10,7 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
+#include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
@@ -372,24 +373,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-static constexpr int32_t kTruncatLength = 30;
+static constexpr int32_t kTruncateLength = 30;
 
 template <typename ListLikeType>
 static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
-  if (truncate && list.size() > kTruncatLength) {
+  if (truncate && list.size() > kTruncateLength) {
     if (with_escaped_quotes == true) {
       auto x = fmt::format(
           "\"[{}, ..., {}]\"",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     } else {
       auto x = fmt::format(
           "[{}, ..., {}]",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     }
@@ -509,7 +510,24 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
       }
     }
+
+    auto seqNum = debugInfo->getSequenceNumber();
+    if (seqNum >= 0) {
+      map.emplace(kSeqNum, std::to_string(seqNum));
+
+      size_t comms_id = c10::get_hash(
+          debugInfo->getProcessGroupName(),
+          seqNum,
+          debugInfo->getIsP2P(),
+          globalRankStart,
+          globalRankStride,
+          debugInfo->getWorldSize());
+      map.emplace(kCommsId, std::to_string(comms_id));
+    }
   }
+
+  map.emplace(
+      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
 
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;

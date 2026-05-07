@@ -73,7 +73,7 @@ void checkZeroPoint(const char* fn_name, int64_t zero_point) {
 
 template <typename T>
 void checkZeroPoints(const char* fn_name, const Tensor& zero_points) {
-  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
@@ -269,7 +269,7 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_float_qparams";
 
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
