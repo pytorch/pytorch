@@ -717,13 +717,39 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
-        # https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L168-L181
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
         # Key has already been converted to int via nb_index_impl by vt_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
             explanation=f"Dynamo does not know how to handle sq_item on {self}",
             hints=[],
+        )
+
+    def sq_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """Sequence concatenation via + operator (sq_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_concat",
+            context=f"sq_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """In-place sequence concatenation via += operator (sq_inplace_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_inplace_concat",
+            context=f"sq_inplace_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
 
     def call_method(
@@ -1260,7 +1286,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__radd__`` instead of ``__add__``).
         """
-        return self._nb_slot_not_implemented("nb_add_impl", other, reverse=reverse)
+        # We need to return NotImplemented here because of sq_concat
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_inplace_add_impl(
         self,
@@ -1268,7 +1295,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_add slot. Default: graph break."""
-        return self._nb_slot_not_implemented("nb_inplace_add", other)
+        # We need to return NotImplemented here because of sq_inplace_concat
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_subtract_impl(
         self,

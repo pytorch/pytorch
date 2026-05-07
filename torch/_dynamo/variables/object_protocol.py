@@ -8,7 +8,7 @@ live in their respective VT files.
 """
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import NoReturn, TYPE_CHECKING
 
 from torch._C._dynamo import (
     get_type_slots,
@@ -93,22 +93,28 @@ def vt_identity_compare(
     return None
 
 
+def binop_type_error(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+    op_symbol: str,
+) -> NoReturn:
+    raise_type_error(
+        tx,
+        f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
+    )
+
+
 @lru_cache(maxsize=256)
 def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     """Get all type slots for a type (cached)."""
     return get_type_slots(obj_type)
 
 
-def type_implements_sq_length(obj_type: type) -> bool:
-    """Check whether obj_type implements __len__ as sequence protocol"""
+def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given sq slot."""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_LENGTH)
-
-
-def type_implements_sq_item(obj_type: type) -> bool:
-    """Check whether obj_type implements __getitem__ as sequence protocol"""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, PySequenceSlots.SQ_ITEM)
+    return has_slot(seq_slots, slot)
 
 
 def type_implements_mp_length(obj_type: type) -> bool:
@@ -181,7 +187,7 @@ def pysequence_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1714-L1721
     if issubclass(obj_type, dict):
         return False
-    return type_implements_sq_item(obj_type)
+    return type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
@@ -230,7 +236,7 @@ def vt_mapping_size(
     if type_implements_mp_length(T):
         return obj.mp_length(tx)
 
-    if type_implements_sq_length(T):
+    if type_implements_sequence_slot(T, PySequenceSlots.SQ_LENGTH):
         raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
 
     raise_type_error(tx, f"object of type {obj.python_type_name()} has no len()")
@@ -246,7 +252,7 @@ def generic_len(
     """
 
     T = maybe_get_python_type(obj)
-    if type_implements_sq_length(T):
+    if type_implements_sequence_slot(T, PySequenceSlots.SQ_LENGTH):
         return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
 
@@ -316,7 +322,7 @@ def vt_getitem(
     # Branch 2: sq_item (only if mp_subscript is absent)
     # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
     #          → PySequence_GetItem (wraps negative, calls sq_item)
-    if type_implements_sq_item(obj_type):
+    if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM):
         key_type = maybe_get_python_type(key)
         if type_implements_nb_index(key_type):
             key = key.nb_index_impl(tx)
@@ -349,12 +355,12 @@ def vt_sequence_getitem(
     """
     obj_type = maybe_get_python_type(obj)
 
-    if type_implements_sq_item(obj_type):
+    if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM):
         # Negative index wrapping (abstract.c L2175-2183)
         if isinstance(index, ConstantVariable):
             index_val = index.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
-                if type_implements_sq_length(obj_type):
+                if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_LENGTH):
                     length = obj.sq_length(tx)
                     index = ConstantVariable.create(
                         index_val + length.as_python_constant()
@@ -531,6 +537,8 @@ NB_SLOT_MAPPING = {
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
     "nb_subtract": PyNumberSlots.NB_SUBTRACT,
     "nb_inplace_subtract": PyNumberSlots.NB_INPLACE_SUBTRACT,
+    "nb_add": PyNumberSlots.NB_ADD,
+    "nb_inplace_add": PyNumberSlots.NB_INPLACE_ADD,
 }
 
 
@@ -619,10 +627,7 @@ def binary_op(
 
     result = binary_op1(tx, v, w, op_slot)
     if is_nb_not_implemented(result):
-        raise_type_error(
-            tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
-        )
+        binop_type_error(tx, v, w, op_symbol)
     return result
 
 
@@ -675,10 +680,44 @@ def binary_iop(
     """
     result = binary_iop1(tx, v, w, iop_slot, op_slot)
     if is_nb_not_implemented(result):
-        raise_type_error(
-            tx,
-            f"unsupported operand type(s) for {op_symbol}: '{v.python_type_name()}' and '{w.python_type_name()}'",
-        )
+        binop_type_error(tx, v, w, op_symbol)
+    return result
+
+
+# add / inplace add needs special handling
+def vt_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements addition via nb_add / nb_inplace_add with binary_op dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1138-L1155
+    result = binary_op1(tx, v, w, "nb_add")
+    if not is_nb_not_implemented(result):
+        return result
+
+    T = maybe_get_python_type(v)
+    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONCAT):
+        return v.sq_concat_impl(tx, w)
+    binop_type_error(tx, v, w, "+")
+
+
+def vt_inplace_add(
+    tx: "InstructionTranslator",
+    v: VariableTracker,
+    w: VariableTracker,
+) -> VariableTracker:
+    """Implements in-place addition via nb_inplace_add with binary_iop dispatch."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1307-L1328
+    result = binary_iop1(tx, v, w, "nb_inplace_add", "nb_add")
+    if is_nb_not_implemented(result):
+        obj_type = maybe_get_python_type(v)
+        if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_INPLACE_CONCAT):
+            return v.sq_inplace_concat_impl(tx, w)
+        elif type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_CONCAT):
+            return v.sq_concat_impl(tx, w)
+        else:
+            binop_type_error(tx, v, w, "+=")
     return result
 
 
