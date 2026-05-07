@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import dis
     from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
@@ -1083,6 +1085,7 @@ class TracingContext:
         # to frame_summary_stack (prepping this variable for the inner frame's
         # progress)
         self.loc_in_frame: tuple[str, int, str] | None = None
+        self.loc_in_frame_positions: dis.Positions | None = None
         # this is only set after aot_autograd
         self.fw_metadata: ViewAndMutationMeta | None = None
         # this is only set when the DDPOptimizer is used
@@ -1159,7 +1162,18 @@ class TracingContext:
         if self.loc_in_frame is None:
             raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
-        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["colno"] = self.loc_in_frame_positions.col_offset
+            kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
+        return traceback.FrameSummary(
+            filename,
+            lineno,
+            frame_name,
+            lookup_line=False,
+            **kwargs,
+        )
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -1170,6 +1184,7 @@ class TracingContext:
         with (
             unittest.mock.patch.object(tc, "frame_summary_stack", []),
             unittest.mock.patch.object(tc, "loc_in_frame", None),
+            unittest.mock.patch.object(tc, "loc_in_frame_positions", None),
         ):
             try:
                 yield
@@ -1206,7 +1221,9 @@ class TracingContext:
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
+        old_positions = tc.loc_in_frame_positions
         tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
         try:
             yield
         except Exception as e:
@@ -1217,6 +1234,7 @@ class TracingContext:
             if frame_summary is not None:
                 tc.frame_summary_stack.pop()
             tc.loc_in_frame = old
+            tc.loc_in_frame_positions = old_positions
 
     @staticmethod
     @contextlib.contextmanager
@@ -1235,10 +1253,17 @@ class TracingContext:
             tc.output_strides = old_output_strides
 
     @staticmethod
-    def set_current_loc(filename: str, lineno: int, frame_name: str) -> None:
+    def set_current_loc(
+        filename: str,
+        lineno: int,
+        frame_name: str,
+        positions: dis.Positions | None = None,
+    ) -> None:
         # Save the current location in the frame. Lazily generate the
         # framesummary.
-        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
+        tc = TracingContext.get()
+        tc.loc_in_frame = (filename, lineno, frame_name)
+        tc.loc_in_frame_positions = positions
 
     @staticmethod
     def get_traced_code() -> list[CodeType] | None:
