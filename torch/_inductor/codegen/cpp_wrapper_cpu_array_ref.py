@@ -84,11 +84,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return DTYPE_TO_CPP[input.get_dtype()]
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
+    def get_device_include_path_jit(device: str) -> str:
         assert device == "cpu", "ArrayRef only supported on CPU!"
-        if V.graph.aot_mode:
-            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
         return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
+
+    @staticmethod
+    def get_device_include_path_aot(device: str) -> str:
+        assert device == "cpu", "ArrayRef only supported on CPU!"
+        return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
 
     def codegen_input_numel_asserts(self, indented_buffer=None):
         writer = indented_buffer or self.prefix
@@ -101,6 +104,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 continue
             numel = buf.get_numel()
             writer.writeline(f"assert_numel({name}, {numel});")
+
+    def write_assert_size_stride(
+        self, name: str, size: str, stride: str, op_name: str
+    ) -> None:
+        # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
+        # assert_size_stride would fail to compile.
+        return
 
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
