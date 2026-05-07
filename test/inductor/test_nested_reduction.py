@@ -89,7 +89,7 @@ def _layernorm(x_flat):
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
 
-    # ---- Small dim in X: falls back to existing fusion ----
+    # ---- Small dim in X: norm + weighted reduce ----
 
     def _weighted_norm_reduce_k(self, norm, reduce_fn, B, K, D):
         rfn = {
@@ -106,7 +106,7 @@ class _NestedReductionBase:
         x = torch.randn(B, K, D, device=GPU_TYPE)
         w = torch.randn(B, K, device=GPU_TYPE)
         self.check_numeric(f, (x, w))
-        self.check_no_fusion()
+        self.check_fusion()
 
     @parametrize("B", [32, 256])
     @parametrize("K", [16, 32])
@@ -119,7 +119,7 @@ class _NestedReductionBase:
 
     @parametrize("reduce_fn", ["sum", "amax", "amin"])
     def test_rmsnorm_weighted_reduce_B1(self, reduce_fn):
-        """B=1 flattened small_dim_in_x still falls back cleanly."""
+        """B=1 flattened small_dim_in_x still fuses."""
         self._weighted_norm_reduce_k(_rmsnorm, reduce_fn, 1, 16, 1024)
 
     def test_layernorm_weighted_sum(self):
@@ -145,7 +145,7 @@ class _NestedReductionBase:
         w = torch.randn(B, K, device=GPU_TYPE)
         bias = torch.randn(B, D, device=GPU_TYPE)
         self.check_numeric(f, (x, w, bias))
-        self.check_no_fusion()
+        self.check_fusion()
 
     # ---- Small dim in R: norm + block reduce ----
 
@@ -218,7 +218,7 @@ class _NestedReductionBase:
         x = torch.randn(64, 16, 4096, device=GPU_TYPE)
         w = torch.randn(64, 16, device=GPU_TYPE)
         self.check_numeric(f, (x, w))
-        self.check_no_fusion()
+        self.check_fusion()
 
     def test_layernorm_block_amax_bf16_epilogue(self):
         def f(x):
@@ -237,7 +237,7 @@ class _NestedReductionBase:
     # ---- Downstream pointwise fusion ----
 
     def test_weighted_rmsnorm_reduce_k_pointwise_epilogue(self):
-        """Pointwise after weighted small-dim-in-X reduction falls back."""
+        """Fuse reduced-output pointwise after weighted small-dim-in-X reduction."""
 
         def f(x, w, scale, bias):
             x_normed = _rmsnorm(x.reshape(x.shape[0] * 16, 4096)).reshape(x.shape)
@@ -249,7 +249,7 @@ class _NestedReductionBase:
         scale = torch.randn(64, 4096, device=GPU_TYPE)
         bias = torch.randn(64, 4096, device=GPU_TYPE)
         self.check_numeric(f, (x, w, scale, bias))
-        self.check_no_fusion()
+        self.check_fusion()
 
     def test_layernorm_block_amax_reduced_pointwise_epilogue(self):
         """Fuse out * scale + bias after reduced-output block amax."""
@@ -288,7 +288,7 @@ class _NestedReductionBase:
 
     @parametrize("dynamic", [False, True])
     def test_shapes_weighted_rmsnorm_reduce_k(self, dynamic):
-        """Dynamic small-dim-in-x falls back cleanly."""
+        """Dynamic small-dim-in-x fuses when the local group size is static."""
         K = 16
 
         def f(x, w):
@@ -308,7 +308,7 @@ class _NestedReductionBase:
             ref = f(x, w)
             act = compiled(x, w)
             self.assertEqual(act, ref, atol=1e-2, rtol=1e-2)
-        self.check_no_fusion()
+        self.check_fusion()
 
     @parametrize("dynamic", [False, True])
     def test_shapes_layernorm_block_amax(self, dynamic):
@@ -602,19 +602,67 @@ class _NestedReductionBase:
         self.check_numeric(f, (x, residual, w))
         self.check_fusion()
 
-    @parametrize("B,K,D", [(64, 16, 4096), (1, 16, 1024)])
-    def test_no_fullres_epilogue_small_dim_in_x(self, B, K, D):
-        """Small-dim-in-X with full-res consumer falls back."""
+    @parametrize(
+        "B,K,D,expect_fullres_consumer",
+        [(64, 16, 4096, False), (1, 16, 1024, True)],
+    )
+    def test_fullres_epilogue_small_dim_in_x(self, B, K, D, expect_fullres_consumer):
+        """Small-dim-in-X full-res consumer remaps through the parent tile."""
+        from torch._inductor.scheduler import FusedNestedReductions
 
         def f(x, w):
             x_normed = _rmsnorm(x.reshape(B * K, D)).reshape(B, K, D)
             s = (w[:, :, None] * x_normed).sum(dim=1)
             return x_normed + s[:, None, :]
 
+        def check_reduction_fusion(nodes):
+            fused_nodes = [n for n in nodes if isinstance(n, FusedNestedReductions)]
+            self.assertEqual(len(fused_nodes), 1)
+            self.assertFalse(fused_nodes[0].group_size_in_r)
+            self.assertEqual(
+                any(not sn.is_reduction() for sn in fused_nodes[0].node2.get_nodes()),
+                expect_fullres_consumer,
+            )
+            return nodes
+
         x = torch.randn(B, K, D, device=GPU_TYPE)
         w = torch.randn(B, K, device=GPU_TYPE)
-        self.check_numeric(f, (x, w))
-        self.check_no_fusion()
+        with inductor_config.patch(
+            _post_fusion_custom_pass=check_reduction_fusion,
+            fx_graph_cache=False,
+        ):
+            self.check_numeric(f, (x, w))
+        self.check_fusion(1 if expect_fullres_consumer else None)
+
+    def test_fullres_x_epilogue_rejects_intermediate_dependency(self):
+        """Do not fuse a full-res consumer before its extra producer."""
+        from torch._inductor.scheduler import FusedNestedReductions
+
+        B, K, D = 16, 16, 1024
+
+        def f(x, w):
+            x_normed = _rmsnorm(x.reshape(B * K, D)).reshape(B, K, D)
+            s = (w[:, :, None] * x_normed).sum(dim=1)
+            row_sum = torch.ops._inductor_test.realize(s.sum(dim=-1, keepdim=True))
+            return x_normed + s[:, None, :] + row_sum[:, None, :]
+
+        def check_reduction_fusion(nodes):
+            fused_nodes = [n for n in nodes if isinstance(n, FusedNestedReductions)]
+            self.assertEqual(len(fused_nodes), 1)
+            self.assertFalse(fused_nodes[0].group_size_in_r)
+            self.assertTrue(
+                all(sn.is_reduction() for sn in fused_nodes[0].node2.get_nodes())
+            )
+            return nodes
+
+        x = torch.randn(B, K, D, device=GPU_TYPE)
+        w = torch.randn(B, K, device=GPU_TYPE)
+        with inductor_config.patch(
+            _post_fusion_custom_pass=check_reduction_fusion,
+            fx_graph_cache=False,
+        ):
+            self.check_numeric(f, (x, w))
+        self.check_fusion(expected_kernels=None)
 
     def test_epilogue_rejects_intermediate_dependency(self):
         """Do not fuse a pointwise epilogue before another dependent node."""
@@ -669,6 +717,19 @@ class _NestedReductionBase:
 
         self._check_rejected(f, (torch.randn(4, D, device=GPU_TYPE),))
 
+    @parametrize("K", [17, 256])
+    def test_reject_bad_x_group_size(self, K):
+        """X-axis group_size has the same static power-of-2/block cap checks."""
+        B, D = 4, 512
+
+        def f(x, w):
+            x_normed = _rmsnorm(x.reshape(B * K, D)).reshape(B, K, D)
+            return (w[:, :, None] * x_normed).sum(dim=1)
+
+        x = torch.randn(B, K, D, device=GPU_TYPE)
+        w = torch.randn(B, K, device=GPU_TYPE)
+        self._check_rejected(f, (x, w))
+
     def test_small_outer_reduction_fuses(self):
         self._norm_block_reduce(_rmsnorm, "amax", 4, 128, 16)
 
@@ -690,6 +751,18 @@ class _NestedReductionBase:
             return _rmsnorm(x.reshape(8, 1024)).reshape(4, 2, 8, 128).abs().amax(dim=-1)
 
         self._check_rejected(f, (torch.randn(4, 2, 1024, device=GPU_TYPE),))
+
+    def test_reject_x_grouped_reduction_with_three_iter_dims(self):
+        """[B, H, K, D].sum(dim=2) needs explicit 3D X-axis mapping."""
+        B, H, K, D = 2, 3, 16, 512
+
+        def f(x, w):
+            x_normed = _rmsnorm(x.reshape(B * H * K, D)).reshape(B, H, K, D)
+            return (w[:, :, :, None] * x_normed).sum(dim=2)
+
+        x = torch.randn(B, H, K, D, device=GPU_TYPE)
+        w = torch.randn(B, H, K, device=GPU_TYPE)
+        self._check_rejected(f, (x, w))
 
     def test_reject_multiple_reduce_dims(self):
         """[B, groups, G1, G2] needs one local reduce axis."""
@@ -805,6 +878,29 @@ def _run_and_capture_sources(
             f"{[_kernel_name(kernel_code) for kernel_code in kernel_codes]}"
         )
     return wrapper_code, kernel_codes[0]
+
+
+def _capture_weighted_rmsnorm_reduce_k_kernel_sources(
+    batch_size: int,
+    K: int,
+    D: int,
+    *,
+    force_persistent_outer_reduction: bool | None = None,
+) -> tuple[str, str]:
+    def f(x, w):
+        B, K, D = x.shape
+        x_flat = x.reshape(B * K, D)
+        x_normed = _rmsnorm(x_flat).reshape(B, K, D)
+        return (w[:, :, None] * x_normed).sum(dim=1)
+
+    x = torch.randn(batch_size, K, D, device=GPU_TYPE)
+    w = torch.randn(batch_size, K, device=GPU_TYPE)
+    return _run_and_capture_sources(
+        f,
+        (x, w),
+        _nested_kernel_signature(force_persistent_outer_reduction),
+        force_persistent_outer_reduction=force_persistent_outer_reduction,
+    )
 
 
 def _capture_layernorm_block_amax_kernel_sources(
@@ -1107,6 +1203,35 @@ class _InternalsBase:
             num_outputs=1,
             meta_num_load=self.looped_or_persistent(2, 1),
             min_rblock=16,
+        )
+
+    def test_weighted_rmsnorm_reduce_k_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_weighted_rmsnorm_reduce_k_kernel_sources,
+            32,
+            16,
+            4096,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=1,
+            meta_num_load=self.looped_or_persistent(3, 2),
+            min_xblock=16,
+            extra_checks=FileCheck()
+            .check("nested_X_REDUCED_BLOCK")
+            .check("tl.reshape")
+            .check("nested_X_REDUCED_BLOCK, nested_X_LOCAL_REDUCTION_SIZE, R0_BLOCK")
+            .check("tl.sum")
+            .check_not("nested_R0_LOCAL_REDUCTION_SIZE"),
+        )
+
+    def test_weighted_rmsnorm_reduce_k_B1_kernel_form(self):
+        self.assert_single_kernel_form(
+            _capture_weighted_rmsnorm_reduce_k_kernel_sources,
+            1,
+            16,
+            1024,
+            input_counts=self.looped_or_persistent({0: 2, 1: 1}, {0: 1, 1: 1}),
+            num_outputs=1,
+            min_xblock=16,
         )
 
     def test_dynamic_layernorm_block_amax_kernel_form(self):

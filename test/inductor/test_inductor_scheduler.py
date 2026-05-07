@@ -12,7 +12,6 @@ import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, ReadWrites
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
-from torch._inductor.runtime.hints import ReductionHint
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
@@ -140,29 +139,7 @@ class TestScheduler(TestCase):
                 outer_x0 + 16 * outer_x1 + outer_r,
                 grouped_x0 + 16 * grouped_x1 + grouped_r,
             ),
-            NestedReduction.GroupedAxis.UNKNOWN,
-        )
-
-    def test_nested_reduction_min_block_axis_hint_conflicts(self):
-        self.assertTrue(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.OUTER, group_size_in_r=True
-            )
-        )
-        self.assertTrue(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.INNER, group_size_in_r=False
-            )
-        )
-        self.assertFalse(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.OUTER_TINY, group_size_in_r=True
-            )
-        )
-        self.assertFalse(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.DEFAULT, group_size_in_r=False
-            )
+            None,
         )
 
     @dtypes(torch.float, torch.float16)
