@@ -1,6 +1,7 @@
 
 #include <c10/util/irange.h>
 #include <algorithm>
+#include <vector>
 #include <array>
 #include <unordered_map>
 #include <utility>
@@ -221,8 +222,10 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
 
 void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
   // Remove all the tracking state of the close FD
-  std::erase_if(waitingSockets_, [&](auto& entry) {
-    std::erase(entry.second, socket);
+  for (auto& [key, sockets] : waitingSockets_) {
+    std::erase(sockets, socket);
+  }
+  std::erase_if(waitingSockets_, [](const auto& entry) {
     return entry.second.empty();
   });
   keysAwaited_.erase(socket);
