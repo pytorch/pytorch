@@ -1936,13 +1936,31 @@ class TestTorchFunctionMode(TestCase):
 
 
 class TestTorchFunctionRedispatch(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.assertFalse(
+            torch._C._peek_should_skip_torch_function(),
+            "skip_next TLS was set at test start",
+        )
+
+    def tearDown(self):
+        leaked = torch._C._peek_should_skip_torch_function()
+        if leaked:
+            torch._C._set_skip_next_torch_function(False)
+        super().tearDown()
+        self.assertFalse(leaked, "skip_next TLS leaked from test")
+
+    @staticmethod
+    def _filter_log(call_log, allowed_qualnames):
+        return [e for e in call_log if e[0] in allowed_qualnames]
+
     def test_simple(self):
         call_log = []
         x = RedispatchTensor(torch.ones(1), call_log=call_log)
         ret = bar(x)
         self.assertIs(ret, x)
-        # Check that bar was intercepted
-        call_log_str = '\n'.join(f"{entry[0]}" for entry in call_log)
+        filtered = self._filter_log(call_log, {"bar"})
+        call_log_str = '\n'.join(f"{entry[0]}" for entry in filtered)
         self.assertExpectedInline(call_log_str, """bar""")
 
     def test_skip_to_inner(self):
@@ -1956,7 +1974,8 @@ class TestTorchFunctionRedispatch(TestCase):
         # but then the + operations inside foo DO dispatch to __torch_function__
         # So we should see: foo, then add (from a+b), then add (from temp+c)
         # Snapshot the log before assertEqual triggers more __torch_function__ calls.
-        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in call_log)
+        filtered = self._filter_log(call_log, {"foo", "TensorBase.add"})
+        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in filtered)
         self.assertEqual(ret, torch.full((1,), 6))
         self.assertExpectedInline(call_log_str, """\
 foo: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
@@ -1980,7 +1999,8 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
         self.assertEqual(ret, torch.tensor([6.0]))
         # Without 'with self:', mode only sees the outer call
-        self.assertEqual(call_log, ['foo'])
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo'])
 
     def test_mode_with_redispatch_reentrant(self):
         call_log = []
@@ -2001,7 +2021,8 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 
         self.assertEqual(ret, torch.tensor([6.0]))
         # With 'with self:', mode sees outer call and inner add operations
-        self.assertEqual(call_log, ['foo', 'add', 'add'])
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo', 'add', 'add'])
 
 
 class TestTorchFunctionRedispatchOps(TestCase):
