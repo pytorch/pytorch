@@ -393,17 +393,18 @@ class BenchmarkRunner:
         """This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        cuda_sync = "cuda" in test_case.test_config.test_name
-        test_case.run_forward(num_runs=1, print_per_iter=False, gpu_sync=cuda_sync)
+        test_name = test_case.test_config.test_name
+        gpu_sync = ("cuda" in test_name) or ("xpu" in test_name)
+        test_case.run_forward(num_runs=1, print_per_iter=False, gpu_sync=gpu_sync)
         test_case._output_mean()
 
         timer = Timer(
-            stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
+            stmt="test_case.run_backward(iters, print_per_iter, gpu_sync)",
             globals={
                 "test_case": test_case,
                 "iters": iters,
                 "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
+                "gpu_sync": gpu_sync,
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
