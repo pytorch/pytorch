@@ -1,10 +1,25 @@
 # mypy: allow-untyped-defs
 import contextlib
 from collections import defaultdict
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 from torch import Tensor
+
+
+class _GroupSwapinInfo(NamedTuple):
+    """Per-group bookkeeping for ``swap_in_optimizer_state``.
+
+    Fields:
+        live_group: live ``optimizer.param_groups[i]`` dict, mutated in place.
+        swapin_group: per-group hyperparameter dict from the input state_dict
+            (e.g. lr, betas, ...) plus packed ``params`` ids.
+        swapin_params: replacement parameter tensors for ``live_group["params"]``.
+    """
+
+    live_group: dict[str, Any]
+    swapin_group: dict[str, Any]
+    swapin_params: list[Tensor]
 
 
 def _validate_state_field(state: Any) -> dict[Any, Any]:
@@ -91,7 +106,7 @@ def _prepare_swap_in(
     optimizer: "torch.optim.Optimizer",
     parameters: dict[str, Tensor],
     swapin_optimizer_state_dict: dict[str, Any],
-):
+) -> tuple[dict[Any, Any], list[_GroupSwapinInfo]]:
     """
     Validate and normalize optimizer state for ``swap_in_optimizer_state``.
 
@@ -139,27 +154,25 @@ def _prepare_swap_in(
         swapin_params = flat_parameters[flat_param_offset:next_offset]
         flat_param_offset = next_offset
 
+        # ``swapin_group`` is the per-group hyperparameter dict from the
+        # input state_dict (e.g. lr, betas, eps, weight_decay, amsgrad,
+        # maximize, foreach, capturable, differentiable, fused, ...) plus
+        # the packed ``params`` ids; installed onto the live group for the
+        # duration of the context. Example for AdamW:
+        #   {
+        #     'lr': 0.1, 'weight_decay': 0.01,
+        #     'betas': (0.9, 0.999), 'eps': 1e-08,
+        #     'amsgrad': False, 'maximize': False,
+        #     'foreach': None, 'capturable': False,
+        #     'differentiable': False, 'fused': None,
+        #     'decoupled_weight_decay': True,
+        #     'params': [0, 1],
+        #   }
         group_swapin_infos.append(
-            (
-                group,  # live optimizer group to mutate
-                # per-group hyperparameters from the input state_dict (the
-                # exact keys depend on the optimizer class) plus the packed
-                # ``params`` ids; installed onto the live group for the
-                # duration of the context. Example for AdamW:
-                #   {
-                #     'lr': 0.1, 'weight_decay': 0.01,
-                #     'betas': (0.9, 0.999), 'eps': 1e-08,
-                #     'amsgrad': False, 'maximize': False,
-                #     'foreach': None, 'capturable': False,
-                #     'differentiable': False, 'fused': None,
-                #     'decoupled_weight_decay': True,
-                #     'params': [0, 1],
-                #   }
-                swapin_group,
-                swapin_params,  # explicit tensors that replace group["params"]
-                # snapshot of the live group's pre-swap values for the keys
-                # we're about to overwrite, used to restore on context exit
-                {k: group[k] for k in swapin_group if k != "params"},
+            _GroupSwapinInfo(
+                live_group=group,
+                swapin_group=swapin_group,
+                swapin_params=swapin_params,
             )
         )
 
@@ -241,22 +254,26 @@ def swap_in_optimizer_state(
     )
 
     original_state = optimizer.state
-    original_group_params = [group["params"] for group in optimizer.param_groups]
+    # Shallow-copy each group dict so we can restore the full pre-swap
+    # contents (params list, lr, betas, ...) atomically on exit. Shallow
+    # copy preserves the identity of the original ``params`` list, which
+    # callers may compare with ``is``.
+    original_group_snapshots = [dict(g) for g in optimizer.param_groups]
 
     try:
         swapin_state: defaultdict[Tensor, Any] = defaultdict(dict)
 
-        for group, swapin_group, swapin_params, _ in group_swapin_infos:
+        for info in group_swapin_infos:
             # Swap the explicit tensors and saved group metadata onto the
             # live optimizer group.
-            group["params"] = swapin_params
-            for key, value in swapin_group.items():
+            info.live_group["params"] = info.swapin_params
+            for key, value in info.swapin_group.items():
                 if key == "params":
                     continue
-                group[key] = value
+                info.live_group[key] = value
 
             for swapin_param, param_id in zip(
-                swapin_params, swapin_group["params"], strict=True
+                info.swapin_params, info.swapin_group["params"], strict=True
             ):
                 # Re-key per-parameter optimizer state from packed ids to the
                 # swapped-in parameter tensors. Shallow-copy the per-param dict so
@@ -267,12 +284,10 @@ def swap_in_optimizer_state(
         optimizer.state = swapin_state
         yield
     finally:
-        # Restore the original live optimizer object exactly.
-        for group, params in zip(
-            optimizer.param_groups, original_group_params, strict=True
+        # Restore each live group dict to its pre-swap contents.
+        for group, snapshot in zip(
+            optimizer.param_groups, original_group_snapshots, strict=True
         ):
-            group["params"] = params
-        for group, _, _, saved_values in group_swapin_infos:
-            for key, value in saved_values.items():
-                group[key] = value
+            group.clear()
+            group.update(snapshot)
         optimizer.state = original_state
