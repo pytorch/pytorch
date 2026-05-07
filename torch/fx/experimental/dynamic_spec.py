@@ -254,7 +254,9 @@ class ParamsSpec:
         varargs: list[IntermediateSpec] | None = None,
         varkw: dict[str, IntermediateSpec] | None = None,
     ) -> None:
-        self._named_args: dict[str, LeafSpec] = dict(named_args) if named_args else {}
+        self._named_args: dict[str, IntermediateSpec] = (
+            dict(named_args) if named_args else {}
+        )
         if varargs is not None:
             raise NotImplementedError("varargs is not supported yet")
         if varkw is not None:

@@ -419,6 +419,10 @@ def lookup_spec_from_dynamo_source(
             if not isinstance(spec, ObjectSpec):
                 return None
             spec = spec._fields.get(key)
+    # Only return leaves — a container at the end of the walk means
+    # the source's path didn't reach an applicable spec.
+    if isinstance(spec, ObjectSpec):
+        return None
     return spec
 
 
@@ -2288,9 +2292,7 @@ class VariableBuilder:
             def _has_spec_for_attr(name: str) -> bool:
                 attr_source = AttrSource(self.source, name)
                 return (
-                    lookup_spec_from_dynamo_source(
-                        attr_source, config._shapes_spec
-                    )
+                    lookup_spec_from_dynamo_source(attr_source, config._shapes_spec)
                     is not None
                 )
 

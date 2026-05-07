@@ -608,13 +608,25 @@ class TestObjectSpecLookup(TestCase):
     def _attr(self, base, member):
         return AttrSource(base, member)
 
-    def test_local_source_root_returns_top_level_spec(self):
-        """Bare ``LocalSource`` at the root returns the top-level spec object."""
-        spec_obj = ObjectSpec({"weight": TensorSpec([None, None])})
-        shapes_spec = ShapesSpec(params=ParamsSpec({"model": spec_obj}))
+    def test_local_source_root_returns_leaf_spec(self):
+        """Bare ``LocalSource`` resolves to its top-level entry only when
+        that entry is a leaf — a top-level ``ObjectSpec`` is a container,
+        not applicable to a single tensor, so the lookup returns
+        ``None``."""
+        leaf = TensorSpec([ShapeVar("h"), None])
+        # Leaf at the top-level: returned directly.
+        shapes_spec_leaf = ShapesSpec(params=ParamsSpec({"x": leaf}))
         self.assertIs(
-            lookup_spec_from_dynamo_source(self._local("model"), shapes_spec),
-            spec_obj,
+            lookup_spec_from_dynamo_source(self._local("x"), shapes_spec_leaf),
+            leaf,
+        )
+        # Container at the top-level: bare LocalSource without a path
+        # has no leaf to apply, so returns None.
+        shapes_spec_obj = ShapesSpec(
+            params=ParamsSpec({"model": ObjectSpec({"weight": leaf})})
+        )
+        self.assertIsNone(
+            lookup_spec_from_dynamo_source(self._local("model"), shapes_spec_obj)
         )
 
     def test_attr_descends_into_objectspec(self):
@@ -742,11 +754,7 @@ class TestObjectSpecCompile(TestCase):
             backend=backend,
             shapes_spec=ShapesSpec(
                 params=ParamsSpec(
-                    {
-                        "self": ObjectSpec(
-                            {"weight": TensorSpec([ShapeVar("h"), None])}
-                        )
-                    }
+                    {"self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})}
                 )
             ),
         )
@@ -757,6 +765,7 @@ class TestObjectSpecCompile(TestCase):
         # Captured weight placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
+
 
 if __name__ == "__main__":
     run_tests()
