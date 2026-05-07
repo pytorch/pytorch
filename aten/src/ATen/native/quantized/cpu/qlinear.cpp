@@ -1053,19 +1053,18 @@ static at::Tensor fp8_qlinear_onednn_ref(
   return y_f32.to(out_dtype);
 }
 
-template <typename InputScaleType, typename InputZeroPointType>
 static at::Tensor linear_int8_with_onednn_weight(
-    const at::Tensor& input, // int8 CPU Tensor, not QTensor
-    const InputScaleType& input_scale_arg,
-    const InputZeroPointType& input_zero_point_arg,
-    const at::Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-    const at::Tensor& weight_scales,
-    const at::Tensor& weight_zero_points,
-    const std::optional<at::Tensor>& bias, // plain tensor
+    at::Tensor input, // int8 CPU Tensor, not QTensor
+    double input_scale,
+    int64_t input_zero_point,
+    at::Tensor onednn_weight, // int8 tensor from MkldnnCPU
+    at::Tensor weight_scales,
+    at::Tensor weight_zero_points,
+    std::optional<at::Tensor> bias, // plain tensor
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
-    const std::optional<at::Tensor>& other, // extra input for binary post-op
+    std::optional<at::Tensor> other, // extra input for binary post-op
     double other_scale,
     int64_t other_zero_point,
     const std::string_view& binary_post_op, // e.g. "none", "sum", "add"
@@ -1087,65 +1086,6 @@ static at::Tensor linear_int8_with_onednn_weight(
         input.scalar_type(), " and ", onednn_weight.scalar_type());
     is_fp8 = true;
   }
-
-  // Fast path with cache of params.
-  static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
-  static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
-  static const bool context_cache_enabled = cache_flag_str != "" && cache_flag_str == "1";
-  static thread_local std::unordered_map<
-      QlinearForwardCacheKey,
-      QlinearForwardParams,
-      QlinearForwardCacheKeyHash>
-      qlinear_forward_params_map;
-  static tensor empty_tensor;
-  static tensor::desc empty_tensor_desc;
-  int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
-  int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
-  const QlinearForwardCacheKey cache_key({weight_addr, M});
-#if defined(__powerpc__)
-      bool allow_cache = context_cache_enabled && !is_fp8;
-#else
-      bool allow_cache =
-          context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
-#endif
-  if (allow_cache) {
-    if (qlinear_forward_params_map.contains(cache_key)) {
-      auto input_contig =
-          dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      auto& params = qlinear_forward_params_map.at(cache_key);
-      if (params.K == K && params.N == N) {
-        at::Tensor output = binary_post_op == "sum"
-            ? other.value()
-            : at::empty({M, N}, at::device(c10::kCPU).dtype(params.out_dtype));
-        if (output.numel() == 0) {
-          return output;
-        }
-        params.src.set_data_handle(input_contig.data_ptr());
-        params.dst.set_data_handle(output.data_ptr());
-        if (binary_post_op == "add") {
-          const auto& other_ref = other.value();
-          auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
-          params.src1->set_data_handle(other_2d.data_ptr());
-        }
-        params.primitive.execute(ideep::stream::default_stream(), params.args);
-        return dim == 2 ? output : output.resize_(params.output_size);
-      }
-    }
-  }
-  double input_scale;
-  int64_t input_zero_point;
-  if constexpr (std::is_same_v<std::decay_t<InputScaleType>, at::Tensor>) {
-    TORCH_CHECK(
-        input_scale_arg.numel() == 1 && input_zero_point_arg.numel() <= 1,
-        "onednn int8 linear: act scale/zp size should be 1/<=1");
-    input_scale = input_scale_arg.item().toDouble();
-    input_zero_point =
-        input_zero_point_arg.numel() == 1 ? input_zero_point_arg.item().toLong() : 0;
-  } else {
-    input_scale = input_scale_arg;
-    input_zero_point = input_zero_point_arg;
-  }
-
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(
@@ -1207,6 +1147,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
   auto src = at::native::itensor_from_tensor(input_contig);
+  int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
 
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
@@ -1227,9 +1168,32 @@ static at::Tensor linear_int8_with_onednn_weight(
     return output;
   }
   tensor dst = at::native::itensor_view_from_dense(output);
+  static tensor empty_tensor;
+  static tensor::desc empty_tensor_desc;
   tensor src1 = binary_post_op == "add" ?
       at::native::itensor_view_from_dense(other.value().reshape({-1, other.value().size(dim - 1)})) :
       empty_tensor;
+
+  // Fast path with cache of params
+  static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
+  static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
+  static const bool context_cache_enabled = !cache_flag_str.empty() && cache_flag_str == "1";
+  static std::unordered_map<int64_t, QlinearForwardParams> qlinear_forward_params_map;
+  int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
+  if (context_cache_enabled) {
+    auto it = qlinear_forward_params_map.find(weight_addr);
+    if (it != qlinear_forward_params_map.end()) {
+      auto& params = it->second;
+      auto& args = params.args;
+      args[DNNL_ARG_SRC] = std::move(src);
+      args[DNNL_ARG_DST] = std::move(dst);
+      if (binary_post_op == "add") {
+        args[DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1] = std::move(src1);
+      }
+      params.primitive.execute(ideep::stream::default_stream(), args);
+      return dim == 2 ? output : output.resize_(output_size);
+    }
+  }
 
   // Regular path
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
@@ -1332,12 +1296,8 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   primitive.execute(ideep::stream::default_stream(), args);
   // Update cache if needed
-  if (allow_cache) {
+  if (context_cache_enabled) {
     QlinearForwardParams params;
-    params.K = K;
-    params.N = N;
-    params.out_dtype = out_dtype;
-    params.output_size = output_size;
     params.primitive = primitive;
     params.packed_weight = expected_weight;
     // keep a copy rather than a view of weight scales
@@ -1349,11 +1309,8 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.dst_zero_point = output_zero_point != 0 ? std::make_optional<tensor>(dst_zp_t) : std::nullopt;
     params.bias = with_bias ? std::make_optional<tensor>(onednn_bias) : std::nullopt;
     params.scratchpad = scratchpad;
-    params.src = src;
-    params.dst = dst;
-    params.src1 = binary_post_op == "add" ? std::make_optional<tensor>(src1) : std::nullopt;
     params.init_args();
-    qlinear_forward_params_map[cache_key] = params;
+    qlinear_forward_params_map[weight_addr] = params;
   }
   return dim == 2 ? output : output.resize_(output_size);
 }
@@ -1452,13 +1409,13 @@ at::Tensor PackedLinearWeightsACL::apply_relu(
 namespace at::native {
 
   Tensor QLinearOnednn::run_pointwise_tensor(
-      const Tensor& act, // int8 CPU tensor, not QTensor
-      const Tensor& act_scale,
-      const Tensor& act_zero_point,
-      const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-      const Tensor& weight_scales,
-      const Tensor& weight_zero_points,
-      const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
@@ -1466,10 +1423,14 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
+    // act_zero_point.numel() == 0 for symmetric quantization
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
+        "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
     constexpr std::string_view binary_post_op = "none";
+    int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
-        act, act_scale, act_zero_point,
+        act, act_scale.item().toDouble(), act_zp,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
         other, /*other scale*/1.0, /*other zp*/0,
@@ -1481,14 +1442,14 @@ namespace at::native {
   }
 
   Tensor QLinearOnednn::run_pointwise_binary_tensor(
-      const Tensor& act, // int8 CPU tensor, not QTensor
-      const Tensor& act_scale,
-      const Tensor& act_zero_point,
-      const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-      const Tensor& weight_scales,
-      const Tensor& weight_zero_points,
-      const std::optional<at::Tensor>& other, // extra input for binary post-op
-      const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<at::Tensor> other, // extra input for binary post-op
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
@@ -1500,8 +1461,12 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
       std::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
+    // act_zero_point.numel() == 0 for symmetric quantization
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
+        "onednn int8 linear: act scale/zp size should be 1/<=1");
+    int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
-        act, act_scale, act_zero_point,
+        act, act_scale.item().toDouble(), act_zp,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
         other, other_scale, other_zero_point,

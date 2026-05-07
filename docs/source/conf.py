@@ -453,8 +453,6 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.mtia.memory
-    "reset_peak_memory_stats",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -463,12 +461,8 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -1032,8 +1026,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    "set_checkpoint_early_stop",
-    "set_device_states",
     # torch.utils.cpp_backtrace
     "get_cpp_backtrace",
     # torch.utils.cpp_extension
