@@ -1969,46 +1969,46 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
         num_meta_mut = len(aliased_meta_mut_indices)
 
-        L: list[str] = ["def _synthetic_base_wrapper(args):"]
-        G: dict[str, object] = {"torch": torch, "_compiled_fn_": compiled_fn}
+        lines: list[str] = ["def _synthetic_base_wrapper(args):"]
+        code_globals: dict[str, object] = {"torch": torch, "_compiled_fn_": compiled_fn}
 
-        L.append(f"    _bases = [None] * {num_bases}")
+        lines.append(f"    _bases = [None] * {num_bases}")
         for base_idx in sorted(base_groups):
             first_orig = base_groups[base_idx][0]
-            L.append(f"    _a = args[{first_orig}]")
-            L.append("    if _a._base is not None:")
-            L.append(f"        _bases[{base_idx}] = _a._base")
-            L.append("    else:")
-            L.append("        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)")
-            L.append("        _b.set_(_a.untyped_storage())")
-            L.append(f"        _bases[{base_idx}] = _b")
+            lines.append(f"    _a = args[{first_orig}]")
+            lines.append("    if _a._base is not None:")
+            lines.append(f"        _bases[{base_idx}] = _a._base")
+            lines.append("    else:")
+            lines.append("        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)")
+            lines.append("        _b.set_(_a.untyped_storage())")
+            lines.append(f"        _bases[{base_idx}] = _b")
 
         other_items = ", ".join(f"args[{orig}]" for orig, _ in other_map)
-        L.append(f"    _new_args = _bases + [{other_items}]")
+        lines.append(f"    _new_args = _bases + [{other_items}]")
 
         if num_meta_mut > 0:
             meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
-            L.append(f"    _meta_mut = [{meta_items}]")
+            lines.append(f"    _meta_mut = [{meta_items}]")
 
-        L.append("    args.clear()")
-        L.append("    _outs = _compiled_fn_(_new_args)")
+        lines.append("    args.clear()")
+        lines.append("    _outs = _compiled_fn_(_new_args)")
 
         if num_meta_mut > 0:
-            L.append(f"    _mut_inps = _outs[-{num_meta_mut}:]")
-            L.append(f"    _user_outs = _outs[:-{num_meta_mut}]")
-            L.append("    for _inp, _mi in zip(_meta_mut, _mut_inps):")
-            L.append(
+            lines.append(f"    _mut_inps = _outs[-{num_meta_mut}:]")
+            lines.append(f"    _user_outs = _outs[:-{num_meta_mut}]")
+            lines.append("    for _inp, _mi in zip(_meta_mut, _mut_inps):")
+            lines.append(
                 "        _inp.as_strided_(_mi.size(), _mi.stride(),"
                 " _mi.storage_offset())"
             )
-            L.append("    return _user_outs")
+            lines.append("    return _user_outs")
         else:
-            L.append("    return _outs")
+            lines.append("    return _outs")
 
-        source = "\n".join(L)
+        source = "\n".join(lines)
         inner_fn = _compile_and_exec_source(
             source,
-            G,
+            code_globals,
             "_synthetic_base_wrapper",
             "synthetic_base_wrapper",
             wrapped_fn=compiled_fn,
