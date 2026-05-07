@@ -317,7 +317,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
+    def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=True):
         r"""Registers the fake impl for an operator defined in the library."""
 
         source = torch._library.utils.get_source(_stacklevel + 1)
@@ -423,7 +423,7 @@ class Library:
         self._op_impls.add(key)
 
     def impl(
-        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=False
+        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=True
     ):
         r"""Registers the function implementation for an operator defined in the library.
 
@@ -436,10 +436,9 @@ class Library:
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
             allow_override: Flag controlling if we want to override an
-                         existing registered kernel implementation. This is by
-                         default off, and will error you're trying to register a
-                         kernel to a dispatch key with a kernel already
-                         registered.
+                         existing registered kernel implementation. This is on
+                         by default; pass ``False`` to error if a kernel is
+                         already registered for this dispatch key.
 
         Example::
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
@@ -1117,7 +1116,7 @@ def register_fake(
     *,
     lib: Library | None = None,
     _stacklevel: int = 1,
-    allow_override: bool = False,
+    allow_override: bool = True,
 ):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
@@ -1147,12 +1146,11 @@ def register_fake(
         func: Fake tensor implementation.
         lib (Optional[Library]): Library to register the fake tensor to.
         allow_override: Flag controlling if we want to override an
-                        existing registered fake impl. This is by default off,
-                        and will error you're trying to register a fake impl to
-                        an operator that already has a fake impl. This also only
-                        applies if the custom operator was not created via
-                        torch.library.custom_op, as overriding an existing fake
-                        impl is already allowed.
+                        existing registered fake impl. This is on by default;
+                        pass ``False`` to error if the operator already has a
+                        fake impl. This also only applies if the custom operator
+                        was not created via torch.library.custom_op, as
+                        overriding an existing fake impl is already allowed.
 
     Examples:
         >>> import torch
