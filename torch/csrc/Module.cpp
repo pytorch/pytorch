@@ -1686,7 +1686,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   torch::autograd::Node* node = nullptr;
   c10::intrusive_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata;
     node = node_sp.get();
   } else {
     node =
@@ -2241,6 +2241,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_disabled_torch_dispatch_impl",
      THPModule_disable_torch_dispatch,
+     METH_VARARGS,
+     nullptr},
+    {"_skip_one_hop_torch_function",
+     THPModule_skip_one_hop_torch_function,
      METH_VARARGS,
      nullptr},
     {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
