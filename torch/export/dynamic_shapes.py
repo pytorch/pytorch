@@ -1118,7 +1118,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])
             else:
-                raise UserError(  # noqa: B904
+                raise UserError(
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
