@@ -2,6 +2,7 @@ ARG UBUNTU_VERSION
 
 FROM ubuntu:${UBUNTU_VERSION} as base
 
+# No-op change to trigger docker-builds CI and verify current state.
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
