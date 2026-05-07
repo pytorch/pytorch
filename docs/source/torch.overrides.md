@@ -47,7 +47,3 @@ protocol. See {ref}`extending-torch-python` for more details on the
 ```{eval-rst}
 .. autofunction::  wrap_torch_function
 ```
-
-```{eval-rst}
-.. autofunction::  redispatch_function
-```
