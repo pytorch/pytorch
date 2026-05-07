@@ -1203,10 +1203,6 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName& qualname) {
-  if (consume_should_skip_torch_function()) {
-    return std::nullopt;
-  }
-
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);

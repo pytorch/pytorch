@@ -1408,9 +1408,6 @@ def _disabled_torch_dispatch_impl(
     args: tuple,
     kwargs: dict,
 ) -> Any: ...  # THPModule_disable_dispatch_function
-def _skip_one_hop_torch_function(
-    func: Callable, types: Iterable[type], args: tuple, kwargs: dict
-) -> Any: ...  # THPModule_skip_one_hop_torch_function
 def _get_linalg_preferred_backend() -> _LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: _LinalgBackend): ...
 def _get_fp32_precision_getter(backend: str, op: str) -> str: ...
