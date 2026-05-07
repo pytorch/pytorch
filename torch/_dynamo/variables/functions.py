@@ -3793,7 +3793,6 @@ class WrapperDescriptorVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.WrapperDescriptorType)
         self.descriptor = descriptor
         self.owner = owner
 
@@ -3874,8 +3873,6 @@ class MethodWrapperVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.WrapperDescriptorType)
-        assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
 
@@ -3932,7 +3929,6 @@ class MethodDescriptorVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.MethodDescriptorType)
         self.descriptor = descriptor
         self.owner = owner
 
@@ -4026,15 +4022,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(
-            descriptor,
-            (
-                types.MethodDescriptorType,
-                types.BuiltinFunctionType,
-                types.ClassMethodDescriptorType,
-            ),
-        )
-        assert isinstance(obj, VariableTracker)
         self.descriptor = descriptor
         self.obj = obj
 
@@ -4088,7 +4075,6 @@ class ClassMethodDescriptorVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.ClassMethodDescriptorType)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
