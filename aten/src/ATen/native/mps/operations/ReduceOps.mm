@@ -907,27 +907,32 @@ static void sum_nansum_kernel_mps(TensorIterator& iter, const std::string& kerne
     const auto elems_per_group = reduction_size / num_groups;
 
     auto out_metal = scalarToMetalTypeString(output);
-    auto p1_kernel = fmt::format("{}reduction_{}_{}", kernel_prefix, scalarToMetalTypeString(input), out_metal);
+    auto is_contig = input.is_contiguous();
+    auto p1_kernel = fmt::format(
+        "{}reduction{}_{}_{}", kernel_prefix, is_contig ? "" : "_strided", scalarToMetalTypeString(input), out_metal);
     // Pass 2 combines partials by summing them regardless of pass-1 mode.
     // For count_nonzero the partials are already per-block counts (long);
     // counting them again would be wrong, so always use "sum_" here.
     auto p2_kernel = fmt::format("sum_reduction_{}_{}", out_metal, out_metal);
 
-    // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1
-    // Dim 0 (non-reduced): size=num_groups, input_stride=elems_per_group, output_stride=1
-    // Dim 1 (reduced):     size=elems_per_group, input_stride=1
-    NormParams params1;
-    params1.ndim = 2;
-    params1.p = 0;
+    NormParams params1{};
     params1.reduction_size = elems_per_group;
-    params1.input_sizes[0] = num_groups;
-    params1.input_strides[0] = elems_per_group;
-    params1.output_sizes[0] = num_groups;
-    params1.output_strides[0] = 1;
-    params1.input_sizes[1] = elems_per_group;
-    params1.input_strides[1] = 1;
-    params1.output_sizes[1] = 1;
-    params1.output_strides[1] = 0;
+    if (is_contig) {
+      // Model as 2D: input is [num_groups, elems_per_group], reduce dim=1.
+      params1.ndim = 2;
+      params1.input_sizes[0] = num_groups;
+      params1.input_strides[0] = elems_per_group;
+      params1.output_sizes[0] = num_groups;
+      params1.output_strides[0] = 1;
+      params1.input_sizes[1] = elems_per_group;
+      params1.input_strides[1] = 1;
+    } else {
+      params1.ndim = input.dim();
+      for (const auto d : c10::irange(input.dim())) {
+        params1.input_sizes[d] = input.size(d);
+        params1.input_strides[d] = input.stride(d);
+      }
+    }
 
     // Pass 2: partials[num_groups] -> output[1], reduce dim=0.
     // divisor applies here (not on pass 1), so pass 2 produces
