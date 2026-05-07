@@ -136,7 +136,7 @@ static StableIValue from_ivalue(
             std::nullopt, extension_build_version);
       }
       StableIValue* sivp = nullptr;
-      TORCH_ERROR_CODE_CHECK(aoti_torch_new_stable_ivalue(&sivp));
+      TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
       *sivp = from_ivalue(inner_type, ivalue, extension_build_version);
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
@@ -249,7 +249,7 @@ static c10::IValue to_ivalue(
       StableIValue* sivp = torch::stable::detail::_to<StableIValue*>(
           stable_ivalue, extension_build_version);
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
-      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_stable_ivalue(sivp));
+      TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
       return ival;
     }
     case c10::TypeKind::ListType: {
@@ -753,6 +753,27 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     reinterpret_cast<torch::Library*>(self)->set_python_module(
         pymodule, context);
   });
+
+AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value) {
+  // Check if ret_value can be dereferenced, if not it is a failure.
+  if (ret_value == nullptr) {
+    return AOTI_TORCH_FAILURE;
+  }
+  // Ensure the ret_value is set to a nullptr in case the allocation fails.
+  *ret_value = nullptr;
+
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_value = new StableIValue(0); });
+}
+
+AOTITorchError torch_delete_stable_ivalue(StableIValue* value) {
+  if (value == nullptr) {
+    // Freeing a nullptr is invalid.
+    return AOTI_TORCH_FAILURE;
+  } else {
+    delete value;
+    return AOTI_TORCH_SUCCESS;
+  }
 }
 
 AOTI_TORCH_EXPORT const char* torch_exception_get_what() {
