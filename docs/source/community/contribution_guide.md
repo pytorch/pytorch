@@ -1,11 +1,12 @@
-:orphan:
+---
+orphan: true
+---
 
-.. note::
+```{note}
+This page has been deprecated. Please refer to the [Contribution Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions) on the PyTorch Wiki.
+```
 
-   This page has been deprecated. Please refer to the `Contribution Guide <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`_ on the PyTorch Wiki.
-
-PyTorch Contribution Guide
-==========================
+# PyTorch Contribution Guide
 
 PyTorch is a GPU-accelerated Python tensor computation package for
 building deep neural networks using a tape-based autograd systems.
@@ -13,12 +14,11 @@ building deep neural networks using a tape-based autograd systems.
 
 
 
-Contribution Process
---------------------
+## Contribution Process
 
-The PyTorch organization is governed by :doc:`PyTorch
+The PyTorch organization is governed by {doc}`PyTorch
 Governance <governance>` and the technical guide to contributing
-can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_.
+can be found in [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md).
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
@@ -33,14 +33,13 @@ here is the basic process.
    looking to get more acquainted with the project, here are some tips
    for how to find appropriate tasks:
 
-   -  Look through the `issue
-      tracker <https://github.com/pytorch/pytorch/issues/>`__ and see if
+   -  Look through the [issue tracker](https://github.com/pytorch/pytorch/issues/) and see if
       there are any issues you know how to fix. Issues that are
       confirmed by other contributors tend to be better to investigate.
       We also maintain some labels for issues that are likely to be
       good for new people, e.g., **bootcamp** and **1hr**, although
       these labels are less well maintained.
-   -  Join us on `dev discuss <https://dev-discuss.pytorch.org/>`_
+   -  Join us on [dev discuss](https://dev-discuss.pytorch.org/)
       and let us know you're interested in getting to
       know PyTorch. We're very happy to help out researchers and
       partners get up to speed with the codebase.
@@ -50,12 +49,12 @@ here is the basic process.
    requests are small; in that case, no need to let us know about what
    you want to do, just get cracking. But if the change is going to be
    large, it's usually a good idea to get some design comments about it
-   first by `submitting an RFC <https://github.com/pytorch/rfcs/blob/master/README.md>`__.
+   first by [submitting an RFC](https://github.com/pytorch/rfcs/blob/master/README.md).
 
    -  If you don't know how big a change is going to be, we can help you
       figure it out! Just post about it on
-      `issues <https://github.com/pytorch/pytorch/issues/>`_ or
-      `dev discuss <https://dev-discuss.pytorch.org/>`_.
+      [issues](https://github.com/pytorch/pytorch/issues/) or
+      [dev discuss](https://dev-discuss.pytorch.org/).
    -  Some feature additions are very standardized; for example, lots of
       people add new operators or optimizers to PyTorch. Design
       discussion in these cases boils down mostly to, “Do we want this
@@ -77,7 +76,7 @@ here is the basic process.
 
 -  **Code it out!**
 
-   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
+   -  See the [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md) file for advice for working with PyTorch in a
       technical form.
 
 -  **Open a pull request.**
@@ -94,22 +93,20 @@ here is the basic process.
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/main/community/persons_of_interest.html>`_
+      [Persons of Interest](https://pytorch.org/docs/main/community/persons_of_interest.html)
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
 
    -  We'll try our best to minimize the number of review round trips and
       block PRs only when there are major issues. For the most common
-      issues in pull requests, take a look at `Common Mistakes <#common-mistakes-to-avoid>`__.
+      issues in pull requests, take a look at [Common Mistakes](#common-mistakes-to-avoid).
    -  Once a pull request is accepted and CI is passing, there is
       nothing else you need to do; we will merge the PR for you.
 
-Getting Started
----------------
+## Getting Started
 
-Proposing New Features
-~~~~~~~~~~~~~~~~~~~~~~
+### Proposing New Features
 
 New feature ideas are best discussed on a specific issue. Please include
 as much information as you can, any accompanying data, and your proposed
@@ -117,18 +114,16 @@ solution. The PyTorch team and community frequently review new issues
 and comments where they think they can help. If you feel confident in
 your solution, go ahead and implement it.
 
-Reporting Issues
-~~~~~~~~~~~~~~~~
+### Reporting Issues
 
-If you've identified an issue, first search through the `list of
-existing issues <https://github.com/pytorch/pytorch/issues>`__ on the
+If you've identified an issue, first search through the [list of
+existing issues](https://github.com/pytorch/pytorch/issues) on the
 repo. If you are unable to find a similar issue, then create a new one.
 Supply as much information you can to reproduce the problematic
 behavior. Also, include any additional insights like the behavior you
 expect.
 
-Implementing Features or Fixing Bugs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Implementing Features or Fixing Bugs
 
 If you want to fix a specific issue, it's best to comment on the
 individual issue with your intent. However, we do not lock or assign
@@ -140,38 +135,34 @@ time.
 Issues that are labeled first-new-issue, low, or medium priority provide
 the best entrance points and are great places to start.
 
-Adding Tutorials
-~~~~~~~~~~~~~~~~
+### Adding Tutorials
 
-A great deal of the tutorials on `pytorch.org <https://pytorch.org/>`__
+A great deal of the tutorials on [pytorch.org](https://pytorch.org/)
 come from the community itself and we welcome additional contributions.
 To learn more about how to contribute a new tutorial you can learn more
-here: `PyTorch.org Tutorial Contribution Guide on
-GitHub <https://github.com/pytorch/tutorials/#contributing>`__
+here: [PyTorch.org Tutorial Contribution Guide on
+GitHub](https://github.com/pytorch/tutorials/#contributing)
 
-Improving Documentation & Tutorials
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Improving Documentation & Tutorials
 
 We aim to produce high quality documentation and tutorials. On rare
 occasions that content includes typos or bugs. If you find something you
 can fix, send us a pull request for consideration.
 
-Take a look at the `Documentation <#on-documentation>`__ section to learn how our system
+Take a look at the [Documentation](#on-documentation) section to learn how our system
 works.
 
-Participating in Online Discussions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Participating in Online Discussions
 
-You can find active discussions happening on the `PyTorch Discussion
-Forums <https://discuss.pytorch.org/>`__  for users as well as the
-`PyTorch Dev Discussion Forums <https://dev-discuss.pytorch.org/>`__
+You can find active discussions happening on the [PyTorch Discussion
+Forums](https://discuss.pytorch.org/)  for users as well as the
+[PyTorch Dev Discussion Forums](https://dev-discuss.pytorch.org/)
 for developers and maintainers.
 
-Submitting Pull Requests to Fix Open Issues
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Submitting Pull Requests to Fix Open Issues
 
 You can view a list of all open issues
-`here <https://github.com/pytorch/pytorch/issues>`__. Commenting on an
+[here](https://github.com/pytorch/pytorch/issues). Commenting on an
 issue is a great way to get the attention of the team. From here you can
 share your ideas and how you plan to resolve the issue.
 
@@ -182,8 +173,7 @@ If you're not able to fix the issue yourself, commenting and sharing
 whether you can reproduce the issue can help the team
 identify problem areas.
 
-Reviewing Open Pull Requests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Reviewing Open Pull Requests
 
 We appreciate your help reviewing and commenting on pull requests. Our
 team strives to keep the number of open pull requests at a manageable
@@ -191,38 +181,33 @@ size, we respond quickly for more information if we need it, and we
 merge PRs that we think are useful. However, due to the high level of
 interest, additional eyes on the pull requests are always appreciated.
 
-Improving Code Readability
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Improving Code Readability
 
 Improving code readability helps everyone. It is often better to submit a
 small number of pull requests that touch a few files versus a large pull
 request that touches many files. Starting a discussion in the PyTorch
-forum `here <https://discuss.pytorch.org/>`__ or on an issue related to
+forum [here](https://discuss.pytorch.org/) or on an issue related to
 your improvement is the best way to get started.
 
-Adding Test Cases to Make the Codebase More Robust
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Adding Test Cases to Make the Codebase More Robust
 
 Additional test coverage is appreciated.
 
-Promoting PyTorch
-~~~~~~~~~~~~~~~~~
+### Promoting PyTorch
 
 Your use of PyTorch in your projects, research papers, write ups, blogs,
 or general discussions around the internet helps to raise awareness for
 PyTorch and our growing community. Please reach out to
-`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
+[marketing@pytorch.org](mailto:marketing@pytorch.org)
 for marketing support.
 
-Triaging Issues
-~~~~~~~~~~~~~~~
+### Triaging Issues
 
 If you feel that an issue could benefit from a particular tag or level
 of complexity, comment on the issue and share your opinion. If you
 feel an issue isn't categorized properly, comment and let the team know.
 
-About Open Source Development
------------------------------
+## About Open Source Development
 
 If this is your first time contributing to an open source project, some
 aspects of the development process may seem unusual to you.
@@ -244,8 +229,7 @@ aspects of the development process may seem unusual to you.
    make a bugfix to the code. This naturally leads to a higher standard
    of contribution.
 
-Common Mistakes To Avoid
-------------------------
+## Common Mistakes To Avoid
 
 -  **Did you add tests?** (Or if the change is hard to test, did you
    describe how you tested your change?)
@@ -296,8 +280,7 @@ Common Mistakes To Avoid
    please only include files in your pull request that are directly
    related to your changes.
 
-Frequently Asked Questions
---------------------------
+## Frequently Asked Questions
 
 -  **How can I contribute as a reviewer?** There is lots of value if
    community developers reproduce issues, try out new functionality, or
@@ -316,25 +299,22 @@ Frequently Asked Questions
    your pull request or branch. This is often needed for getting CI tests
    to pass.
 
-On Documentation
-----------------
+## On Documentation
 
-Python Docs
-~~~~~~~~~~~
+### Python Docs
 
 PyTorch documentation is generated from python source using
-`Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
+[Sphinx](https://www.sphinx-doc.org/en/master/). Generated HTML is
 copied to the docs folder in the main branch of
-`pytorch.org/docs <https://pytorch.org/docs/main>`__,
+[pytorch.org/docs](https://pytorch.org/docs/main),
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
 -  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://pytorch.org/docs/main <https://pytorch.org/docs/main>`__
+   [https://pytorch.org/docs/main](https://pytorch.org/docs/main)
 
-C++ Docs
-~~~~~~~~
+### C++ Docs
 
 For C++ code we use Doxygen to generate the content files. The C++ docs
 are built on a special server and the resulting files are copied to the
@@ -345,24 +325,22 @@ pages.
 -  GitHub: https://github.com/pytorch/pytorch/tree/main/docs/cpp
 -  Served from: https://github.com/pytorch/cppdocs
 
-Tutorials
----------
+## Tutorials
 
 PyTorch tutorials are documents used to help understand using PyTorch to
 accomplish specific tasks or to understand more holistic concepts.
 Tutorials are built using
-`Sphinx-Gallery <https://sphinx-gallery.readthedocs.io/en/latest/index.html>`__
+[Sphinx-Gallery](https://sphinx-gallery.readthedocs.io/en/latest/index.html)
 from executable python source files, or from restructured-text (rst)
 files.
 
 -  Site: https://pytorch.org/tutorials
 -  GitHub: https://github.com/pytorch/tutorials
 
-Tutorials Build Overview
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Tutorials Build Overview
 
-For tutorials, `pull
-requests <https://github.com/pytorch/tutorials/pulls>`__ trigger a
+For tutorials, [pull
+requests](https://github.com/pytorch/tutorials/pulls) trigger a
 rebuild of the entire site using CircleCI to test the effects of the
 change. This build is sharded into 9 worker builds and takes around 40
 minutes total. At the same time, we do a Netlify build using *make
@@ -372,8 +350,7 @@ output into pages for quick review.
 After a PR is accepted, the site is rebuilt and deployed using GitHub
 Actions.
 
-Contributing a New Tutorial
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Contributing a New Tutorial
 
-See `PyTorch.org Tutorial Contribution
-Guide <https://github.com/pytorch/tutorials/#contributing>`__.
+See [PyTorch.org Tutorial Contribution
+Guide](https://github.com/pytorch/tutorials/#contributing).
