@@ -79,7 +79,12 @@ def flops_to_ns(flops: float | int, dtype: "torch.dtype") -> float:
 
     Uses 75% of theoretical peak and converts FLOPs to MACs (divide by 2).
     """
-    peak_gpu_flops = get_device_tflops(dtype) * 1e12
+    device_tflops = get_device_tflops(dtype, device=device)
+    if device_tflops is None or device_tflops == 0:
+        return 0.0
+
+    peak_gpu_flops = device_tflops * 1e15
+
     if peak_gpu_flops == 0:
         return 0.0
     macs = flops / 2

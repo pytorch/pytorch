@@ -3127,21 +3127,28 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
+def get_device_tflops(dtype: torch.dtype, device: torch.device | None = None,) -> float:
     """
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
     ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+        device=device
     )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device is not None and device.type != "cuda":
         log.warning(
             "get_device_tflops: no Triton fallback available for non-CUDA devices. "
             "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
+        return 0.0
+
+    if not torch.cuda.is_available():
+        log.warning(
+            "get_device_tflops: CUDA is not available. Returning 0.0."
         )
         return 0.0
 
