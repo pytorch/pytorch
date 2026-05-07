@@ -166,12 +166,6 @@ class TensorSpec:
 class ObjectSpec:
     """Spec for any Python object's attributes.
 
-    Models attribute access on a Python object (e.g., an ``nn.Module``'s
-    parameters / buffers / submodules; ``self`` inside an instance
-    method). Each field corresponds to an ``AttrSource`` in the dynamo
-    builder — when ``model.weight`` is traced, the spec walk descends
-    via ``ObjectSpec._fields["weight"]``.
-
     Constructor::
 
         ObjectSpec({name: IntermediateSpec, ...})
@@ -228,23 +222,9 @@ class ObjectSpec:
 class DictSpec:
     """Spec for a Python ``dict``-typed value.
 
-    Models dict-subscript access (``d["x"]``) on a value — the value
-    might be a top-level function arg that's a dict, or a dict-typed
-    attribute reached through an ``ObjectSpec`` (``obj.config["batch"]``).
-    Each entry corresponds to a ``DictGetItemSource`` (or
-    ``GetItemSource`` with a ``str`` index) in the dynamo builder.
-
-    Distinct from ``ParamsSpec``: ``ParamsSpec`` describes the
-    *function's named arguments* (signature-level identifiers);
-    ``DictSpec`` describes a runtime ``dict`` value's keys.
-
     Constructor::
 
         DictSpec({key: IntermediateSpec, ...})
-
-    Values may be leaves (``TensorSpec`` / ``IntVar`` / ``int`` /
-    ``None``) or another container (``ObjectSpec`` / ``DictSpec``) for
-    recursion.
 
     Example::
 
