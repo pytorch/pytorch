@@ -1759,14 +1759,23 @@ class SizeVariable(TupleVariable):
                 tx,
                 f"can only concatenate tuple (not '{other.python_type_name()}') to torch.Size",
             )
-        other_items = other.unpack_var_sequence(tx)
-        new_items = list(self.items) + list(other_items)
-        return SizeVariable(new_items)
+        # Size nb_add uses sq_concat. We do the opposite here because of the reverse keyword
+        return self.nb_add_impl(tx, other)
 
     def nb_add_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
     ) -> VariableTracker:
-        return self.sq_concat_impl(tx, other)
+        # NOTE: The python interpreter tries, in order:
+        #    1. right.nb_add(left, right)  (only if right is a subclass of left)
+        #    2. left.nb_add(left, right)
+        #    3. right.nb_add(left, right)
+        #    4. left.sq_concat(right)
+        #  Hence, to support tuple + size -> size, we need to implement nb_add
+        if not pytuple_check(other):
+            return ConstantVariable(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
 class SliceVariable(VariableTracker):
