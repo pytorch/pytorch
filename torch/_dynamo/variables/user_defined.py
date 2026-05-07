@@ -1898,9 +1898,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise AssertionError(
                     f"Expected UserDefinedObjectVariable, got {type(other_)}"
                 )
-            r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
-            if not is_nb_not_implemented(r):
-                return r
+            if other_._maybe_get_baseclass_method(rdunder):
+                r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
+                if not is_nb_not_implemented(r):
+                    return r
 
         return variables.ConstantVariable.create(NotImplemented)
 
@@ -1927,6 +1928,54 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
+
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10315-L10318
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__add__",
+            "__radd__",
+            nb_slot=PyNumberSlots.NB_ADD,
+            reverse=reverse,
+        )
+
+    def nb_inplace_add_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
+        return self.call_method(tx, "__iadd__", [other], {})
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10319-L10322
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__sub__",
+            "__rsub__",
+            nb_slot=PyNumberSlots.NB_SUBTRACT,
+            reverse=reverse,
+        )
+
+    def nb_inplace_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10362-L10363
+        return self.call_method(tx, "__isub__", [other], {})
 
     def call_method(
         self,
@@ -2018,6 +2067,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
         return super().call_method(tx, name, args, kwargs)
+
+    def sq_concat_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10373-L10374
+        # return self.nb_add_impl(tx, other, reverse=False)
+        method = self._maybe_get_baseclass_method("__add__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.sq_concat_impl(tx, other)
+
+        return self.nb_add_impl(tx, other, reverse=False)
+
+    def sq_inplace_concat_impl(
+        self, tx: "InstructionTranslator", other: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10387-L10389
+        method = self._maybe_get_baseclass_method("__add__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.sq_inplace_concat_impl(tx, other)
+
+        return self.nb_inplace_add_impl(tx, other)
 
     def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         type_attr, source = self._lookup_slot_type_attr(tx, "__len__")
