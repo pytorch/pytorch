@@ -59,6 +59,9 @@ on:
       use-arc:
         description: Whether to use ARC runners
         value: ${{ jobs.runner-determinator.outputs.use-arc }}
+      ci-docker-hash:
+        description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
+        value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
 
 jobs:
   runner-determinator:
@@ -71,6 +74,7 @@ jobs:
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
       use-arc: ${{ steps.set-condition.outputs.use-arc }}
+      ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -83,9 +87,18 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           sparse-checkout: |
             .github/scripts/runner_determinator.py
+            .ci/docker
+          sparse-checkout-cone-mode: false
+
+      - name: Compute .ci/docker tree hash
+        id: ci-docker-hash
+        shell: bash
+        run: |
+          echo "ci-docker-hash=$(git rev-parse HEAD:.ci/docker)" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
