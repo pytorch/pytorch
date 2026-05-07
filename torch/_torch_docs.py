@@ -10579,7 +10579,7 @@ Keyword args:
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
         met and this will lead to silently incorrect results. To force
-        coalescion please use :meth:`coalesce` on the resulting
+        coalescing please use :meth:`coalesce` on the resulting
         Tensor.
         Default: None: except for trivial cases (e.g. nnz < 2) the
         resulting Tensor has is_coalesced set to ``False```.

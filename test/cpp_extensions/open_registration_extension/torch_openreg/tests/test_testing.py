@@ -36,6 +36,18 @@ class TestBypassDeviceRestrictions(TestCase):
         self.bypass_device_restrictions = True
         super().setUp()
 
+    @classmethod
+    def tearDownClass(cls):
+        expected_runs = 2
+        actual_runs = cls.executed_count
+        if actual_runs != expected_runs:
+            raise AssertionError(
+                f"Bypass logic failed! "
+                f"Expected {expected_runs} tests to run, "
+                f"but only {actual_runs} executed."
+            )
+        super().tearDownClass()
+
     @onlyCUDA
     def test_bypass_only_cuda(self, device):
         type(self).executed_count += 1
@@ -45,19 +57,6 @@ class TestBypassDeviceRestrictions(TestCase):
     def test_bypass_only_on(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
-
-    def test_vaildate_bypass_execution(self, device):
-        # Must run last. The 'v' prefix ensures this sorts after test_bypass_* ('b') alphabetically,
-        # so executed_count has been incremented by both bypass tests before we check it here.
-        expected_runs = 2
-        actual_runs = type(self).executed_count
-        self.assertEqual(
-            actual_runs,
-            expected_runs,
-            f"Bypass logic failed! "
-            f"Expected {expected_runs} tests to run, "
-            f"but only {actual_runs} executed.",
-        )
 
 
 def _make_dummy_op(name, **kwargs):
@@ -90,15 +89,13 @@ op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
 
 
 @contextmanager
-def _temp_attrs(obj, **attrs):
-    backup = {k: getattr(obj, k) for k in attrs}
-    for k, v in attrs.items():
-        setattr(obj, k, v)
+def _temp_test_configs(obj, **configs):
+    backup = {k: getattr(obj, k, None) for k in configs}
+    obj.set_test_configs(**configs)
     try:
         yield
     finally:
-        for k, v in backup.items():
-            setattr(obj, k, v)
+        obj.set_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -236,7 +233,7 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
-with _temp_attrs(
+with _temp_test_configs(
     PrivateUse1TestBase,
     op_overrides={
         "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
