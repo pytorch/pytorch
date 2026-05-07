@@ -252,7 +252,7 @@ class TestNativeDSLOps(TestCase):
                     )
 
     def test_registry_mechanics(self):
-        """_get_or_create_library caches Library instances per (lib, dispatch_key)."""
+        """_get_or_create_library caches Library instances per dispatch_key."""
         import torch._native.registry as registry
         import torch.library
 
@@ -265,23 +265,23 @@ class TestNativeDSLOps(TestCase):
         )
 
         try:
-            key = ("_test_native_dsl_registry", "CPU")
-            registry._libs.pop(key, None)
+            cpu_key = ("_native", "CPU")
+            cuda_key = ("_native", "CUDA")
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
 
-            lib1 = registry._get_or_create_library(*key)
+            lib1 = registry._get_or_create_library("CPU")
             self.assertIsInstance(lib1, torch.library.Library)
-            lib2 = registry._get_or_create_library(*key)
+            lib2 = registry._get_or_create_library("CPU")
             self.assertIs(lib1, lib2, "should return cached instance")
 
             # Different dispatch key -> different Library
-            key2 = ("_test_native_dsl_registry", "CUDA")
-            registry._libs.pop(key2, None)
-            lib3 = registry._get_or_create_library(*key2)
+            lib3 = registry._get_or_create_library("CUDA")
             self.assertIsNot(lib1, lib3)
 
             # cleanup
-            registry._libs.pop(key, None)
-            registry._libs.pop(key2, None)
+            registry._libs.pop(cpu_key, None)
+            registry._libs.pop(cuda_key, None)
         finally:
             # Restore original registry state
             registry._libs.clear()
@@ -361,10 +361,10 @@ class TestNativeDSLOps(TestCase):
                 # Use a unique operation name
                 unique_op = f"test_jit_disabled_{uuid.uuid4().hex[:8]}.Tensor"
                 triton_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 cutedsl_utils.register_op_override(
-                    "aten", unique_op, "CPU", lambda: None
+                    "aten", unique_op, "CPU", lambda *a, **k: True, lambda: None
                 )
                 # Should not call the registry function at all since JIT is disabled
                 self.assertEqual(registry_mock.call_count, 0)
@@ -409,8 +409,12 @@ class TestNativeDSLOps(TestCase):
                 op_name = f"test_version_skip_{uuid.uuid4().hex[:8]}.Tensor"
 
                 # Call the register functions
-                triton_utils.register_op_override("aten", op_name, "CPU", lambda: None)
-                cutedsl_utils.register_op_override("aten", op_name, "CPU", lambda: None)
+                triton_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
+                cutedsl_utils.register_op_override(
+                    "aten", op_name, "CPU", lambda *a, **k: True, lambda: None
+                )
 
                 # Verify both implementation functions were called
                 self.assertEqual(

@@ -10518,32 +10518,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_storage_preserve_nonhermetic_in_hermetic_context(self):
-        from torch.library import Library, impl
+        from torch.library import _scoped_library, impl
         global _my_storage
 
-        my_lib = Library("my_lib", "DEF")  # noqa: TOR901
-        my_lib.define('my_func() -> None')
+        with _scoped_library("my_lib", "DEF") as my_lib:
+            my_lib.define('my_func() -> None')
 
-        a = torch.tensor([1.])
-        _my_storage = a.untyped_storage()
+            a = torch.tensor([1.])
+            _my_storage = a.untyped_storage()
 
-        m, t = Tracker.make()
-        _my_storage._tracker = t
-        del t
+            m, t = Tracker.make()
+            _my_storage._tracker = t
+            del t
 
-        @impl(my_lib, 'my_func', '')
-        def my_func():
-            global _my_storage
-            del _my_storage
+            @impl(my_lib, 'my_func', '')
+            def my_func():
+                global _my_storage
+                del _my_storage
 
-        self.assertFalse(m[0])
-        torch.ops.my_lib.my_func()
-        self.assertFalse(m[0])
+            self.assertFalse(m[0])
+            torch.ops.my_lib.my_func()
+            self.assertFalse(m[0])
 
-        s = a.untyped_storage()
-        del a
-        del s
-        self.assertTrue(m[0])
+            s = a.untyped_storage()
+            del a
+            del s
+            self.assertTrue(m[0])
 
     # FIXME: move to test_autograd?
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
