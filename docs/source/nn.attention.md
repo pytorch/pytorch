@@ -1,13 +1,17 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-torch.nn.attention
-==================
+# torch.nn.attention
 
+```{eval-rst}
 .. automodule:: torch.nn.attention
+```
 
-Utils
--------------------
+## Utils
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -19,9 +23,11 @@ Utils
     list_flash_attention_impls
     current_flash_attention_impl
     restore_flash_attention_impl
+```
 
-Submodules
-----------
+## Submodules
+
+```{eval-rst}
 .. autosummary::
     :nosignatures:
 
@@ -29,7 +35,9 @@ Submodules
     bias
     experimental
     varlen
+```
 
+```{eval-rst}
 .. toctree::
     :hidden:
 
@@ -37,3 +45,4 @@ Submodules
     nn.attention.bias
     nn.attention.experimental
     nn.attention.varlen
+```
