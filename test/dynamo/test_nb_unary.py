@@ -700,9 +700,7 @@ class NbUnaryTests(TestCase):
                 return str(e)
 
         eager_result = fn(0)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(
-            torch.tensor(0)
-        )
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
 

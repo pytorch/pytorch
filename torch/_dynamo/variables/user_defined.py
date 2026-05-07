@@ -1866,7 +1866,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method("__pos__")
         if method is None:
             raise_type_error(
-                tx, f"bad operand type for unary +: '{self.python_type_name()}'",
+                tx,
+                f"bad operand type for unary +: '{self.python_type_name()}'",
             )
 
         return self.call_method(tx, "__pos__", [], {})

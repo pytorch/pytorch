@@ -820,8 +820,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_int_impl(tx)
         elif name == "__float__" and not args and not kwargs:
             return self.nb_float_impl(tx)
-        elif name == "__abs__" and not args and not kwargs:
-            return self.nb_absolute_impl(tx)
         elif name == "__get__" and len(args) in (1, 2) and not kwargs:
             # Route to tp_descr_get_impl if the VT implements it.
             # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
