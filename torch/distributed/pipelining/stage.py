@@ -1815,7 +1815,16 @@ class PipelineStage(_PipelineStageBase):
         TensorMeta is materialized as an empty tensor (or DTensor via mesh cache).
         """
         if isinstance(arg, torch.Tensor):
-            return arg.detach().requires_grad_(arg.requires_grad)
+            result = arg.detach().requires_grad_(arg.requires_grad)
+            # detach() strips spmd_types annotations; re-apply them
+            from torch.distributed.pipelining._utils import _has_spmd_local_type
+
+            if _has_spmd_local_type(arg):
+                import spmd_types._type_attr
+
+                lt = spmd_types._type_attr.get_local_type(arg)
+                spmd_types._type_attr.set_local_type(result, lt)
+            return result
         elif isinstance(arg, TensorMeta):
             if isinstance(arg, _DTensorMeta):
                 mesh = self._mesh_cache.get_mesh(arg.mesh_cache_key)

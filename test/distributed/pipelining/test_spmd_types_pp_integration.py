@@ -110,8 +110,7 @@ def _annotate_replicate(model: nn.Module, tp_mesh: DeviceMesh) -> None:
 def _wrap_with_typecheck(model: NormMLPStack, mesh: DeviceMesh) -> None:
     """Wrap each NormMLP layer's forward to run under spmd_types typecheck."""
     mesh_axes = frozenset(
-        spmd.MeshAxis.of(mesh.get_group(name))
-        for name in mesh.mesh_dim_names
+        spmd.MeshAxis.of(mesh.get_group(name)) for name in mesh.mesh_dim_names
     )
 
     for layer in model.layers:
@@ -124,6 +123,7 @@ def _wrap_with_typecheck(model: NormMLPStack, mesh: DeviceMesh) -> None:
                     spmd._checker.typecheck(strict_mode="strict"),
                 ):
                     return fwd(*args, **kwargs)
+
             return _typechecked_fwd
 
         layer.forward = _make_typechecked(orig_fwd)
@@ -182,7 +182,6 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         ref_model: NormMLPStack,
         input_tensor: torch.Tensor,
         target_tensor: torch.Tensor,
-        tp_mesh: DeviceMesh,
     ) -> tuple[
         dict[str, torch.Tensor | None], dict[int, tuple[torch.Tensor, torch.Tensor]]
     ]:
@@ -197,11 +196,11 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         input_chunks = torch.tensor_split(input_tensor, n_microbatches)
         target_chunks = torch.tensor_split(target_tensor, n_microbatches)
 
-        # Re-annotate chunks (tensor_split doesn't preserve spmd_types)
+        # Re-annotate chunks (tensor_split doesn't preserve spmd_types attrs)
         if spmd._checker.has_local_type(input_tensor):
-            lt = spmd.get_local_type(input_tensor)
+            lt = spmd._type_attr.get_local_type(input_tensor)
             for chunk in input_chunks:
-                spmd.assert_type(chunk, lt)
+                spmd._type_attr.set_local_type(chunk, lt)
 
         # Capture first-microbatch I/O shapes per stage
         captured_io: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
@@ -281,6 +280,8 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         self,
         apply_parallelism: Callable[[NormMLP, dist.ProcessGroup], None],
         annotate_fn: Callable[[nn.Module, DeviceMesh], None],
+        input_spmd_type: object | None = None,
+        typecheck: bool = False,
     ) -> None:
         self.init_pg()
 
@@ -305,27 +306,27 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         for layer in pp_model.layers:
             apply_parallelism(layer, tp_pg)
 
-        # Annotate with spmd_types and wrap forward with typecheck
+        # Annotate with spmd_types
         annotate_fn(ref_model, tp_mesh)
         annotate_fn(pp_model, tp_mesh)
-        _wrap_with_typecheck(ref_model, tp_mesh)
-        _wrap_with_typecheck(pp_model, tp_mesh)
+        if typecheck:
+            _wrap_with_typecheck(ref_model, tp_mesh)
+            _wrap_with_typecheck(pp_model, tp_mesh)
 
         # Create inputs (same on all ranks for Replicate; per-rank shard for TP)
+        tp_axis = spmd.MeshAxis.of(tp_pg)
         torch.manual_seed(INPUT_SEED)
         input_full = torch.randn(batch_size, d_hid, device=self.device)
         torch.manual_seed(TARGET_SEED)
         target_full = torch.randn(batch_size, d_hid, device=self.device)
 
-        # Annotate inputs
-        tp_axis = spmd.MeshAxis.of(tp_pg)
-
         # Reference: microbatched serial execution
         ref_input = input_full.clone().requires_grad_(True)
-        spmd.assert_type(ref_input, {tp_axis: spmd.R})
+        if input_spmd_type is not None:
+            spmd._type_attr.set_local_type(ref_input, {tp_axis: input_spmd_type})
         ref_target = target_full.clone()
         ref_grads, _ = self._run_reference_microbatched(
-            ref_model, ref_input, ref_target, tp_mesh
+            ref_model, ref_input, ref_target
         )
 
         # PP execution (dynamic metadata inference)
@@ -339,7 +340,8 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         stage.submod.zero_grad(set_to_none=True)
 
         pp_input = input_full.clone().requires_grad_(True)
-        spmd.assert_type(pp_input, {tp_axis: spmd.R})
+        if input_spmd_type is not None:
+            spmd._type_attr.set_local_type(pp_input, {tp_axis: input_spmd_type})
         pp_target = target_full.clone()
 
         schedule = Schedule1F1B(
@@ -475,7 +477,7 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
 
     @_requires_multi_gpu
     def test_replicate(self):
-        """PP + spmd_types with all-Replicate annotations."""
+        """PP + spmd_types with all-Replicate annotations and typecheck."""
 
         def _no_tp(block, tp_pg):
             pass
@@ -483,6 +485,8 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         self._run_training_correctness(
             _no_tp,
             _annotate_replicate,
+            input_spmd_type=spmd.R,
+            typecheck=True,
         )
 
     @_requires_multi_gpu
@@ -518,8 +522,6 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         # Annotate params as Replicate on FSDP axis, then apply fully_shard
         for param in pp_model.parameters():
             spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R})
-        _wrap_with_typecheck(pp_model, fsdp_mesh)
-
         for layer in pp_model.layers:
             fully_shard(
                 layer,
@@ -535,7 +537,6 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         # Reference: replicate on all ranks (no FSDP), microbatched
         from torch.distributed._composable import replicate
 
-        _wrap_with_typecheck(ref_model, fsdp_mesh)
         replicate(ref_model, device_ids=[self.rank])
 
         torch.manual_seed(INPUT_SEED)
@@ -546,7 +547,7 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
         ref_input = input_full.clone().requires_grad_(True)
         ref_target = target_full.clone()
         ref_grads, _ = self._run_reference_microbatched(
-            ref_model, ref_input, ref_target, fsdp_mesh
+            ref_model, ref_input, ref_target
         )
 
         stage = self._make_stage(
@@ -598,6 +599,7 @@ class TestSpmdTypesPPIntegration(MultiProcContinuousTest):
     def test_fsdp_pp(self):
         """FSDP + PP with spmd_types annotations."""
         self._run_fsdp_pp_correctness()
+
 
 if __name__ == "__main__":
     run_tests()

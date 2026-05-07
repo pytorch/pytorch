@@ -184,6 +184,27 @@ def _split_block_mask(
     return chunk_block_masks
 
 
+def _reannotate_spmd_chunks(
+    original: torch.Tensor, chunks: Sequence[torch.Tensor]
+) -> None:
+    """Re-apply spmd_types annotations from *original* to each chunk.
+
+    ``tensor_split`` returns views that don't inherit spmd_types tensor
+    attributes.  This copies them so that downstream typechecked forwards
+    see the correct per-axis types.
+    """
+    try:
+        import spmd_types._checker
+        import spmd_types._type_attr
+    except ImportError:
+        return
+    if not spmd_types._checker.has_local_type(original):
+        return
+    lt = spmd_types._type_attr.get_local_type(original)
+    for chunk in chunks:
+        spmd_types._type_attr.set_local_type(chunk, lt)
+
+
 def _split_tensor(
     tensor: torch.Tensor,
     spec: TensorChunkSpec,
@@ -221,6 +242,8 @@ def _split_tensor(
         chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)  # type: ignore[assignment]
     else:
         chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
+        # tensor_split doesn't preserve spmd_types annotations; re-apply them
+        _reannotate_spmd_chunks(tensor, chunk_tensors)
 
     # tensor_split on a leaf tensor produces non-leaf views that won't
     # accumulate .grad during torch.autograd.backward().  Call retain_grad()
