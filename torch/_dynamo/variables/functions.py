@@ -4372,7 +4372,7 @@ class PropertyVariable(VariableTracker):
 
     The property type is a data descriptor with tp_descr_get =
     property_descr_get which calls fget(obj) to compute the value.
-    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L2046
+    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L2073
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
     """
 
@@ -4402,11 +4402,13 @@ class PropertyVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # Mirrors property_descr_get which calls fget(obj).
+        # Mirrors property_descr_get: if obj is NULL or None, return self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
+        if obj is None:
+            return self
         fget_source = AttrSource(self.source, "fget") if self.source else None
         fget_vt = VariableTracker.build(
             tx, self.descriptor.fget, source=fget_source, realize=True
@@ -4420,8 +4422,8 @@ class TupleGetterVariable(VariableTracker):
     _tuplegetter is a C data descriptor that stores an index and returns
     self[index] on instance access. When accessed on the class (obj=None),
     it returns the descriptor itself.
-    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2365
-    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2735
+    https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
     """
 
     _nonvar_fields = {
@@ -4458,7 +4460,7 @@ class TupleGetterVariable(VariableTracker):
         obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2313-L2334
+        # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
         if obj is None:
             return self
         _, (idx, _) = self.descriptor.__reduce__()
