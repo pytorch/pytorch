@@ -1803,8 +1803,8 @@ def _adjust_group_norm_scalars(
 # Normalization ops
 #
 # Batch norm reduces over batch (dim 0) + spatial dims (2+), keeping only
-# channel (dim 1).  Neither batch nor channel sharding is safe, so we fall
-# back to replicate-only.
+# channel (dim 1).  Channel-dim sharding is valid for both forward and
+# backward: each shard processes independent channels.
 #
 # Group norm reduces over (C/groups, spatial) within each group per sample.
 # Batch dim (0) is safe to shard — each sample is independent.
@@ -1844,6 +1844,30 @@ def batch_norm_strategy(
     # input [N,C,*] shards on dim 1; weight, bias, running_mean, running_var [C] on dim 0
     rule.append(_ShardingPlaceholder(1))  # input
     rule.extend([_ShardingPlaceholder(0)] * (num_tensor_inputs - 1))
+    return [rule]
+
+
+@register_single_dim_strategy(
+    [aten.native_batch_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def batch_norm_backward_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Backward reduces over batch + spatial dims, orthogonal to the channel dim,
+    # so channel sharding commutes with the op (same principle as forward).
+    # Tensors are [N,C,*] -> Shard(1) or [C] -> Shard(0).
+    num_tensor_inputs = sum(isinstance(a, TensorMeta) for a in args_schema)
+    rule: list[Placement | _ShardingPlaceholder] = [
+        _ShardingPlaceholder(1),  # grad_input [N,C,*]
+        _ShardingPlaceholder(0),  # grad_weight [C]
+        _ShardingPlaceholder(0),  # grad_bias [C]
+        _ShardingPlaceholder(1),  # grad_out [N,C,*]
+        _ShardingPlaceholder(1),  # input [N,C,*]
+    ]
+    rule.extend([_ShardingPlaceholder(0)] * (num_tensor_inputs - 2))
     return [rule]
 
 
