@@ -22,7 +22,7 @@ import os
 _CUDA = None
 
 
-def _cuda():
+def _cuda() -> ctypes.CDLL:
     global _CUDA
     if _CUDA is None:
         _CUDA = ctypes.CDLL("libcuda.so.1")
@@ -79,10 +79,16 @@ def checkpoint_self() -> None:
     ``torch.cuda._mem_tracker.serialize``) or go through CRIU.
     """
     _call("cuCheckpointProcessLock")
-    _call("cuCheckpointProcessCheckpoint")
+    try:
+        _call("cuCheckpointProcessCheckpoint")
+    except BaseException:
+        _call("cuCheckpointProcessUnlock")
+        raise
 
 
 def restore_self() -> None:
     """Restore + unlock the current process. Re-allocates VRAM, resumes CUDA ops."""
+    # If restore fails then we're in a bad state - don't try to recover, just
+    # let the exception propagate and hope nobody catches it.
     _call("cuCheckpointProcessRestore")
     _call("cuCheckpointProcessUnlock")

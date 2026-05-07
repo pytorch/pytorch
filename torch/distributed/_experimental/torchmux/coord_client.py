@@ -3,8 +3,7 @@
 Exposes:
 
 * :class:`CoordClient` — primary API. ``register(rank)``,
-  ``wait_for_turn()`` (bootstrap), ``prepare(send, recv)``,
-  ``release_gpu()``, ``done()``.
+  ``prepare(send, recv)``, ``release_gpu()``, ``done()``.
 
 Addressing: pass ``addr`` as ``"uds:/path/to/sock"`` or ``"tcp:host:port"``.
 Also reads the ``COORD_ADDR`` env var as the default.
@@ -13,28 +12,31 @@ Threading model: the client runs an asyncio event loop in a daemon thread.
 Foreground (torch) code calls synchronous methods which dispatch to the
 loop via ``asyncio.run_coroutine_threadsafe`` and block on ``.result()``.
 No ``asyncio.Queue`` across threads.
-
-Lifecycle invariant: between ``checkpoint_self()`` and ``restore_self()``
-the client has no live CUDA. ``prepare()`` and ``release_gpu()`` call those
-primitives on the caller's behalf; do not call CUDA-touching ops outside
-that window.
 """
+
+from __future__ import annotations
 
 import asyncio
 import os
 import threading
-from typing import Any
+from typing import Any, cast, TYPE_CHECKING
 
-from protocol import (
+
+if TYPE_CHECKING:
+    import torch
+
+from .protocol import (
     ERR_MISMATCH,
-    ERR_NO_PEERS,
     ERR_PEER_GONE,
+    JsonDict,
     OP_DONE,
     OP_PREPARE,
     OP_REGISTER,
     OP_RELEASE_GPU,
-    OP_WAIT_FOR_TURN,
     read_message,
+    RecvEntry,
+    SendEntry,
+    TensorHeader,
     write_message,
 )
 
@@ -43,16 +45,8 @@ class CoordClientError(RuntimeError):
     pass
 
 
-class CheckpointedStateError(CoordClientError):
-    """Raised if a CUDA-touching op is attempted while checkpointed."""
-
-
 class PeerGone(CoordClientError):
     """Raised if a peer we were waiting on disappears."""
-
-
-class NoPeers(CoordClientError):
-    """Raised by wait_for_turn when no other client remains to hand over."""
 
 
 class CollectiveMismatch(CoordClientError):
@@ -62,7 +56,7 @@ class CollectiveMismatch(CoordClientError):
 # ---- Tensor serialization (raw-bytes fast path) ----
 
 
-def _serialize_tensor(tensor) -> tuple[dict, bytes]:
+def _serialize_tensor(tensor: object) -> tuple[TensorHeader, bytes]:
     """Encode a torch.Tensor as (header, raw_bytes). Caller must have live
     CUDA; tensor is materialized to CPU contiguous. Uses untyped storage
     bytes so bfloat16 and torch-only dtypes roundtrip cleanly."""
@@ -83,7 +77,7 @@ def _serialize_tensor(tensor) -> tuple[dict, bytes]:
     return header, payload
 
 
-def _deserialize_tensor(header: dict, payload: bytes):
+def _deserialize_tensor(header: TensorHeader, payload: bytes) -> torch.Tensor:
     import torch
 
     dtype = getattr(torch, header["dtype"])
@@ -100,6 +94,10 @@ def _deserialize_tensor(header: dict, payload: bytes):
     return t
 
 
+def _recv_entries(header: JsonDict) -> list[RecvEntry]:
+    return cast(list[RecvEntry], header.get("recv") or [])
+
+
 # ---- Async engine (runs in background thread) ----
 
 
@@ -107,7 +105,7 @@ class _Engine:
     """Owns the event loop and the server connection. Request-response is
     strictly sequential (one in flight at a time)."""
 
-    def __init__(self, addr: str):
+    def __init__(self, addr: str) -> None:
         self.addr = addr
         self.reader: asyncio.StreamReader | None = None
         self.writer: asyncio.StreamWriter | None = None
@@ -133,9 +131,11 @@ class _Engine:
             self.writer = None
             self.reader = None
 
-    async def rpc(self, header: dict, payload: bytes = b"") -> tuple[dict, bytes]:
+    async def rpc(
+        self, header: JsonDict, payload: bytes = b""
+    ) -> tuple[JsonDict, bytes]:
         async with self._lock:
-            if self.writer is None:
+            if self.writer is None or self.reader is None:
                 raise CoordClientError("not connected")
             await write_message(self.writer, header, payload)
             try:
@@ -143,14 +143,12 @@ class _Engine:
             except asyncio.IncompleteReadError as e:
                 raise PeerGone("coordinator closed the connection") from e
             if not resp_hdr.get("ok"):
-                err = resp_hdr.get("error") or "request failed"
+                err = str(resp_hdr.get("error") or "request failed")
                 detail = resp_hdr.get("detail")
-                if err == ERR_NO_PEERS:
-                    raise NoPeers(err)
                 if err == ERR_PEER_GONE:
                     raise PeerGone(err)
                 if err == ERR_MISMATCH:
-                    raise CollectiveMismatch(detail or err)
+                    raise CollectiveMismatch(str(detail or err))
                 raise CoordClientError(err)
             return resp_hdr, resp_payload
 
@@ -159,7 +157,7 @@ class _Engine:
 
 
 class CoordClient:
-    def __init__(self, addr: str | None = None):
+    def __init__(self, addr: str | None = None) -> None:
         self.addr = addr or os.environ.get("COORD_ADDR")
         if not self.addr:
             raise CoordClientError("addr not provided and COORD_ADDR env not set")
@@ -168,14 +166,13 @@ class CoordClient:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._rank: int | None = None
-        self._checkpointed = False
         self._start_loop()
         self._run_coro(self._engine.connect())
 
     # ---- Loop plumbing ----
 
     def _start_loop(self) -> None:
-        def run_loop():
+        def run_loop() -> None:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
             self._ready.set()
@@ -190,8 +187,14 @@ class CoordClient:
         self._thread.start()
         self._ready.wait()
 
-    def _run_coro(self, coro, *, timeout: float | None = None):
+    def _run_coro(self, coro: Any, *, timeout: float | None = None) -> Any:
+        """
+        We expect that most calls will run without a timeout - they can wait
+        a REALLY long time for the coordinator to get back to them so any
+        timeout should be global.
+        """
         if self._loop is None:
+            coro.close()
             raise CoordClientError("loop not running")
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
         try:
@@ -200,29 +203,25 @@ class CoordClient:
             self._loop.call_soon_threadsafe(fut.cancel)
             raise
 
-    def _guard_cuda(self) -> None:
-        if self._checkpointed:
-            raise CheckpointedStateError("CUDA-touching op called while checkpointed")
-
     # ---- Public API ----
 
     def register(self, rank: int) -> None:
+        """Register with the coordinator.
+
+        Rank 0 returns immediately once registered.  Later ranks block until
+        their rank-ordered turn and the active rank yields.
+        """
         if not isinstance(rank, int):
             raise TypeError(f"rank must be int, got {type(rank).__name__}")
-        self._run_coro(self._engine.rpc({"op": OP_REGISTER, "rank": rank}))
+        msg: JsonDict = {"op": OP_REGISTER, "rank": rank}
+        self._run_coro(self._engine.rpc(msg))
         self._rank = rank
-
-    def wait_for_turn(self) -> None:
-        """Bootstrap: block until this rank holds the baton. Call exactly
-        once after register() for ranks that aren't the initial holder.
-        """
-        self._run_coro(self._engine.rpc({"op": OP_WAIT_FOR_TURN}))
 
     def prepare(
         self,
-        send: dict[tuple[int, ...], Any],
+        send: dict[tuple[int, ...], torch.Tensor | None],
         recv: tuple[int, ...] | list[int],
-    ) -> dict[int, Any] | None:
+    ) -> dict[int, torch.Tensor | None] | None:
         """Declare this rank's collective step.
 
         Args:
@@ -232,7 +231,7 @@ class CoordClient:
 
         Returns:
             ``dict[src_rank -> tensor | None]`` if the fast path hit (all
-            recv sources have already deposited); caller keeps the baton.
+            recv sources have already deposited and this rank can keep running).
             ``None`` if the caller must follow up with :meth:`release_gpu`.
 
         Raises:
@@ -266,11 +265,9 @@ class CoordClient:
         ``barrier()``                  ``{tuple(others): None}``                          ``tuple(others)``                  —
         =============================  =================================================  =================================  =============================
         """
-        self._guard_cuda()
-        import torch  # ensure torch is importable for serialization
+        import torch
 
-        # Build the wire-form send list; gather payloads.
-        send_entries = []
+        send_entries: list[SendEntry] = []
         payloads: list[bytes] = []
         for dsts, tensor in send.items():
             if not isinstance(dsts, tuple):
@@ -286,39 +283,52 @@ class CoordClient:
                     f"send values must be Tensor or None, got {type(tensor).__name__}"
                 )
 
-        req = {"op": OP_PREPARE, "send": send_entries, "recv": list(recv)}
+        req = cast(
+            JsonDict, {"op": OP_PREPARE, "send": send_entries, "recv": list(recv)}
+        )
         resp_hdr, resp_payload = self._run_coro(
             self._engine.rpc(req, b"".join(payloads))
         )
         if resp_hdr.get("block"):
             return None
-        return self._decode_recv(resp_hdr.get("recv") or [], resp_payload)
+        return self._decode_recv(_recv_entries(resp_hdr), resp_payload)
 
-    def release_gpu(self) -> dict[int, Any]:
-        """Checkpoint, wait for the coordinator to schedule this rank, then
-        restore and return the data this rank's pending prepare was waiting
-        on. Must follow a :meth:`prepare` that returned ``None``.
+    def release_gpu(self) -> dict[int, torch.Tensor | None]:
+        """Checkpoint CUDA, send release_gpu to the coordinator, wait for
+        the recv data, then restore before decoding any returned tensors.
+        Must follow a :meth:`prepare` that returned ``None``.
         """
-        from cuda_checkpoint import checkpoint_self, restore_self
-
         import torch
+
+        from .cuda_checkpoint import checkpoint_self, restore_self
 
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         checkpoint_self()
-        self._checkpointed = True
         try:
-            resp_hdr, resp_payload = self._run_coro(
-                self._engine.rpc({"op": OP_RELEASE_GPU})
-            )
+            resp_hdr, resp_payload = self._wait_for_recv_raw()
         finally:
-            # Whether server replied ok or error, we need to restore to
-            # keep the process usable.
             restore_self()
-            self._checkpointed = False
-        return self._decode_recv(resp_hdr.get("recv") or [], resp_payload)
+        return self._decode_recv(_recv_entries(resp_hdr), resp_payload)
+
+    def wait_for_recv(self) -> dict[int, torch.Tensor | None]:
+        """Send release_gpu to the coordinator and block until the recv
+        data is delivered.  Like :meth:`release_gpu` but without CUDA
+        checkpoint/restore — the caller manages that if needed.
+        """
+        resp_hdr, resp_payload = self._wait_for_recv_raw()
+        return self._decode_recv(_recv_entries(resp_hdr), resp_payload)
+
+    def _wait_for_recv_raw(self) -> tuple[JsonDict, bytes]:
+        """Send release_gpu and return the raw framed response."""
+        resp_hdr, resp_payload = self._run_coro(
+            self._engine.rpc({"op": OP_RELEASE_GPU})
+        )
+        return resp_hdr, resp_payload
 
     def done(self) -> None:
+        if self._loop is None:
+            return
         try:
             self._run_coro(self._engine.rpc({"op": OP_DONE}))
         finally:
@@ -332,13 +342,16 @@ class CoordClient:
         except Exception:
             pass
         self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=2.0)
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         self._loop = None
 
     # ---- Helpers ----
 
-    def _decode_recv(self, entries: list[dict], payload: bytes) -> dict[int, Any]:
-        out: dict[int, Any] = {}
+    def _decode_recv(
+        self, entries: list[RecvEntry], payload: bytes
+    ) -> dict[int, torch.Tensor | None]:
+        out: dict[int, torch.Tensor | None] = {}
         offset = 0
         for entry in entries:
             src = entry["src"]

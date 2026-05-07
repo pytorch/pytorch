@@ -7,24 +7,22 @@ High-level model
 ----------------
 
 N torch processes cooperate on one or more GPUs, coordinated by a central
-coordinator. Each process registers under an integer ``rank``. Exactly one
-rank holds the "baton" (is actively running on GPU) at a time; the others
-are checkpointed to host RAM via ``cuCheckpointProcess*``.
+coordinator.  Each process registers under an integer ``rank``.
 
 Data exchange uses a single primitive, :func:`prepare`, that expresses any
-point-to-point or collective pattern. A ``prepare`` call declares:
+point-to-point or collective pattern.  A ``prepare`` call declares:
 
   * ``send``:  what tensors (or notifications) this rank is depositing for
     specific peer ranks.
   * ``recv``:  which peer ranks this rank expects tensors (or notifications)
     from.
 
-If all ``recv`` sources have already deposited, the coordinator returns the
-data synchronously (the "fast path"); the caller keeps the baton. If any
-recv source has not yet deposited, the coordinator replies ``block``; the
-caller must call :func:`release_gpu` next, which checkpoints the process,
-waits for the coordinator to schedule it, and restores + returns the data
-when it is this rank's turn.
+If all ``recv`` sources have already deposited and the scheduler can keep this
+rank running, the coordinator returns the data synchronously (the "fast path").
+Otherwise the coordinator replies ``block``; the caller must call
+:func:`release_gpu` next, which checkpoints the process and waits for the
+coordinator to return the data once all recv sources have deposited and this
+rank is scheduled again.
 
 Per-pair FIFO ordering is guaranteed: rank A's nth send to B pairs with
 rank B's nth recv from A, matching PyTorch's "user ensures collective call
@@ -48,13 +46,9 @@ Ops
 ``OP_REGISTER``
     Request:  ``{"op": "register", "rank": int}``
     Response: ``{"ok": true}``
-    Registers this connection under ``rank``. Error if already registered.
-
-``OP_WAIT_FOR_TURN``
-    Request:  ``{"op": "wait_for_turn"}``
-    Response: ``{"ok": true}``
-    Bootstrap only. Block until this rank holds the baton. Returns error
-    ``"no_peers"`` if all other peers have disconnected.
+    Registers this connection under ``rank``.  Error if already registered.
+    Rank 0 returns immediately once registered. Later ranks remain blocked in
+    register until their rank-ordered turn and the active rank yields.
 
 ``OP_PREPARE``
     Request::
@@ -68,7 +62,7 @@ Ops
     followed by concatenated tensor bodies (only for non-null send entries,
     in ``send`` order).
 
-    Response — fast path (all recvs already deposited), caller keeps baton::
+    Response — fast path (all recvs already deposited)::
 
         {
             "ok": true,
@@ -78,7 +72,7 @@ Ops
 
     followed by concatenated tensor bodies (only non-null, in ``recv`` order).
 
-    Response — slow path, caller must call release_gpu next::
+    Response — slow path or scheduler yield, caller must call release_gpu next::
 
         {"ok": true, "block": true}
 
@@ -91,11 +85,11 @@ Ops
     Response: ``{"ok": true, "recv": [...]}`` + payloads, same shape as
     the fast-path branch of ``prepare``.
 
-    Valid only after a ``prepare`` that returned ``block: true``. Blocks
-    server-side until this rank's prepare becomes satisfiable (all recv
-    deposits present) AND this rank is scheduled to run. Returns the recv
-    data. Client is expected to have checkpointed before sending this
-    request and restore immediately on receiving the response.
+    Valid only after a ``prepare`` that returned ``block: true``.  Blocks
+    server-side until this rank's recv set is fully satisfied and the rank is
+    scheduled again.  Returns the recv data.  Client is expected to have
+    checkpointed before sending this request and restore immediately on
+    receiving the response.
 
 ``OP_DONE``
     Request:  ``{"op": "done"}``
@@ -108,7 +102,6 @@ PyTorch collective using this primitive.)
 
 Error codes
 -----------
-``ERR_NO_PEERS``   — all other clients disconnected; the waiter can't be granted.
 ``ERR_PEER_GONE``  — a peer we were waiting on (recv src) disappeared.
 ``ERR_MISMATCH``   — a peer's pending prepare is inconsistent with ours.
 """
@@ -116,13 +109,18 @@ Error codes
 import asyncio
 import json
 import struct
-from typing import TypedDict
+from typing import TypeAlias, TypedDict
+
+
+JsonValue: TypeAlias = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
+JsonDict: TypeAlias = dict[str, JsonValue]
 
 
 # ---- Op names ----
 
 OP_REGISTER = "register"
-OP_WAIT_FOR_TURN = "wait_for_turn"
 OP_PREPARE = "prepare"
 OP_RELEASE_GPU = "release_gpu"
 OP_DONE = "done"
@@ -130,7 +128,6 @@ OP_DONE = "done"
 
 # ---- Error codes ----
 
-ERR_NO_PEERS = "no_peers"
 ERR_PEER_GONE = "peer_gone"
 ERR_MISMATCH = "mismatch"
 
@@ -163,17 +160,17 @@ async def read_exact(reader: asyncio.StreamReader, n: int) -> bytes:
     return await reader.readexactly(n)
 
 
-async def read_message(reader: asyncio.StreamReader) -> tuple[dict, bytes]:
+async def read_message(reader: asyncio.StreamReader) -> tuple[JsonDict, bytes]:
     """Read one framed message. Returns ``(header_dict, payload_bytes)``."""
     (hdr_len,) = struct.unpack(">I", await read_exact(reader, 4))
-    header: dict = json.loads((await read_exact(reader, hdr_len)).decode("utf-8"))
+    header: JsonDict = json.loads((await read_exact(reader, hdr_len)).decode("utf-8"))
     (payload_len,) = struct.unpack(">Q", await read_exact(reader, 8))
     payload: bytes = await read_exact(reader, payload_len) if payload_len else b""
     return header, payload
 
 
 async def write_message(
-    writer: asyncio.StreamWriter, header: dict, payload: bytes = b""
+    writer: asyncio.StreamWriter, header: JsonDict, payload: bytes = b""
 ) -> None:
     """Write one framed message and drain."""
     hdr_bytes = json.dumps(header).encode("utf-8")
