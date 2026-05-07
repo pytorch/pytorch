@@ -147,7 +147,7 @@ void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   nvshmemx_getmem_on_stream(tensor.mutable_data_ptr(), buffer_ptr, buffer_size, peer, stream);
 }
 
-at::Tensor& nvshmem_get_out(
+void nvshmem_get_out(
     at::Tensor& dst,
     const at::Tensor& src,
     int64_t peer,
@@ -174,14 +174,13 @@ at::Tensor& nvshmem_get_out(
   auto global_peer = hdl->get_rank_to_global_rank().at(peer);
   auto nbytes = dst.numel() * dst.element_size();
   if (nbytes == 0) {
-    return dst;
+    return;
   }
 
   c10::cuda::CUDAGuard guard(dst.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_getmem_on_stream(
       dst.mutable_data_ptr(), src.const_data_ptr(), nbytes, global_peer, stream);
-  return dst;
 }
 
 at::Tensor nvshmem_all_to_all(

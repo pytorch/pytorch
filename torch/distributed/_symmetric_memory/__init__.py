@@ -2161,9 +2161,9 @@ def get(
     src: torch.Tensor,
     group: c10d.GroupName | ProcessGroup,
     peer: int,
-) -> torch.Tensor:
+) -> None:
     r"""
-    get(dst, src, group, peer) -> Tensor
+    get(dst, src, group, peer) -> ()
 
     Copy ``src`` from ``peer`` into local ``dst`` using one-sided symmetric
     memory access.
@@ -2173,7 +2173,7 @@ def get(
     ``group``. ``dst`` can be a regular CUDA tensor or a symmetric-memory
     tensor. Both tensors must be backed by contiguous memory, have the same
     dtype, and contain the same number of elements. The copy is issued on the
-    current CUDA stream and the returned tensor is ``dst``.
+    current CUDA stream.
 
     Args:
         dst (Tensor): local destination tensor.
@@ -2196,10 +2196,10 @@ def get(
     group_name = _resolve_group_name(group)
     backend = get_backend(src.device)
     if backend == "NVSHMEM":
-        return torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group_name)
-    if backend == "NCCL":
-        return torch.ops.symm_mem.nccl_get_out(dst, src, peer, group_name)
-    if backend == "CUDA":
+        torch.ops.symm_mem.nvshmem_get_out(dst, src, peer, group_name)
+    elif backend == "NCCL":
+        torch.ops.symm_mem.nccl_get_out(dst, src, peer, group_name)
+    elif backend == "CUDA":
         hdl = rendezvous(src, group_name)
         if hdl is None:
             raise RuntimeError("get: src must be allocated from symmetric memory")
@@ -2210,8 +2210,8 @@ def get(
         storage_offset = hdl.offset // src.element_size() + int(src.storage_offset())
         remote_src = hdl.get_buffer(peer, src.size(), src.dtype, storage_offset)
         dst.copy_(remote_src)
-        return dst
-    raise ValueError(f"get: unsupported backend: {backend}")
+    else:
+        raise ValueError(f"get: unsupported backend: {backend}")
 
 
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:

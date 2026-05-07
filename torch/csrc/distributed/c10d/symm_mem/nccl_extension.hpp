@@ -11,7 +11,7 @@ TORCH_API void nccl_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nccl_get(at::Tensor& tensor, const int64_t peer);
 
-TORCH_API at::Tensor& nccl_get_out(
+TORCH_API void nccl_get_out(
     at::Tensor& dst,
     const at::Tensor& src,
     int64_t peer,

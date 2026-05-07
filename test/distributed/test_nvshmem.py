@@ -302,8 +302,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dist.barrier()
 
         if self.rank == 0:
-            ret = symm_mem.get(dst, src, group, peer=1)
-            self.assertIs(ret, dst)
+            symm_mem.get(dst, src, group, peer=1)
             torch.testing.assert_close(dst, torch.ones_like(dst))
 
         dist.barrier()
@@ -319,8 +318,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dist.barrier()
 
         if self.rank == 0:
-            ret = symm_mem.get(dst, src_view, group, peer=1)
-            self.assertIs(ret, dst)
+            symm_mem.get(dst, src_view, group, peer=1)
             expected = (
                 torch.arange(
                     numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
@@ -337,9 +335,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                     peer=1,
                 )
 
-            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[
-                ::2
-            ]
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
             with self.assertRaisesRegex(ValueError, "contiguous"):
                 symm_mem.get(noncontig_dst, src, group, peer=1)
 

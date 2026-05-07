@@ -25,7 +25,7 @@ TORCH_API void nvshmem_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
 
-TORCH_API at::Tensor& nvshmem_get_out(
+TORCH_API void nvshmem_get_out(
     at::Tensor& dst,
     const at::Tensor& src,
     int64_t peer,

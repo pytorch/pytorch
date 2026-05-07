@@ -285,7 +285,7 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
-at::Tensor& nccl_get_out(
+void nccl_get_out(
     at::Tensor& dst,
     const at::Tensor& src,
     int64_t peer,
@@ -312,7 +312,7 @@ at::Tensor& nccl_get_out(
   TORCH_CHECK(peer >= 0 && peer < symm_mem->get_world_size(), "symm_mem.get: invalid peer");
   auto nbytes = dst.numel() * dst.element_size();
   if (nbytes == 0) {
-    return dst;
+    return;
   }
 
   c10::cuda::CUDAGuard guard(dst.device());
@@ -328,12 +328,10 @@ at::Tensor& nccl_get_out(
       dst.mutable_data_ptr(),
       nbytes);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return dst;
 #else
   TORCH_CHECK(
       false,
       "NCCL symmetric memory get is not supported. Requires NCCL >= 2.28.0");
-  return dst;
 #endif
 }
 

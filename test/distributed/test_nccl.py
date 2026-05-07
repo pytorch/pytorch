@@ -433,7 +433,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 28), "NCCL Symmetric Memory device API support from nccl 2.28")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory device API support from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_get(self):
         symm_mem.set_backend("NCCL")
@@ -449,8 +451,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         c10d.barrier()
 
         if self.rank == 0:
-            ret = symm_mem.get(dst, src, group, peer=1)
-            self.assertIs(ret, dst)
+            symm_mem.get(dst, src, group, peer=1)
             torch.testing.assert_close(dst, torch.ones_like(dst))
 
         c10d.barrier()
@@ -466,8 +467,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         c10d.barrier()
 
         if self.rank == 0:
-            ret = symm_mem.get(dst, src_view, group, peer=1)
-            self.assertIs(ret, dst)
+            symm_mem.get(dst, src_view, group, peer=1)
             expected = (
                 torch.arange(
                     numel // 2, numel // 2 + numel, dtype=dtype, device=self.device
@@ -484,9 +484,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                     peer=1,
                 )
 
-            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[
-                ::2
-            ]
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
             with self.assertRaisesRegex(ValueError, "contiguous"):
                 symm_mem.get(noncontig_dst, src, group, peer=1)
 
