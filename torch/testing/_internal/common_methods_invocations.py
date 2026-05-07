@@ -22247,7 +22247,11 @@ op_db: list[OpInfo] = [
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.complex64),
+        # The MPS kernel handles complex64 (matching the forward dropout op),
+        # but autograd does not support complex backward of
+        # native_dropout_backward, so OpInfo tests cannot exercise it through
+        # the standard requires_grad path.
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
@@ -23538,17 +23542,6 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
     )
 )
 
-def _cutedsl_rmsnorm_override_registered() -> bool:
-    # The override only registers on CUDA SM 9.x / 10.x when the vendored
-    # quack module is importable; gate OpInfo-driven suites on that so they
-    # skip cleanly on CPU-only binaries or older GPUs.
-    try:
-        from torch._native.registry import _graphs
-        return ("_fused_rms_norm", "CUDA") in _graphs
-    except ImportError:
-        return False
-
-
 if "cutedsl" in dsl_ops_by_dsl:
     dsl_ops_by_dsl["cutedsl"].append(
         OpInfo(
@@ -23565,10 +23558,6 @@ if "cutedsl" in dsl_ops_by_dsl:
             decorators=[
                 onlyCUDA,
                 skipCUDAIf(not SM90OrLater, "cutedsl rms_norm override requires SM90+"),
-                unittest.skipIf(
-                    not _cutedsl_rmsnorm_override_registered(),
-                    "cutedsl _fused_rms_norm override not registered",
-                ),
             ],
             skips=(
                 # test_dtypes probes every dtype and expects the listed set
