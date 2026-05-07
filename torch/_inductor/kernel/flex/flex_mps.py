@@ -110,36 +110,35 @@ def lower_mps(
             f"got d_qk={d_qk} d_k={d_k}"
         )
 
-    Bq_int = V.graph.sizevars.guard_int(B)
-    Bkv_int = V.graph.sizevars.guard_int(Bkv)
-    if Bq_int != Bkv_int:
-        # The kernel indexes K/V with the same b_idx as Q; it has no logic to
-        # broadcast a Bkv=1 K/V over Bq>1 (Triton does this via off_zkv = off_zq % ZKV).
+    sizevars = V.graph.sizevars
+    # Kernel indexes K/V with the same b_idx as Q; no broadcast logic for Bkv=1 yet.
+    # check_equals adds a runtime guard B == Bkv; it raises AssertionError if it
+    # can prove they differ — convert to NIE so callers see the right error.
+    try:
+        sizevars.check_equals(B, Bkv)
+    except AssertionError:
         raise NotImplementedError(
             f"flex_attention on MPS does not yet support batch broadcasting "
-            f"between query and key/value (Bq != Bkv); got Bq={Bq_int} Bkv={Bkv_int}"
-        )
+            f"between query and key/value (Bq != Bkv); got Bq={B} Bkv={Bkv}"
+        ) from None
 
-    SPARSE_KV_BLOCK_SIZE_val = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE_val = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     if SPARSE_Q_BLOCK_SIZE_val < BLOCK_M or SPARSE_Q_BLOCK_SIZE_val % BLOCK_M != 0:
         # Each threadgroup tiles BLOCK_M query rows and looks up sparse-mask info
-        # at sparse_q_idx = m_base / SPARSE_Q_BLOCK_SIZE; if SPARSE_Q_BLOCK_SIZE
-        # is smaller (or not a multiple), one threadgroup spans multiple sparse
-        # blocks and the lookup returns the wrong block.
+        # at sparse_q_idx = m_base / SPARSE_Q_BLOCK_SIZE; a smaller/non-multiple
+        # SPARSE_Q_BLOCK_SIZE makes one threadgroup span multiple sparse blocks.
         raise NotImplementedError(
             f"flex_attention on MPS requires SPARSE_Q_BLOCK_SIZE to be a positive "
             f"multiple of {BLOCK_M}, got {SPARSE_Q_BLOCK_SIZE_val}"
         )
 
-    Hq_int = V.graph.sizevars.guard_int(Hq)
-    Hkv_int = V.graph.sizevars.guard_int(Hkv)
-    if Hkv_int <= 0 or Hq_int % Hkv_int != 0:
+    if not sizevars.statically_known_multiple_of(Hq, Hkv):
         raise NotImplementedError(
             f"flex_attention on MPS requires Hq to be a positive multiple of "
-            f"Hkv, got Hq={Hq_int} Hkv={Hkv_int}"
+            f"Hkv, got Hq={Hq} Hkv={Hkv}"
         )
-    gqa_shared_heads = Hq_int // Hkv_int
+    gqa_shared_heads = Hq // Hkv
 
     scale_val = float(scale)
 

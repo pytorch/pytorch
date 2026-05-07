@@ -27,8 +27,9 @@ _OP_TABLE: dict[Any, tuple[str, str]] = {
     aten.sub.Scalar: ("float", "{} - {}"),
     aten.mul.Tensor: ("float", "{} * {}"),
     aten.mul.Scalar: ("float", "{} * {}"),
-    aten.div.Tensor: ("float", "{} / {}"),
-    aten.div.Scalar: ("float", "{} / {}"),
+    # Cast to float so Python truediv semantics hold even when both operands are ints
+    aten.div.Tensor: ("float", "static_cast<float>({}) / static_cast<float>({})"),
+    aten.div.Scalar: ("float", "static_cast<float>({}) / static_cast<float>({})"),
     aten.neg.default: ("float", "-{}"),
     aten.abs.default: ("float", "metal::abs({})"),
     # Comparisons
