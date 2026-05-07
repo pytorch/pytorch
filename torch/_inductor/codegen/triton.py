@@ -475,7 +475,6 @@ class BlockDescriptorOptions:
         reduction_ndim = V.kernel.num_reduction_dims
         if (
             not V.kernel.inside_reduction
-            and len(params.strides) == len(V.kernel.numels) - reduction_ndim
             and V.kernel.features.is_reduction()
         ):
             # Need to expand rank to match the rank used inside the reduction loop
