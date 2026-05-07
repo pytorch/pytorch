@@ -3095,6 +3095,108 @@ def _codegen_backward_epilogue(
     )
 
 
+def _codegen_backward_epilogue(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: SubclassMeta | None,
+    codegen_wrap_fn: Callable[..., Any] | None,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    num_bw_tokens = fw_metadata.num_backward_tokens
+    is_rng = fw_metadata.is_rng_op_functionalized
+    has_subclass = maybe_subclass_meta is not None
+
+    if has_subclass:
+        lines: list[str] = ["def _backward_epilogue(out, make_subclass_override=None):"]
+    else:
+        lines = ["def _backward_epilogue(out):"]
+    code_globals: dict[str, object] = {}
+
+    if num_bw_tokens > 0:
+        lines.append(f"    out = out[:-{num_bw_tokens}]")
+
+    if is_rng:
+        if fw_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
+            )
+        code_globals["_set_offset_"] = CUDARngStateHelper.set_new_offset
+        lines.append("    _oi = len(out) - 1")
+        lines.append("    _set_offset_(out[_oi])")
+        lines.append("    out = out[:_oi] + out[_oi + 1:]")
+
+    lines.append("    out = tuple(out)")
+
+    if has_subclass:
+        code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
+        if (
+            maybe_subclass_meta.grad_input_metas is None
+        ):  # pyrefly: ignore [missing-attribute]
+            raise AssertionError("grad_input_metas must not be None")
+        code_globals["_grad_input_metas_"] = (
+            maybe_subclass_meta.grad_input_metas
+        )  # pyrefly: ignore [missing-attribute]
+        if codegen_wrap_fn is not None:
+            code_globals["_wrap_"] = codegen_wrap_fn
+            lines.append("    if make_subclass_override is None:")
+            lines.append("        return _wrap_(out)")
+        lines.append("    return _wrap_subclasses_(out,")
+        lines.append("        subclass_metas=_grad_input_metas_,")
+        lines.append("        included_subclass_symints=True, is_runtime=True,")
+        lines.append("        make_subclass_override=make_subclass_override)")
+    else:
+        lines.append("    return out")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_backward_epilogue", "backward_epilogue"
+    )
+
+
+def _codegen_compiled_forward(
+    fw_metadata: ViewAndMutationMeta,
+    backward_state_indices: list[int],
+    disable_amp: bool,
+    num_rng: int,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    lines: list[str] = [
+        "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
+    ]
+    code_globals: dict[str, object] = {
+        "torch": torch,
+        "BackwardState": BackwardState,
+        "_normalize_as_list_": normalize_as_list,
+    }
+
+    if backward_state_indices:
+        idx = backward_state_indices[0]
+        lines.append(f"    _bw_state = args[{idx}]")
+        lines.append("    if not isinstance(_bw_state, BackwardState):")
+        lines.append("        raise AssertionError(")
+        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
+        lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
+
+    if num_rng > 0:
+        lines.append("    args = _rng_add_(ctx, args)")
+
+    if disable_amp:
+        code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+        lines.append("    with _DisableAutocast_():")
+        lines.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+    else:
+        lines.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+
+    lines.append("    _save_(ctx, fw_outs)")
+    lines.append("    return _finalize_(ctx, fw_outs)")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_compiled_forward", "compiled_function_forward"
+    )
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
@@ -3148,6 +3250,13 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_wrap_fn,
+        )
+
+        _codegen_fwd = _codegen_compiled_forward(
+            fw_metadata,
+            backward_state_indices,
+            disable_amp,
+            rng_state.num_rng,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3262,6 +3371,7 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_prologue_fn = _codegen_bw_prologue
             _bw_epilogue_fn = _codegen_bw_epilogue
+            _fwd_fn = _codegen_fwd
             boxed_grads_call = True
 
             @staticmethod
@@ -3271,33 +3381,14 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
-                args = deduped_flat_tensor_args
-                if backward_state_indices:
-                    bw_state = args[backward_state_indices[0]]
-                    if not isinstance(bw_state, BackwardState):
-                        raise AssertionError(
-                            f"expected BackwardState, got {type(bw_state)}"
-                        )
-                    ctx._compiled_autograd_backward_state = bw_state
-
-                args = rng_state.add_forward_args(ctx, args)
-
-                # There is a pretty complicated calling convention around what the compiled fw returns.
-                # The full list of outputs and their relative order is:
-                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-                #   of the original view, and not the synthetic base
-                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
-                #   in the fw output order.
-                fw_outs = call_func_at_runtime_with_args(
+                return CompiledFunction._fwd_fn(
+                    ctx,
+                    deduped_flat_tensor_args,
+                    rng_state.add_forward_args,
+                    saved_state.save_from_forward,
+                    forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
-                    # pyrefly: ignore [bad-argument-type]
-                    args,
-                    disable_amp=disable_amp,
                 )
-
-                saved_state.save_from_forward(ctx, fw_outs)
-                return forward_epilogue.finalize(ctx, fw_outs)
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
