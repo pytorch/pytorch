@@ -5723,6 +5723,8 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
+        *,
+        rollback_if_vertical_fusion_fails: bool = False,
     ) -> bool:
         """
         Reindex a pointwise's iteration loops to match a reduction's
@@ -5730,6 +5732,8 @@ class Scheduler:
         expressions, enabling the codegen to CSE loads.
 
         Returns True if reindexing was applied.
+        If rollback_if_vertical_fusion_fails is true, roll back unless the
+        reindexed nodes also pass can_fuse_vertical().
         """
         from .codegen.simd import SIMDKernel
 
@@ -5765,12 +5769,25 @@ class Scheduler:
         ):
             return False
 
+        # Nothing to reindex if the pointwise already uses the reduction split.
+        target_iter_sizes = (red_numel, red_rnumel)
+        if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
+            return False
+
         # Snapshot state before mutation so we can rollback if the
         # reindexed deps don't actually improve the fusion score.
         snapshots = [(sn, sn.snapshot_loop_state()) for sn in snodes]
         old_pw_group = (
             pw_node.group if isinstance(pw_node, FusedSchedulerNode) else None
         )
+
+        def restore_state() -> None:
+            for sn, state in snapshots:
+                sn.restore_loop_state(state)
+            if isinstance(pw_node, FusedSchedulerNode):
+                assert old_pw_group is not None
+                pw_node.group = old_pw_group
+                refresh_group_node_dependencies(pw_node)
 
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
@@ -5790,12 +5807,7 @@ class Scheduler:
             for name in common_names
         )
         if not has_benefit:
-            for sn, state in snapshots:
-                sn.restore_loop_state(state)
-            if isinstance(pw_node, FusedSchedulerNode):
-                assert old_pw_group is not None
-                pw_node.group = old_pw_group
-                refresh_group_node_dependencies(pw_node)
+            restore_state()
             return False
 
         # When loop ordering is disabled, re-extract deps with
@@ -5808,6 +5820,12 @@ class Scheduler:
                 sn.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
             if isinstance(pw_node, FusedSchedulerNode):
                 refresh_group_node_dependencies(pw_node)
+
+        if rollback_if_vertical_fusion_fails and not self.can_fuse_vertical(
+            node1, node2
+        ):
+            restore_state()
+            return False
 
         return True
 
@@ -6230,8 +6248,23 @@ class Scheduler:
 
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
+            can_fuse_vertical = self.can_fuse_vertical(node1, node2)
+            if (
+                not can_fuse_vertical
+                and can_reorder
+                and config.loop_reindexing_after_fusion
+                and self._try_reindex_pointwise_for_reduction(
+                    node1,
+                    node2,
+                    rollback_if_vertical_fusion_fails=True,
+                )
+            ):
+                shared_data_score = self.score_fusion_memory(node1, node2)
+                assert isinstance(shared_data_score, int)
+                can_fuse_vertical = True
+
             return (
-                self.can_fuse_vertical(node1, node2)
+                can_fuse_vertical
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
             )
