@@ -44,7 +44,6 @@ ciflow_push_tags:
 - ciflow/s390
 - ciflow/slow
 - ciflow/slow-rocm-mi200
-- ciflow/torchbench
 - ciflow/torchtitan
 - ciflow/tsan
 - ciflow/triton_binaries
