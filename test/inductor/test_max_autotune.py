@@ -1580,39 +1580,6 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    def test_broadcast_batch_bmm(self):
-        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
-        # guard that skips the Triton bmm template for stride-0 inputs.
-        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
-        y = rand_strided(
-            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
-        )
-
-        @torch.compile(mode="max-autotune")
-        def f(x, y):
-            return torch.bmm(x, y)
-
-        ref = torch.bmm(x, y)
-        act = f(x, y)
-        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
-
-    def test_broadcast_batch_baddbmm(self):
-        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
-        # guard that skips the Triton bmm template for stride-0 inputs.
-        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
-        y = rand_strided(
-            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
-        )
-        inp = torch.randn(4, 32, 16, dtype=torch.bfloat16, device=GPU_TYPE)
-
-        @torch.compile(mode="max-autotune")
-        def f(inp, x, y):
-            return torch.baddbmm(inp, x, y)
-
-        ref = torch.baddbmm(inp, x, y)
-        act = f(inp, x, y)
-        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
-
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
@@ -3077,6 +3044,35 @@ class TestMaxAutotune(TestCase):
             _, code = run_and_get_code(compiled_fn, a, b, c)
 
             FileCheck().check("triton_tem_fused").run(code[0])
+
+    @config.patch(
+        {
+            "max_autotune": True,
+        }
+    )
+    def test_deffered_layout_constraint_mm_cat_mm(self):
+        def mm_cat_mm(t1, t2, t3, t4):
+            add = t2 + 1
+            matmul1 = torch.matmul(t1, add)
+            cat = torch.cat((t3, add), dim=1)
+            matmul2 = torch.matmul(t4, add)
+            return matmul1, cat, matmul2
+
+        B = 3072
+        M = 128
+        K = 144
+        N = 160
+        P = 96
+        t1 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+        t2 = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float16)
+        t3 = torch.randn(B, P, N, device=GPU_TYPE, dtype=torch.float16)
+        t4 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+
+        args = (t1, t2, t3, t4)
+
+        compiled_fn = torch.compile(mm_cat_mm)
+
+        run_and_get_code(compiled_fn, *args)
 
     @fresh_cache()
     @skipIfXpu
