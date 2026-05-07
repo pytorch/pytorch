@@ -22,11 +22,6 @@
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
 /.github/merge_rules.yaml @albanD @malfet
-# auto-request-reviewers operates under pull_request_target with write
-# permissions; the compute/request job split is what keeps it safe.
-# Changes here need security-aware review.
-/.github/workflows/auto-request-reviewers.yml @albanD @pytorch/pytorch-dev-infra
-/.github/scripts/match_reviewers.py @albanD @pytorch/pytorch-dev-infra
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh

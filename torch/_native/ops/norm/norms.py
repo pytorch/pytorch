@@ -7,27 +7,16 @@ to avoid dispatcher overhead).
 
 from __future__ import annotations
 
-import importlib
 import math
-from functools import cache
 
 import torch
-
-
-@cache
-def _quack_rmsnorm():  # type: ignore[no-untyped-def]
-    return importlib.import_module("torch._vendor.quack.rmsnorm")
-
-
-@cache
-def _quack_cute_dsl_utils():  # type: ignore[no-untyped-def]
-    return importlib.import_module("torch._vendor.quack.cute_dsl_utils")
+from torch._vendor.quack import cute_dsl_utils as _cute_dsl_utils, rmsnorm as _quack_rmsnorm
 
 
 def _torch2cute(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
     if t is None:
         return None
-    return _quack_cute_dsl_utils().torch2cute_dtype_map[t.dtype]
+    return _cute_dsl_utils.torch2cute_dtype_map[t.dtype]
 
 
 def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
@@ -67,7 +56,7 @@ def quack_rmsnorm_fwd(
     out_dtype = _torch2cute(out)
     weight_dtype = _torch2cute(weight)
 
-    kernel = _quack_rmsnorm()._compile_rmsnorm_fwd(
+    kernel = _quack_rmsnorm._compile_rmsnorm_fwd(
         dtype,
         out_dtype,
         None,
@@ -99,8 +88,6 @@ def quack_rmsnorm_bwd(
     normalized_shape: list[int],
     dw_mask: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    mod = _quack_rmsnorm()
-
     N = math.prod(normalized_shape)
     M = input.numel() // N
     x = _reshape_2d(input, M, N)
@@ -108,7 +95,7 @@ def quack_rmsnorm_bwd(
     rstd_flat = _flatten_rstd(rstd, M)
 
     dx = torch.empty_like(x)
-    sm_count = mod._get_sm_count(N, x.device)
+    sm_count = _quack_rmsnorm._get_sm_count(N, x.device)
 
     # quack's kernel requires a contiguous 1-D weight with matching dtype.
     if weight is not None:
@@ -127,7 +114,7 @@ def quack_rmsnorm_bwd(
     dx_dtype = _torch2cute(dx)
     weight_dtype = _torch2cute(weight)
 
-    kernel = mod._compile_rmsnorm_bwd(
+    kernel = _quack_rmsnorm._compile_rmsnorm_bwd(
         N,
         dtype,
         dout_dtype,

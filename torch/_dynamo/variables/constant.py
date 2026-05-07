@@ -202,6 +202,10 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        return hash(self.value), False
+
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
@@ -402,12 +406,6 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
     def is_python_equal(self, other: object) -> bool:
         from .tensor import SymNodeVariable
 
@@ -491,6 +489,16 @@ class ConstantVariable(VariableTracker):
         # bool inherits nb_negative from int via slot inheritance.
         return ConstantVariable.create(-self.value)
 
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
+        # bool inherits nb_positive from int via slot inheritance.
+        return ConstantVariable.create(+self.value)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
@@ -525,11 +533,8 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), True
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
