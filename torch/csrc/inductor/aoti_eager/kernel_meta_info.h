@@ -117,7 +117,7 @@ struct ParameterMetadata {
   ParameterMetadataValue value_;
   // The order of the parameter is used to distinguish the parameters with the
   // same tag. For example, an operation with two input tensors, the first
-  // tensor is a optional tensor and the second tensor is a tensor. The first
+  // tensor is an optional tensor and the second tensor is a tensor. The first
   // tensor will have the order 0 and the second tensor will have the order 1.
   uint64_t order_{};
 
