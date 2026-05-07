@@ -711,6 +711,13 @@ if torch.backends.mps.is_available():
             # "to - 1 is out of bounds for bool" - not a comparator issue.
             "randint": [torch.bool],
             "randint_like": [torch.bool],
+            # `normal(Tensor mean, Tensor std)` with broadcast-compatible-but-
+            # different-numel inputs is rejected by the legacy `normal_mps_out`
+            # strict numel check; CPU/CUDA broadcast via the shared
+            # `normal_out_impl` template. Followup PR will collapse the
+            # `normal.Tensor_*` dispatch rows in `native_functions.yaml` so MPS
+            # shares the CPU/CUDA target and this xfail can come out.
+            "normal": None,
             # `nn.functional.dropout` keeps a complex64 entry because the
             # MPS dropout kernel doesn't support complex inputs at all (the
             # shape comparison would fail to even run).
