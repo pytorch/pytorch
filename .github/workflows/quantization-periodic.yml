@@ -28,7 +28,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      opt_out_experiments: lf
+      check_experiments: arc,lf
 
   periodic-quantization-build:
     name: periodic-quantization-build
@@ -43,13 +43,23 @@ jobs:
         { include: [
           { config: "quantization", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
+      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
   periodic-test-quantization:
     name: periodic-test-quantization
     uses: ./.github/workflows/_linux-test.yml
-    needs: periodic-quantization-build
+    needs:
+      - periodic-quantization-build
+      - get-default-label-prefix
     with:
       build-environment: ${{ needs.periodic-quantization-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-quantization-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-quantization-build.outputs.test-matrix }}
+      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
