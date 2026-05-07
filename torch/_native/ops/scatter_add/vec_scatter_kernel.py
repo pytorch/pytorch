@@ -72,7 +72,7 @@ def _atomic_add_bf16x2(ptr, val_a: BFloat16, val_b: BFloat16, *, loc=None, ip=No
     _packed_atomic_add_bf16x2(gmem_ptr_i64, packed, loc=loc, ip=ip)
 
 
-def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
+def _make_kernel(dtype, elem_bytes: int, vec_elems: int, scale: bool):
     """Build a dtype-specialized vectorized scatter-add kernel.
 
     Each warp handles one source row. 32 lanes chunk through N, each lane
@@ -82,6 +82,10 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
     fp16/bf16 use paired x2 atomics (``red.global.add.noftz.{f16x2,bf16x2}``)
     to match the instruction count aten gets with ``atomicAdd(__half2*, ...)``.
     fp32 uses scalar ``atomicAdd``.
+
+    When ``scale`` is True each src value is multiplied by the runtime
+    ``alpha`` argument before the atomic. For alpha == 1 the caller should
+    pick the non-scaling variant to skip the multiply entirely.
     """
     is_half = dtype is Float16 or dtype is BFloat16
 
@@ -92,6 +96,7 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
         mOut: cute.Tensor,
         num_entries: Int32,
         D: Int32,
+        alpha: cute.Numeric,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -99,6 +104,14 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
 
         warp_in_block = tidx // Int32(32)
         lane = tidx - warp_in_block * Int32(32)
+
+        # Alpha comes across the ABI as fp32 (tvm_ffi doesn't support
+        # fp16/bf16 scalar args). Cast once to the src dtype so the
+        # per-element multiply is in-dtype.
+        if const_expr(scale and is_half):
+            alpha_t = dtype(alpha)
+        else:
+            alpha_t = alpha
 
         entries_per_block = Int32(_WARPS_PER_BLOCK)
         base = bidx * entries_per_block
@@ -134,19 +147,27 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
                                 mSrc.iterator + (src_off + Int64(v1)),
                                 cute.make_layout(1),
                             )
+                            val_a = src_a[0]
+                            val_b = src_b[0]
+                            if const_expr(scale):
+                                val_a = val_a * alpha_t
+                                val_b = val_b * alpha_t
                             dst_ptr = mOut.iterator + (dst_off + Int64(v0))
                             if const_expr(dtype is Float16):
-                                _atomic_add_f16x2(dst_ptr, src_a[0], src_b[0])
+                                _atomic_add_f16x2(dst_ptr, val_a, val_b)
                             else:
-                                _atomic_add_bf16x2(dst_ptr, src_a[0], src_b[0])
+                                _atomic_add_bf16x2(dst_ptr, val_a, val_b)
                     else:
                         for v in cutlass.range_constexpr(vec_elems):
                             src_t = cute.make_tensor(
                                 mSrc.iterator + (src_off + Int64(v)),
                                 cute.make_layout(1),
                             )
+                            val = src_t[0]
+                            if const_expr(scale):
+                                val = val * alpha_t
                             dst_ptr_v = mOut.iterator + (dst_off + Int64(v))
-                            cute.arch.atomic_add(dst_ptr_v, src_t[0])
+                            cute.arch.atomic_add(dst_ptr_v, val)
 
                     off = off + stride_elems
 
@@ -161,8 +182,9 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
         num_entries: Int32,
         D: Int32,
         grid_x: Int32,
+        alpha: cute.Numeric,
     ):
-        _kernel(mSrc, mIndex, mOut, num_entries, D).launch(
+        _kernel(mSrc, mIndex, mOut, num_entries, D, alpha).launch(
             grid=[grid_x, 1, 1],
             block=[_THREADS_PER_BLOCK, 1, 1],
             stream=stream,
@@ -171,12 +193,19 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
     return _launch
 
 
+def _alpha_dtype_for(torch_dtype: torch.dtype):
+    """Alpha is passed as fp32 across the ABI; the tvm_ffi runtime doesn't
+    support fp16/bf16 scalars. For half dtypes the kernel casts alpha to
+    the src dtype before multiplying."""
+    return Float32
+
+
 @jit_cache
-def _compile_vec_scatter(torch_dtype: torch.dtype, N: int):
+def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, scale: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     vec_elems = _VEC_BYTES // elem_bytes
-    launcher = _make_kernel(dtype, elem_bytes, vec_elems)
+    launcher = _make_kernel(dtype, elem_bytes, vec_elems, scale)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
@@ -187,6 +216,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, N: int):
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
+    alpha_dtype = _alpha_dtype_for(torch_dtype)
     return cute.compile(
         launcher,
         mSrc_fake,
@@ -196,6 +226,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, N: int):
         Int32(0),
         Int32(0),
         Int32(0),
+        alpha_dtype(0.0),
         options="--enable-tvm-ffi",
     )
 
@@ -209,15 +240,21 @@ def vec_scatter_add_into(
     out: torch.Tensor,
     index_1d: torch.Tensor,
     src: torch.Tensor,
+    alpha: float = 1.0,
 ) -> None:
-    """In-place: ``out[index_1d[i], :] += src[i, :]`` for every i.
+    """In-place: ``out[index_1d[i], :] += alpha * src[i, :]`` for every i.
 
     Requires N divisible by ``vec_elems_for(src.dtype)`` (the cond enforces
     this). When N < 32 * vec_elems the loop has fewer active lanes per
     warp; lanes whose starting offset is >= N simply skip.
+
+    When ``alpha == 1.0`` a non-scaling kernel variant is used (no runtime
+    multiply in the hot loop).
     """
     M, N = src.shape
-    compiled = _compile_vec_scatter(src.dtype, N)
+    scale = alpha != 1.0
+    compiled = _compile_vec_scatter(src.dtype, N, scale)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
     grid = min((M + _WARPS_PER_BLOCK - 1) // _WARPS_PER_BLOCK, sm * 8)
-    compiled(src, index_1d, out, M, N, grid)
+    alpha_dtype = _alpha_dtype_for(src.dtype)
+    compiled(src, index_1d, out, M, N, grid, alpha_dtype(float(alpha)))

@@ -32,7 +32,7 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import BFloat16, Float16, Float32, Int32, Int64, Uint64
+from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64, Uint64
 
 import torch
 from torch._vendor.quack.cache_utils import jit_cache
@@ -68,10 +68,16 @@ def _reduce_op_for(dtype):
     raise ValueError(f"unsupported dtype: {dtype}")
 
 
-def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
+def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op, scale: bool):
     """Build a dtype-specialized kernel closure. dtype/elem_bytes/chunk_elems
-    are Python-time constants that the preprocessor folds at cute.compile
-    time."""
+    /scale are Python-time constants that the preprocessor folds at
+    cute.compile time.
+
+    When ``scale`` is True, after the TMA bulk load completes the 32 lanes
+    cooperatively multiply the smem buffer by the runtime ``alpha`` before
+    the bulk-reduce. The ``alpha == 1`` fast path uses ``scale=False`` and
+    avoids the smem pass + proxy fence entirely.
+    """
 
     @cute.kernel
     def _kernel(
@@ -81,6 +87,7 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
         num_entries: Int32,
         D: Int32,
         d_tile_size: Int32,
+        alpha: cute.Numeric,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, bidy, _ = cute.arch.block_idx()
@@ -190,6 +197,24 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
                         cute.arch.mbarrier_wait(mbar1_ptr, mbar1_phase & Int32(1))
                         mbar1_phase = mbar1_phase + Int32(1)
 
+                    if const_expr(scale):
+                        # All 32 lanes cooperatively scale smem in place.
+                        # Warp is already synchronized by the mbarrier_wait.
+                        # fence_view_async_shared releases these generic
+                        # writes to the async proxy so the bulk-reduce
+                        # sees them.
+                        alpha_t = dtype(alpha)
+                        buf_ptr = buf0_ptr
+                        if cur != Int32(0):
+                            buf_ptr = buf1_ptr
+                        i = lane
+                        while i < cur_elems:
+                            slot = cute.make_tensor(buf_ptr + i, cute.make_layout(1))
+                            slot[0] = slot[0] * alpha_t
+                            i = i + Int32(32)
+                        cute.arch.sync_warp()
+                        cute.arch.fence_view_async_shared()
+
                     if lane == Int32(0):
                         dst_off = r * Int64(D) + Int64(off)
                         gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
@@ -218,8 +243,9 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
         d_tile_size: Int32,
         grid_x: Int32,
         grid_y: Int32,
+        alpha: cute.Numeric,
     ):
-        _kernel(mSrc, mIndex, mOut, num_entries, D, d_tile_size).launch(
+        _kernel(mSrc, mIndex, mOut, num_entries, D, d_tile_size, alpha).launch(
             grid=[grid_x, grid_y, 1],
             block=[_THREADS_PER_BLOCK, 1, 1],
             stream=stream,
@@ -228,13 +254,19 @@ def _make_kernel(dtype, elem_bytes: int, chunk_elems: int, reduce_op):
     return _launch
 
 
+def _alpha_dtype_for(torch_dtype: torch.dtype):
+    """Alpha is passed as fp32 across the ABI; tvm_ffi doesn't support
+    fp16/bf16 scalar args. Kernel casts to src dtype inside."""
+    return Float32
+
+
 @jit_cache
-def _compile_tma_scatter(torch_dtype: torch.dtype, N: int):
+def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, scale: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     chunk_elems = _CHUNK_BYTES // elem_bytes
     reduce_op = _reduce_op_for(dtype)
-    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, reduce_op)
+    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, reduce_op, scale)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
@@ -245,6 +277,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int):
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
+    alpha_dtype = _alpha_dtype_for(torch_dtype)
     return cute.compile(
         launcher,
         mSrc_fake,
@@ -256,6 +289,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int):
         Int32(0),
         Int32(0),
         Int32(0),
+        alpha_dtype(0.0),
         options="--enable-tvm-ffi",
     )
 
@@ -304,18 +338,34 @@ def tma_scatter_add_into(
     out: torch.Tensor,
     index_1d: torch.Tensor,
     src: torch.Tensor,
+    alpha: float = 1.0,
 ) -> None:
-    """In-place: ``out[index_1d[i], :] += src[i, :]`` for every i.
+    """In-place: ``out[index_1d[i], :] += alpha * src[i, :]`` for every i.
 
     ``out`` and ``src`` must be contiguous (M_out, N) and (M_src, N);
     ``index_1d`` is 1D int64 of length M_src. N must satisfy
     ``min_d_divisor_for(src.dtype)``; the cond checks this.
+
+    ``alpha == 1.0`` dispatches to the non-scaling variant (no smem scale
+    pass, no proxy fence, one less register pressure item).
     """
     M, N = src.shape
     elem_bytes = torch.tensor([], dtype=src.dtype).element_size()
     chunk_elems = _CHUNK_BYTES // elem_bytes
-    compiled = _compile_tma_scatter(src.dtype, N)
+    scale = alpha != 1.0
+    compiled = _compile_tma_scatter(src.dtype, N, scale)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
 
     grid_x, grid_y, d_tile_size = _plan_grid(M, N, chunk_elems, sm)
-    compiled(src, index_1d, out, M, N, d_tile_size, grid_x, grid_y)
+    alpha_dtype = _alpha_dtype_for(src.dtype)
+    compiled(
+        src,
+        index_1d,
+        out,
+        M,
+        N,
+        d_tile_size,
+        grid_x,
+        grid_y,
+        alpha_dtype(float(alpha)),
+    )
