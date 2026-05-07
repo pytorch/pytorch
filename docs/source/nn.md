@@ -23,6 +23,7 @@ These are the basic building blocks for graphs:
 :depth: 2
 :local:
 :backlinks: top
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.nn
