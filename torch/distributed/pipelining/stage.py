@@ -315,6 +315,7 @@ class _PipelineStageBase(ABC):
         loss_fn: Callable[..., torch.Tensor] | None = None,
         target: torch.Tensor | None = None,
         received_grad_meta: _StageBackwardMeta | None = None,
+        loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
         raise NotImplementedError
 
@@ -1273,6 +1274,7 @@ class _PipelineStage(_PipelineStageBase):
         loss_fn: Callable[..., torch.Tensor] | None = None,
         target: torch.Tensor | None = None,
         received_grad_meta: _StageBackwardMeta | None = None,
+        loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
         """
         Prepare backward infrastructure for traced pipeline.
@@ -1920,6 +1922,7 @@ class PipelineStage(_PipelineStageBase):
         loss_fn: Callable[..., torch.Tensor] | None = None,
         target: torch.Tensor | None = None,
         received_grad_meta: _StageBackwardMeta | None = None,
+        loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
         """Run backward metadata inference (Stage N → 0).
 
@@ -1928,6 +1931,8 @@ class PipelineStage(_PipelineStageBase):
             target: Target tensor (required for the last stage).
             received_grad_meta: Grad metadata from next same-rank stage
                 (V-schedule only).
+            loss_kwargs: Extra keyword arguments forwarded to the loss
+                function (e.g. ``global_valid_tokens``).
 
         Returns:
             ``_StageBackwardMeta`` for the previous stage, or ``None`` if sent via P2P.
@@ -1954,6 +1959,7 @@ class PipelineStage(_PipelineStageBase):
             loss = loss_fn(
                 fwd_outputs[0] if len(fwd_outputs) == 1 else fwd_outputs,
                 inference_target,
+                **(loss_kwargs or {}),
             )
             self._stage_meta.output_grads = None
             all_input_grads = self._compute_input_grads(
@@ -2062,6 +2068,7 @@ class PipelineStage(_PipelineStageBase):
         loss_fn: Callable[..., torch.Tensor] | None = None,
         target: torch.Tensor | None = None,
         received_grad_meta: "_StageBackwardMeta | None" = None,
+        loss_kwargs: dict[str, Any] | None = None,
     ) -> "_StageBackwardMeta | None":
         """Run backward metadata inference and prepare backward infrastructure.
 
@@ -2076,6 +2083,7 @@ class PipelineStage(_PipelineStageBase):
                 loss_fn=loss_fn,
                 target=target,
                 received_grad_meta=received_grad_meta,
+                loss_kwargs=loss_kwargs,
             )
             # Validate dynamically inferred metadata against user-provided metadata
             self._validate_inferred_metadata()
