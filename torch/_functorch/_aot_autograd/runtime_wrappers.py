@@ -1789,6 +1789,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
+    saved_synthetic_base_info: list[Any] | None = None
 
     def pre_compile(
         self,
@@ -1857,6 +1858,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         )
         # Save old input args for post-compile
         self.old_input_info = fw_metadata.input_info
+        self.saved_synthetic_base_info = synthetic_base_info
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -1948,48 +1950,71 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        is_inference = not self.trace_joint
+        from .subclass_codegen import _compile_and_exec_source
 
-        @wraps(compiled_fn)
-        def wrapped_compiled_fn(args: list[Any]) -> Any:
-            # TODO: this sure seems expensive to run at runtime (which
-            # post_compile seems to imply it does?!)
-            args_with_synthetic_bases, _, synthetic_base_info = merge_view_inputs(
-                aot_config, args, None, self.old_input_info, is_inference=is_inference
-            )
-            if synthetic_base_info is None:
-                raise AssertionError("synthetic_base_info must not be None")
-            aliased_args_w_metadata_mutations = [
-                args[i] for i in self.aliased_arg_idx_with_metadata_mutations
-            ]
-            num_aliased_args_with_metadata_mutations = len(
-                aliased_args_w_metadata_mutations
-            )
-            args.clear()
-            outs = compiled_fn(args_with_synthetic_bases)
-            if num_aliased_args_with_metadata_mutations > 0:
-                # This code does not handle **all** input metadata mutations.
-                # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
-                # (which only happens if at least one aliased input experienced a data mutation).
-                # e.g:
-                # def f(a, b):
-                #     a.mul_(2)
-                #     b.t_(1, 0)
-                # f(x.view(2, 2), x.view(2, 2))
-                mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
-                user_outs = outs[:-num_aliased_args_with_metadata_mutations]
-                for inp, mutated_inp in zip(
-                    aliased_args_w_metadata_mutations, mutated_metadata_inps
-                ):
-                    inp.as_strided_(
-                        mutated_inp.size(),
-                        mutated_inp.stride(),
-                        mutated_inp.storage_offset(),
-                    )
-                return user_outs
-            return outs
+        sbi = self.saved_synthetic_base_info
+        if sbi is None:
+            raise AssertionError("saved_synthetic_base_info must not be None")
 
-        return wrapped_compiled_fn
+        base_groups: dict[int, list[int]] = {}
+        other_map: list[tuple[int, int]] = []
+        for orig_idx, entry in enumerate(sbi):
+            if isinstance(entry, int):
+                other_map.append((orig_idx, entry))
+            else:
+                base_idx, _ = entry
+                base_groups.setdefault(base_idx, []).append(orig_idx)
+
+        num_bases = len(base_groups)
+        aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
+        num_meta_mut = len(aliased_meta_mut_indices)
+
+        L: list[str] = ["def _synthetic_base_wrapper(args):"]
+        G: dict[str, object] = {"torch": torch, "_compiled_fn_": compiled_fn}
+
+        L.append(f"    _bases = [None] * {num_bases}")
+        for base_idx in sorted(base_groups):
+            first_orig = base_groups[base_idx][0]
+            L.append(f"    _a = args[{first_orig}]")
+            L.append("    if _a._base is not None:")
+            L.append(f"        _bases[{base_idx}] = _a._base")
+            L.append("    else:")
+            L.append("        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)")
+            L.append("        _b.set_(_a.untyped_storage())")
+            L.append(f"        _bases[{base_idx}] = _b")
+
+        other_items = ", ".join(f"args[{orig}]" for orig, _ in other_map)
+        L.append(f"    _new_args = _bases + [{other_items}]")
+
+        if num_meta_mut > 0:
+            meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
+            L.append(f"    _meta_mut = [{meta_items}]")
+
+        L.append("    args.clear()")
+        L.append("    _outs = _compiled_fn_(_new_args)")
+
+        if num_meta_mut > 0:
+            L.append(f"    _mut_inps = _outs[-{num_meta_mut}:]")
+            L.append(f"    _user_outs = _outs[:-{num_meta_mut}]")
+            L.append("    for _inp, _mi in zip(_meta_mut, _mut_inps):")
+            L.append(
+                "        _inp.as_strided_(_mi.size(), _mi.stride(),"
+                " _mi.storage_offset())"
+            )
+            L.append("    return _user_outs")
+        else:
+            L.append("    return _outs")
+
+        source = "\n".join(L)
+        inner_fn = _compile_and_exec_source(
+            source,
+            G,
+            "_synthetic_base_wrapper",
+            "synthetic_base_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
 
 # Note [Handling mutations on an input that aliases other inputs]

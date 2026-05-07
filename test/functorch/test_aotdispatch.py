@@ -8923,6 +8923,56 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
 
+    # --- AOTSyntheticBaseWrapper codegen tests ---
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_emitted(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        with self._capture_codegen_source("synthetic_base_wrapper") as captured:
+
+            def f(a, b):
+                a.mul_(2)
+                return a + 1
+
+            base = torch.randn(8)
+            compiled_f = aot_function(f, nop)
+            compiled_f(base[:6], base[2:])
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _synthetic_base_wrapper(", source)
+        self.assertIn("_bases", source)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+        a_ref = a.clone()
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+        self.assertEqual(a, a_ref * 2)
+
+    def test_synthetic_base_no_codegen_when_not_needed(self):
+        with self._capture_codegen_source("synthetic_base_wrapper") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
     # --- Compiled autograd adaptation test ---
 
     def test_compiled_autograd_uses_codegen_prologue(self):
