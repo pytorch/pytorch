@@ -370,8 +370,8 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // we are going to log all the calls for GraphFunction::run. The logging was
   // noisy we also call GraphFunction::run for the default value evaluation
   // which generates a lot of useless log samples. Therefore as a workaround we
-  // just directly use the executor API which avoids this placing producing
-  // un-necessary log entries.
+  // just directly use the executor API which avoids producing
+  // unnecessary log entries.
   gf->get_executor().run(stack);
   return stack.at(0).toTupleRef().elements().vec();
 }
