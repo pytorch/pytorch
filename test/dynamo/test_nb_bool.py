@@ -13,7 +13,8 @@ class _Color(enum.Enum):
 
 
 import torch.nn
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class NbBoolTests(TestCase):
