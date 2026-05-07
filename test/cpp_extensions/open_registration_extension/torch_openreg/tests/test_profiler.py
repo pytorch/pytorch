@@ -1,12 +1,14 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import json
+import os
 import tempfile
 
 import torch
 import torch.nn as nn
+from torch._C._profiler import ProfilerState
 from torch.autograd.profiler import profile as autograd_profile
-from torch.profiler import record_function
+from torch.profiler import ProfilerActivity, record_function
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -550,6 +552,115 @@ class TestProfilerPerformance(TestCase):
         events = prof.function_events
         self.assertGreater(len(events), 0)
         self.assertLess(elapsed, 60.0)  # Should complete within 1 minute
+
+
+class TestKinetoIntegration(TestCase):
+    """End-to-end integration tests for OpenReg Kineto profiler plugin.
+
+    Covers IActivityProfiler plugin registration, session lifecycle, fallback
+    path compatibility, and Chrome trace output via ProfilerActivity.PrivateUse1.
+    """
+
+    def _export_and_load_trace(self, prof):
+        """Export Chrome trace to a temp file, load and return traceEvents."""
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            trace_file = f.name
+        try:
+            prof.export_chrome_trace(trace_file)
+            with open(trace_file) as f:
+                return json.load(f)["traceEvents"]
+        finally:
+            os.remove(trace_file)
+
+    @skipIfTorchDynamo()
+    def test_basic_profiling_cpu_ops(self):
+        """PrivateUse1 profiler session runs without error and CPU ops are recorded."""
+        self.assertIn(
+            ProfilerActivity.PrivateUse1, torch.profiler.supported_activities()
+        )
+
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+            x * y
+            x @ y
+
+        events = prof.events()
+        self.assertGreater(len(events), 0, "No events recorded")
+        cpu_op_names = [e.name for e in events]
+        self.assertTrue(
+            any("aten::" in n for n in cpu_op_names),
+            f"No aten:: CPU ops in {cpu_op_names[:10]}",
+        )
+
+    @skipIfTorchDynamo()
+    def test_multi_session_lifecycle(self):
+        """Two independent sessions run to completion without error or cross-contamination."""
+        activities = [ProfilerActivity.CPU, ProfilerActivity.PrivateUse1]
+
+        with torch.profiler.profile(activities=activities) as prof1:
+            x = torch.randn(10, 10, device="openreg")
+            x + x
+        with torch.profiler.profile(activities=activities) as prof2:
+            y = torch.randn(10, 10, device="openreg")
+            torch.abs(y)
+
+        events1 = prof1.events()
+        events2 = prof2.events()
+        self.assertGreater(len(events1), 0, "Session 1 produced no events")
+        self.assertGreater(len(events2), 0, "Session 2 produced no events")
+        self.assertTrue(
+            any("aten::" in e.name for e in events1),
+            "Session 1: no aten:: CPU ops",
+        )
+        self.assertTrue(
+            any("aten::" in e.name for e in events2),
+            "Session 2: no aten:: CPU ops",
+        )
+
+    @skipIfTorchDynamo()
+    def test_fallback_preserved(self):
+        """use_kineto=False still uses ProfilerStubs for device timing."""
+        with autograd_profile(
+            use_device="openreg", use_kineto=False, use_cpu=True
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+
+        events = prof.function_events
+        self.assertGreater(len(events), 0, "No events in fallback mode")
+
+        event_names = [e.name for e in events]
+        self.assertTrue(
+            any("aten::" in n for n in event_names),
+            f"No aten:: ops in fallback mode: {event_names}",
+        )
+        self.assertEqual(
+            prof.profiler_kind,
+            ProfilerState.KINETO_PRIVATEUSE1_FALLBACK,
+        )
+
+    @skipIfTorchDynamo()
+    def test_chrome_trace_cpu_ops(self):
+        """CPU ops appear in the exported Chrome trace JSON."""
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+        ) as prof:
+            x = torch.randn(10, 10, device="openreg")
+            y = torch.randn(10, 10, device="openreg")
+            x + y
+            x * y
+
+        trace_events = self._export_and_load_trace(prof)
+        self.assertGreater(len(trace_events), 0, "No trace events produced")
+
+        # CPU ops appear in the trace
+        cpu_ops = [e for e in trace_events if e.get("cat") == "cpu_op"]
+        self.assertGreater(len(cpu_ops), 0, "No cpu_op events in trace")
 
 
 if __name__ == "__main__":
