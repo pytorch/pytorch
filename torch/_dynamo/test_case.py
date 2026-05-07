@@ -234,6 +234,12 @@ class CPythonTestCase(TestCase):
             ),
         )
 
+    @contextlib.contextmanager
+    def subTest(self, *args, **kwargs):
+        # pytest 9.x addSubTest uses typing._GenericAlias calls that
+        # Dynamo cannot trace. Use a no-op subTest instead.
+        yield
+
     # pyrefly: ignore [implicit-any]
     def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
         pass

@@ -1537,7 +1537,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 #   - VIEW, a view of an input tensor is returned
 #   - INPLACE, one or more input tensors is modified
 #
-# these descriptors are mututally exclusive and exhaustive.
+# these descriptors are mutually exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
