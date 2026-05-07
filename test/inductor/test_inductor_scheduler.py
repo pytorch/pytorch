@@ -3,13 +3,17 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
+import sympy
+
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.runtime.hints import ReductionHint
+from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -78,6 +82,89 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_nested_reduction_axis_from_loop_body(self):
+        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
+        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
+            "grouped_x0 grouped_x1 grouped_r"
+        )
+
+        def make_body(index, iter_vars, reduce_vars):
+            body = Mock()
+            body.iter_vars = iter_vars
+            body.reduce_vars = reduce_vars
+            body.indexing_exprs = {"load": index}
+            body.memory_usage = {
+                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
+            }
+            return body
+
+        def make_reduction(index, iter_vars, reduce_vars):
+            node = Mock()
+            node.is_reduction.return_value = True
+            node.get_ranges.return_value = ([16, 16], [16])
+            node._body = make_body(index, iter_vars, reduce_vars)
+            return node
+
+        def classify(outer_index, grouped_index):
+            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
+            grouped = make_reduction(
+                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            )
+            outer_node = Mock()
+            outer_node.get_nodes.return_value = [outer]
+            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
+
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + 256 * outer_r,
+                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.X,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + outer_r,
+                grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.UNKNOWN,
+        )
+
+    def test_nested_reduction_min_block_axis_hint_conflicts(self):
+        self.assertTrue(
+            NestedReduction._reduction_hint_conflicts_with_group_axis(
+                ReductionHint.OUTER, group_size_in_r=True
+            )
+        )
+        self.assertTrue(
+            NestedReduction._reduction_hint_conflicts_with_group_axis(
+                ReductionHint.INNER, group_size_in_r=False
+            )
+        )
+        self.assertFalse(
+            NestedReduction._reduction_hint_conflicts_with_group_axis(
+                ReductionHint.OUTER_TINY, group_size_in_r=True
+            )
+        )
+        self.assertFalse(
+            NestedReduction._reduction_hint_conflicts_with_group_axis(
+                ReductionHint.DEFAULT, group_size_in_r=False
+            )
+        )
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
