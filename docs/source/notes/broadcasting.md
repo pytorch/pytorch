@@ -18,62 +18,58 @@ Two tensors are "broadcastable" if the following rules hold:
 
 For Example:
 
-```{code-block} python
-:dedent: 4
+```python
+>>> x=torch.empty(5,7,3)
+>>> y=torch.empty(5,7,3)
+# same shapes are always broadcastable (i.e. the above rules always hold)
 
-    >>> x=torch.empty(5,7,3)
-    >>> y=torch.empty(5,7,3)
-    # same shapes are always broadcastable (i.e. the above rules always hold)
+>>> x=torch.empty((0,))
+>>> y=torch.empty(2,2)
+# x and y are not broadcastable, because the 0-sized dimension of x
+# does not match the 2-sized dimension of y.
 
-    >>> x=torch.empty((0,))
-    >>> y=torch.empty(2,2)
-    # x and y are not broadcastable, because the 0-sized dimension of x
-    # does not match the 2-sized dimension of y.
+# can line up trailing dimensions
+>>> x=torch.empty(5,3,4,1)
+>>> y=torch.empty(  3,1,1)
+# x and y are broadcastable.
+# 1st trailing dimension: both have size 1
+# 2nd trailing dimension: y has size 1
+# 3rd trailing dimension: x size == y size
+# 4th trailing dimension: y dimension doesn't exist
 
-    # can line up trailing dimensions
-    >>> x=torch.empty(5,3,4,1)
-    >>> y=torch.empty(  3,1,1)
-    # x and y are broadcastable.
-    # 1st trailing dimension: both have size 1
-    # 2nd trailing dimension: y has size 1
-    # 3rd trailing dimension: x size == y size
-    # 4th trailing dimension: y dimension doesn't exist
-
-    # but:
-    >>> x=torch.empty(5,2,4,1)
-    >>> y=torch.empty(  3,1,1)
-    # x and y are not broadcastable, because in the 3rd trailing dimension 2 != 3
+# but:
+>>> x=torch.empty(5,2,4,1)
+>>> y=torch.empty(  3,1,1)
+# x and y are not broadcastable, because in the 3rd trailing dimension 2 != 3
 ```
 
-If two tensors {attr}`x`, {attr}`y` are "broadcastable", the resulting tensor size
+If two tensors `x`, `y` are "broadcastable", the resulting tensor size
 is calculated as follows:
 
-- If the number of dimensions of {attr}`x` and {attr}`y` are not equal, prepend 1
+- If the number of dimensions of `x` and `y` are not equal, prepend 1
   to the dimensions of the tensor with fewer dimensions to make them equal length.
 - Then, for each dimension size, the resulting dimension size is the max of the sizes of
-  {attr}`x` and {attr}`y` along that dimension.
+  `x` and `y` along that dimension.
 
 For Example:
 
-```{code-block} python
-:dedent: 4
+```python
+# can line up trailing dimensions to make reading easier
+>>> x=torch.empty(5,1,4,1)
+>>> y=torch.empty(  3,1,1)
+>>> (x+y).size()
+torch.Size([5, 3, 4, 1])
 
-    # can line up trailing dimensions to make reading easier
-    >>> x=torch.empty(5,1,4,1)
-    >>> y=torch.empty(  3,1,1)
-    >>> (x+y).size()
-    torch.Size([5, 3, 4, 1])
+# but not necessary:
+>>> x=torch.empty(1)
+>>> y=torch.empty(3,1,7)
+>>> (x+y).size()
+torch.Size([3, 1, 7])
 
-    # but not necessary:
-    >>> x=torch.empty(1)
-    >>> y=torch.empty(3,1,7)
-    >>> (x+y).size()
-    torch.Size([3, 1, 7])
-
-    >>> x=torch.empty(5,2,4,1)
-    >>> y=torch.empty(3,1,1)
-    >>> (x+y).size()
-    RuntimeError: The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1
+>>> x=torch.empty(5,2,4,1)
+>>> y=torch.empty(3,1,1)
+>>> (x+y).size()
+RuntimeError: The size of tensor a (2) must match the size of tensor b (3) at non-singleton dimension 1
 ```
 
 ## In-place semantics
@@ -83,19 +79,17 @@ as a result of the broadcast.
 
 For Example:
 
-```{code-block} python
-:dedent: 4
+```python
+>>> x=torch.empty(5,3,4,1)
+>>> y=torch.empty(3,1,1)
+>>> (x.add_(y)).size()
+torch.Size([5, 3, 4, 1])
 
-    >>> x=torch.empty(5,3,4,1)
-    >>> y=torch.empty(3,1,1)
-    >>> (x.add_(y)).size()
-    torch.Size([5, 3, 4, 1])
-
-    # but:
-    >>> x=torch.empty(1,3,1)
-    >>> y=torch.empty(3,1,7)
-    >>> (x.add_(y)).size()
-    RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
+# but:
+>>> x=torch.empty(1,3,1)
+>>> y=torch.empty(3,1,7)
+>>> (x.add_(y)).size()
+RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
 ```
 
 ## Backwards compatibility
@@ -110,10 +104,8 @@ Note that the introduction of broadcasting can cause backwards incompatible chan
 two tensors do not have the same shape, but are broadcastable and have the same number of elements.
 For Example:
 
-```{code-block} python
-:dedent: 4
-
-    >>> torch.add(torch.ones(4,1), torch.randn(4))
+```python
+>>> torch.add(torch.ones(4,1), torch.randn(4))
 ```
 
 would previously produce a Tensor with size: torch.Size([4,1]), but now produces a Tensor with size: torch.Size([4,4]).
@@ -123,11 +115,9 @@ in such cases.
 
 For Example:
 
-```{code-block} python
-:dedent: 4
-
-    >>> torch.utils.backcompat.broadcast_warning.enabled=True
-    >>> torch.add(torch.ones(4,1), torch.ones(4))
-    __main__:1: UserWarning: self and other do not have the same shape, but are broadcastable, and have the same number of elements.
-    Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.
+```python
+>>> torch.utils.backcompat.broadcast_warning.enabled=True
+>>> torch.add(torch.ones(4,1), torch.ones(4))
+__main__:1: UserWarning: self and other do not have the same shape, but are broadcastable, and have the same number of elements.
+Changing behavior in a backwards incompatible manner to broadcasting rather than viewing as 1-dimensional.
 ```
