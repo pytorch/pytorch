@@ -191,12 +191,6 @@ def pysequence_check(obj_type: type) -> bool:
     return type_implements_sq_item(obj_type)
 
 
-def type_mapping_check(obj_type: type) -> bool:
-    """Implements PyMapping_Check semantics for VariableTracker objects."""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
-
-
 def maybe_get_python_type(obj: VariableTracker) -> type:
     try:
         return obj.python_type()
