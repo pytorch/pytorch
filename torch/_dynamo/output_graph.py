@@ -707,10 +707,9 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
 
         if config.use_cpp_fake_tensor:
-            torch._C._create_and_enter_fake_tensor_mode(
+            torch._C._create_cpp_fake_tensor_mode(
                 fake_mode.fake_tensor_converter, shape_env
             )
-            self.add_cleanup_hook(torch._C._exit_fake_tensor_mode)
 
         self.init_ambient_guards()
 
@@ -2790,8 +2789,7 @@ class OutputGraph(OutputGraphCommon):
                 ),
             )
             self.call_cleanup_hooks()
-            # if config.use_cpp_fake_tensor:
-            raise AssertionError("graph completed")
+            # raise AssertionError("graph completed")
             old_fake_mode = self.tracing_context.fake_mode
             if old_fake_mode is None:
                 raise AssertionError("old_fake_mode must not be None")

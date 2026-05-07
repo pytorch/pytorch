@@ -15,7 +15,16 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
+from torch._inductor.utils import maybe_cpp_fake_mode_ctx
 from torch._subclasses.fake_tensor import FakeTensorMode
+
+
+def _get_shape_env():
+    from torch._inductor.virtualized import V
+
+    if torch._C._does_cpp_fake_tensor_mode_exist():
+        return torch._C._get_cpp_fake_mode_shape_env()
+    return V.fake_mode.shape_env
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -345,13 +354,14 @@ class FakeTensorUpdater:
                         return True
 
                     with (
-                        V.fake_mode,
+                        maybe_cpp_fake_mode_ctx(V.fake_mode),
                         enable_python_dispatcher(),
                         contextlib.ExitStack() as stack,
                     ):
                         # Ignore unbacked symbols (if they exist): we're making
                         # this FakeTensor and then throwing it away.
-                        if (shape_env := V.fake_mode.shape_env) is not None:
+                        shape_env = _get_shape_env()
+                        if shape_env is not None:
                             stack.enter_context(
                                 shape_env.ignore_fresh_unbacked_symbols()
                             )
@@ -510,7 +520,7 @@ class FakeTensorUpdater:
                 if not any_output_updated and "val" in node.meta:
                     continue
 
-            with V.fake_mode, enable_python_dispatcher():
+            with maybe_cpp_fake_mode_ctx(V.fake_mode), enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
 
             if "val" in node.meta and is_fake_tensor_same(
@@ -518,12 +528,13 @@ class FakeTensorUpdater:
             ):
                 continue
 
-            rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
+            shape_env = _get_shape_env()
+            rebind_unbacked(shape_env, node, new_fake_tensor)
 
             node.meta["val"] = new_fake_tensor
             nodes_updated += 1
 
-            if (shape_env := V.fake_mode.shape_env) and (
+            if (shape_env := _get_shape_env()) and (
                 symbol_to_path := compute_unbacked_bindings(shape_env, new_fake_tensor)
             ):
                 # Refresh the bindings to the new symbols

@@ -15,6 +15,20 @@ void FakeTensorModeTLS::set_state(std::shared_ptr<FakeTensorMode> state) {
   fakeTensorModeState = std::move(state);
 }
 
+void FakeTensorModeTLS::create_state(std::shared_ptr<FakeTensorMode> state) {
+  fakeTensorModeState = std::move(state);
+}
+
+void FakeTensorModeTLS::activate() {
+  if (fakeTensorModeState) {
+    tls_set_dispatch_key_included(DispatchKey::Fake, true);
+  }
+}
+
+void FakeTensorModeTLS::deactivate() {
+  tls_set_dispatch_key_included(DispatchKey::Fake, false);
+}
+
 std::shared_ptr<FakeTensorMode> FakeTensorModeTLS::get_state() {
   return fakeTensorModeState;
 }

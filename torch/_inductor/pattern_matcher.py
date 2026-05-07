@@ -78,6 +78,7 @@ from ..fx import Transformer
 from ..fx.experimental import _config as exp_config
 from . import config
 from .decomposition import select_decomp_table
+from .utils import maybe_cpp_fake_mode_ctx
 from .lowering import fallback_node_due_to_unsupported_type
 
 
@@ -286,11 +287,12 @@ class Match:
         """
         from torch._inductor.virtualized import NullHandler, V
 
-        context = (
-            V.fake_mode
-            if (not isinstance(V.fake_mode, NullHandler) or (V.fake_mode is None))
-            else contextlib.nullcontext()
-        )
+        if torch._C._does_cpp_fake_tensor_mode_exist():
+            context = maybe_cpp_fake_mode_ctx(V.fake_mode)
+        elif not isinstance(V.fake_mode, NullHandler) or (V.fake_mode is None):
+            context = V.fake_mode
+        else:
+            context = contextlib.nullcontext()
 
         def should_propagate_eager_input_vals(nodes: list[torch.fx.Node]) -> bool:
             if len(nodes) != 1:
@@ -1542,7 +1544,7 @@ def register_replacement(
         sym_args: list[torch.SymInt] = []
         fake_mode = torch._dynamo.utils.detect_fake_mode(args)
         assert fake_mode is not None
-        with fake_mode:
+        with maybe_cpp_fake_mode_ctx(fake_mode):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
                     # pyrefly: ignore [missing-attribute]

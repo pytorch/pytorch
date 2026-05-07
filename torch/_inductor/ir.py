@@ -108,6 +108,7 @@ from .utils import (
     ir_dataclass,
     is_dynamic,
     is_gpu,
+    maybe_cpp_fake_mode_ctx,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -3982,7 +3983,7 @@ class Layout(OutputSpec):
         return self.device
 
     def get_example(self) -> torch.Tensor:
-        with V.fake_mode:
+        with maybe_cpp_fake_mode_ctx(V.fake_mode):
             return torch.empty_strided(
                 convert_shape_to_symint(self.size),
                 convert_shape_to_symint(self.stride),
@@ -6581,7 +6582,9 @@ class ExternKernel(InputsKernel):
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None
-        if shape_env := V.fake_mode.shape_env:
+        from torch._inductor.fx_utils import _get_shape_env
+
+        if shape_env := _get_shape_env():
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:

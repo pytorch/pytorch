@@ -929,6 +929,8 @@ def trace_frame(
     def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
+            if torch._dynamo.config.use_cpp_fake_tensor:
+                torch._C._activate_cpp_fake_tensor_mode()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -945,6 +947,8 @@ def trace_frame(
                 bisect(tracer.output.shape_env)
             raise
         finally:
+            if torch._dynamo.config.use_cpp_fake_tensor:
+                torch._C._deactivate_cpp_fake_tensor_mode()
             tracer.output.call_cleanup_hooks()
             tracer.f_locals = {}
 

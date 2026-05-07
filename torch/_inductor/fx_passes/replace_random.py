@@ -8,6 +8,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 from .. import config, inductor_prims
+from ..utils import maybe_cpp_fake_mode_ctx
 from ..pattern_matcher import (
     CallFunctionVarArgs,
     Match,
@@ -142,7 +143,7 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
     for device, seeds in device_seeds.items():
         with graph.inserting_before(seeds[0]):
             combined = graph.call_function(inductor_prims.seeds, (len(seeds), device))
-            with V.fake_mode:
+            with maybe_cpp_fake_mode_ctx(V.fake_mode):
                 combined.meta["val"] = torch.empty(
                     [len(seeds)], device=device, dtype=torch.int64
                 )

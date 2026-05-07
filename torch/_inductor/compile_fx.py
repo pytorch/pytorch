@@ -92,6 +92,7 @@ from torch._inductor.utils import (
     get_static_bw_input_idxs,
     InputType,
     is_gpu,
+    maybe_cpp_fake_mode_ctx,
     should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
     tensor_is_aligned,
@@ -707,6 +708,11 @@ def maybe_disable_graph_partition(
         return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
+
+
+def cpp_fake_mode_shape_env():
+    """Return the ShapeEnv from the active C++ FakeTensorMode, or None."""
+    return torch._C._get_cpp_fake_mode_shape_env()
 
 
 def fake_tensor_prop(

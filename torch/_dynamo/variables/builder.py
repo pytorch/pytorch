@@ -4467,7 +4467,7 @@ def _wrap_to_fake_tensor_and_record_impl(
                 raise AssertionError("tx.fake_mode must not be None")
             if (
                 config.use_cpp_fake_tensor
-                and torch._C._is_cpp_fake_tensor_mode_active()
+                and torch._C._does_cpp_fake_tensor_mode_exist()
             ):
                 log.debug(
                     "wrap_to_fake (C++ mode) %s %s",
