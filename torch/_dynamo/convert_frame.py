@@ -1099,21 +1099,16 @@ class GraphRuntimeEnv:
             fn.__kwdefaults__ = self.kwdefaults
         return fn
 
-    def _build_python_wrapper(
-        self, f_globals: dict[str, Any], backend_id: str
-    ) -> types.CodeType:
-        """Build a Python code object from the generated pycode strings."""
-        # Filter out None values and join the pycode strings
+    def _build_python_wrapper_source(self) -> str:
+        """Build Python source for the wrapper function from generated pycode."""
         pycode_parts = [p for p in self.pycode if p is not None]
         if not pycode_parts:
             raise RuntimeError("No Python code generated from Dynamo.")
-        # Get the original code object to extract signature info
         orig_code = self.bytecode
         argcount = orig_code.co_argcount
         varnames = orig_code.co_varnames[:argcount]
         argnames = ", ".join(varnames)
 
-        # Build the function source
         func_lines = ["def __generate_func__():"]
         func_lines.append(f"    def __dynamo_func__({argnames}):")
         for part in pycode_parts:
@@ -1122,9 +1117,13 @@ class GraphRuntimeEnv:
         func_lines.append("        return __ret")
         func_lines.append("    return __dynamo_func__")
         func_lines.append("__dynamo_generated_func__ = __generate_func__()")
+        return "\n".join(func_lines)
 
-        func_source = "\n".join(func_lines)
-
+    def _build_python_wrapper(
+        self, f_globals: dict[str, Any], backend_id: str
+    ) -> types.CodeType:
+        """Build a Python code object from the generated pycode strings."""
+        func_source = self._build_python_wrapper_source()
         # Execute to get the function, then extract its code
         namespace: dict[str, Any] = f_globals.copy()
         # exec() should be fine because we only define a function in the scope

@@ -49,6 +49,7 @@ _test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestOutVariant(TestCase):
     def setUp(self):
+        super().setUp()
         self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: SCOPED_LIBRARY
 
     def tearDown(self):

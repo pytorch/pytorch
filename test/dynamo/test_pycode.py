@@ -6,7 +6,7 @@ import torch
 import torch._inductor.test_case
 from torch._dynamo.convert_frame import fullgraph_capture
 from torch._dynamo.utils import get_metrics_context
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -19,8 +19,7 @@ class SimpleLinearModule(torch.nn.Module):
 
 
 @torch._dynamo.config.patch(generate_pycode=True)
-@skipIfTorchDynamo("Not suitable for generate_pycode=True")
-class TestPycode(torch._inductor.test_case.TestCase):
+class TestPycode(torch._dynamo.test_case.TestCase):
     def test_pycode_module(self):
         mod = SimpleLinearModule()
         x = torch.randn(3, 3)
@@ -88,6 +87,30 @@ __ret = __stack0""",
         result = compiled_fn(x, y)
         expected = fn(x, y)
         self.assertEqual(result, expected)
+
+    def test_pycode_wrapper_source(self):
+        mod = SimpleLinearModule()
+        x = torch.randn(3, 3)
+        with get_metrics_context():
+            capture_output = fullgraph_capture(mod, (x,), {})
+        runtime_env = capture_output.graph_capture_output.get_runtime_env()
+        source = runtime_env._build_python_wrapper_source()
+        source = re.sub(r"__compiled_fn_\d+_[0-9a-f_]+", "__compiled_fn_<ID>", source)
+        self.assertExpectedInline(
+            source,
+            """\
+def __generate_func__():
+    def __dynamo_func__(self, x):
+        __arg0 = self._modules['linear']._parameters['weight']
+        __arg1 = self._modules['linear']._parameters['bias']
+        __arg2 = x
+        __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
+        __stack0 = __graph_out[0]
+        __ret = __stack0
+        return __ret
+    return __dynamo_func__
+__dynamo_generated_func__ = __generate_func__()""",
+        )
 
     def test_pycode_default_args(self):
         def fn(x, y, scale=1.0, bias=0.0):
