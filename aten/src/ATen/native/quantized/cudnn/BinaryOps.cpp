@@ -141,9 +141,9 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> uids;
     data_ptrs.reserve(8);
     uids.reserve(8);
-    data_ptrs = {qb.data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
-                 qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 quantized_output.data_ptr<int8_t>()};
+    data_ptrs = {qb.mutable_data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
+                 qa.mutable_data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if constexpr (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
