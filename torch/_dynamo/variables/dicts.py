@@ -21,7 +21,7 @@ import collections
 import functools
 import types
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, Literal, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 from torch.utils._pytree import MappingKey
 
@@ -56,7 +56,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable, raise_unhashable
+from .hashable import HashableTracker, is_hashable
 from .sets import SetVariable
 
 
@@ -68,8 +68,9 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Implement is_python_hashable() method in the VariableTracker subclass
-# - Implement get_python_hash() and is_python_equal() methods for hashable types
+# - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
+#   base class default which uses get_real_python_backed_value())
+# - Implement is_python_equal() for key equality
 
 
 def pydict_check(obj: VariableTracker) -> bool:
@@ -179,10 +180,12 @@ class ConstDictVariable(VariableTracker):
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
-        Hashable = HashableTracker
+        # Use is_hashable as a side-effect-free pre-check.  We can't catch
+        # ObservedTypeError from HashableTracker because it modifies
+        # tx.exn_vt_stack as a side effect.
         if not is_hashable(vt):
             return False
-        key = Hashable(vt)
+        key = HashableTracker(vt)
         return key in self.items and not isinstance(
             self.items[key], variables.DeletedVariable
         )
@@ -462,7 +465,7 @@ class ConstDictVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # Unhashable key check happens inside _HashableTracker (raise_unhashable → TypeError).
+        # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -545,10 +548,6 @@ class ConstDictVariable(VariableTracker):
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__setitem__" and self.is_mutable():
-            arg_hashable = args and is_hashable(args[0])
-            if not arg_hashable:
-                raise_unhashable(args[0], tx)
-
             self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -574,10 +573,6 @@ class ConstDictVariable(VariableTracker):
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
-            arg_hashable = args and is_hashable(args[0])
-            if not arg_hashable:
-                raise_unhashable(args[0], tx)
-
             if args[0] not in self:
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
@@ -589,10 +584,6 @@ class ConstDictVariable(VariableTracker):
         elif name == "pop" and self.is_mutable():
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
-
-            arg_hashable = args and is_hashable(args[0])
-            if not arg_hashable:
-                raise_unhashable(args[0], tx)
 
             if args[0] not in self:
                 # missing item, return the default value. Install no DICT_CONTAINS guard.
@@ -676,10 +667,6 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            arg_hashable = args and is_hashable(args[0])
-            if not arg_hashable:
-                raise_unhashable(args[0], tx)
-
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return VariableTracker.build(tx, contains)
@@ -691,10 +678,6 @@ class ConstDictVariable(VariableTracker):
                     "1 or 2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-
-            arg_hashable = args and is_hashable(args[0])
-            if not arg_hashable:
-                raise_unhashable(args[0], tx)
 
             self.install_dict_keys_match_guard()
             if kwargs or len(args) > 2:
@@ -793,11 +776,13 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
 
-    def is_python_hashable(self) -> bool:
-        """
-        Dictionaries are mutable and therefore not hashable in Python.
-        """
+    def is_hashable(self) -> bool:
         return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__class__":
@@ -818,6 +803,11 @@ class MappingProxyVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.MappingProxyType
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # mappingproxy.__hash__ delegates to the underlying dict, which
+        # raises TypeError. Mirror that behavior.
+        return self.dv_dict.hash_impl(tx)
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         return self.dv_dict.unpack_var_sequence(tx)
@@ -940,6 +930,14 @@ class DictViewVariable(VariableTracker):
         if self.kv is None:
             raise AssertionError("kv must not be None")
         return getattr(self.dv_dict.items, self.kv)()
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:
@@ -1070,15 +1068,34 @@ class DictKeysVariable(DictViewVariable):
 
 
 class DictValuesVariable(DictViewVariable):
-    # PyDictValues_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6567
+    # PyDictValues_Type: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6615
     _cpython_type = dict_values
 
-    # DictValuesVariable is an iterable but cannot be compared.
+    # dict_values is hashable (identity hash), unlike dict_keys/dict_items.
+    #
+    # CPython only inherits tp_hash from the base when BOTH tp_richcompare
+    # AND tp_hash are NULL on the type
+    # (https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L7665-L7679).
+    # dict_keys/dict_items set tp_richcompare (for set-like comparisons),
+    # so their tp_hash is NOT inherited — it stays NULL, and
+    # type_ready_set_hash sets it to PyObject_HashNotImplemented (unhashable)
+    # (https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L8066-L8085).
+    # dict_values does NOT set tp_richcompare
+    # (https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6630),
+    # so it inherits object's tp_hash (PyObject_GenericHash) — hashable.
+    #
+    # Override DictViewVariable.hash_impl to restore the base identity hash.
     kv = "values"
 
     # dict.values() do not implement nb_or and nb_inplace_or
     nb_or_impl = None  # type: ignore[bad-override]
     nb_inplace_or = None  # type: ignore[bad-override]
+
+    def is_hashable(self) -> bool:
+        return True
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        return super(DictViewVariable, self).hash_impl(tx)
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:
@@ -1202,12 +1219,6 @@ class DictItemsVariable(DictViewVariable):
                 cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
-
-    def is_python_hashable(self) -> Literal[False]:
-        """
-        Dictionary item views are not hashable in Python.
-        """
-        return False
 
 
 kV = HashableTracker | str
