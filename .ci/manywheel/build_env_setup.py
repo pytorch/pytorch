@@ -57,28 +57,48 @@ CUDA_BUILD_ENV_DEFAULTS: dict[str, str] = {
 }
 
 
-def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
-    """Compute TORCH_CUDA_ARCH_LIST for the wheel build.
+# Compute capabilities each (cuda_version, host arch) wheel is built for, as
+# the same {cc_int} representation used by torch/cuda/__init__.py:
+# `50 == 5.0`, `120 == 12.0`. Kept in sync with PYTORCH_RELEASES_CODE_CC by
+# validate_runtime_release_table_consistency() in
+# .github/scripts/generate_binary_build_matrix.py.
+TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+}
 
-    Mirrors the matrix from the original build_cuda.sh. CUDA 13.x dropped
-    sm_50/60/70, so we must NOT leave this empty -- CMake's defaults still
-    include compute_50 which nvcc 13 rejects with "Unsupported gpu
-    architecture 'compute_50'".
+# Architectures we additionally emit PTX for (forward-compat for newer GPUs).
+_PTX_ARCHES: set[int] = {120}
+
+
+def torch_cuda_arch_list(cuda_version: str, arch: str) -> str:
+    """Format TORCH_CUDA_ARCH_LIST for the wheel build (";"-separated).
+
+    Returns e.g. "8.0;9.0;10.0;11.0;12.0+PTX" for cuda 13.x aarch64.
+
+    CUDA 13.x dropped sm_50/60/70, so we must NOT leave this empty --
+    CMake's defaults still include compute_50 which nvcc 13 rejects with
+    "Unsupported gpu architecture 'compute_50'".
     """
-    base = ["7.5", "8.0", "8.6", "9.0", "10.0"]
-    if cuda_version.startswith("12.6"):
-        # 12.6 keeps legacy Maxwell/Pascal/Volta and drops the 10.0 entry.
-        archs = ["5.0", "6.0", "7.0", *(a for a in base if a != "10.0")]
-    elif cuda_version.startswith("13."):
-        # 13.x adds 12.0+PTX, plus 11.0 on aarch64 (Grace Hopper / GB200).
-        archs = [*base, *(["11.0"] if arch == "aarch64" else []), "12.0+PTX"]
-    else:
+    if cuda_version not in TORCH_CUDA_ARCH_LIST_TABLE:
         raise SystemExit(f"unknown cuda version {cuda_version}")
-    if arch == "aarch64":
-        # aarch64 GPUs are 8.0+ only; 8.6 is x86-only (RTX 3090 / A6000).
-        skip = {"5.0", "6.0", "7.0", "7.5", "8.6"}
-        archs = [a for a in archs if a not in skip]
-    return ";".join(archs)
+    archs = TORCH_CUDA_ARCH_LIST_TABLE[cuda_version].get(arch)
+    if not archs:
+        raise SystemExit(f"no TORCH_CUDA_ARCH_LIST for cuda {cuda_version} on {arch}")
+    return ";".join(
+        f"{cc // 10}.{cc % 10}" + ("+PTX" if cc in _PTX_ARCHES else "")
+        for cc in sorted(archs)
+    )
 
 
 def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
