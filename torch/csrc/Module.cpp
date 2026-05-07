@@ -3016,26 +3016,20 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("converter"),
       py::arg("shape_env") = py::none());
+
   py_module.def("_activate_cpp_fake_tensor_mode", []() {
     c10::impl::FakeTensorModeTLS::activate();
   });
+
   py_module.def("_deactivate_cpp_fake_tensor_mode", []() {
     c10::impl::FakeTensorModeTLS::deactivate();
   });
+
   py_module.def("_exit_fake_tensor_mode", []() {
     c10::impl::FakeTensorModeTLS::reset_state();
   });
 
-  py_module.def(
-      "_reenter_fake_tensor_mode_from_tensor",
-      [](const at::Tensor& t) {
-        TORCH_CHECK(t.is_fake(), "tensor must be a C++ fake tensor");
-        auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-        TORCH_CHECK(mode != nullptr, "fake tensor has no associated mode");
-        c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
-      });
-
-  py_module.def("_is_cpp_fake_tensor_mode_active", []() -> bool {
+  py_module.def("_does_cpp_fake_tensor_mode_exist", []() -> bool {
     return c10::impl::FakeTensorModeTLS::get_state() != nullptr;
   });
 

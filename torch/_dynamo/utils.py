@@ -3828,7 +3828,7 @@ def _get_fake_value_impl(
     try:
         if (
             torch._dynamo.config.use_cpp_fake_tensor
-            and torch._C._is_cpp_fake_tensor_mode_active()
+            and torch._C._does_cpp_fake_tensor_mode_exist()
         ):
             log.debug("get_fake_value: using C++ fake tensor mode for %s", node.target)
             fake_mode_ctx = contextlib.nullcontext()

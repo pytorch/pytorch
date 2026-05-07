@@ -22,7 +22,7 @@ from torch._inductor.ir import (
     Layout,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.utils import do_bench_using_profiling, maybe_cpp_fake_mode_ctx
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -77,8 +77,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         #   or concrete inputs from ir_node_to_tensor with guard_shape=False.
         trace_inputs = []
         self.benchmark_inputs = []
-        from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
-
         with maybe_cpp_fake_mode_ctx(V.fake_mode):
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
@@ -519,8 +517,6 @@ class SubgraphTemplate(KernelTemplate):
 
         # Assert kwargs contain only non-tensor arguments
         self._validate_non_tensor_kwargs(kwargs)
-
-        from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
 
         with maybe_cpp_fake_mode_ctx(V.fake_mode):
             example_inputs = []

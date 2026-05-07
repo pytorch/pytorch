@@ -15,6 +15,7 @@ from torch._inductor.comm_analysis import (
     NCCL_COLL,
 )
 from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch._inductor.utils import maybe_cpp_fake_mode_ctx
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.traceback import NodeSource, NodeSourceAction
@@ -893,8 +894,6 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     with dynamo_timed("fx.bucketing._trace", log_pt2_compile_event=True):
         fake_mode = detect_fake_mode(inps)
         assert fake_mode is not None
-        from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
-
         with maybe_cpp_fake_mode_ctx(fake_mode), enable_python_dispatcher():
             out = make_fx(fn)(*inps)
             for node in out.graph.find_nodes(

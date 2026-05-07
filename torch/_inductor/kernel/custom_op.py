@@ -24,6 +24,7 @@ from torch._inductor.select_algorithm import (
     ExternKernelChoice,
 )
 from torch._inductor.utils import convert_symint_to_expr
+from torch._inductor.utils import maybe_cpp_fake_mode_ctx
 from torch._inductor.virtualized import V
 
 
@@ -510,8 +511,6 @@ def autotune_custom_op(
 
     fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
-    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
-
     with maybe_cpp_fake_mode_ctx(V.fake_mode):
         # pyrefly: ignore [no-matching-overload]
         fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
@@ -613,8 +612,6 @@ def _generate_dynamic_configs(
     # Get parameter names from op schema instead of impl signature
     schema = op_overload._schema
     param_names = [arg.name for arg in schema.arguments if not arg.kwarg_only]
-
-    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
 
     with maybe_cpp_fake_mode_ctx(V.fake_mode):
         fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
@@ -771,7 +768,6 @@ def _lower_single_impl(
     def impl_wrapper(*tensors):
         return impl(*tensors, **merged_kwargs)
 
-    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
     from torch._inductor.fx_utils import _get_shape_env
 
     shape_env = _get_shape_env()
@@ -992,7 +988,6 @@ def _range_based_lowering_fn(
 
         return build_nested_cond(0)(*fake_tensors)
 
-    from torch._inductor.compile_fx import maybe_cpp_fake_mode_ctx
     from torch._inductor.fx_utils import _get_shape_env
 
     with maybe_cpp_fake_mode_ctx(V.fake_mode):

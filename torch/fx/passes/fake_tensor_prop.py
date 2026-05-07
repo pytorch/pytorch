@@ -113,7 +113,7 @@ class FakeTensorProp(torch.fx.Interpreter):
     def propagate_dont_convert_inputs(self, *args):
         import torch._C
 
-        if torch._C._is_cpp_fake_tensor_mode_active():
+        if torch._C._does_cpp_fake_tensor_mode_exist():
             torch._C._activate_cpp_fake_tensor_mode()
             try:
                 return super().run(*args)

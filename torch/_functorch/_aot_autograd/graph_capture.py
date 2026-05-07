@@ -123,7 +123,7 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
-    _cpp_fake = torch._C._is_cpp_fake_tensor_mode_active()
+    _cpp_fake = torch._C._does_cpp_fake_tensor_mode_exist()
     if _cpp_fake:
         torch._C._activate_cpp_fake_tensor_mode()
     with (

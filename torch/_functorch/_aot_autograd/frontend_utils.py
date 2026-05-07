@@ -104,7 +104,7 @@ def process_inputs(
                     # We already fakeified this tensor in Dynamo, don't
                     # dump the trace for it again
                     trace = False
-            if torch._C._is_cpp_fake_tensor_mode_active():
+            if torch._C._does_cpp_fake_tensor_mode_exist():
                 return torch._C._make_fake_tensor(
                     x,
                     source=source,

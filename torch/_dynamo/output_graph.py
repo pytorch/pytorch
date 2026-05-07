@@ -2670,9 +2670,6 @@ class OutputGraph(OutputGraphCommon):
                 ),
             )
             self.call_cleanup_hooks()
-            readable = gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            )
             # raise AssertionError("graph completed")
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None

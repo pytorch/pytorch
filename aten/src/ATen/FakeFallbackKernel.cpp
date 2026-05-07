@@ -366,6 +366,12 @@ void fakeFallback(
   // lift_fresh with no fake inputs (e.g. torch.tensor(())): run the real op
   // to produce a constant tensor, then convert to fake.
   if (is_lift_func(op) && flat_arg_fake_tensors.empty()) {
+    /*
+      (TODO: should_allow_numbers_as_tensors &&
+       !has_symints &&
+       flat_arg_fake_tensors.empty() &&
+       !device_conversion_skip_const_prop)) {
+    */
     // // TODO: implement constant propagation
     // TORCH_CHECK(false, "constant propagation not implemented in C++ faketensor");
     {
