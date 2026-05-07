@@ -404,7 +404,10 @@ def assert_sequence_equal(
     msg: str | None = None,
     seq_type: type[Any] | None = None,
 ) -> None:
-    return self_.assertTrue(seq1 == seq2, msg)
+    # list == tuple is False in Python even if elements match.
+    # Match unittest.TestCase.assertSequenceEqual behavior: when seq_type
+    # is None, compare element-by-element regardless of container type.
+    return self_.assertTrue(list(seq1) == list(seq2), msg)
 
 
 def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
