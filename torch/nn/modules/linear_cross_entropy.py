@@ -255,8 +255,9 @@ def _linear_cross_entropy_batch_chunked(
     dtype = input.dtype
     num_batches, in_features = input.shape
     num_classes, _ = linear_weight.shape
-    # CUDA gates the out_dtype= mm fast path; other accelerators take
-    # the more conservative CPU path until validated.
+    # CUDA gates the out_dtype= mm fast path; the non-CUDA path
+    # (CPU, MPS, XPU, ...) routes mixed-dtype mm through explicit casts
+    # until out_dtype= is validated on those backends.
     is_cuda = input.device.type == "cuda"
     is_mps = input.device.type == "mps"
 
@@ -388,6 +389,13 @@ def _linear_cross_entropy_batch_chunked(
         dtype=dtypes["weight_grad_chunk"],
         requires_grad=False,
     )
+    # input_grad_acc_buf is allocated when the input-grad path needs a
+    # non-narrow scratch tensor in linear_weight_.dtype:
+    # - CPU: mixed dtype (bf16/fp16 grad_input + fp32 linear_weight_)
+    #   requires a fp32 scratch since CPU addmm is dtype-strict and a
+    #   bf16 subtract loses precision.
+    # - MPS: addmm with M aliasing out= on a narrow view of grad_input
+    #   produces wrong values (see input-grad branch below).
     input_grad_acc_buf_shape = (
         (batch_chunk_size, in_features)
         if (
@@ -460,9 +468,10 @@ def _linear_cross_entropy_batch_chunked(
         if compute_input_grad or compute_linear_weight_grad:
             tmp_chunk = tmp.narrow(0, 0, bchunk_size)
             torch.div(weight_chunk, softmax_denom, out=tmp_chunk)
-            # MPS workaround: in-place .mul_() on a narrow'd view
-            # doesn't propagate to logits_buf; out= dispatches
-            # differently.  Was: logits.mul_(tmp_chunk.unsqueeze(1))
+            # MPS workaround: an in-place op on a narrow view of
+            # logits_buf does not write back to the parent storage;
+            # the equivalent out=-form does. Was:
+            #   logits.mul_(tmp_chunk.unsqueeze(1))
             torch.mul(logits, tmp_chunk.unsqueeze(1), out=logits)
 
         softmax_denom.log_()
@@ -470,37 +479,11 @@ def _linear_cross_entropy_batch_chunked(
 
         # Compute gradients.
 
-        if compute_input_grad:
-            grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
-            if is_cuda or (grad_x.dtype == linear_weight_.dtype and not is_mps):
-                torch.mul(
-                    torch.index_select(linear_weight_, 0, target_chunk),
-                    weight_chunk.unsqueeze(1),
-                    out=grad_x,
-                )
-                torch.addmm(grad_x, logits, linear_weight_, alpha=-1, out=grad_x)
-            else:
-                # CPU: addmm is strict on dtype, and a bf16 subtract
-                # loses precision; compute in acc_dtype and cast at
-                # the end.
-                # MPS: addmm with M aliasing out= on a narrow view of
-                # grad_input misbehaves; route through a non-narrow
-                # scratch buffer and copy_ into grad_x.
-                input_grad_acc_chunk = input_grad_acc_buf.narrow(0, 0, bchunk_size)
-                torch.mul(
-                    torch.index_select(linear_weight_, 0, target_chunk),
-                    weight_chunk.unsqueeze(1),
-                    out=input_grad_acc_chunk,
-                )
-                torch.addmm(
-                    input_grad_acc_chunk,
-                    logits,
-                    linear_weight_,
-                    alpha=-1,
-                    out=input_grad_acc_chunk,
-                )
-                grad_x.copy_(input_grad_acc_chunk)
-
+        # Weight-grad is split: the mm (which consumes logits in
+        # logits_buf.dtype) runs first so that the CUDA mixed-dtype
+        # input-grad branch below can reuse logits_buf's storage for
+        # the cast-down logits view. The accumulation half of
+        # weight-grad runs after input-grad.
         if compute_linear_weight_grad:
             if logits_buf.dtype == weight_grad_chunk.dtype:
                 torch.mm(logits.T, input_chunk_acc, out=weight_grad_chunk)
@@ -515,18 +498,89 @@ def _linear_cross_entropy_batch_chunked(
                 logits_acc_chunk = logits_acc_buf.narrow(0, 0, bchunk_size)
                 logits_acc_chunk.copy_(logits)
                 torch.mm(logits_acc_chunk.T, input_chunk_acc, out=weight_grad_chunk)
-            if use_acc_dtype:
-                # input_chunk_acc is a copy of input slice, so we can
-                # change it inplace to reduce memory usage
-                input_chunk_acc.mul_(weight_chunk.unsqueeze(1))
-                weight_grad_chunk.index_add_(0, target_chunk, input_chunk_acc, alpha=-1)
+
+        if compute_input_grad:
+            grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
+            # Three paths into the same addmm:
+            # 1. fast path (matching dtypes, non-MPS): addmm into
+            #    grad_x with logits and linear_weight_.
+            # 2. CUDA mixed-dtype (bf16+memory only, given
+            #    linear_weight.dtype == input.dtype): logits is fp32
+            #    but grad_x and linear_weight are bf16. Cast logits
+            #    to bf16 via a storage view of logits_buf, and use
+            #    the original linear_weight so all addmm operands
+            #    match. Computing in bf16 trades softmax precision
+            #    for the memory-mode dtype.
+            # 3. buf-and-copy (CPU mixed-dtype, or MPS): write into
+            #    a non-narrow scratch in linear_weight_.dtype, then
+            #    copy_ into grad_x. CPU avoids a dtype-strict addmm
+            #    error and bf16-subtract precision loss; MPS avoids
+            #    an addmm bug where M aliasing out= on a narrow view
+            #    of grad_input gives ~48% relative error vs fp64.
+            use_input_grad_acc = not is_cuda and (
+                grad_x.dtype != linear_weight_.dtype or is_mps
+            )
+            if use_input_grad_acc:
+                addmm_out = input_grad_acc_buf.narrow(0, 0, bchunk_size)
             else:
-                weight_grad_chunk.index_add_(
-                    0,
-                    target_chunk,
-                    input_chunk_acc * weight_chunk.unsqueeze(1),
-                    alpha=-1,
+                addmm_out = grad_x
+
+            # First term: linear_weight_[target] * weight_chunk.
+            torch.mul(
+                torch.index_select(linear_weight_, 0, target_chunk),
+                weight_chunk.unsqueeze(1),
+                out=addmm_out,
+            )
+
+            # Second-term operands. Branch 2 reuses logits_buf
+            # storage as a bf16 view: viewing logits_buf (fp32) as
+            # linear_weight.dtype (smaller) doubles the last dim;
+            # the first num_classes columns share the first 2 bytes
+            # of each fp32 element. The copy_ corrupts those bytes,
+            # but the fp32 values were already consumed by the
+            # weight-grad mm above. The resulting bf16 view is
+            # non-contiguous (row stride = 2*num_classes elements),
+            # which cuBLAS addmm handles via its leading-dimension
+            # parameter.
+            if is_cuda and grad_x.dtype != linear_weight_.dtype:
+                logits_lw = (
+                    logits_buf.view(linear_weight.dtype)
+                    .narrow(1, 0, num_classes)
+                    .narrow(0, 0, bchunk_size)
                 )
+                logits_lw.copy_(logits)
+                mat1, mat2 = logits_lw, linear_weight
+            else:
+                mat1, mat2 = logits, linear_weight_
+
+            # Second term: subtract mat1 @ mat2.
+            torch.addmm(addmm_out, mat1, mat2, alpha=-1, out=addmm_out)
+
+            if use_input_grad_acc:
+                grad_x.copy_(addmm_out)
+
+        if compute_linear_weight_grad:
+            if use_acc_dtype:
+                # Safe to mutate: when use_acc_dtype is True,
+                # input_chunk_acc was freshly created above as
+                # input_chunk.to(acc_dtype), so it is a copy and not
+                # aliased with the user's input.
+                input_chunk_acc.mul_(weight_chunk.unsqueeze(1))
+                temp = input_chunk_acc
+            elif num_classes >= in_features:
+                # input_chunk_acc is input_chunk (a view of the user's
+                # input); cannot mutate. Reuse logits storage for the
+                # broadcast-multiply temp — logits values are no
+                # longer needed after the weight-grad mm above.
+                temp = torch.mul(
+                    input_chunk_acc,
+                    weight_chunk.unsqueeze(1),
+                    out=logits.narrow(1, 0, in_features),
+                )
+            else:
+                # No suitable buffer to reuse; allocate per chunk.
+                temp = input_chunk_acc * weight_chunk.unsqueeze(1)
+            weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
             grad_linear_weight.sub_(weight_grad_chunk)
 
     return output.to(dtype), grad_input.to(dtype), grad_linear_weight

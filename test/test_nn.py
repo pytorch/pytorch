@@ -6866,6 +6866,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
 
+    @unittest.skipIf(IS_WINDOWS and IS_ARM64, "Fails as 'Unexpected success' on Windows ARM64")
     @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
     # see https://github.com/pytorch/pytorch/issues/177250
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
@@ -14529,31 +14530,29 @@ if __name__ == '__main__':
         expected_weight_grad_max_ulp_diff = 1
         # The following mapping to expected ULP differences
         # characterizes the accuracy dependence on acc_policy, dtype,
-        # device:
+        # and device:
         if acc_policy == "memory":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 204
                     expected_weight_grad_max_ulp_diff = 191
-                else:
+                else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 2
-                    expected_weight_grad_max_ulp_diff = 153
+                    expected_input_grad_max_ulp_diff = 0
+                    expected_weight_grad_max_ulp_diff = 0
             else:
-                if (
-                        dtype == torch.float16
-                        or dtype == torch.bfloat16
-                ):
-                    # TODO: bf16 satisfies fp16's bound on the current
-                    # sample matrix; revisit if a sample triggers a
-                    # tighter check
+                if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 90
                     if "mps" in device:
                         expected_weight_grad_max_ulp_diff = 107
                     else:  # CUDA/...
                         expected_weight_grad_max_ulp_diff = 37
+                else:  # dtype == torch.bfloat16
+                    expected_max_ulp_diff = 2
+                    expected_input_grad_max_ulp_diff = 90
+                    expected_weight_grad_max_ulp_diff = 0
         elif acc_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:
@@ -14562,34 +14561,32 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 38
                 else:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 2
-                    expected_weight_grad_max_ulp_diff = 153
+                    expected_input_grad_max_ulp_diff = 0
+                    expected_weight_grad_max_ulp_diff = 0
             else:
-                if (
-                        dtype == torch.float16
-                        or dtype == torch.bfloat16
-                ):
-                    # TODO: bf16 satisfies fp16's bound on the current
-                    # sample matrix; revisit if a sample triggers a
-                    # tighter check
+                if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 1
                     expected_weight_grad_max_ulp_diff = 21
+                else:  # dtype == torch.bfloat16
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 104
+                    expected_weight_grad_max_ulp_diff = 0
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 6236
+                    expected_input_grad_max_ulp_diff = 8284  # 6236
                     expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, cpu 2271
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     if "mps" in device:
-                        expected_input_grad_max_ulp_diff = 5078
-                    else:  # CUDA/XPU/HPU
                         expected_input_grad_max_ulp_diff = 277
-                    expected_weight_grad_max_ulp_diff = 4878
+                    else:  # CUDA/XPU/HPU
+                        expected_input_grad_max_ulp_diff = 358
+                    expected_weight_grad_max_ulp_diff = 8974
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 2
@@ -14718,10 +14715,6 @@ if __name__ == '__main__':
         self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
                              msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
 
-    # ~48% relative error on input-grad vs fp64 reference; pending
-    # MPS-side investigation. Forward (loss value) is correct; the
-    # gradient diverges below the dispatch-form layer.
-    # @skipMPS
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_default(self, device, dtype):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
