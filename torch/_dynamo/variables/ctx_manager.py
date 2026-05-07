@@ -856,6 +856,34 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
         return torch.accelerator.device_index
 
 
+_device_context_manager_map: dict[type, type[GenericDeviceVariable]] = {
+    torch.cuda.device: CUDADeviceVariable,
+    torch.xpu.device: XPUDeviceVariable,
+    torch.accelerator.device_index: AcceleratorDeviceIndexVariable,
+}
+
+
+def register_device_context_manager(
+    device_context: type, variable_cls: type[GenericDeviceVariable]
+) -> None:
+    """Register a Dynamo variable class for a device context manager type.
+
+    Raises ``ValueError`` if ``device_context`` is already registered.
+    """
+    if device_context in _device_context_manager_map:
+        raise ValueError(
+            f"Device context {device_context} already has a registered context manager"
+        )
+    _device_context_manager_map[device_context] = variable_cls
+
+
+def get_device_context_manager(
+    device_context: type,
+) -> type[GenericDeviceVariable] | None:
+    """Return the Dynamo variable class for ``device_context``, or ``None`` if not registered."""
+    return _device_context_manager_map.get(device_context)
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
