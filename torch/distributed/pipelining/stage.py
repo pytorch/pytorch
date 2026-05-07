@@ -19,6 +19,7 @@ from torch.distributed.pipelining._utils import (
     _DTensorMeta,
     _make_tensor_from_meta,
     _MeshCache,
+    _SpmdTypesMeta,
     _StageBackwardMeta,
     _StageForwardMeta,
     _StageMeta,
@@ -629,6 +630,10 @@ class _PipelineStageBase(ABC):
                         stride=info.tensor_meta.global_stride,
                         run_check=False,
                     ).requires_grad_(effective_requires_grad)
+                elif isinstance(info.tensor_meta, _SpmdTypesMeta):
+                    mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
+                    info.tensor_meta.reannotate(info.buffer, mesh)
+                    activation = info.buffer.requires_grad_(effective_requires_grad)
                 else:
                     activation = info.buffer.requires_grad_(effective_requires_grad)
                 # Activation must be a leaf so backward terminates here.
@@ -690,6 +695,10 @@ class _PipelineStageBase(ABC):
                         stride=info.tensor_meta.global_stride,
                         run_check=False,
                     )
+                elif isinstance(info.tensor_meta, _SpmdTypesMeta):
+                    mesh = self._mesh_cache.get_mesh(info.tensor_meta.mesh_cache_key)
+                    info.tensor_meta.reannotate(info.buffer, mesh)
+                    grad = info.buffer
                 else:
                     grad = info.buffer
                 grads.append(grad)
@@ -1624,14 +1633,23 @@ class PipelineStage(_PipelineStageBase):
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
         get_mesh: GetMeshCallback | None = None,
+        device_mesh: torch.distributed.device_mesh.DeviceMesh | None = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
 
         self._mesh_cache = _MeshCache(get_mesh_cb=get_mesh)
+        self._spmd_device_mesh = device_mesh
         self._inference_mode: InferenceMode | None = None
         self._fwd_outputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_inputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_kwargs_tensors_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
+
+        # Pre-populate mesh cache from device_mesh if provided
+        if device_mesh is not None:
+            dim_names = (
+                tuple(device_mesh.mesh_dim_names) if device_mesh.mesh_dim_names else ()
+            )
+            self._mesh_cache.put((dim_names, device_mesh._layout), device_mesh)
 
         # Validate and normalize args to tuples
         inputs = validate_and_normalize_to_tuple(input_args)
@@ -1640,10 +1658,14 @@ class PipelineStage(_PipelineStageBase):
         out_grads = validate_and_normalize_to_tuple(output_grads, allow_none=True)
 
         self._user_meta = _StageMeta(
-            inputs=extract_tensor_metas(inputs),
-            outputs=extract_tensor_metas(outputs),
-            input_grads=extract_tensor_metas(in_grads, allow_none=True),
-            output_grads=extract_tensor_metas(out_grads, allow_none=True),
+            inputs=extract_tensor_metas(inputs, device_mesh=device_mesh),
+            outputs=extract_tensor_metas(outputs, device_mesh=device_mesh),
+            input_grads=extract_tensor_metas(
+                in_grads, allow_none=True, device_mesh=device_mesh
+            ),
+            output_grads=extract_tensor_metas(
+                out_grads, allow_none=True, device_mesh=device_mesh
+            ),
         )
 
         # Cache meshes from user-provided DTensors
@@ -1793,11 +1815,25 @@ class PipelineStage(_PipelineStageBase):
         TensorMeta is materialized as an empty tensor (or DTensor via mesh cache).
         """
         if isinstance(arg, torch.Tensor):
-            return arg.detach().requires_grad_(arg.requires_grad)
+            result = arg.detach().requires_grad_(arg.requires_grad)
+            # detach() strips spmd_types annotations; re-apply them
+            from torch.distributed.pipelining._utils import _has_spmd_local_type
+
+            if _has_spmd_local_type(arg):
+                import spmd_types._type_attr
+
+                lt = spmd_types._type_attr.get_local_type(arg)
+                spmd_types._type_attr.set_local_type(result, lt)
+            return result
         elif isinstance(arg, TensorMeta):
             if isinstance(arg, _DTensorMeta):
                 mesh = self._mesh_cache.get_mesh(arg.mesh_cache_key)
                 return arg.to_dtensor(self.device, mesh)
+            elif isinstance(arg, _SpmdTypesMeta):
+                t = arg.to_tensor(self.device)
+                mesh = self._mesh_cache.get_mesh(arg.mesh_cache_key)
+                arg.reannotate(t, mesh)
+                return t
             else:
                 return arg.to_tensor(self.device)
         else:
@@ -1822,6 +1858,9 @@ class PipelineStage(_PipelineStageBase):
                 stride=meta.global_stride,
                 run_check=False,
             )
+        if isinstance(meta, _SpmdTypesMeta):
+            mesh = self._mesh_cache.get_mesh(meta.mesh_cache_key)
+            meta.reannotate(local_ones, mesh)
         return local_ones
 
     def _forward_metadata_inference(
@@ -1853,7 +1892,9 @@ class PipelineStage(_PipelineStageBase):
                 )
             tensor_args = validate_and_normalize_to_tuple(args)
             assert tensor_args is not None  # noqa: S101
-            self._stage_meta.inputs = extract_tensor_metas(tensor_args)
+            self._stage_meta.inputs = extract_tensor_metas(
+                tensor_args, device_mesh=self._spmd_device_mesh
+            )
             inference_args = tuple(self._to_tensor(a) for a in tensor_args)
         elif self._is_same_rank(self.stage_index - 1):
             # Same-rank: _StageForwardMeta passed via argument
@@ -1892,7 +1933,9 @@ class PipelineStage(_PipelineStageBase):
         # Normalize outputs to tuple
         outputs = validate_and_normalize_to_tuple(outputs)
 
-        self._stage_meta.outputs = extract_tensor_metas(outputs)
+        self._stage_meta.outputs = extract_tensor_metas(
+            outputs, device_mesh=self._spmd_device_mesh
+        )
 
         # Store for backward metadata inference (always, even during eval)
         fwd_kwargs_tensors = tuple(
@@ -2030,7 +2073,9 @@ class PipelineStage(_PipelineStageBase):
 
         input_grads = all_input_grads[: len(fwd_inputs)]
         self._stage_meta.input_grads = tuple(
-            extract_tensor_meta(g) if isinstance(g, torch.Tensor) else None
+            extract_tensor_meta(g, device_mesh=self._spmd_device_mesh)
+            if isinstance(g, torch.Tensor)
+            else None
             for g in input_grads
         )
 
