@@ -969,7 +969,9 @@ op_db: list[OpInfo] = [
             # test_dtypes succeeds for ints / bool / complex64, fooling the
             # detector into believing these dtypes are supported.
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestCommon", "test_dtypes",
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_dtypes",
                 device_type="mps",
             ),
         ),
