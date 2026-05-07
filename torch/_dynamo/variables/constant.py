@@ -418,10 +418,14 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        if isinstance(other, ConstantVariable):
+            return self.as_python_constant() == other.as_python_constant()
+        # Delegate to other's is_python_equal - this handles cases like
+        # StringFormatVariable which can compare against constants and
+        # install guards for any lazy constants it contains.
+        if isinstance(other, VariableTracker):
+            return other.is_python_equal(self)
+        return False
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
