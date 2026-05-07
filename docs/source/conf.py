@@ -461,12 +461,8 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
