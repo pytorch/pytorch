@@ -310,6 +310,41 @@ struct mul_functor {
   }
 };
 
+struct bitwise_and_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a & b;
+  }
+};
+
+struct bitwise_or_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a | b;
+  }
+};
+
+struct bitwise_xor_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a ^ b;
+  }
+};
+
+struct bitwise_left_shift_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a << b;
+  }
+};
+
+struct bitwise_right_shift_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a >> b;
+  }
+};
+
 struct div_true_functor {
   template <
       typename T,
@@ -499,6 +534,11 @@ REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(bitwise_and);
+REGISTER_INTEGER_BINARY_OP(bitwise_or);
+REGISTER_INTEGER_BINARY_OP(bitwise_xor);
+REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
+REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
