@@ -622,8 +622,12 @@ struct ToImpl<std::optional<T>> {
     auto inner_val =
         detail::ToImpl<T>::call(*sivp, extension_build_version, is_internal);
 
-    // free the memory associated with StableIValue* sivp
+// free the memory associated with StableIValue* sivp
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+    TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
+#else
     delete sivp;
+#endif
 
     return std::make_optional(inner_val);
   }
