@@ -925,7 +925,10 @@ if torch.backends.mps.is_available():
             "nn.functional.dropout2d": [torch.float16, torch.float32],
             "nn.functional.dropout3d": [torch.float16, torch.float32],
             "nn.functional.alpha_dropout": [torch.float16, torch.float32],
-            "nn.functional.feature_alpha_dropoutwith_train": [torch.float16, torch.float32],
+            "nn.functional.feature_alpha_dropoutwith_train": [
+                torch.float16,
+                torch.float32,
+            ],
             # PCA singular vectors are sign-ambiguous - same root cause as the
             # forward leg above. RNG shift lands seeded samples on different
             # sign choices.
