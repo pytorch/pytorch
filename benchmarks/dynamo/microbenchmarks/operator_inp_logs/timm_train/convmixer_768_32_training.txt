@@ -1,0 +1,45 @@
+Operator: aten._log_softmax.default
+cnt: 1, ((T([32, 1000], f16), 1, False), {})
+Operator: aten._log_softmax_backward_data.default
+cnt: 1, ((T([32, 1000], f16), T([32, 1000], f16), 1, f16), {})
+Operator: aten.add.Tensor
+cnt: 64, ((T([32, 768, 32, 32], f16), T([32, 768, 32, 32], f16)), {})
+Operator: aten.add_.Tensor
+cnt: 65, ((T([], i64), 1), {})
+Operator: aten.addmm.default
+cnt: 1, ((T([1000], f16), T([32, 768], f16), T([768, 1000], f16, stride=(1, 768))), {})
+Operator: aten.clone.default
+cnt: 1, ((T([32, 3, 224, 224], f16),), {})
+Operator: aten.convolution.default
+cnt: 1, ((T([32, 3, 224, 224], f16), T([768, 3, 7, 7], f16), T([768], f16), [7, 7], [0, 0], [1, 1], False, [0, 0], 1), {})
+cnt: 32, ((T([32, 768, 32, 32], f16), T([768, 1, 7, 7], f16), T([768], f16), [1, 1], [3, 3], [1, 1], False, [0, 0], 768), {})
+cnt: 32, ((T([32, 768, 32, 32], f16), T([768, 768, 1, 1], f16), T([768], f16), [1, 1], [0, 0], [1, 1], False, [0, 0], 1), {})
+Operator: aten.convolution_backward.default
+cnt: 32, ((T([32, 768, 32, 32], f16), T([32, 768, 32, 32], f16), T([768, 768, 1, 1], f16), [768], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [True, True, True]), {})
+cnt: 32, ((T([32, 768, 32, 32], f16), T([32, 768, 32, 32], f16), T([768, 1, 7, 7], f16), [768], [1, 1], [3, 3], [1, 1], False, [0, 0], 768, [True, True, True]), {})
+cnt: 1, ((T([32, 768, 32, 32], f16), T([32, 3, 224, 224], f16), T([768, 3, 7, 7], f16), [768], [7, 7], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]), {})
+Operator: aten.copy_.default
+cnt: 1, ((T([32, 3, 224, 224], f16), T([32, 3, 224, 224], f16)), {})
+Operator: aten.div.Scalar
+cnt: 1, ((T([32, 768, 32, 32], f16, stride=(768, 1, 0, 0)), 1024), {})
+Operator: aten.lift_fresh_copy.default
+cnt: 1, ((T([32], i64),), {})
+Operator: aten.mean.dim
+cnt: 1, ((T([32, 768, 32, 32], f16), [-1, -2], True), {})
+Operator: aten.mm.default
+cnt: 1, ((T([32, 1000], f16), T([1000, 768], f16)), {})
+cnt: 1, ((T([1000, 32], f16, stride=(1, 1000)), T([32, 768], f16)), {})
+Operator: aten.native_batch_norm.default
+cnt: 65, ((T([32, 768, 32, 32], f16), T([768], f16), T([768], f16), T([768], f16), T([768], f16), True, 0.1, 1e-05), {})
+Operator: aten.native_batch_norm_backward.default
+cnt: 65, ((T([32, 768, 32, 32], f16), T([32, 768, 32, 32], f16), T([768], f16), T([768], f16), T([768], f16), T([768], f32), T([768], f32), True, 1e-05, [True, True, True]), {})
+Operator: aten.nll_loss_backward.default
+cnt: 1, ((T([], f16), T([32, 1000], f16), T([32], i64), None, 1, -100, T([], f16)), {})
+Operator: aten.nll_loss_forward.default
+cnt: 1, ((T([32, 1000], f16), T([32], i64), None, 1, -100), {})
+Operator: aten.relu.default
+cnt: 65, ((T([32, 768, 32, 32], f16),), {})
+Operator: aten.sum.SymInt
+cnt: 1, ((T([32, 1000], f16), [0], True), {})
+Operator: aten.threshold_backward.default
+cnt: 65, ((T([32, 768, 32, 32], f16), T([32, 768, 32, 32], f16), 0), {})

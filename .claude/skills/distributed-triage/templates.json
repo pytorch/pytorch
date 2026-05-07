@@ -1,0 +1,15 @@
+{
+  "description": "Response templates for the distributed triage sub-skill",
+  "templates": {
+    "needs_distributed_reproduction": {
+      "action": "Add 'needs reproduction' label and comment",
+      "use_when": "Issue lacks a minimal reproduction script and the bot cannot confidently determine the module",
+      "comment": "Thanks for the report! To help us investigate this distributed issue, could you provide:\n\n1. **Minimal reproduction script** — a self-contained script we can run\n2. **Environment details:**\n   - Number of nodes and GPUs per node\n   - How you launch the job (torchrun, mp.spawn, etc.)\n   - PyTorch version (`torch.__version__`)\n   - NCCL version (if applicable)\n   - GPU model and driver version\n3. **Full error logs** — ideally from all ranks (at minimum rank 0), including the full stack trace\n4. **Distributed init method** — env://, tcp://, file://, etc.\n\nA self-contained script that reproduces on a single node with 2 GPUs is ideal, if possible."
+    },
+    "not_distributed": {
+      "action": "Add 'triage review' label (do NOT remove oncall: distributed)",
+      "use_when": "Issue appears to be mislabeled — not actually a distributed training issue",
+      "comment": "After reviewing this issue, it appears it may not be related to distributed training (DDP, FSDP, DTensor, c10d, etc.). We've flagged it for human review so the oncall can re-route it to the correct team.\n\nIf this issue does involve distributed training, please update the description with details about your distributed setup and we'll re-evaluate."
+    }
+  }
+}

@@ -1,0 +1,24 @@
+########## torch.float64/torch.int64/size=()+(4, 6)+()+() ##########
+# sparse meta tensor
+tensor(ccol_indices=tensor(..., size=(7,)),
+       row_indices=tensor(..., size=(0,)),
+       values=tensor(..., size=(0,)), device='meta', size=(4, 6),
+       dtype=torch.float64, layout=torch.sparse_csc)
+########## torch.float64/torch.int64/size=()+(4, 6)+()+(3,) ##########
+# sparse meta tensor
+tensor(ccol_indices=tensor(..., size=(7,)),
+       row_indices=tensor(..., size=(0,)),
+       values=tensor(..., size=(0, 3)), device='meta', size=(4, 6, 3),
+       dtype=torch.float64, layout=torch.sparse_csc)
+########## torch.float64/torch.int64/size=(2,)+(4, 6)+()+() ##########
+# sparse meta tensor
+tensor(ccol_indices=tensor(..., size=(2, 7)),
+       row_indices=tensor(..., size=(2, 0)),
+       values=tensor(..., size=(2, 0)), device='meta', size=(2, 4, 6),
+       dtype=torch.float64, layout=torch.sparse_csc)
+########## torch.float64/torch.int64/size=(2,)+(4, 6)+()+(3,) ##########
+# sparse meta tensor
+tensor(ccol_indices=tensor(..., size=(2, 7)),
+       row_indices=tensor(..., size=(2, 0)),
+       values=tensor(..., size=(2, 0, 3)), device='meta', size=(2, 4, 6, 3),
+       dtype=torch.float64, layout=torch.sparse_csc)

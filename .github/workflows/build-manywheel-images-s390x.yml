@@ -1,0 +1,78 @@
+name: Build manywheel docker images for s390x
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - ciflow/s390/*
+    paths:
+      - .github/workflows/build-manywheel-images-s390x.yml
+
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-docker-cpu-s390x:
+    if: github.repository_owner == 'pytorch'
+    environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
+    runs-on: linux.s390x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          no-sudo: true
+
+      - name: Build Docker Image
+        run: |
+          .ci/docker/manywheel/build.sh manylinuxs390x-builder:cpu-s390x -t manylinuxs390x-builder:cpu-s390x
+
+      - name: Tag and (if WITH_PUSH) push docker image to docker.io
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
+          CREATED_FULL_DOCKER_IMAGE_NAME: manylinuxs390x-builder:cpu-s390x
+        shell: bash
+        run: |
+          set -euox pipefail
+          GITHUB_REF="${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}"
+          GIT_BRANCH_NAME="${GITHUB_REF##*/}"
+          GIT_COMMIT_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+          CI_FOLDER_SHA="$(git rev-parse HEAD:.ci/docker)"
+
+          DOCKER_IMAGE_NAME_PREFIX="docker.io/pytorch/${CREATED_FULL_DOCKER_IMAGE_NAME}"
+
+          docker tag "${CREATED_FULL_DOCKER_IMAGE_NAME}" "${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}"
+          docker tag "${CREATED_FULL_DOCKER_IMAGE_NAME}" "${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}"
+          docker tag "${CREATED_FULL_DOCKER_IMAGE_NAME}" "${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}"
+
+          # Pretty sure Github will mask tokens and I'm not sure if it will even be
+          # printed due to pipe, but just in case
+          set +x
+          if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+            docker push "${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}"
+            docker push "${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}"
+            docker push "${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}"
+          fi
+
+      - name: Cleanup docker
+        if: cancelled()
+        shell: bash
+        run: |
+          # If podman build command is interrupted,
+          # it can leave a couple of processes still running.
+          # Order them to stop for clean shutdown.
+          # It looks like sometimes some processes remain
+          # after first cleanup.
+          # Wait a bit and do cleanup again. It looks like it helps.
+          docker system prune --build -f || true
+          sleep 60
+          docker system prune --build -f || true

@@ -1,0 +1,102 @@
+skip:
+  all:
+    # Difficult to setup accuracy test because .eval() not supported
+    - Reformer
+    # Fails deepcopy
+    - BlenderbotForConditionalGeneration
+    - GPTNeoForCausalLM
+    - GPTNeoForSequenceClassification
+    # Fails with even batch size = 1
+    - GPTJForCausalLM
+    - GPTJForQuestionAnswering
+    # Model too big
+    - google/gemma-3-4b-it
+    - openai/gpt-oss-20b
+    - mistralai/Mistral-7B-Instruct-v0.3
+
+  device:
+    cpu:
+      - meta-llama/Llama-3.2-1B
+      - google/gemma-2-2b
+      - google/gemma-3-4b-it
+      - openai/whisper-tiny
+      - Qwen/Qwen3-0.6B
+      - mistralai/Mistral-7B-Instruct-v0.3
+      - openai/gpt-oss-20b
+
+  control_flow:
+    - AllenaiLongformerBase
+
+batch_size:
+  # TODO - Fails even after fake tensors
+  divisors:
+    AlbertForMaskedLM: 2
+    AllenaiLongformerBase: 2
+    BartForCausalLM: 2
+    BertForMaskedLM: 2
+    BlenderbotForCausalLM: 8
+    # BlenderbotForConditionalGeneration : 16
+    DebertaV2ForMaskedLM: 4
+    DistilBertForMaskedLM: 2
+    DistillGPT2: 2
+    ElectraForCausalLM: 2
+    GPT2ForSequenceClassification: 2
+    # GPTJForCausalLM : 2
+    # GPTJForQuestionAnswering : 2
+    # GPTNeoForCausalLM : 32
+    # GPTNeoForSequenceClassification : 2
+    GoogleFnet: 2
+    LayoutLMForMaskedLM: 2
+    M2M100ForConditionalGeneration: 4
+    MBartForCausalLM: 2
+    MT5ForConditionalGeneration: 2
+    MegatronBertForCausalLM: 4
+    MobileBertForMaskedLM: 2
+    OPTForCausalLM: 2
+    PLBartForCausalLM: 2
+    PegasusForCausalLM: 4
+    RobertaForCausalLM: 2
+    T5ForConditionalGeneration: 2
+    T5Small: 2
+    TrOCRForCausalLM: 2
+    XGLMForCausalLM: 4
+    XLNetLMHeadModel: 2
+    YituTechConvBert: 2
+    meta-llama/Llama-3.2-1B: 8
+    google/gemma-2-2b: 8
+    google/gemma-3-4b-it: 8
+    openai/whisper-tiny: 8
+    Qwen/Qwen3-0.6B: 8
+    mistralai/Mistral-7B-Instruct-v0.3: 8
+    openai/gpt-oss-20b: 8
+
+
+tolerance:
+  higher_training:
+    - MT5ForConditionalGeneration
+
+  higher_max_autotune_training: []
+
+  higher_inference:
+    - GPT2ForSequenceClassification
+
+  higher_inference_cpu:
+    - GPT2ForSequenceClassification
+
+  cosine: []
+
+
+accuracy:
+  skip:
+    large_models:
+      # Models too large to have eager, dynamo and fp64_numbers simultaneously
+      # even for 40 GB machine.
+      - DebertaV2ForMaskedLM
+      - BlenderbotForCausalLM
+
+only_inference:
+  # Fails with dynamo for train mode
+  - M2M100ForConditionalGeneration
+
+only_fp32:
+  - GoogleFnet
