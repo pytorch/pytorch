@@ -2871,12 +2871,13 @@ end
                                 f"{kernel_build_options.precompiled_header}.obj"
                             )
                         else:
-                            kernel_build_options.precompiled_header = _precompile_header(
-                                cpp_prefix,
-                                cpp_command,
-                                **compile_command,
+                            kernel_build_options.precompiled_header = (
+                                _precompile_header(
+                                    cpp_prefix,
+                                    cpp_command,
+                                    **compile_command,
+                                )
                             )
-
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
