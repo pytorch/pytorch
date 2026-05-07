@@ -860,14 +860,10 @@ class NestedReduction:
         """Use LoopBody iter/reduce vars to disambiguate equal-size axes."""
         from torch._inductor.loop_body import MemoryUsageType
 
-        outer_reductions = [
-            sn
-            for sn in outer_node.get_nodes()
-            if isinstance(sn, SchedulerNode) and sn.is_reduction()
-        ]
+        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
         if len(outer_reductions) != 1:
             return cls.GroupedAxis.UNKNOWN
-        outer_reduction = outer_reductions[0]
+        outer_reduction = typing.cast(SchedulerNode, outer_reductions[0])
         outer_body = getattr(outer_reduction, "_body", None)
         grouped_body = getattr(grouped_reduction, "_body", None)
         if outer_body is None or grouped_body is None:
@@ -8571,6 +8567,9 @@ class Scheduler:
                 else:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
+            elif isinstance(node, FusedNestedReductions):
+                # pyrefly: ignore [unbound-name]
+                self.get_backend(device).codegen_nested_reduction(node)
             elif isinstance(node, FusedMixOrderReductions):
                 # pyrefly: ignore [unbound-name]
                 self.get_backend(device).codegen_mix_order_reduction(node)
@@ -8911,6 +8910,9 @@ class BaseScheduling:  # noqa: docstring_linter
         raise NotImplementedError
 
     def codegen_mix_order_reduction(self, node: FusedMixOrderReductions) -> None:
+        raise NotImplementedError
+
+    def codegen_nested_reduction(self, node: FusedNestedReductions) -> None:
         raise NotImplementedError
 
     def codegen_sync(self) -> None:
