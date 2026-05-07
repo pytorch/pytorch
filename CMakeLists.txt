@@ -704,9 +704,18 @@ endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
-# Set linker max-page-size to 64KiB on AArch64 Linux
 if(LINUX AND CPU_AARCH64)
+
+  # Set linker max-page-size to 64KiB on AArch64 Linux
   add_link_options_if_supported("-z,max-page-size=0x10000")
+
+  # On AArch64, some symbols are too far away from one another to allow for a
+  # single relative branch between them. To facilitate this, the linker should
+  # automatically insert stubs which act as stepping stones for relative
+  # branches. This fails in some cases, and so we force the linker to generate
+  # stubs to service every 32 MiB, which is sufficient for AArch64 b/bl
+  # instructions which have a range of +/- 128 MiB.
+  add_link_options_if_supported("--stub-group-size=0x2000000")
 endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -890,7 +899,7 @@ if(NOT IOS
   # CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed
   # the cmake compiler check for cross-compiling
   set(protoc_build_command
-      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1"
+      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1 -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
   )
   # We write to a temp scriptfile because CMake COMMAND dislikes double quotes
   # in commands
@@ -1492,6 +1501,8 @@ include(cmake/FileMirroring.cmake)
 # setup.py package_data; now consolidated here for both scikit-build-core
 # and setuptools builds.
 include(cmake/PackageData.cmake)
+
+include(cmake/PostBuildSteps.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
