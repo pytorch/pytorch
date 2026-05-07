@@ -67,7 +67,8 @@ def run(fn: Callable[_P, _R] | None = None) -> Any:
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
         fn = innermost_fn(fn)
-        assert callable(fn)
+        if not callable(fn):
+            raise AssertionError("fn must be callable")
         return RunOnlyContext()(fn)
     return RunOnlyContext()
 
@@ -87,14 +88,16 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
     if recursive:
         if fn is not None:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
             return DisableContext(msg=reason, wrapping=wrapping)(fn)
         return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
 
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
@@ -123,7 +126,8 @@ def skip(fn: Callable[_P, _R] | None = None) -> Callable[..., Any]:
     if fn is None:
         return skip
     fn = innermost_fn(fn)
-    assert callable(fn)
+    if not callable(fn):
+        raise AssertionError("fn must be callable")
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True  # type: ignore[attr-defined]
     return fn
@@ -189,7 +193,8 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
-    assert callable(fn), "allow_in_graph expects a callable"
+    if not callable(fn):
+        raise AssertionError("allow_in_graph expects a callable")
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         fn_id = id(fn)
         trace_rules._disallowed_callable_ids.remove(fn_id)
@@ -283,7 +288,8 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         >>> out.sum().backward()  # Gradients flow through traced_forward
 
     """
-    assert callable(traceable_fn), "nonstrict_trace expects a callable"
+    if not callable(traceable_fn):
+        raise AssertionError("nonstrict_trace expects a callable")
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
 
@@ -376,7 +382,8 @@ def _invoke_leaf_function_python(
         real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
     )
 
-    assert captured_out_spec[0] is not None
+    if captured_out_spec[0] is None:
+        raise AssertionError("captured_out_spec was not set by leaf function wrappers")
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
 
 
@@ -516,34 +523,33 @@ def leaf_function(
 
         **register_multi_grad_hook (optional)**:
         You can register a backward hook via ``@fn.register_multi_grad_hook``
-        to run code when gradients have been computed
-        for all requires_grad tensor inputs during backward. The hook fires exactly once
-        per backward pass. The hook function has the same signature as the leaf function;
-        each requires_grad tensor argument receives the corresponding gradient instead
-        of the original tensor. Non-tensor arguments and tensors without requires_grad
-        are passed through unchanged. The hook must return ``None``. The hook is called
-        as a leaf function itself, so it is also opaque to the compiler.
+        to run code when gradients have been computed for all requires_grad
+        tensor inputs during backward. The hook fires exactly once per
+        backward pass. The hook receives only the gradients of the leaf
+        function's requires_grad tensor inputs, in the order they appeared;
+        non-tensor arguments and tensors without ``requires_grad`` are not
+        forwarded to the hook. The hook must return ``None``. The hook is
+        called as a leaf function itself, so it is also opaque to the
+        compiler.
 
         Example::
 
             >>> @leaf_function
-            ... def debug_log(t, tag):
-            ...     print(f"[{tag}][fwd] norm={t.norm().item()}")
+            ... def debug_log(t):
             ...     return None
             ...
             >>> @debug_log.register_fake
-            ... def debug_log_fake(t, tag):
+            ... def debug_log_fake(t):
             ...     return None
             ...
             >>> @debug_log.register_multi_grad_hook
-            ... def debug_log_hook(t_grad, tag):
-            ...     print(f"[{tag}][bwd] norm={t_grad.norm().item()}")
+            ... def debug_log_hook(t_grad):
+            ...     print(f"[bwd] norm={t_grad.norm().item()}")
             ...
             >>> x = torch.randn(4, requires_grad=True)
-            >>> debug_log(x, "intermediate")  # no assignment needed
-            [intermediate][fwd] norm=...
+            >>> debug_log(x)  # no assignment needed
             >>> (x * 2).sum().backward()
-            [intermediate][bwd] norm=...
+            [bwd] norm=...
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
@@ -789,7 +795,8 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
     def inner(fn: Any) -> Any:
         if isinstance(fn, (list, tuple)):
             return [disallow_in_graph(x) for x in fn]
-        assert callable(fn), "disallow_in_graph expects a callable"
+        if not callable(fn):
+            raise AssertionError("disallow_in_graph expects a callable")
         if (
             throw_if_not_allowed
             and trace_rules.lookup_callable(fn)
@@ -862,7 +869,8 @@ def forbid_in_graph(fn: Any) -> Any:
     """
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
-    assert callable(fn), "forbid_in_graph applies only to callables"
+    if not callable(fn):
+        raise AssertionError("forbid_in_graph applies only to callables")
     # pyrefly: ignore [missing-attribute]
     fn._dynamo_forbidden = True
     return fn
@@ -1047,7 +1055,8 @@ def substitute_in_graph(
             else:
                 guard_type = GuardBuilder.ID_MATCH
             guards = self.install_guards(guard_type)
-            assert guards is not None
+            if guards is None:
+                raise AssertionError("install_guards returned None")
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
@@ -1075,10 +1084,12 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(
     func: Callable[..., Any], t: object, *args: Any, **kwargs: Any
 ) -> None:
-    assert is_traceable_wrapper_subclass(t)
+    if not is_traceable_wrapper_subclass(t):
+        raise AssertionError(f"Expected a traceable wrapper subclass, got {type(t)}")
 
     attrs, _ctx = t.__tensor_flatten__()
-    assert isinstance(t, torch.Tensor)
+    if not isinstance(t, torch.Tensor):
+        raise AssertionError(f"Expected a Tensor, got {type(t)}")
     for attr in attrs:
         match getattr(t, attr):
             case torch.Tensor() as inner:
@@ -1154,7 +1165,8 @@ def mark_unbacked(
     else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
-        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+        if is_traceable_wrapper_subclass(t):
+            raise AssertionError("not implemented yet")
 
     if isinstance(index, int):
         if strict:
@@ -1201,7 +1213,10 @@ def mark_unbacked(
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
 
@@ -1294,7 +1309,10 @@ def mark_dynamic(
 
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
@@ -1319,7 +1337,10 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         maybe_mark_dynamic(t, i)
 
@@ -1385,7 +1406,10 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
         for i in range(t.dim()):
             mark_static(t, i)
     else:
-        assert isinstance(index, (list, tuple))
+        if not isinstance(index, (list, tuple)):
+            raise AssertionError(
+                f"Expected index to be int, list, or tuple, got {type(index)}"
+            )
         for i in index:
             mark_static(t, i)
 
@@ -1522,7 +1546,8 @@ from . import config
 
 
 for name in _allowed_config_patches:
-    assert hasattr(config, name), "nonexistent config"
+    if not hasattr(config, name):
+        raise AssertionError(f"nonexistent config: {name}")
 del config
 
 
@@ -1774,3 +1799,52 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+def allow_c_hash(tp: type) -> type:
+    """Register a C extension type's ``__hash__`` as safe to call at trace time.
+
+    By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
+    on a C extension type with a custom ``tp_hash`` slot (e.g., types defined
+    in C extension modules).  This function tells Dynamo that the type's
+    ``__hash__`` is safe to evaluate during tracing, avoiding the graph break.
+
+    The hash function must satisfy these requirements:
+
+    - **Pure**: depends only on the object's value, with no observable side
+      effects (no I/O, no mutation of global state).
+    - **Deterministic**: returns the same result for the same object across
+      calls within a process.
+    - **Immutable objects**: the object's hash-relevant state must not change
+      after construction — if the object is mutated in a way that changes its
+      hash, Dynamo's cached hash value will be stale.
+
+    Builtin types (``int``, ``str``, etc.) and Python-level ``__hash__``
+    methods are already handled and do not need registration.  This API is
+    only needed for C extension types whose ``tp_hash`` slot Dynamo cannot
+    trace into.
+
+    Args:
+        tp: The C extension type whose ``__hash__`` should be allowed.
+
+    Returns:
+        The type, unchanged (so it can be used as a decorator).
+
+    Example::
+
+        import torch._dynamo
+        from my_extension import MyType
+
+        torch._dynamo.allow_c_hash(MyType)
+    """
+    from .variables.user_defined import _safe_c_tp_hash_funcs
+
+    if not isinstance(tp, type):
+        raise TypeError(f"allow_c_hash expects a type, got {type(tp).__name__}")
+    hash_fn = tp.__hash__
+    if hash_fn is object.__hash__:
+        raise ValueError(
+            f"{tp.__name__} uses the default object.__hash__ and does not need registration"
+        )
+    _safe_c_tp_hash_funcs().add(hash_fn)
+    return tp
