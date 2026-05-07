@@ -947,9 +947,6 @@ if torch.backends.mps.is_available():
             "cauchy": [torch.float16, torch.float32],
             "geometric": [torch.float16, torch.float32],
             "normal": [torch.float16, torch.float32],
-            # topk picks different positions than CPU when the new RNG produces
-            # ties; the values still match but the index gather diverges.
-            "topk": [torch.float16],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
@@ -989,6 +986,9 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
+            # topk index gather is flaky on fp16 - whether duplicates appear in
+            # the seeded sample input depends on prior test order's RNG draws.
+            "topk": [torch.float16],
             "nn.functional.pairwise_distance": [torch.float16],
             # failed assertion `destination datatype must be fp32'
             "nn.functional.conv1d": [torch.float16],
