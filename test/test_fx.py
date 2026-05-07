@@ -820,6 +820,22 @@ class TestFX(JitTestCase):
         restored_n = next(iter(restored_graph.nodes))
         self.assertEqual(restored_n.type, torch.Tensor)
 
+    def test_graph_pickle_find_nodes(self):
+        g = Graph()
+        x = g.placeholder("x")
+        y = g.placeholder("y")
+        add = g.call_function(operator.add, (x, y))
+        neg = g.call_function(operator.neg, (add,))
+        g.output(neg)
+
+        restored = pickle.loads(pickle.dumps(g))
+        self.assertEqual(len(restored.find_nodes(op="placeholder")), 2)
+        self.assertEqual(len(restored.find_nodes(op="call_function", target=operator.add)), 1)
+        self.assertEqual(len(restored.find_nodes(op="call_function", target=operator.neg)), 1)
+        self.assertEqual(len(restored.find_nodes(op="output")), 1)
+        node_names = [n.name for n in restored.nodes]
+        self.assertEqual(node_names, ["x", "y", "add", "neg", "output"])
+
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -5207,6 +5223,7 @@ class TestFunctionalTracing(JitTestCase):
         "unfold": PROXY_ITERATED,
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,
+        "apply_rotary_emb": CONTROL_FLOW,
         "batch_norm": CONTROL_FLOW,
         "binary_cross_entropy": CONTROL_FLOW,
         "binary_cross_entropy_with_logits": CONTROL_FLOW,
@@ -5248,6 +5265,7 @@ class TestFunctionalTracing(JitTestCase):
         "poisson_nll_loss": CONTROL_FLOW,
         "relu": CONTROL_FLOW,
         "relu6": CONTROL_FLOW,
+        "rotate_half": CONTROL_FLOW,
         "rrelu": CONTROL_FLOW,
         "selu": CONTROL_FLOW,
         "silu": CONTROL_FLOW,
