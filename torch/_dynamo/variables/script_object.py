@@ -328,6 +328,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     __repr__ = __str__
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )

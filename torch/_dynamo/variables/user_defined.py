@@ -3001,7 +3001,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in_allowlist = method in _safe_c_slots()
             except TypeError:
                 pass
-            if cls.__module__ == "builtins" or in_allowlist:
+            if (
+                cls.__module__ == "builtins"
+                or in_allowlist
+                or is_pybind11_enum_member(self.value)
+            ):
                 other_val = _get_underlying_value(other)
                 if other_val is not _SENTINEL:
                     try:
@@ -3595,9 +3599,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def richcompare_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, op: str
     ) -> VariableTracker:
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("expected _base_vt to be set")
         if isinstance(other, UserDefinedDictVariable):
-            assert other._base_vt is not None
+            if other._base_vt is None:
+                raise AssertionError("expected other._base_vt to be set")
             other = other._base_vt
         return self._base_vt.richcompare_impl(tx, other, op)
 
@@ -4089,7 +4095,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             return VariableTracker.build(tx, not self.is_python_equal(other))
         # Ordering comparisons — delegate to base SetVariable which handles
         # subset/superset via set_richcompare.
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("expected _base_vt to be set")
         return self._base_vt.richcompare_impl(tx, other, op)
 
     def as_python_constant(self) -> object:
@@ -4231,9 +4238,11 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
                 result = not result
             return VariableTracker.build(tx, result)
         # Ordering: delegate to base TupleVariable, unwrapping other if needed.
-        assert self._base_vt is not None
+        if self._base_vt is None:
+            raise AssertionError("expected _base_vt to be set")
         if isinstance(other, UserDefinedTupleVariable):
-            assert other._base_vt is not None
+            if other._base_vt is None:
+                raise AssertionError("expected other._base_vt to be set")
             other = other._base_vt
         return self._base_vt.richcompare_impl(tx, other, op)
 

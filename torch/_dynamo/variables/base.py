@@ -813,7 +813,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name in _RICHCOMPARE_OPS and len(args) == 1 and not kwargs:
+        elif name in _RICHCOMPARE_OPS and not kwargs:
+            if len(args) != 1:
+                from ..exc import raise_observed_exception
+
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
             # a.__eq__(b) calls the type's tp_richcompare directly, without
             # do_richcompare's reflected-operand protocol.  This matches
             # CPython where a.__eq__(b) can return NotImplemented.
