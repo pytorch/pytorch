@@ -25,9 +25,6 @@ class ComplexTensor(Tensor):
         real: Tensor,
         imag: Tensor,
         /,
-        *,
-        neg_flag: bool = False,
-        conj_flag: bool = False,
     ) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
         from ._ops.common import REAL_TO_COMPLEX
@@ -43,26 +40,10 @@ class ComplexTensor(Tensor):
         # 2. `x.imag.is_neg() := (x.is_conj() != x.is_neg())`
         #
         # Or, in words:
-        # 1. The conjugate flag doesn't affect the real part
-        # 2. The conjugate flag affects the imaginary part
-        # 3. The negative flag affects both the real and imaginary parts
-        #
-        # So, in order to flip the sign of just the real part, we need to flip the
-        # negative flag and the conjugate flag, in order to not affect the imaginary part.
-        #
-        # Flipping the sign of the imaginary part equates to flipping the conjugate flag.
-        #
-        # The internal tensors `self._re` and `self._im` store the raw data.
-        # The programmer-visible tensors `self.re` and `self.im` are views into `self._re` and `self._im`,
-        # with the negative flag and conjugate flag applied to them.
-        if real.is_neg():
-            neg_flag = not neg_flag
-            conj_flag = not conj_flag
-            real = torch._neg_view(real)
-
-        if imag.is_neg():
-            conj_flag = not conj_flag
-            imag = torch._neg_view(imag)
+        # 1. The negative flag affects both the real and imaginary parts
+        # 2. The conjugate flag affects the only the imaginary part
+        neg_flag = real.is_neg()
+        conj_flag = neg_flag != imag.is_neg()
 
         # TODO (hameerabbasi):
         # What should we do with dtype?
@@ -128,20 +109,12 @@ class ComplexTensor(Tensor):
     @property
     def re(self) -> Tensor:
         # See "NOTE conj/neg (hameerabbasi)"
-        negate = self.is_neg()
-        real = self._re
-        if negate:
-            real = torch._neg_view(real)
-        return real
+        return self._re
 
     @property
     def im(self) -> Tensor:
         # See "NOTE conj/neg (hameerabbasi)"
-        negate = self.is_neg() != self.is_conj()
-        imag = self._im
-        if negate:
-            imag = torch._neg_view(imag)
-        return imag
+        return self._im
 
     @property
     def real(self) -> Tensor:  # type: ignore[bad-override]
@@ -195,15 +168,13 @@ class ComplexTensor(Tensor):
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
         re, im = inner_tensors["_re"], inner_tensors["_im"]
-        return ComplexTensor(
-            re, im, neg_flag=meta["neg_flag"], conj_flag=meta["conj_flag"]
-        )
+        return ComplexTensor(re, im)
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_re", "_im"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
+        return ["_re", "_im"], None
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor({self._re!r}, {self._im!r}, conj_flag={self.is_conj()!r}, neg_flag={self.is_neg()!r})"
+        return f"ComplexTensor({self._re!r}, {self._im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
         return self._re.is_pinned(device)

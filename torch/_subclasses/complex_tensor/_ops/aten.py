@@ -733,15 +733,7 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
             " tensor so you can view it as real, use self.resolve_conj(); however, be warned that "
             "the resulting tensor will NOT alias the original."
         )
-    warnings.warn(
-        "`view_as_real` doesn't respect aliasing semantics under `torch.compile`.",
-        category=RuntimeWarning,
-        stacklevel=3,
-    )
-    out = torch.stack([self._re, self._im], dim=-1)
-    if self.is_neg():
-        out = torch._neg_view(out)
-    return out
+    return torch.stack([self.re, self.im], dim=-1)
 
 
 @register_complex(aten.linalg_vector_norm)
@@ -816,10 +808,8 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(
-        aten.alias(self._re),
-        aten.alias(self._im),
-        neg_flag=self.is_neg(),
-        conj_flag=not self.is_conj(),
+        aten.alias(self.re),
+        aten._neg_view(self.im),
     )
 
 
@@ -827,27 +817,21 @@ def _conj_impl(self: ComplexTensor) -> ComplexTensor:
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(
-        aten.alias(self._re),
-        aten.alias(self._im),
-        neg_flag=not self.is_neg(),
-        conj_flag=self.is_conj(),
+        aten._neg_view(self.re),
+        aten._neg_view(self.im),
     )
 
 
 @register_complex(aten.resolve_conj)
 def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    if not self.is_conj():
-        return self
-    return ComplexTensor(aten.alias(self._re), -self._im, neg_flag=self.is_neg())
+    return ComplexTensor(aten.resolve_neg(self.re), aten.resolve_neg(self.im))
 
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    if not self.is_neg():
-        return self
-    return ComplexTensor(-self._re, -self._im, conj_flag=self.is_conj())
+    return ComplexTensor(aten.resolve_neg(self.re), aten.resolve_neg(self.im))
 
 
 @register_complex(aten.index_add)
