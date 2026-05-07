@@ -9,8 +9,6 @@ from pathlib import Path
 
 from packaging.version import Version
 
-from tools.strtobool import strtobool
-
 
 UNKNOWN = "Unknown"
 RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
@@ -113,6 +111,11 @@ def get_torch_version(sha: str | None = None) -> str:
 
 
 if __name__ == "__main__":
+    # Imported here so library users that load this file outside the tools
+    # package (e.g. via importlib.util.spec_from_file_location) do not need
+    # the project root on sys.path just to call get_torch_version().
+    from tools.strtobool import strtobool
+
     parser = argparse.ArgumentParser(
         description="Generate torch/version.py from build and environment metadata."
     )

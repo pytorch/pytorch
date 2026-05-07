@@ -12,8 +12,6 @@ from typing import Any
 
 import requests
 
-from tools.strtobool import strtobool
-
 
 ALL_SKIPPED_THRESHOLD = 100
 SIMILARITY_THRESHOLD = 0.75
@@ -278,6 +276,10 @@ def get_recurrently_failing_jobs_alerts(
 
 
 def parse_args() -> argparse.Namespace:
+    # Imported here so library users that pull in filter_job_names / JobStatus
+    # do not pay for the strtobool import path.
+    from tools.strtobool import strtobool
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--repo",
