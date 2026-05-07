@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 """Common utilities and functions for flex attention kernels"""
 
+import importlib.resources
 import math
 from collections.abc import Sequence
 from functools import partial
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -357,7 +357,7 @@ def next_power_of_two(n):
     return 2 ** math.ceil(math.log2(n))
 
 
-_FLEX_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_FLEX_TEMPLATE_DIR = importlib.resources.files("torch._inductor.kernel.flex") / "templates"
 load_flex_template = partial(load_template, template_dir=_FLEX_TEMPLATE_DIR)
 
 

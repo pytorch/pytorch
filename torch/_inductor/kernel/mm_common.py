@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
+import importlib.resources
 import logging
 from collections.abc import Sequence
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -259,8 +259,8 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     return True
 
 
-_KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_KERNEL_TEMPLATE_DIR = importlib.resources.files("torch._inductor.kernel") / "templates"
 load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
 
-_KERNEL_TEMPLATE_FB_DIR = Path(__file__).parent.parent / "fb" / "tlx_templates"
+_KERNEL_TEMPLATE_FB_DIR = importlib.resources.files("torch._inductor.fb") / "tlx_templates"
 load_fb_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_FB_DIR)

@@ -26,6 +26,7 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import importlib.resources
 import json
 import logging
 import re
@@ -33,12 +34,10 @@ import textwrap
 import typing
 from enum import auto, Enum
 from functools import lru_cache
-from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch._guards
-from torch._utils_internal import get_file_path_2
 
 from . import config
 from .utils import counters
@@ -580,12 +579,12 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
     Includes historical gb_type (mapping behavior of duplicate gb_types with different gb_ids is undefined).
     """
     try:
-        script_dir = Path(__file__).resolve().parent
-        registry_path = get_file_path_2(
-            "", str(script_dir), "graph_break_registry.json"
+        registry_ref = (
+            importlib.resources.files("torch._dynamo") / "graph_break_registry.json"
         )
-        with open(registry_path) as f:
-            registry = json.load(f)
+        with importlib.resources.as_file(registry_ref) as registry_path:
+            with open(registry_path) as f:
+                registry = json.load(f)
     except Exception:
         log.exception("Error accessing the registry file")
         # pyrefly: ignore [implicit-any]

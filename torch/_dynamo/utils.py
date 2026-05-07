@@ -24,7 +24,7 @@ import dis
 import enum
 import functools
 import gc
-import importlib
+import importlib.resources
 import inspect
 import itertools
 import json
@@ -4230,9 +4230,12 @@ def import_submodule(mod: types.ModuleType) -> None:
     """
     Ensure all the files in a given submodule are imported
     """
-    for filename in sorted(os.listdir(os.path.dirname(cast(str, mod.__file__)))):
-        if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+    for item in sorted(
+        importlib.resources.files(mod.__name__).iterdir(),
+        key=lambda x: x.name,
+    ):
+        if item.name.endswith(".py") and item.name[0] != "_":
+            importlib.import_module(f"{mod.__name__}.{item.name[:-3]}")
 
 
 def object_has_getattribute(value: Any) -> bool:
