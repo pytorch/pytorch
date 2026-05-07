@@ -8,6 +8,9 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 # simple example of user code that takes the base class ControlCollectives
 # and executes multiple different collectives
 def simple_user_func(collectives: dist._ControlCollectives, rank: int) -> int:
@@ -207,9 +210,10 @@ class TestCollectives(TestCase):
 
 
 if __name__ == "__main__":
-    if torch.cuda._initialized:
+    mod = torch.get_device_module(device_type)
+    if (device_type == "xpu" or device_type == "cuda") and mod._initialized:
         raise AssertionError(
-            "test_distributed must not have initialized CUDA context on main process"
+            "test_distributed must not have initialized accelerator context on main process"
         )
 
     run_tests()

@@ -15,6 +15,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -24,6 +25,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -137,7 +141,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @parametrize("device", ["cpu", device_type])
     @skip_if_lt_x_gpu(4)
     def test_check_rng_sync(
         self,
@@ -145,6 +150,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
     ) -> None:
         if device == "cuda" and not torch.cuda.is_available():
             self.skipTest("Cuda is not available")
+        if device == "xpu" and not torch.xpu.is_available():
+            self.skipTest("XPU is not available")
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size

@@ -32,6 +32,11 @@ class TestMiscCollectiveUtils(TestCase):
                 raise AssertionError(
                     f"Expected hccl, got {dist.get_default_backend_for_device(device)}"
                 )
+        elif "xpu" in device:
+            if dist.get_default_backend_for_device(device) != "xccl":
+                raise AssertionError(
+                    f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
+                )
         else:
             with self.assertRaises(ValueError):
                 dist.get_default_backend_for_device(device)
@@ -54,8 +59,10 @@ class TestMiscCollectiveUtils(TestCase):
         dist.destroy_process_group()
 
 
-devices = ["cpu", "cuda", "hpu"]
-instantiate_device_type_tests(TestMiscCollectiveUtils, globals(), only_for=devices)
+devices = ["cpu", "cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    TestMiscCollectiveUtils, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
