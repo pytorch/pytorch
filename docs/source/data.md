@@ -543,6 +543,27 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
+.. py:module:: torch.utils.data.datapipes.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.decoder
+
+.. autofunction:: basichandlers
+
+.. autofunction:: handle_extension
+```
+
+```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.utils.common
+
+.. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autofunction:: validate_input_col
+
+```
+
+```{eval-rst}
 .. automodule:: torch.utils.data.datapipes.iter.streamreader
 
 .. currentmodule:: torch.utils.data.datapipes.iter.streamreader
@@ -555,27 +576,11 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. automodule:: torch.utils.data.datapipes.utils.common
-
 .. currentmodule:: torch.utils.data.datapipes.utils.common
-
-.. autofunction:: validate_input_col
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     StreamWrapper
-```
-
-```{eval-rst}
-.. py:module:: torch.utils.data.datapipes.utils
-```
-
-```{eval-rst}
-.. currentmodule:: torch.utils.data.datapipes.utils.decoder
-
-.. autofunction:: basichandlers
-
-.. autofunction:: handle_extension
 ```
