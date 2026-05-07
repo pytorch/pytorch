@@ -2264,6 +2264,13 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
+    *,
+    # When set, replaces the default partitioner (`config.custom_partitioner_fn`
+    # or `min_cut_rematerialization_partition`) while still running Inductor's
+    # joint-graph passes first. Used by `_get_partition_fn` so HOP subgraphs
+    # go through the same joint-pass + raw-partitioner pipeline as the outer
+    # Inductor compile.
+    partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2281,6 +2288,14 @@ def partition_fn(
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
     )
+
+    if partitioner_fn_override is not None:
+        return partitioner_fn_override(
+            gm,
+            joint_inputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
 
     if config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(

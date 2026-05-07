@@ -12,6 +12,11 @@
 
 #define PREFILL_CONST static constant constexpr const
 #define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
+#if __METAL_VERSION__ >= 400
+#define IF_CONSTEXPR constexpr
+#else
+#define IF_CONSTEXPR
+#endif
 
 template <typename T>
 struct pointer_element {};
@@ -606,7 +611,7 @@ prefill_attention(
   O += batch_idx * params->O_strides[0] + head_idx * params->O_strides[1] +
       (block_idx * BQ) * params->O_strides[2];
 
-  if constexpr (has_mask) {
+  if IF_CONSTEXPR (has_mask) {
     mask += batch_idx * mask_params->M_strides[0] +
         head_idx * mask_params->M_strides[1];
   }
@@ -715,7 +720,7 @@ prefill_attention(
   // vs kL. So the last query in this block (row block_idx*BQ + q_block_size-1)
   // attends to cols 0..(block_idx*BQ + q_block_size - 1).
   int kb_lim = c10::metal::ceil_div(k_seq_len, BK);
-  if constexpr (do_causal) {
+  if IF_CONSTEXPR (do_causal) {
     int max_col = block_idx * BQ + q_block_size; // exclusive upper bound
     kb_lim = min(kb_lim, c10::metal::ceil_div(max_col, BK));
   }
@@ -753,7 +758,6 @@ prefill_attention(
     // Mask out partial K block.
     if (k_block_size < BK) {
       using stile_t = decltype(Stile);
-      using selem_t = typename stile_t::elem_type;
       constexpr auto neg_inf = -INFINITY;
 
       PREFILL_PRAGMA_UNROLL
@@ -772,9 +776,8 @@ prefill_attention(
     }
 
     // Causal mask (PyTorch upper-left convention: row r sees cols 0..r).
-    if constexpr (do_causal) {
+    if IF_CONSTEXPR (do_causal) {
       using stile_t = decltype(Stile);
-      using selem_t = typename stile_t::elem_type;
       constexpr auto neg_inf = -INFINITY;
 
       PREFILL_PRAGMA_UNROLL
@@ -794,7 +797,7 @@ prefill_attention(
     }
 
     // Optional additive / boolean mask.
-    if constexpr (has_mask) {
+    if IF_CONSTEXPR (has_mask) {
       using stile_t = decltype(Stile);
       using selem_t = typename stile_t::elem_type;
       constexpr auto neg_inf = -INFINITY;
@@ -827,7 +830,7 @@ prefill_attention(
 
           PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
-            if constexpr (is_bool) {
+            if IF_CONSTEXPR (is_bool) {
               Stile.frag_at(i, j)[jj] =
                   mfrag[jj] ? Stile.frag_at(i, j)[jj] : neg_inf;
             } else {
@@ -909,7 +912,7 @@ prefill_attention(
       for (short id = 0; id < TD; id++) {
         PREFILL_PRAGMA_UNROLL
         for (short ik = 0; ik < TK; ik++) {
-          if constexpr (BD == 128) {
+          if IF_CONSTEXPR (BD == 128) {
             simdgroup_barrier(mem_flags::mem_none);
           }
 
@@ -919,7 +922,7 @@ prefill_attention(
           Vtile.template load<T, 1, 1, LDV_tgp, 1>(
               &Vs[Vs_offset + kk * LDV_tgp + dd]);
 
-          if constexpr (BD == 128) {
+          if IF_CONSTEXPR (BD == 128) {
             simdgroup_barrier(mem_flags::mem_none);
           }
 
