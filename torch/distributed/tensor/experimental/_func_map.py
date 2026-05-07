@@ -49,24 +49,26 @@ def _placements_to_spmd_type(
         axis = spmd.MeshAxis.of(device_mesh.get_group(dim_idx))
         grad_p = grad_placements[dim_idx] if grad_placements is not None else None
 
-        if isinstance(placement, Shard):
+        if type(placement) is Shard:
             fwd_type = spmd.V
-        elif isinstance(placement, Replicate):
-            fwd_type = spmd.I if isinstance(grad_p, Replicate) else spmd.R
-        elif isinstance(placement, Partial):
+        elif type(placement) is Replicate:
+            fwd_type = spmd.I if type(grad_p) is Replicate else spmd.R
+        elif type(placement) is Partial:
             fwd_type = spmd.P
         else:
-            raise ValueError(f"Unsupported placement type: {placement}")
+            raise ValueError(
+                f"local_map(spmd_types=True) does not support placement type "
+                f"{type(placement).__name__}: {placement}"
+            )
 
         if grad_p is not None and not _spmd_type_compatible_with_placement(
             fwd_type.backward_type(),  # pyrefly: ignore [missing-attribute]
             grad_p,
         ):
-            bwd = fwd_type.backward_type()  # pyrefly: ignore [missing-attribute]
             raise ValueError(
                 f"in_grad_placements={grad_p} is incompatible with "
-                f"in_placements={placement}: backward requires {bwd.name}, "
-                f"which is not compatible with {grad_p}"
+                f"in_placements={placement}. Valid grad placements for "
+                f"{placement}: {_valid_grad_placements(placement)}"
             )
 
         result[axis] = fwd_type
@@ -79,9 +81,12 @@ def _annotate_spmd_types(
     in_grad_placements: InputPlacements,
     device_mesh: DeviceMesh,
 ) -> None:
-    """Annotate unwrapped local tensors with spmd_types inferred from placements."""
+    """Annotate unwrapped local tensors with spmd_types inferred from placements.
+
+    Assumes local_map has already validated in_placements and unwrapped DTensors.
+    """
     for idx, local_arg in enumerate(flat_local_args):
-        if not isinstance(local_arg, torch.Tensor) or isinstance(local_arg, DTensor):
+        if not isinstance(local_arg, torch.Tensor):
             continue
         if in_placements is None or in_placements[idx] is None:
             continue
@@ -94,13 +99,25 @@ def _annotate_spmd_types(
         spmd.assert_type(local_arg, spmd_type)
 
 
+def _valid_grad_placements(placement: Placement) -> str:
+    if type(placement) is Shard:
+        return "Shard"
+    elif type(placement) is Replicate:
+        return "Partial or Replicate"
+    elif type(placement) is Partial:
+        return "Replicate"
+    raise ValueError(
+        f"local_map(spmd_types=True) does not support placement type {type(placement).__name__}"
+    )
+
+
 def _spmd_type_compatible_with_placement(local_type, placement: Placement) -> bool:
     """Check if an inferred local SPMD type is compatible with a DTensor placement."""
     if local_type == spmd.V:
         # V maps to Shard in DTensor. Also compatible with Partial, because
         # spmd_types infers V for ops like mm(S(1), S(0)) that DTensor knows
         # produce a Partial result.
-        return isinstance(placement, (Shard, Partial))
+        return type(placement) in (Shard, Partial)
     actual_placement = spmd.spmd_type_to_dtensor_placement(local_type)
     return type(actual_placement) is type(placement)
 
@@ -139,7 +156,7 @@ def _enforce_output_spmd_types(
                 raise ValueError(
                     f"Output tensor placement mismatch on {axis}: "
                     f"out_placements={placement} but spmd_types inferred "
-                    f"{actual.name}"
+                    f"spmd.{actual.name}"
                 )
 
 
@@ -176,6 +193,19 @@ class _GradPlacementEnforce(torch.autograd.Function):
         return grad, None, None
 
 
+def _fwd_to_bwd_placement(p: Placement) -> Placement:
+    """Shard stays Shard, Replicate becomes Partial, Partial becomes Replicate."""
+    if type(p) is Shard:
+        return p
+    elif type(p) is Replicate:
+        return Partial()
+    elif type(p) is Partial:
+        return Replicate()
+    raise ValueError(
+        f"local_map(spmd_types=True) does not support placement type {type(p).__name__}"
+    )
+
+
 def _enforce_grad_out_spmd_types(
     flat_dist_out: list[DTensor],
     out_placements_tuple: tuple[PlacementType, ...],
@@ -185,14 +215,7 @@ def _enforce_grad_out_spmd_types(
     result = []
     for dt_out, spec in zip(flat_dist_out, out_placements_tuple):
         if isinstance(dt_out, DTensor) and spec is not None and dt_out.requires_grad:
-            target = tuple(
-                Partial()
-                if isinstance(p, Replicate)
-                else Replicate()
-                if isinstance(p, Partial)
-                else p  # Shard stays Shard
-                for p in spec  # pyrefly: ignore
-            )
+            target = tuple(_fwd_to_bwd_placement(p) for p in spec)  # pyrefly: ignore
             dt_out = _GradPlacementEnforce.apply(dt_out, device_mesh, target)
         result.append(dt_out)
     return result
@@ -442,15 +465,13 @@ def _local_map_wrapped(
         _annotate_spmd_types(
             flat_local_args, in_placements, in_grad_placements, device_mesh
         )
-        from spmd_types._checker import typecheck  # pyrefly: ignore[missing-import]
-
         mesh_axes = frozenset(
             spmd.MeshAxis.of(device_mesh.get_group(name))
             for name in device_mesh.mesh_dim_names  # pyrefly: ignore
         )
         with (
             spmd.set_current_mesh(mesh_axes),
-            typecheck(strict_mode="strict"),
+            spmd._checker.typecheck(strict_mode="strict"),
         ):
             out = func(*local_args, **kwargs)
     else:
