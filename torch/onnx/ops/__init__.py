@@ -4,7 +4,6 @@ This module provides a set of functions to create ONNX operators in the FX graph
 which are exportable to ONNX.
 """
 
-# flake8: noqa: B950
 from __future__ import annotations
 
 
