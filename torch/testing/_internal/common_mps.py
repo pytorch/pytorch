@@ -572,12 +572,7 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "scatter_reduceamax": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reduceamin": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
+            # scatter_reduceamax and scatter_reduceamin: int32/int64 fixed by Metal kernels (PR #182249)
             "scatter_reducemean": [torch.bool],
             "segment_reduce": None,
             "_segment.reduce": None,

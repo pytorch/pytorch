@@ -266,6 +266,43 @@ struct AtomicType<long> {
     high += (old_low + low < old_low) ? 1 : 0;
     atomic_fetch_add_explicit(ptr + 1, high, ::metal::memory_order_relaxed);
   }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      long value,
+      long (*op)(long, long)) {
+    auto ptr = data + (offset << 1);
+    while (true) {
+      uint old_low =
+          ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
+      uint old_high =
+          ::metal::atomic_load_explicit(ptr + 1, ::metal::memory_order_relaxed);
+      long old_val =
+          static_cast<long>(ulong(old_low) | (ulong(old_high) << 32));
+      long new_val = op(old_val, value);
+      if (new_val == old_val)
+        return;
+      auto new_bits = as_type<ulong>(new_val);
+      uint new_low = static_cast<uint>(new_bits);
+      uint new_high = static_cast<uint>(new_bits >> 32);
+      if (!::metal::atomic_compare_exchange_weak_explicit(
+              ptr,
+              &old_low,
+              new_low,
+              ::metal::memory_order_relaxed,
+              ::metal::memory_order_relaxed))
+        continue;
+      if (::metal::atomic_compare_exchange_weak_explicit(
+              ptr + 1,
+              &old_high,
+              new_high,
+              ::metal::memory_order_relaxed,
+              ::metal::memory_order_relaxed))
+        return;
+      ::metal::atomic_store_explicit(
+          ptr, old_low, ::metal::memory_order_relaxed);
+    }
+  }
 };
 
 // ComplexFloat atomic op, which again is not really atomic, but eventually

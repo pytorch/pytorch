@@ -7713,6 +7713,275 @@ class TestMPS(TestCaseMPS):
             helper((4, 5, 9, 8), 2, (3, 4, 10, 6), (3, 4, 10, 6), reduce_str=reduce_type)
             helper((4, 5, 9, 8), 2, (3, 3, 7, 5), (3, 4, 10, 6), reduce_str=reduce_type)
 
+    # ── Metal scatter/gather kernel tests ─────────────────────────────────
+
+    def test_scatter_reduce_two_metal(self):
+        """Test scatter_reduce (two) API with all reduce modes including mean."""
+        def helper(shape, dim, idx_shape, src_shape, reduce_str, dtype=torch.float32, include_self=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.clone().to('mps')
+
+            cpu_src = torch.randn(src_shape, device='cpu', dtype=dtype)
+            src = cpu_src.clone().to('mps')
+
+            idx_np = np.random.randint(0, shape[dim], idx_shape)
+            cpu_idx = torch.tensor(idx_np, device='cpu', dtype=torch.int64)
+            idx = cpu_idx.to('mps')
+
+            result_cpu = cpu_x.scatter_reduce(dim, cpu_idx, cpu_src, reduce=reduce_str, include_self=include_self)
+            result_mps = x.scatter_reduce(dim, idx, src, reduce=reduce_str, include_self=include_self)
+
+            self.assertEqual(result_mps, result_cpu, atol=1e-5, rtol=1e-4)
+
+        for reduce in ["sum", "prod", "amax", "amin", "mean"]:
+            helper((8, 8), 0, (4, 8), (4, 8), reduce)
+            helper((8, 8, 4), 1, (8, 12, 4), (8, 12, 4), reduce)
+            helper((16, 32), 0, (8, 32), (8, 32), reduce)
+
+        # include_self=False
+        for reduce in ["sum", "prod", "amax", "amin", "mean"]:
+            helper((8, 8), 0, (4, 8), (4, 8), reduce, include_self=False)
+
+    def test_scatter_add_dtypes_metal(self):
+        """Test scatter_add across fp32, fp16, bf16."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            cpu_x = torch.zeros(64, 32, device='cpu', dtype=dtype)
+            x = cpu_x.clone().to('mps')
+
+            cpu_src = torch.randn(128, 32, device='cpu', dtype=dtype)
+            src = cpu_src.clone().to('mps')
+
+            idx = torch.randint(0, 64, (128, 32), dtype=torch.int64)
+            cpu_idx = idx.clone()
+            mps_idx = idx.to('mps')
+
+            result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+            result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+            atol = 2e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-5
+            rtol = 2e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+            self.assertEqual(result_mps, result_cpu, atol=atol, rtol=rtol)
+
+    def test_scatter_int_index_metal(self):
+        """Test scatter with int32 index tensors."""
+        cpu_x = torch.zeros(32, 16, device='cpu', dtype=torch.float32)
+        x = cpu_x.clone().to('mps')
+
+        cpu_src = torch.randn(64, 16, device='cpu', dtype=torch.float32)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.randint(0, 32, (64, 16), dtype=torch.int32)
+        cpu_idx = idx.long()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_variable_shapes_metal(self):
+        """Test scatter_add with many different first-dim sizes (cache swell test)."""
+        D = 64
+        for N in [17, 33, 100, 255, 500, 1024, 4096]:
+            cpu_x = torch.zeros(N, D, device='cpu', dtype=torch.float32)
+            x = cpu_x.clone().to('mps')
+
+            cpu_src = torch.randn(N * 2, D, device='cpu', dtype=torch.float32)
+            src = cpu_src.clone().to('mps')
+
+            idx = torch.randint(0, N, (N * 2, D), dtype=torch.int64)
+            cpu_idx = idx.clone()
+            mps_idx = idx.to('mps')
+
+            result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+            result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+            self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_set_metal(self):
+        """Test scatter with set mode (no reduction)."""
+        cpu_x = torch.zeros(8, 4, device='cpu', dtype=torch.float32)
+        x = cpu_x.clone().to('mps')
+
+        cpu_src = torch.arange(20, device='cpu', dtype=torch.float32).reshape(5, 4)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4], [2, 3, 4, 5],
+                            [3, 4, 5, 6], [4, 5, 6, 7]], dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = cpu_x.scatter(0, cpu_idx, cpu_src)
+        result_mps = x.scatter(0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_value_metal(self):
+        """Test scatter with scalar value source."""
+        cpu_x = torch.zeros(8, 4, device='cpu', dtype=torch.float32)
+        x = cpu_x.clone().to('mps')
+
+        idx = torch.tensor([[0, 1, 2, 3], [4, 5, 6, 7]], dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = cpu_x.scatter(0, cpu_idx, 1.5)
+        result_mps = x.scatter(0, mps_idx, 1.5)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_strided_metal(self):
+        """Test scatter on non-contiguous (strided) tensors."""
+        cpu_base = torch.randn(16, 8, device='cpu', dtype=torch.float32)
+        cpu_x = cpu_base[:, ::2]  # stride (8, 2)
+        x = cpu_base.clone().to('mps')[:, ::2]
+
+        cpu_src = torch.randn(8, 4, device='cpu', dtype=torch.float32)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.randint(0, 16, (8, 4), dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_empty_index_metal(self):
+        """Test scatter with empty index (should be a no-op)."""
+        cpu_x = torch.randn(8, 4, device='cpu', dtype=torch.float32)
+        x = cpu_x.clone().to('mps')
+
+        cpu_src = torch.randn(0, 4, device='cpu', dtype=torch.float32)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.empty(0, 4, dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_gather_dtypes_metal(self):
+        """Test gather across multiple dtypes."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            cpu_x = torch.randn(32, 64, device='cpu', dtype=dtype)
+            x = cpu_x.clone().to('mps')
+
+            idx = torch.randint(0, 32, (16, 64), dtype=torch.int64)
+            cpu_idx = idx.clone()
+            mps_idx = idx.to('mps')
+
+            result_cpu = torch.gather(cpu_x, 0, cpu_idx)
+            result_mps = torch.gather(x, 0, mps_idx)
+
+            self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_add_backward_metal(self):
+        """Test that gradients flow correctly through scatter_add."""
+        cpu_x = torch.randn(8, 4, device='cpu', dtype=torch.float32, requires_grad=True)
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+        cpu_src = torch.randn(12, 4, device='cpu', dtype=torch.float32, requires_grad=True)
+        src = cpu_src.detach().clone().to('mps').requires_grad_()
+
+        idx = torch.randint(0, 8, (12, 4), dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        grad = torch.randn(8, 4, device='cpu', dtype=torch.float32)
+        mps_grad = grad.to('mps')
+
+        result_cpu.backward(gradient=grad)
+        result_mps.backward(gradient=mps_grad)
+
+        self.assertEqual(result_mps, result_cpu)
+        self.assertEqual(x.grad, cpu_x.grad)
+        self.assertEqual(src.grad, cpu_src.grad)
+
+    def test_scatter_reduce_int_tensor_metal(self):
+        """Test scatter_add with integer tensors."""
+        cpu_x = torch.zeros(16, 8, device='cpu', dtype=torch.int32)
+        x = cpu_x.clone().to('mps')
+
+        cpu_src = torch.randint(1, 10, (32, 8), device='cpu', dtype=torch.int32)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.randint(0, 16, (32, 8), dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
+    def test_scatter_long_full_metal(self):
+        """Test all scatter ops with torch.int64 (exercises atomic_binary_op<long>)."""
+        N, D = 32, 16
+        cpu_x_base = torch.zeros(N, D, dtype=torch.long, device="cpu")
+        cpu_src = torch.randint(1, 10, (N * 2, D), dtype=torch.long, device="cpu")
+        idx = torch.randint(0, N, (N * 2, D), dtype=torch.int64)
+
+        # scatter_set (use unique indices since set with duplicates is non-deterministic on GPU)
+        idx_unique = torch.arange(N, dtype=torch.int64).unsqueeze(1).expand(N, D)
+        src_set = cpu_src[:N]
+        r = cpu_x_base.clone().to("mps").scatter(0, idx_unique.to("mps"), src_set.to("mps"))
+        e = cpu_x_base.clone().scatter(0, idx_unique, src_set)
+        self.assertEqual(r, e)
+
+        # scatter_add
+        r = cpu_x_base.clone().to("mps").scatter_add(0, idx.to("mps"), cpu_src.to("mps"))
+        e = cpu_x_base.clone().scatter_add(0, idx, cpu_src)
+        self.assertEqual(r, e)
+
+        # scatter_reduce prod
+        ones = torch.ones(N, D, dtype=torch.long, device="cpu")
+        r = ones.clone().to("mps").scatter_reduce(0, idx.to("mps"), cpu_src.to("mps"), reduce="prod")
+        e = ones.clone().scatter_reduce(0, idx, cpu_src, reduce="prod")
+        self.assertEqual(r, e)
+
+        # scatter_reduce amax
+        r = cpu_x_base.clone().to("mps").scatter_reduce(0, idx.to("mps"), cpu_src.to("mps"), reduce="amax")
+        e = cpu_x_base.clone().scatter_reduce(0, idx, cpu_src, reduce="amax")
+        self.assertEqual(r, e)
+
+        # scatter_reduce amin
+        big = torch.full((N, D), 1000, dtype=torch.long, device="cpu")
+        r = big.clone().to("mps").scatter_reduce(0, idx.to("mps"), cpu_src.to("mps"), reduce="amin")
+        e = big.clone().scatter_reduce(0, idx, cpu_src, reduce="amin")
+        self.assertEqual(r, e)
+
+        # gather
+        x = torch.arange(N * D, dtype=torch.long, device="mps").reshape(N, D)
+        idx_g = torch.randint(0, N, (N, D), dtype=torch.int64)
+        r = torch.gather(x, 0, idx_g.to("mps"))
+        e = torch.gather(x.cpu(), 0, idx_g)
+        self.assertEqual(r, e)
+
+    def test_scatter_high_dim_metal(self):
+        """Test scatter on 5D tensor."""
+        cpu_x = torch.zeros(4, 3, 2, 5, 6, device='cpu', dtype=torch.float32)
+        x = cpu_x.clone().to('mps')
+
+        cpu_src = torch.randn(4, 3, 2, 5, 6, device='cpu', dtype=torch.float32)
+        src = cpu_src.clone().to('mps')
+
+        idx = torch.randint(0, 4, (4, 3, 2, 5, 6), dtype=torch.int64)
+        cpu_idx = idx.clone()
+        mps_idx = idx.to('mps')
+
+        result_cpu = torch.scatter_add(cpu_x, 0, cpu_idx, cpu_src)
+        result_mps = torch.scatter_add(x, 0, mps_idx, src)
+
+        self.assertEqual(result_mps, result_cpu)
+
     def test_is_nonzero(self):
         self.assertFalse(torch.is_nonzero(torch.tensor([0.]).to('mps')))
         self.assertTrue(torch.is_nonzero(torch.tensor([1.5]).to('mps')))
