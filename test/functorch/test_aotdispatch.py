@@ -8990,8 +8990,8 @@ def forward(self, primals_1, tangents_1):
             return a + 1
 
         base = torch.randn(4, 4)
-        a = base[:, :2]
-        b = base[:, 2:]
+        a = base[:3, :]
+        b = base[1:, :]
 
         with capture_codegen_source("synthetic_base_wrapper") as captured:
             compiled_f = aot_function(f, nop)
@@ -9009,10 +9009,10 @@ def forward(self, primals_1, tangents_1):
 
         base1 = torch.randn(8)
         base2 = torch.randn(8)
-        a1 = base1[:4]
-        a2 = base1[4:]
-        b1 = base2[:4]
-        b2 = base2[4:]
+        a1 = base1[:6]
+        a2 = base1[2:]
+        b1 = base2[:6]
+        b2 = base2[2:]
 
         def f(a1, a2, b1, b2):
             a1.mul_(2)
@@ -9033,9 +9033,9 @@ def forward(self, primals_1, tangents_1):
         from torch._functorch.aot_autograd import aot_function
 
         base = torch.randn(8)
-        a = base[:4]
-        b = base[4:]
-        c = torch.randn(4)
+        a = base[:6]
+        b = base[2:]
+        c = torch.randn(6)
 
         def f(a, b, c):
             a.mul_(2)
