@@ -1,17 +1,15 @@
-.. _autograd-mechanics:
+(autograd-mechanics)=
 
-Autograd mechanics
-==================
+# Autograd mechanics
 
 This note will present an overview of how autograd works and records the
 operations. It's not strictly necessary to understand all this, but we recommend
 getting familiar with it, as it will help you write more efficient, cleaner
 programs, and can aid you in debugging.
 
-.. _how-autograd-encodes-history:
+(how-autograd-encodes-history)=
 
-How autograd encodes the history
---------------------------------
+## How autograd encodes the history
 
 Autograd is a reverse automatic differentiation system.  Conceptually,
 autograd records a graph recording all of the operations that created
@@ -21,12 +19,12 @@ By tracing this graph from roots to leaves, you can automatically
 compute the gradients using the chain rule.
 
 Internally, autograd represents this graph as a graph of
-:class:`Function` objects (really expressions), which can be
-:meth:`~torch.autograd.Function.apply` ed to compute the result of
+{class}`Function` objects (really expressions), which can be
+{meth}`~torch.autograd.Function.apply` ed to compute the result of
 evaluating the graph.  When computing the forward pass, autograd
 simultaneously performs the requested computations and builds up a graph
 representing the function that computes the gradient (the ``.grad_fn``
-attribute of each :class:`torch.Tensor` is an entry point into this graph).
+attribute of each {class}`torch.Tensor` is an entry point into this graph).
 When the forward pass is completed, we evaluate this graph in the
 backwards pass to compute the gradients.
 
@@ -36,44 +34,41 @@ flow statements, that can change the overall shape and size of the graph at
 every iteration. You don't have to encode all possible paths before you
 launch the training - what you run is what you differentiate.
 
-.. _saved-tensors-doc:
+(saved-tensors-doc)=
 
-Saved tensors
-^^^^^^^^^^^^^
+### Saved tensors
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass. For example, the function
-:math:`x\mapsto x^2` saves the input :math:`x` to compute the gradient.
+$x\mapsto x^2$ saves the input $x$ to compute the gradient.
 
-When defining a custom Python :class:`~torch.autograd.Function`, you can use
-:func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` to save
+When defining a custom Python {class}`~torch.autograd.Function`, you can use
+{func}`~torch.autograd.function._ContextMethodMixin.save_for_backward` to save
 tensors during the forward pass and
-:attr:`~torch.autograd.function.Function.saved_tensors` to retrieve them
-during the backward pass. See :doc:`/notes/extending` for more information.
+{attr}`~torch.autograd.function.Function.saved_tensors` to retrieve them
+during the backward pass. See {doc}`/notes/extending` for more information.
 
-For operations that PyTorch defines (e.g. :func:`torch.pow`), tensors are
+For operations that PyTorch defines (e.g. {func}`torch.pow`), tensors are
 automatically saved as needed. You can explore (for educational or debugging
 purposes) which tensors are saved by a certain ``grad_fn`` by looking for its
 attributes starting with the prefix ``_saved``.
 
-.. code::
-
-    x = torch.randn(5, requires_grad=True)
-    y = x.pow(2)
-    print(x.equal(y.grad_fn._saved_self))  # True
-    print(x is y.grad_fn._saved_self)  # True
-
+```python
+x = torch.randn(5, requires_grad=True)
+y = x.pow(2)
+print(x.equal(y.grad_fn._saved_self))  # True
+print(x is y.grad_fn._saved_self)  # True
+```
 
 In the previous code, ``y.grad_fn._saved_self`` refers to the same Tensor object as `x`.
 But that may not always be the case. For instance:
 
-.. code::
-
-    x = torch.randn(5, requires_grad=True)
-    y = x.exp()
-    print(y.equal(y.grad_fn._saved_result))  # True
-    print(y is y.grad_fn._saved_result)  # False
-
+```python
+x = torch.randn(5, requires_grad=True)
+y = x.exp()
+print(y.equal(y.grad_fn._saved_result))  # True
+print(y is y.grad_fn._saved_result)  # False
+```
 
 Under the hood, to prevent reference cycles, PyTorch has *packed* the tensor
 upon saving and *unpacked* it into a different tensor for reading. Here, the
@@ -84,44 +79,41 @@ Whether a tensor will be packed into a different tensor object depends on
 whether it is an output of its own `grad_fn`, which is an implementation detail
 subject to change and that users should not rely on.
 
-You can control how PyTorch does packing / unpacking with :ref:`saved-tensors-hooks-doc`.
+You can control how PyTorch does packing / unpacking with {ref}`saved-tensors-hooks-doc`.
 
 
-.. _non-differentiable-func-grad:
+(non-differentiable-func-grad)=
 
-Gradients for non-differentiable functions
-------------------------------------------
+## Gradients for non-differentiable functions
 
 The gradient computation using Automatic Differentiation is only valid when each elementary function being used is differentiable.
 Unfortunately many of the functions we use in practice do not have this property (``relu`` or ``sqrt`` at ``0``, for example).
 To try and reduce the impact of functions that are non-differentiable, we define the gradients of the elementary operations by applying the following rules in order:
 
-#. If the function is differentiable and thus a gradient exists at the current point, use it.
-#. If the function is convex (at least locally), use the sub-gradient of minimum norm.
-#. If the function is concave (at least locally), use the super-gradient of minimum norm (consider `-f(x)` and apply the previous point).
-#. If the function is defined, define the gradient at the current point by continuity (note that ``inf`` is possible here, for example for ``sqrt(0)``). If multiple values are possible, pick one arbitrarily.
-#. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
-#. If the function is not a deterministic mapping (i.e. it is not a `mathematical function`_), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
+1. If the function is differentiable and thus a gradient exists at the current point, use it.
+2. If the function is convex (at least locally), use the sub-gradient of minimum norm.
+3. If the function is concave (at least locally), use the super-gradient of minimum norm (consider `-f(x)` and apply the previous point).
+4. If the function is defined, define the gradient at the current point by continuity (note that ``inf`` is possible here, for example for ``sqrt(0)``). If multiple values are possible, pick one arbitrarily.
+5. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
+6. If the function is not a deterministic mapping (i.e. it is not a [mathematical function](https://en.wikipedia.org/wiki/Function_%28mathematics%29)), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
 
-.. _mathematical function: https://en.wikipedia.org/wiki/Function_%28mathematics%29
 
-Division by Zero in Autograd
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Division by Zero in Autograd
 
 When performing division by zero in PyTorch (e.g., ``x / 0``), the forward pass will produce ``inf`` values following IEEE-754 floating point arithmetic. While these ``inf`` values can be masked out before computing the final loss (e.g., via indexing or masking), the autograd system still tracks and differentiates through the full computation graph, including the division by zero operation.
 
 During backpropagation, this can lead to problematic gradient expressions. For example:
 
-.. code::
+```python
+x = torch.tensor([1., 1.], requires_grad=True)
+div = torch.tensor([0., 1.])
 
-    x = torch.tensor([1., 1.], requires_grad=True)
-    div = torch.tensor([0., 1.])
-
-    y = x / div          # Results in [inf, 1]
-    mask = div != 0      # [False, True]
-    loss = y[mask].sum()
-    loss.backward()
-    print(x.grad)        # [nan, 1], not [0, 1]
+y = x / div          # Results in [inf, 1]
+mask = div != 0      # [False, True]
+loss = y[mask].sum()
+loss.backward()
+print(x.grad)        # [nan, 1], not [0, 1]
+```
 
 In this example, even though we only use the masked output (which excludes the division by zero), autograd still computes gradients through the full computation graph, including the division by zero operation. This results in ``nan`` gradients for the masked elements, which can cause training instability.
 
@@ -129,39 +121,38 @@ To avoid this issue, there are several recommended approaches:
 
 1. Mask before division:
 
-.. code::
+```python
+x = torch.tensor([1., 1.], requires_grad=True)
+div = torch.tensor([0., 1.])
 
-    x = torch.tensor([1., 1.], requires_grad=True)
-    div = torch.tensor([0., 1.])
-
-    mask = div != 0
-    safe = torch.zeros_like(x)
-    safe[mask] = x[mask] / div[mask]
-    loss = safe.sum()
-    loss.backward()      # Produces safe gradients [0, 1]
+mask = div != 0
+safe = torch.zeros_like(x)
+safe[mask] = x[mask] / div[mask]
+loss = safe.sum()
+loss.backward()      # Produces safe gradients [0, 1]
+```
 
 2. Use MaskedTensor (experimental API):
 
-.. code::
+```python
+from torch.masked import as_masked_tensor
 
-    from torch.masked import as_masked_tensor
+x = torch.tensor([1., 1.], requires_grad=True)
+div = torch.tensor([0., 1.])
 
-    x = torch.tensor([1., 1.], requires_grad=True)
-    div = torch.tensor([0., 1.])
-
-    y = x / div
-    mask = div != 0
-    loss = as_masked_tensor(y, mask).sum()
-    loss.backward()      # Cleanly handles "undefined" vs "zero" gradients
+y = x / div
+mask = div != 0
+loss = as_masked_tensor(y, mask).sum()
+loss.backward()      # Cleanly handles "undefined" vs "zero" gradients
+```
 
 The key principle is to prevent the division by zero operation from being recorded in the computation graph, rather than masking its results after the fact. This ensures that autograd only computes gradients through valid operations.
 
 This behavior is important to keep in mind when working with operations that might produce ``inf`` or ``nan`` values, as masking the outputs does not prevent the problematic gradients from being computed.
 
-.. _locally-disable-grad-doc:
+(locally-disable-grad-doc)=
 
-Locally disabling gradient computation
---------------------------------------
+## Locally disabling gradient computation
 
 There are several mechanisms available from Python to locally disable gradient
 computation:
@@ -172,13 +163,12 @@ For more fine-grained exclusion of subgraphs from gradient computation,
 there is setting the ``requires_grad`` field of a tensor.
 
 Below, in addition to discussing the mechanisms above, we also describe
-evaluation mode (:meth:`nn.Module.eval()`), a method that is not used
+evaluation mode ({meth}`nn.Module.eval()`), a method that is not used
 to disable gradient computation but, because of its name, is often mixed up with the three.
 
-Setting ``requires_grad``
-^^^^^^^^^^^^^^^^^^^^^^^^^
+### Setting ``requires_grad``
 
-:attr:`requires_grad` is a flag, defaulting to false *unless wrapped
+{attr}`requires_grad` is a flag, defaulting to false *unless wrapped
 in a* ``nn.Parameter``, that allows for fine-grained exclusion of
 subgraphs from gradient computation. It takes effect in both the
 forward and backward passes:
@@ -210,12 +200,11 @@ pass because they won't be part of the backward graph in the first place, as
 desired.
 
 Because this is such a common pattern, ``requires_grad`` can also be set at
-the module level with :meth:`nn.Module.requires_grad_()`.
+the module level with {meth}`nn.Module.requires_grad_()`.
 When applied to a module, ``.requires_grad_()`` takes effect on all
 of the module's parameters (which have ``requires_grad=True`` by default).
 
-Grad Modes
-^^^^^^^^^^
+### Grad Modes
 
 Apart from setting ``requires_grad`` there are also three grad modes that can
 be selected from Python that can affect how computations in PyTorch are
@@ -223,33 +212,34 @@ processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be toggleable via context managers and
 decorators.
 
-.. list-table::
-   :widths: 50 50 50 50 50
-   :header-rows: 1
+```{list-table}
+:widths: 50 50 50 50 50
+:header-rows: 1
 
-   * - Mode
-     - Excludes operations from being recorded in backward graph
-     - Skips additional autograd tracking overhead
-     - Tensors created while the mode is enabled can be used in grad-mode later
-     - Examples
-   * - default
-     -
-     -
-     - ✓
-     - Forward pass
-   * - no-grad
-     - ✓
-     -
-     - ✓
-     - Optimizer updates
-   * - inference
-     - ✓
-     - ✓
-     -
-     - Data processing, model evaluation
+* - Mode
+  - Excludes operations from being recorded in backward graph
+  - Skips additional autograd tracking overhead
+  - Tensors created while the mode is enabled can be used in grad-mode later
+  - Examples
+* - default
+  -
+  -
+  - ✓
+  - Forward pass
+* - no-grad
+  - ✓
+  -
+  - ✓
+  - Optimizer updates
+* - inference
+  - ✓
+  - ✓
+  -
+  - Data processing, model evaluation
 
-Default Mode (Grad Mode)
-^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Default Mode (Grad Mode)
 
 The "default mode" is the mode we are implicitly in when no other modes like
 no-grad and inference mode are enabled. To be contrasted with
@@ -259,8 +249,7 @@ The most important thing to know about the default mode is that it is the only
 mode in which ``requires_grad`` takes effect. ``requires_grad`` is always overridden
 to be ``False`` in both the two other modes.
 
-No-grad Mode
-^^^^^^^^^^^^
+### No-grad Mode
 
 Computations in no-grad mode behave as if none of the inputs require grad.
 In other words, computations in no-grad mode are never recorded in the backward graph
@@ -279,12 +268,11 @@ in-place without the update being recorded by autograd.
 You also intend to use the updated parameters for computations in
 grad mode in the next forward pass.
 
-The implementations in :ref:`nn-init-doc` also
+The implementations in {ref}`nn-init-doc` also
 rely on no-grad mode when initializing the parameters as to avoid
 autograd tracking when updating the initialized parameters in-place.
 
-Inference Mode
-^^^^^^^^^^^^^^
+### Inference Mode
 
 Inference mode is the extreme version of no-grad mode. Just like in no-grad
 mode, computations in inference mode are not recorded in the backward graph, but
@@ -307,13 +295,12 @@ mode. If you cannot avoid such use in your case, you can always switch back
 to no-grad mode.
 
 For details on inference mode please see
-`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+[Inference Mode](https://pytorch.org/cppdocs/notes/inference_mode.html).
 
 For implementation details of inference mode see
-`RFC-0011-InferenceMode <https://github.com/pytorch/rfcs/pull/17>`_.
+[RFC-0011-InferenceMode](https://github.com/pytorch/rfcs/pull/17).
 
-Evaluation Mode (``nn.Module.eval()``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Evaluation Mode (``nn.Module.eval()``)
 
 Evaluation mode is not a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
@@ -324,8 +311,8 @@ your model depends entirely on the specific modules used in your model and
 whether they define any training-mode specific behavior.
 
 You are responsible for calling ``model.eval()`` and ``model.train()`` if your
-model relies on modules such as :class:`torch.nn.Dropout` and
-:class:`torch.nn.BatchNorm2d` that may behave
+model relies on modules such as {class}`torch.nn.Dropout` and
+{class}`torch.nn.BatchNorm2d` that may behave
 differently depending on training mode, for example, to avoid updating your
 BatchNorm running statistics on validation data.
 
@@ -335,8 +322,7 @@ if you aren't sure your model has training-mode specific behavior, because a
 module you are using might be updated to behave differently in training and
 eval modes.
 
-In-place operations with autograd
----------------------------------
+## In-place operations with autograd
 
 Supporting in-place operations in autograd is a hard matter, and we discourage
 their use in most cases. Autograd's aggressive buffer freeing and reuse makes
@@ -352,14 +338,13 @@ There are two main reasons that limit the applicability of in-place operations:
 2. Every in-place operation requires the implementation to rewrite the
    computational graph. Out-of-place versions simply allocate new objects and
    keep references to the old graph, while in-place operations, require
-   changing the creator of all inputs to the :class:`Function` representing
+   changing the creator of all inputs to the {class}`Function` representing
    this operation. This can be tricky, especially if there are many Tensors
    that reference the same storage (e.g. created by indexing or transposing),
    and in-place functions will raise an error if the storage of
-   modified inputs is referenced by any other :class:`Tensor`.
+   modified inputs is referenced by any other {class}`Tensor`.
 
-In-place correctness checks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### In-place correctness checks
 
 Every tensor keeps a version counter, that is incremented every time it is
 marked dirty in any operation. When a Function saves any tensors for backward,
@@ -369,8 +354,7 @@ an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
-Multithreaded Autograd
-----------------------
+## Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
@@ -380,41 +364,38 @@ relevant only for PyTorch 1.6+ as the behavior in previous version was different
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
 
-.. code::
+```python
+# Define a train function to be used in different threads
+def train_fn():
+    x = torch.ones(5, 5, requires_grad=True)
+    # forward
+    y = (x + 3) * (x + 4) * 0.5
+    # backward
+    y.sum().backward()
+    # potential optimizer update
 
-    # Define a train function to be used in different threads
-    def train_fn():
-        x = torch.ones(5, 5, requires_grad=True)
-        # forward
-        y = (x + 3) * (x + 4) * 0.5
-        # backward
-        y.sum().backward()
-        # potential optimizer update
 
+# User write their own threading code to drive the train_fn
+threads = []
+for _ in range(10):
+    p = threading.Thread(target=train_fn, args=())
+    p.start()
+    threads.append(p)
 
-    # User write their own threading code to drive the train_fn
-    threads = []
-    for _ in range(10):
-        p = threading.Thread(target=train_fn, args=())
-        p.start()
-        threads.append(p)
-
-    for p in threads:
-        p.join()
-
+for p in threads:
+    p.join()
+```
 
 Note that some behaviors that user should be aware of:
 
-Concurrency on CPU
-^^^^^^^^^^^^^^^^^^
+### Concurrency on CPU
 
 When you run ``backward()`` or ``grad()`` via python or C++ API in multiple
 threads on CPU, you are expecting to see extra concurrency instead of
 serializing all the backward calls in a specific order during execution
 (behavior before PyTorch 1.6).
 
-Non-determinism
-^^^^^^^^^^^^^^^
+### Non-determinism
 
 If you are calling ``backward()`` from multiple threads concurrently and have
 shared inputs (i.e. Hogwild CPU training), then non-determinism should be expected.
@@ -426,11 +407,10 @@ it might result in race condition and the result might be invalid to use.
 Users developing multithreaded models featuring shared parameters should have the
 threading model in mind and should understand the issues described above.
 
-The functional API :func:`torch.autograd.grad` may be used to calculate the
+The functional API {func}`torch.autograd.grad` may be used to calculate the
 gradients instead of ``backward()`` to avoid non-determinism.
 
-Graph retaining
-^^^^^^^^^^^^^^^
+### Graph retaining
 
 If part of the autograd graph is shared between threads, i.e. run first
 part of forward single thread, then run second part in multiple threads,
@@ -441,8 +421,7 @@ crash in this case. Autograd will error out to the user similar to what call
 ``backward()`` twice with out ``retain_graph=True``, and let the user know
 they should use ``retain_graph=True``.
 
-Thread Safety on Autograd Node
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Thread Safety on Autograd Node
 
 Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
@@ -453,29 +432,27 @@ For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
 ``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
 
-No thread safety on C++ hooks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### No thread safety on C++ hooks
 
 Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
 
-.. _complex_autograd-doc:
+(complex_autograd-doc)=
 
-Autograd for Complex Numbers
-----------------------------
+## Autograd for Complex Numbers
 
 The short version:
 
-- When you use PyTorch to differentiate any function :math:`f(z)` with complex domain and/or codomain,
+- When you use PyTorch to differentiate any function $f(z)$ with complex domain and/or codomain,
   the gradients are computed under the assumption that the function is a part of a larger real-valued
-  loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
+  loss function $g(input)=L$. The gradient computed is $\frac{\partial L}{\partial z^*}$
   (note the conjugation of z), the negative of which is precisely the direction of steepest descent
   used in Gradient Descent algorithm. Thus, there is a viable path in making the existing optimizers
   work out of the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes
-  :math:`\frac{\partial L}{\partial z}`).
+  $\frac{\partial L}{\partial z}$).
 - If you have a real-to-real function which internally uses complex
   operations, the convention here doesn't matter: you will always get
   the same result that you would have gotten if it had been implemented
@@ -484,28 +461,28 @@ The short version:
 If you are curious about the mathematical details, or want to know how
 to define complex derivatives in PyTorch, read on.
 
-What are complex derivatives?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### What are complex derivatives?
 
 The mathematical definition of complex-differentiability takes the
 limit definition of a derivative and generalizes it to operate on
-complex numbers. Consider a function :math:`f: ℂ → ℂ`,
+complex numbers. Consider a function $f: ℂ → ℂ$,
 
-    .. math::
-        f(z=x+yj) = u(x, y) + v(x, y)j
+```{math}
+    f(z=x+yj) = u(x, y) + v(x, y)j
+```
 
-where :math:`u` and :math:`v` are two variable real valued functions
-and :math:`j` is the imaginary unit.
+where $u$ and $v$ are two variable real valued functions
+and $j$ is the imaginary unit.
 
 Using the derivative definition, we can write:
 
-    .. math::
-        f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
+```{math}
+    f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
+```
 
-In order for this limit to exist, not only must :math:`u` and :math:`v` must be
-real differentiable, but :math:`f` must also satisfy the Cauchy-Riemann `equations
-<https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_.  In
-other words: the limit computed for real and imaginary steps (:math:`h`)
+In order for this limit to exist, not only must $u$ and $v$ must be
+real differentiable, but $f$ must also satisfy the [Cauchy-Riemann equations](https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations). In
+other words: the limit computed for real and imaginary steps ($h$)
 must be equal. This is a more restrictive condition.
 
 The complex differentiable functions are commonly known as holomorphic
@@ -519,240 +496,250 @@ It also turns out that no interesting real-valued objective fulfill the
 Cauchy-Riemann equations. So the theory with holomorphic function cannot be
 used for optimization and most people therefore use the Wirtinger calculus.
 
-Wirtinger Calculus comes into the picture ...
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Wirtinger Calculus comes into the picture ...
 
 So, we have this great theory of complex differentiability and
 holomorphic functions, and we can't use any of it at all, because many
 of the commonly used functions are not holomorphic. What's a poor
-mathematician to do? Well, Wirtinger observed that even if :math:`f(z)`
+mathematician to do? Well, Wirtinger observed that even if $f(z)$
 isn't holomorphic, one could rewrite it as a two variable function
-:math:`f(z, z*)` which is always holomorphic. This is because real and
-imaginary of the components of :math:`z` can be expressed in terms of
-:math:`z` and :math:`z^*` as:
+$f(z, z*)$ which is always holomorphic. This is because real and
+imaginary of the components of $z$ can be expressed in terms of
+$z$ and $z^*$ as:
 
-    .. math::
-        \begin{aligned}
-            \mathrm{Re}(z) &= \frac {z + z^*}{2} \\
-            \mathrm{Im}(z) &= \frac {z - z^*}{2j}
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        \mathrm{Re}(z) &= \frac {z + z^*}{2} \\
+        \mathrm{Im}(z) &= \frac {z - z^*}{2j}
+    \end{aligned}
+```
 
-Wirtinger calculus suggests to study :math:`f(z, z^*)` instead, which is
-guaranteed to be holomorphic if :math:`f` was real differentiable (another
-way to think of it is as a change of coordinate system, from :math:`f(x, y)`
-to :math:`f(z, z^*)`.)  This function has partial derivatives
-:math:`\frac{\partial }{\partial z}` and :math:`\frac{\partial}{\partial z^{*}}`.
+Wirtinger calculus suggests to study $f(z, z^*)$ instead, which is
+guaranteed to be holomorphic if $f$ was real differentiable (another
+way to think of it is as a change of coordinate system, from $f(x, y)$
+to $f(z, z^*)$.)  This function has partial derivatives
+$\frac{\partial }{\partial z}$ and $\frac{\partial}{\partial z^{*}}$.
 We can use the chain rule to establish a
 relationship between these partial derivatives and the partial
-derivatives w.r.t., the real and imaginary components of :math:`z`.
+derivatives w.r.t., the real and imaginary components of $z$.
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial }{\partial x} &= \frac{\partial z}{\partial x} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial x} * \frac{\partial }{\partial z^*} \\
-                                         &= \frac{\partial }{\partial z} + \frac{\partial }{\partial z^*}   \\
-            \\
-            \frac{\partial }{\partial y} &= \frac{\partial z}{\partial y} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial y} * \frac{\partial }{\partial z^*} \\
-                                         &= 1j * \left(\frac{\partial }{\partial z} - \frac{\partial }{\partial z^*}\right)
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        \frac{\partial }{\partial x} &= \frac{\partial z}{\partial x} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial x} * \frac{\partial }{\partial z^*} \\
+                                     &= \frac{\partial }{\partial z} + \frac{\partial }{\partial z^*}   \\
+        \\
+        \frac{\partial }{\partial y} &= \frac{\partial z}{\partial y} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial y} * \frac{\partial }{\partial z^*} \\
+                                     &= 1j * \left(\frac{\partial }{\partial z} - \frac{\partial }{\partial z^*}\right)
+    \end{aligned}
+```
 
 From the above equations, we get:
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial }{\partial z} &= 1/2 * \left(\frac{\partial }{\partial x} - 1j * \frac{\partial }{\partial y}\right)   \\
-            \frac{\partial }{\partial z^*} &= 1/2 * \left(\frac{\partial }{\partial x} + 1j * \frac{\partial }{\partial y}\right)
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        \frac{\partial }{\partial z} &= 1/2 * \left(\frac{\partial }{\partial x} - 1j * \frac{\partial }{\partial y}\right)   \\
+        \frac{\partial }{\partial z^*} &= 1/2 * \left(\frac{\partial }{\partial x} + 1j * \frac{\partial }{\partial y}\right)
+    \end{aligned}
+```
 
-which is the classic definition of Wirtinger calculus that you would find on `Wikipedia <https://en.wikipedia.org/wiki/Wirtinger_derivatives>`_.
+which is the classic definition of Wirtinger calculus that you would find on [Wikipedia](https://en.wikipedia.org/wiki/Wirtinger_derivatives).
 
 There are a lot of beautiful consequences of this change.
 
-- For one, the Cauchy-Riemann equations translate into simply saying that :math:`\frac{\partial f}{\partial z^*} = 0` (that is to say, the function :math:`f` can be written
-  entirely in terms of :math:`z`, without making reference to :math:`z^*`).
+- For one, the Cauchy-Riemann equations translate into simply saying that $\frac{\partial f}{\partial z^*} = 0$ (that is to say, the function $f$ can be written
+  entirely in terms of $z$, without making reference to $z^*$).
 - Another important (and somewhat counterintuitive) result, as we'll see later, is that when we do optimization on a real-valued loss, the step we should
-  take while making variable update is given by :math:`\frac{\partial Loss}{\partial z^*}` (not :math:`\frac{\partial Loss}{\partial z}`).
+  take while making variable update is given by $\frac{\partial Loss}{\partial z^*}$ (not $\frac{\partial Loss}{\partial z}$).
 
 For more reading, check out: https://arxiv.org/pdf/0906.4835.pdf
 
-How is Wirtinger Calculus useful in optimization?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### How is Wirtinger Calculus useful in optimization?
 
 Researchers in audio and other fields, more commonly, use gradient
 descent to optimize real valued loss functions with complex variables.
 Typically, these people treat the real and imaginary values as separate
-channels that can be updated. For a step size :math:`\alpha/2` and loss
-:math:`L`, we can write the following equations in :math:`ℝ^2`:
+channels that can be updated. For a step size $\alpha/2$ and loss
+$L$, we can write the following equations in $ℝ^2$:
 
-    .. math::
-        \begin{aligned}
-            x_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x}  \\
-            y_{n+1} &= y_n - (\alpha/2) * \frac{\partial L}{\partial y}
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        x_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x}  \\
+        y_{n+1} &= y_n - (\alpha/2) * \frac{\partial L}{\partial y}
+    \end{aligned}
+```
 
-How do these equations translate into complex space :math:`ℂ`?
+How do these equations translate into complex space $ℂ$?
 
-    .. math::
-        \begin{aligned}
-            z_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (\alpha/2) * \frac{\partial L}{\partial y}) \\
-                    &= z_n - \alpha * 1/2 * \left(\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}\right) \\
-                    &= z_n - \alpha * \frac{\partial L}{\partial z^*}
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        z_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (\alpha/2) * \frac{\partial L}{\partial y}) \\
+                &= z_n - \alpha * 1/2 * \left(\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}\right) \\
+                &= z_n - \alpha * \frac{\partial L}{\partial z^*}
+    \end{aligned}
+```
 
 Something very interesting has happened: Wirtinger calculus tells us
 that we can simplify the complex variable update formula above to only
 refer to the conjugate Wirtinger derivative
-:math:`\frac{\partial L}{\partial z^*}`, giving us exactly the step we take in optimization.
+$\frac{\partial L}{\partial z^*}$, giving us exactly the step we take in optimization.
 
 Because the conjugate Wirtinger derivative gives us exactly the correct step for a real valued loss function, PyTorch gives you this derivative
 when you differentiate a function with a real valued loss.
 
-How does PyTorch compute the conjugate Wirtinger derivative?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### How does PyTorch compute the conjugate Wirtinger derivative?
 
 Typically, our derivative formulas take in `grad_output` as an input,
 representing the incoming Vector-Jacobian product that we've already
-computed, aka, :math:`\frac{\partial L}{\partial s^*}`, where :math:`L`
+computed, aka, $\frac{\partial L}{\partial s^*}$, where $L$
 is the loss of the entire computation (producing a real loss) and
-:math:`s` is the output of our function. The goal here is to compute
-:math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of
+$s$ is the output of our function. The goal here is to compute
+$\frac{\partial L}{\partial z^*}$, where $z$ is the input of
 the function.  It turns out that in the case of real loss, we can
-get away with *only* calculating :math:`\frac{\partial L}{\partial s^*}`,
+get away with *only* calculating $\frac{\partial L}{\partial s^*}$,
 even though the chain rule implies that we also need to
-have access to :math:`\frac{\partial L}{\partial s}`.  If you want
+have access to $\frac{\partial L}{\partial s}$.  If you want
 to skip this derivation, look at the last equation in this section
 and then skip to the next section.
 
-Let's continue working with :math:`f: ℂ → ℂ` defined as
-:math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above,
+Let's continue working with $f: ℂ → ℂ$ defined as
+$f(z) = f(x+yj) = u(x, y) + v(x, y)j$. As discussed above,
 autograd's gradient convention is centered around optimization for real
-valued loss functions, so let's assume :math:`f` is a part of larger
-real valued loss function :math:`g`. Using chain rule, we can write:
+valued loss functions, so let's assume $f$ is a part of larger
+real valued loss function $g$. Using chain rule, we can write:
 
-    .. math::
-        \frac{\partial L}{\partial z^*} = \frac{\partial L}{\partial u} * \frac{\partial u}{\partial z^*} + \frac{\partial L}{\partial v} * \frac{\partial v}{\partial z^*}
-        :label: [1]
+```{math}
+:label: eq1
+    \frac{\partial L}{\partial z^*} = \frac{\partial L}{\partial u} * \frac{\partial u}{\partial z^*} + \frac{\partial L}{\partial v} * \frac{\partial v}{\partial z^*}
+```
 
 Now using Wirtinger derivative definition, we can write:
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial L}{\partial s} = 1/2 * \left(\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j\right) \\
-            \frac{\partial L}{\partial s^*} = 1/2 * \left(\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j\right)
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        \frac{\partial L}{\partial s} = 1/2 * \left(\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j\right) \\
+        \frac{\partial L}{\partial s^*} = 1/2 * \left(\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j\right)
+    \end{aligned}
+```
 
-It should be noted here that since :math:`u` and :math:`v` are real
-functions, and :math:`L` is real by our assumption that :math:`f` is a
+It should be noted here that since $u$ and $v$ are real
+functions, and $L$ is real by our assumption that $f$ is a
 part of a real valued function, we have:
 
-    .. math::
-        \left( \frac{\partial L}{\partial s} \right)^* = \frac{\partial L}{\partial s^*}
-        :label: [2]
+```{math}
+:label: eq2
+    \left( \frac{\partial L}{\partial s} \right)^* = \frac{\partial L}{\partial s^*}
+```
 
-i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
+i.e., $\frac{\partial L}{\partial s}$ equals to $grad\_output^*$.
 
-Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:`\frac{\partial L}{\partial v}`, we get:
+Solving the above equations for $\frac{\partial L}{\partial u}$ and $\frac{\partial L}{\partial v}$, we get:
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
-            \frac{\partial L}{\partial v} = 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
-        \end{aligned}
-        :label: [3]
+```{math}
+:label: eq3
+    \begin{aligned}
+        \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
+        \frac{\partial L}{\partial v} = 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
+    \end{aligned}
+```
 
-Substituting :eq:`[3]` in :eq:`[1]`, we get:
+Substituting {eq}`eq3` in {eq}`eq1`, we get:
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} + 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
-                                            &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
-                                            &= \frac{\partial L}{\partial s} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
-                                            &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
-        \end{aligned}
+```{math}
+    \begin{aligned}
+        \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} + 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
+                                        &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
+                                        &= \frac{\partial L}{\partial s} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
+                                        &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
+    \end{aligned}
+```
 
-Using :eq:`[2]`, we get:
+Using {eq}`eq2`, we get:
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s^*}\right)^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \left(\frac{\partial s}{\partial z}\right)^*  \\
-                                            &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * \left(\frac{\partial s}{\partial z}\right)^* }       \\
-        \end{aligned}
-        :label: [4]
+```{math}
+:label: eq4
+    \begin{aligned}
+        \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s^*}\right)^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \left(\frac{\partial s}{\partial z}\right)^*  \\
+                                        &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * \left(\frac{\partial s}{\partial z}\right)^* }       \\
+    \end{aligned}
+```
 
 This last equation is the important one for writing your own gradients,
 as it decomposes our derivative formula into a simpler one that is easy
 to compute by hand.
 
-How can I write my own derivative formula for a complex function?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### How can I write my own derivative formula for a complex function?
 
 The above boxed equation gives us the general formula for all
 derivatives on complex functions.  However, we still need to
-compute :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}`.
+compute $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$.
 There are two ways you could do this:
 
-    - The first way is to just use the definition of Wirtinger derivatives directly and calculate :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}` by
-      using :math:`\frac{\partial s}{\partial x}` and :math:`\frac{\partial s}{\partial y}`
+    - The first way is to just use the definition of Wirtinger derivatives directly and calculate $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$ by
+      using $\frac{\partial s}{\partial x}$ and $\frac{\partial s}{\partial y}$
       (which you can compute in the normal way).
-    - The second way is to use the change of variables trick and rewrite :math:`f(z)` as a two variable function :math:`f(z, z^*)`, and compute
-      the conjugate Wirtinger derivatives by treating :math:`z` and :math:`z^*` as independent variables. This is often easier; for example, if the function in question is holomorphic, only :math:`z` will be used (and :math:`\frac{\partial s}{\partial z^*}` will be zero).
+    - The second way is to use the change of variables trick and rewrite $f(z)$ as a two variable function $f(z, z^*)$, and compute
+      the conjugate Wirtinger derivatives by treating $z$ and $z^*$ as independent variables. This is often easier; for example, if the function in question is holomorphic, only $z$ will be used (and $\frac{\partial s}{\partial z^*}$ will be zero).
 
-Let's consider the function :math:`f(z = x + yj) = c * z = c * (x+yj)` as an example, where :math:`c \in ℝ`.
+Let's consider the function $f(z = x + yj) = c * z = c * (x+yj)$ as an example, where $c \in ℝ$.
 
 Using the first way to compute the Wirtinger derivatives, we have.
 
-.. math::
-    \begin{aligned}
-        \frac{\partial s}{\partial z} &= 1/2 * \left(\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j\right) \\
-                                      &= 1/2 * (c - (c * 1j) * 1j)  \\
-                                      &= c                          \\
-        \\
-        \\
-        \frac{\partial s}{\partial z^*} &= 1/2 * \left(\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j\right) \\
-                                        &= 1/2 * (c + (c * 1j) * 1j)  \\
-                                        &= 0                          \\
-    \end{aligned}
+```{math}
+\begin{aligned}
+    \frac{\partial s}{\partial z} &= 1/2 * \left(\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j\right) \\
+                                  &= 1/2 * (c - (c * 1j) * 1j)  \\
+                                  &= c                          \\
+    \\
+    \\
+    \frac{\partial s}{\partial z^*} &= 1/2 * \left(\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j\right) \\
+                                    &= 1/2 * (c + (c * 1j) * 1j)  \\
+                                    &= 0                          \\
+\end{aligned}
+```
 
-Using :eq:`[4]`, and `grad\_output = 1.0` (which is the default grad output value used when :func:`backward` is called on a scalar output in PyTorch), we get:
+Using {eq}`eq4`, and `grad\_output = 1.0` (which is the default grad output value used when {func}`backward` is called on a scalar output in PyTorch), we get:
 
-    .. math::
-        \frac{\partial L}{\partial z^*} = 1 * 0 + 1 * c = c
+```{math}
+    \frac{\partial L}{\partial z^*} = 1 * 0 + 1 * c = c
+```
 
 Using the second way to compute Wirtinger derivatives, we directly get:
 
-    .. math::
-        \begin{aligned}
-           \frac{\partial s}{\partial z} &= \frac{\partial (c*z)}{\partial z}       \\
-                                         &= c                                       \\
-            \frac{\partial s}{\partial z^*} &= \frac{\partial (c*z)}{\partial z^*}       \\
-                                         &= 0
-        \end{aligned}
+```{math}
+    \begin{aligned}
+       \frac{\partial s}{\partial z} &= \frac{\partial (c*z)}{\partial z}       \\
+                                     &= c                                       \\
+        \frac{\partial s}{\partial z^*} &= \frac{\partial (c*z)}{\partial z^*}       \\
+                                     &= 0
+    \end{aligned}
+```
 
-And using :eq:`[4]` again, we get :math:`\frac{\partial L}{\partial z^*} = c`. As you can see, the second way involves lesser calculations, and comes
+And using {eq}`eq4` again, we get $\frac{\partial L}{\partial z^*} = c$. As you can see, the second way involves lesser calculations, and comes
 in more handy for faster calculations.
 
-What about cross-domain functions?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### What about cross-domain functions?
 
 Some functions map from complex inputs to real outputs, or vice versa.
-These functions form a special case of :eq:`[4]`, which we can derive using the
+These functions form a special case of {eq}`eq4`, which we can derive using the
 chain rule:
 
-    - For :math:`f: ℂ → ℝ`, we get:
+- For $f: ℂ → ℝ$, we get:
 
-        .. math::
-            \frac{\partial L}{\partial z^*} = 2 * grad\_output * \frac{\partial s}{\partial z^{*}}
+  ```{math}
+  \frac{\partial L}{\partial z^*} = 2 * grad\_output * \frac{\partial s}{\partial z^{*}}
+  ```
 
-    - For :math:`f: ℝ → ℂ`, we get:
+- For $f: ℝ → ℂ$, we get:
 
-        .. math::
-            \frac{\partial L}{\partial z^*} = 2 * \mathrm{Re}(grad\_output^* * \frac{\partial s}{\partial z^{*}})
+  ```{math}
+  \frac{\partial L}{\partial z^*} = 2 * \mathrm{Re}(grad\_output^* * \frac{\partial s}{\partial z^{*}})
+  ```
 
-.. _saved-tensors-hooks-doc:
+(saved-tensors-hooks-doc)=
 
-Hooks for saved tensors
------------------------
+## Hooks for saved tensors
 
-You can control :ref:`how saved tensors are packed / unpacked
+You can control {ref}`how saved tensors are packed / unpacked
 <saved-tensors-doc>` by defining a pair of ``pack_hook`` / ``unpack_hook``
 hooks.  The ``pack_hook`` function should take a tensor as its single argument
 but can return any python object (e.g. another tensor, a tuple, or even a
@@ -765,22 +752,22 @@ unpacking.
 
 An example of such pair is:
 
-.. code::
+```python
+class SelfDeletingTempFile():
+    def __init__(self):
+        self.name = os.path.join(tmp_dir, str(uuid.uuid4()))
 
-    class SelfDeletingTempFile():
-        def __init__(self):
-            self.name = os.path.join(tmp_dir, str(uuid.uuid4()))
+    def __del__(self):
+        os.remove(self.name)
 
-        def __del__(self):
-            os.remove(self.name)
+def pack_hook(tensor):
+    temp_file = SelfDeletingTempFile()
+    torch.save(tensor, temp_file.name)
+    return temp_file
 
-    def pack_hook(tensor):
-        temp_file = SelfDeletingTempFile()
-        torch.save(tensor, temp_file.name)
-        return temp_file
-
-    def unpack_hook(temp_file):
-        return torch.load(temp_file.name)
+def unpack_hook(temp_file):
+    return torch.load(temp_file.name)
+```
 
 Notice that the ``unpack_hook`` should not delete the temporary file because it
 might be called multiple times: the temporary file should be alive for as long
@@ -788,201 +775,190 @@ as the returned `SelfDeletingTempFile` object is alive.  In the above example,
 we prevent leaking the temporary file by closing it when it is no longer needed
 (on deletion of the `SelfDeletingTempFile` object).
 
-.. note::
+```{note}
+ We guarantee that ``pack_hook`` will only be called once but ``unpack_hook`` can
+ be called as many times as the backward pass requires it and we expect it to
+ return the same data each time.
+```
 
-    We guarantee that ``pack_hook`` will only be called once but ``unpack_hook`` can
-    be called as many times as the backward pass requires it and we expect it to
-    return the same data each time.
+```{warning}
+ Performing inplace operations on the input of any of the functions is forbidden
+ as they may lead to unexpected side-effects. PyTorch will throw an error if the
+ input to a pack hook is modified inplace but does not catch the case where the
+ input to an unpack hook is modified inplace.
+```
 
-.. warning::
-
-    Performing inplace operations on the input of any of the functions is forbidden
-    as they may lead to unexpected side-effects. PyTorch will throw an error if the
-    input to a pack hook is modified inplace but does not catch the case where the
-    input to an unpack hook is modified inplace.
-
-
-Registering hooks for a saved tensor
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Registering hooks for a saved tensor
 
 You can register a pair of hooks on a saved tensor by calling the
-:meth:`~torch.autograd.SavedTensor.register_hooks` method on a
-:class:`SavedTensor` object. Those objects are exposed as attributes of a
+{meth}`~torch.autograd.SavedTensor.register_hooks` method on a
+{class}`SavedTensor` object. Those objects are exposed as attributes of a
 ``grad_fn`` and start with the ``_raw_saved_`` prefix.
 
-.. code::
-
-    x = torch.randn(5, requires_grad=True)
-    y = x.pow(2)
-    y.grad_fn._raw_saved_self.register_hooks(pack_hook, unpack_hook)
+```python
+x = torch.randn(5, requires_grad=True)
+y = x.pow(2)
+y.grad_fn._raw_saved_self.register_hooks(pack_hook, unpack_hook)
+```
 
 The ``pack_hook`` method is called as soon as the pair is registered.
 The ``unpack_hook`` method is called each time the saved tensor needs to be
 accessed, either by means of ``y.grad_fn._saved_self`` or during the backward
 pass.
 
-.. warning::
+```{warning}
+ If you maintain a reference to a {class}`SavedTensor` after the saved
+ tensors have been released (i.e. after backward has been called), calling
+ its {meth}`~torch.autograd.SavedTensor.register_hooks` is forbidden.
+ PyTorch will throw an error most of the time but it may fail
+ to do so in some cases and undefined behavior may arise.
+```
 
-    If you maintain a reference to a :class:`SavedTensor` after the saved
-    tensors have been released (i.e. after backward has been called), calling
-    its :meth:`~torch.autograd.SavedTensor.register_hooks` is forbidden.
-    PyTorch will throw an error most of the time but it may fail
-    to do so in some cases and undefined behavior may arise.
-
-Registering default hooks for saved tensors
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Registering default hooks for saved tensors
 
 Alternatively, you can use the context-manager
-:class:`~torch.autograd.graph.saved_tensors_hooks` to register a pair of
+{class}`~torch.autograd.graph.saved_tensors_hooks` to register a pair of
 hooks which will be applied to *all* saved tensors that are created in
 that context.
 
 Example:
 
-.. code::
+```python
+# Only save on disk tensors that have size >= 1000
+SAVE_ON_DISK_THRESHOLD = 1000
 
-    # Only save on disk tensors that have size >= 1000
-    SAVE_ON_DISK_THRESHOLD = 1000
+def pack_hook(x):
+    if x.numel() < SAVE_ON_DISK_THRESHOLD:
+        return x.detach()
+    temp_file = SelfDeletingTempFile()
+    torch.save(tensor, temp_file.name)
+    return temp_file
 
-    def pack_hook(x):
-        if x.numel() < SAVE_ON_DISK_THRESHOLD:
-            return x.detach()
-        temp_file = SelfDeletingTempFile()
-        torch.save(tensor, temp_file.name)
-        return temp_file
+def unpack_hook(tensor_or_sctf):
+    if isinstance(tensor_or_sctf, torch.Tensor):
+        return tensor_or_sctf
+    return torch.load(tensor_or_sctf.name)
 
-    def unpack_hook(tensor_or_sctf):
-        if isinstance(tensor_or_sctf, torch.Tensor):
-            return tensor_or_sctf
-        return torch.load(tensor_or_sctf.name)
+class Model(nn.Module):
+    def forward(self, x):
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+          # ... compute output
+          output = x
+        return output
 
-    class Model(nn.Module):
-        def forward(self, x):
-            with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-              # ... compute output
-              output = x
-            return output
-
-    model = Model()
-    net = nn.DataParallel(model)
-
-
+model = Model()
+net = nn.DataParallel(model)
+```
 
 The hooks defined with this context manager are thread-local.
 Hence, the following code will not produce the desired effects because the hooks do not go
 through `DataParallel`.
 
-.. code::
+```python
+  # Example what NOT to do
 
-      # Example what NOT to do
-
-      net = nn.DataParallel(model)
-      with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-          output = net(input)
-
+  net = nn.DataParallel(model)
+  with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+      output = net(input)
+```
 
 Note that using those hooks disables all the optimization in place to reduce
 Tensor object creation. For example:
 
-.. code::
-
-    with torch.autograd.graph.saved_tensors_hooks(lambda x: x.detach(), lambda x: x):
-        x = torch.randn(5, requires_grad=True)
-        y = x * x
+```python
+with torch.autograd.graph.saved_tensors_hooks(lambda x: x.detach(), lambda x: x):
+    x = torch.randn(5, requires_grad=True)
+    y = x * x
+```
 
 Without the hooks, ``x``, ``y.grad_fn._saved_self`` and
 ``y.grad_fn._saved_other`` all refer to the same tensor object.
 With the hooks, PyTorch will pack and unpack `x` into two new tensor objects
 that share the same storage with the original `x` (no copy performed).
 
-.. _backward-hooks-execution:
+(backward-hooks-execution)=
 
-Backward Hooks execution
-------------------------
+## Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
 The hooks that will be covered are: backward hooks registered to Tensor via
-:meth:`torch.Tensor.register_hook`, post-accumulate-grad hooks registered to
-Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`, post-hooks
-registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
-pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
+{meth}`torch.Tensor.register_hook`, post-accumulate-grad hooks registered to
+Tensor via {meth}`torch.Tensor.register_post_accumulate_grad_hook`, post-hooks
+registered to Node via {meth}`torch.autograd.graph.Node.register_hook`, and
+pre-hooks registered to Node via {meth}`torch.autograd.graph.Node.register_prehook`.
 
-Whether a particular hook will be fired
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Whether a particular hook will be fired
 
-Hooks registered to a Tensor via :meth:`torch.Tensor.register_hook`
+Hooks registered to a Tensor via {meth}`torch.Tensor.register_hook`
 are executed when gradients are being computed for that Tensor. (Note that this does not require
 the Tensor's grad_fn to be executed. For example, if the Tensor is passed
-as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
+as part of the ``inputs`` argument to {func}`torch.autograd.grad`,
 the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
 
-Hooks registered to a Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+Hooks registered to a Tensor via {meth}`torch.Tensor.register_post_accumulate_grad_hook`
 are executed after the gradients have been accumulated for that Tensor, meaning the
-Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.Tensor.register_hook`
-are run as gradients are being computed, hooks registered via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+Tensor's grad field has been set. Whereas hooks registered via {meth}`torch.Tensor.register_hook`
+are run as gradients are being computed, hooks registered via {meth}`torch.Tensor.register_post_accumulate_grad_hook`
 are only triggered once the Tensor's grad field is updated by autograd at the end of
 the backward pass. Thus, post-accumulate-grad hooks can only be registered for leaf
-Tensors. Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+Tensors. Registering a hook via {meth}`torch.Tensor.register_post_accumulate_grad_hook`
 on a non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
 
-Hooks registered to :class:`torch.autograd.graph.Node` using
-:meth:`torch.autograd.graph.Node.register_hook` or
-:meth:`torch.autograd.graph.Node.register_prehook` are only fired if
+Hooks registered to {class}`torch.autograd.graph.Node` using
+{meth}`torch.autograd.graph.Node.register_hook` or
+{meth}`torch.autograd.graph.Node.register_prehook` are only fired if
 the Node it was registered to is executed.
 
 Whether a particular Node is executed may depend on whether the backward pass was called with
-:func:`torch.autograd.grad` or :func:`torch.autograd.backward`.
+{func}`torch.autograd.grad` or {func}`torch.autograd.backward`.
 Specifically, you should be aware of these differences when you register a hook on a
-Node corresponding to a Tensor that you are passing to :func:`torch.autograd.grad` or
-:func:`torch.autograd.backward` as part of the ``inputs`` argument.
+Node corresponding to a Tensor that you are passing to {func}`torch.autograd.grad` or
+{func}`torch.autograd.backward` as part of the ``inputs`` argument.
 
-If you are using :func:`torch.autograd.backward`, all of the above mentioned hooks will be executed,
+If you are using {func}`torch.autograd.backward`, all of the above mentioned hooks will be executed,
 whether or not you specified the ``inputs`` argument. This is because `.backward()` executes all
 Nodes, even if they correspond to a Tensor specified as an input.
 (Note that the execution of this additional Node corresponding to Tensors passed as  ``inputs``
 is usually unnecessary, but done anyway. This behavior is subject to change;
 you should not depend on it.)
 
-On the other hand, if you are using :func:`torch.autograd.grad`, the backward hooks registered
+On the other hand, if you are using {func}`torch.autograd.grad`, the backward hooks registered
 to Nodes that correspond to the Tensors passed to ``input`` may not be executed, because
 those Nodes will not be executed unless there is another input that depends on the gradient
 result of this Node.
 
-The order in which the different hooks are fired
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### The order in which the different hooks are fired
 
 The order in which things happen are:
 
-#. hooks registered to Tensor are executed
-#. pre-hooks registered to Node are executed (if Node is executed).
-#. the ``.grad`` field is updated for Tensors that retain_grad
-#. Node is executed (subject to rules above)
-#. for leaf Tensors that have ``.grad`` accumulated, post-accumulate-grad hooks are executed
-#. post-hooks registered to Node are executed (if Node is executed)
+1. hooks registered to Tensor are executed
+2. pre-hooks registered to Node are executed (if Node is executed).
+3. the ``.grad`` field is updated for Tensors that retain_grad
+4. Node is executed (subject to rules above)
+5. for leaf Tensors that have ``.grad`` accumulated, post-accumulate-grad hooks are executed
+6. post-hooks registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.
 Hooks that are executed later can observe the modifications to the gradient made by
 earlier hooks.
 
-Special hooks
-^^^^^^^^^^^^^
+### Special hooks
 
-:func:`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
+{func}`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
 to Tensors. Each individual Tensor hook is fired following the Tensor hook ordering
 defined above and the registered multi-grad hook is called when the last Tensor gradient
 is computed.
 
-:meth:`torch.nn.modules.module.register_module_full_backward_hook` is implemented using hooks
+{meth}`torch.nn.modules.module.register_module_full_backward_hook` is implemented using hooks
 registered to Node. As the forward is computed, hooks are registered to grad_fn corresponding
 to the inputs and outputs of the module. Because a module may take multiple inputs and return
 multiple outputs, a dummy custom autograd Function is first applied to the inputs of the module
 before forward and the outputs of the module before the output of forward is returned to ensure
 that those Tensors share a single grad_fn, which we can then attach our hooks to.
 
-Behavior of Tensor hooks when Tensor is modified in-place
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Behavior of Tensor hooks when Tensor is modified in-place
 
 Usually hooks registered to a Tensor receive the gradient of the outputs with respect to that
 Tensor, where the value of the Tensor is taken to be its value at the time backward is computed.
@@ -996,12 +972,12 @@ If you prefer the behavior in the former case,
 you should register them to the Tensor after all in-place modifications to it have been made.
 For example:
 
-.. code::
-
-    t = torch.tensor(1., requires_grad=True).sin()
-    t.cos_()
-    t.register_hook(fn)
-    t.backward()
+```python
+t = torch.tensor(1., requires_grad=True).sin()
+t.cos_()
+t.register_hook(fn)
+t.backward()
+```
 
 Furthermore, it can be helpful to know that under the hood,
 when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
