@@ -2847,6 +2847,9 @@ class CSEProxy(DefaultHandler):
         store_cache = self.kernel.cse.store_cache
         if name in store_cache:
             return store_cache[name]
+        assert not is_buffer_removed(name), (
+            f"load from removed buffer {name!r} missing from cse.store_cache"
+        )
         out = self.kernel.load(name, index)
         # count load that is not in the store_cache, and also not in the
         # cse cache.

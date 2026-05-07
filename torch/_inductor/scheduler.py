@@ -25,7 +25,7 @@ from .ir import ComputedBuffer, Pointwise
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
@@ -137,6 +137,18 @@ class PendingFusion:
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
+
+
+def _is_gpu_triton_backend(
+    node1: BaseSchedulerNode,
+    node2: BaseSchedulerNode,
+) -> bool:
+    if not node1.is_gpu() or not node2.is_gpu():
+        return False
+    device_type = node1.get_device().type  # type: ignore[union-attr]
+    return (
+        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+    )
 
 
 class MixOrderReduction:
@@ -282,13 +294,7 @@ class MixOrderReduction:
         if V.graph.cpp_wrapper:
             return False
 
-        if not node1.is_gpu() or not node2.is_gpu():
-            return False
-        device_type = node1.get_device().type  # type: ignore[union-attr]
-        if (
-            device_type not in ("cuda", "xpu")
-            or get_current_backend(device_type) != "triton"
-        ):
+        if not _is_gpu_triton_backend(node1, node2):
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
@@ -6325,14 +6331,29 @@ class Scheduler:
             why("memory deps did not match")
             return False
 
-        node1_op_names = node1.get_operation_names()
-        for name in remaining_deps:
-            op_name = self.name_to_buf[name].defining_op_name()
-            if node1_op_names & self.name_to_fused_node[op_name].ancestors:
-                why("intermediate nodes between node1 & node2")
-                return False
+        if self._has_intermediate_dependencies(
+            node1.get_operation_names(),
+            remaining_deps,
+        ):
+            why("intermediate nodes between node1 & node2")
+            return False
 
         return True
+
+    def _has_intermediate_dependencies(
+        self,
+        producer_op_names: OrderedSet[str],
+        dep_names: Iterable[str],
+    ) -> bool:
+        for name in dep_names:
+            buf = self.name_to_buf.get(name)
+            if buf is None:
+                continue
+            op_name = buf.defining_op_name()
+            producer = self.name_to_fused_node.get(op_name)
+            if producer is not None and producer_op_names & producer.ancestors:
+                return True
+        return False
 
     def fusable_weak_dep(
         self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
