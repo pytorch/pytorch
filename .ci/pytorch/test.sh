@@ -459,6 +459,9 @@ test_dtensor() {
 
 test_h100_distributed() {
   # Distributed tests at H100
+  # Disable NVLS: AWS H100 instances lack the IMEX channel device
+  # needed for NCCL NVLS multicast
+  export NCCL_NVLS_ENABLE=0
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
