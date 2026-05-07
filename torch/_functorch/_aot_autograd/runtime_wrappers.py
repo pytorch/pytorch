@@ -3154,23 +3154,21 @@ def _codegen_compiled_backward(
         "functools": functools,
     }
 
-    lines.append("    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):")
+    lines.append(
+        "    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):"
+    )
     lines.append("        raise AssertionError(")
     lines.append(
-        "            'Compiled backward expects grads as a single mutable list '")
-    lines.append(
-        "            f'argument, but got {len(_flat_args_)} args. '")
-    lines.append(
-        "            'Grads must be passed as [grad0, grad1, ...] to allow '")
-    lines.append(
-        "            'freeing individual grads mid-backward.')")
+        "            'Compiled backward expects grads as a single mutable list '"
+    )
+    lines.append("            f'argument, but got {len(_flat_args_)} args. '")
+    lines.append("            'Grads must be passed as [grad0, grad1, ...] to allow '")
+    lines.append("            'freeing individual grads mid-backward.')")
     lines.append("    grad_args = _flat_args_[0]")
     lines.append("    del _flat_args_")
 
     if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
-        lines.append(
-            "    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)"
-        )
+        lines.append("    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)")
     else:
         lines.append("    _saved = _ctx_.saved_tensors")
 

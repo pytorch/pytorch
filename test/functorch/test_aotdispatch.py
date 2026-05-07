@@ -8175,19 +8175,30 @@ def forward(self, primals_1, tangents_1):
             _codegen_compiled_backward,
         )
 
-        bwd_fn = _codegen_compiled_backward(
-            num_rng=0, num_tensors_no_vc_check=None
-        )
-        noop = lambda *a, **kw: None
+        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+
+        def noop(*a, **kw):
+            return None
+
         with self.assertRaisesRegex(AssertionError, "single mutable list"):
             bwd_fn(
                 (torch.tensor(1.0),),
-                None, noop, noop, noop, noop, noop,
+                None,
+                noop,
+                noop,
+                noop,
+                noop,
+                noop,
             )
         with self.assertRaisesRegex(AssertionError, "single mutable list"):
             bwd_fn(
                 (torch.tensor(1.0), torch.tensor(2.0)),
-                None, noop, noop, noop, noop, noop,
+                None,
+                noop,
+                noop,
+                noop,
+                noop,
+                noop,
             )
 
     # --- Backward epilogue codegen tests ---
