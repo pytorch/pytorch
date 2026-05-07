@@ -221,6 +221,28 @@ class TestCuda(TestCase):
 
         self.assertEqual(actual.cpu(), expected, rtol=1e-4, atol=1e-6)
 
+    def test_cuda_build_version_format(self):
+        """torch.version.cuda_build, when set, must be 'M.m.p' with the
+        same M.m as torch.version.cuda. None is allowed (CPU-only build,
+        or legacy FindCUDA fallback)."""
+        cuda_build = getattr(torch.version, "cuda_build", None)
+        if torch.version.cuda is None:
+            self.assertIsNone(cuda_build)
+            return
+        if cuda_build is None:
+            # Legacy FindCUDA fallback path; nothing more to check.
+            return
+        self.assertTrue(
+            cuda_build.startswith(torch.version.cuda + "."),
+            f"cuda_build={cuda_build!r} does not start with cuda={torch.version.cuda!r}.",
+        )
+        parts = cuda_build.split(".")
+        self.assertEqual(len(parts), 3, f"cuda_build={cuda_build!r} is not M.m.p")
+        for part in parts:
+            self.assertTrue(
+                part.isdigit(), f"cuda_build component {part!r} is not numeric"
+            )
+
     def test_pinned_memory_with_cudaregister(self):
         try:
             torch.cuda.memory._set_allocator_settings(

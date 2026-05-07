@@ -7,6 +7,14 @@ include(../../cmake/public/cuda.cmake)
 
 # ---[ Configure macro file.
 set(C10_CUDA_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
+set(TORCH_CUDA_VERSION_MAJOR ${CUDAToolkit_VERSION_MAJOR})
+set(TORCH_CUDA_VERSION_MINOR ${CUDAToolkit_VERSION_MINOR})
+if(DEFINED CUDAToolkit_VERSION_PATCH)
+  set(TORCH_CUDA_VERSION_PATCH ${CUDAToolkit_VERSION_PATCH})
+else()
+  set(TORCH_CUDA_VERSION_PATCH 0)
+endif()
+math(EXPR TORCH_CUDA_VERSION_BUILD "${TORCH_CUDA_VERSION_MAJOR} * 10000 + ${TORCH_CUDA_VERSION_MINOR} * 100 + ${TORCH_CUDA_VERSION_PATCH}")
 # Probably have to do this :(
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/cuda_cmake_macros.h.in

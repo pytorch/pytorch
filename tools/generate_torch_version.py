@@ -126,6 +126,7 @@ if __name__ == "__main__":
         help="Whether this build is debug mode or not.",
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)
+    parser.add_argument("--cuda-version-build", "--cuda_version_build", type=str)
     parser.add_argument("--hip-version", "--hip_version", type=str)
     parser.add_argument("--rocm-version", "--rocm_version", type=str)
     parser.add_argument("--xpu-version", "--xpu_version", type=str)
@@ -135,6 +136,9 @@ if __name__ == "__main__":
     if args.is_debug is None:
         raise AssertionError("is_debug argument must be provided")
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
+    args.cuda_version_build = (
+        None if args.cuda_version_build == "" else args.cuda_version_build
+    )
     args.hip_version = None if args.hip_version == "" else args.hip_version
     args.rocm_version = None if args.rocm_version == "" else args.rocm_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
@@ -152,7 +156,7 @@ if __name__ == "__main__":
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
         f.write(
-            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', 'xpu']\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'cuda_build', 'git_version', 'hip', 'rocm', 'xpu']\n"
         )
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
@@ -160,6 +164,7 @@ if __name__ == "__main__":
         # this would claim to be a release build when it's not.)
         f.write(f"debug = {repr(bool(args.is_debug))}\n")
         f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
+        f.write(f"cuda_build: Optional[str] = {repr(args.cuda_version_build)}\n")
         f.write(f"git_version = {repr(sha)}\n")
         f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
         f.write(f"rocm: Optional[str] = {repr(args.rocm_version)}\n")
