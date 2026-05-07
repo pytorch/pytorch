@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 # mypy: allow-untyped-defs
-# flake8: noqa: TOR901
 """
 Tests for symmetric memory argument registry.
 
@@ -13,7 +12,7 @@ from unittest.mock import patch
 
 import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
-from torch.library import Library  # noqa: TOR901
+from torch.library import Library  # noqa: SCOPED_LIBRARY
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -162,7 +161,7 @@ class TestLibraryIntegration(TestCase):
 
     def test_library_def_registration(self):
         """Test registration via Library.DEF."""
-        lib = Library("test_lib_def", "DEF")
+        lib = Library("test_lib_def", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("test_op(Tensor input, str group_name) -> Tensor")
         lib.register_symm_mem_args("test_op", ["input"])
 
@@ -174,7 +173,7 @@ class TestLibraryIntegration(TestCase):
 
     def test_library_fragment_registration(self):
         """Test registration via Library.FRAGMENT."""
-        lib = Library("aten", "FRAGMENT")
+        lib = Library("aten", "FRAGMENT")  # noqa: SCOPED_LIBRARY
         lib.register_symm_mem_args("add.Tensor", ["self"])
 
         qualname = "aten::add.Tensor"
@@ -184,7 +183,7 @@ class TestLibraryIntegration(TestCase):
 
     def test_library_multiple_args(self):
         """Test registering multiple args via Library."""
-        lib = Library("test_lib_multi", "DEF")
+        lib = Library("test_lib_multi", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("test_op(Tensor a, Tensor b, Tensor out) -> Tensor")
         lib.register_symm_mem_args("test_op", ["a", "b", "out"])
 
@@ -197,7 +196,7 @@ class TestLibraryIntegration(TestCase):
     def test_library_with_op_overload(self):
         """Test Library registration with OpOverload object."""
         op = torch.ops.aten.mul.Tensor
-        lib = Library("aten", "FRAGMENT")
+        lib = Library("aten", "FRAGMENT")  # noqa: SCOPED_LIBRARY
         lib.register_symm_mem_args(op, ["self", "other"])
 
         qualname = op.__qualname__
@@ -208,7 +207,7 @@ class TestLibraryIntegration(TestCase):
 
     def test_library_cleanup_on_delete(self):
         """Test that deleting a Library cleans up its symm_mem_args registration."""
-        lib = Library("test_lib_cleanup", "DEF")
+        lib = Library("test_lib_cleanup", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_op(Tensor input, str reduce_op, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_op", ["input"])
 
@@ -241,7 +240,7 @@ class TestFunctionalOpCompile(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "Requires CUDA")
     def test_functional_op_compiles_with_symm_mem_args(self):
         """Test that a functional op with registered symm_mem_args compiles and runs."""
-        lib = Library("test_func_symm", "DEF")
+        lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_functional_op(Tensor input, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_functional_op", ["input"])
 
@@ -278,7 +277,7 @@ class TestFunctionalOpCompile(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "Requires CUDA")
     def test_functional_op_with_multiple_symm_mem_args(self):
         """Test that multiple symm_mem args are registered and visible during compilation."""
-        lib = Library("test_func_multi", "DEF")
+        lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define(
             "my_multi_arg_op(Tensor input, Tensor out, str group_name) -> Tensor"
         )
@@ -335,7 +334,7 @@ class TestFunctionalOpCompile(TestCase):
         """Test that _maybe_realize_symm_mem_args correctly looks up registered ops."""
         from torch._inductor.ir import FallbackKernel
 
-        lib = Library("test_realize_lookup", "DEF")
+        lib = Library("test_realize_lookup", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_op(Tensor input, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_op", ["input"])
 
@@ -357,7 +356,7 @@ class TestFunctionalOpCompile(TestCase):
         """Test that _maybe_realize_symm_mem_args returns early when group_name is absent."""
         from torch._inductor.ir import FallbackKernel
 
-        lib = Library("test_no_group", "DEF")
+        lib = Library("test_no_group", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_op(Tensor input) -> Tensor")
         lib.register_symm_mem_args("my_op", ["input"])
 
@@ -372,7 +371,7 @@ class TestFunctionalOpCompile(TestCase):
 
         from torch._inductor.ir import FallbackKernel, TensorBox
 
-        lib = Library("test_realize_call", "DEF")
+        lib = Library("test_realize_call", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define("my_op(Tensor input, str group_name) -> Tensor")
         lib.register_symm_mem_args("my_op", ["input"])
 

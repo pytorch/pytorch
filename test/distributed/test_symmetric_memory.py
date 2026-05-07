@@ -353,9 +353,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(symm_mem_hdl.rank, self.rank)
         self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
-        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
-            "entries"
-        ]
+        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
         ag_entries = [
             e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
         ]
@@ -1769,11 +1767,11 @@ class LoweringTest(MultiProcContinuousTest):
         """Test that torch.compile allocates symm_mem for custom ops with registered symm_mem_args."""
         self._init_process()
 
-        from torch.library import Library  # noqa: TOR901
+        from torch.library import Library  # noqa: SCOPED_LIBRARY
 
         group_name = dist.group.WORLD.group_name
 
-        lib = Library("test_symm_realize", "DEF")
+        lib = Library("test_symm_realize", "DEF")  # noqa: SCOPED_LIBRARY
         lib.define(
             "my_collective(Tensor input, str reduce_op, str group_name) -> Tensor"
         )
