@@ -506,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Step 5: Plain attribute.
             return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
-        # TODO - Revisit if we can use new descriptor VTs here.
+        # TODO(tp_descr_get) - Revisit if we can use new descriptor VTs here.
         # Step 6: Metaclass non-data descriptor or plain attr.
         # These are non-data descriptors on the metaclass (e.g. type.__call__,
         # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
@@ -623,9 +623,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
-        # Comparison dunders must be checked before WrapperDescriptor/
-        # MethodDescriptor to avoid VT type mismatches in identity checks
-        # like `type(a).__eq__ is type.__eq__` in the cmp_eq polyfill.
+        # TODO(tp_descr_get) - Comparison dunders must be checked before
+        # WrapperDescriptor/MethodDescriptor to avoid VT type mismatches in
+        # identity checks. Revisit once we implement tp_richcompare slot.
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
@@ -666,9 +666,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # C-level descriptors not matched above (e.g. instancemethod, or
-        # wrapper/method descriptors on torch classes that need trace_rules).
-        # OrderedDict's C-level methods are handled at runtime.
+        # TODO(tp_descr_get) - C-level descriptors not matched above (e.g.
+        # instancemethod, or wrapper/method descriptors on torch classes that
+        # need trace_rules). OrderedDict's C-level methods are handled at
+        # runtime.
         if inspect.ismethoddescriptor(cls_attr):
             if (
                 source
@@ -2822,7 +2823,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # TODO - Investigate if we need a separate descriptor for these
+        # TODO(tp_descr_get) - Investigate if we need a separate descriptor
+        # VT for instancemethod and cython functions.
         if (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
