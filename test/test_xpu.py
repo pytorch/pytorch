@@ -3161,6 +3161,7 @@ class TestXpuAutocast(TestAutocast):
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
     def setUp(self):
+        super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 

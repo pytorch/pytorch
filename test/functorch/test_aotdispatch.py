@@ -7900,6 +7900,728 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_get_rng_state_", source)
 
+    # --- Backward epilogue codegen tests ---
+
+    def test_backward_epilogue_codegen_emitted(self):
+        with capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _backward_epilogue(", source)
+        self.assertIn("tuple(out)", source)
+
+    def test_backward_epilogue_no_codegen_for_inference(self):
+        with capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_backward_epilogue_elides_rng_when_off(self):
+        with capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_set_offset_", source)
+
+    def test_backward_epilogue_elides_tokens_when_zero(self):
+        with capture_codegen_source("backward_epilogue") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("[:-", source)
+
+    def test_backward_epilogue_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y + 1
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        out = f(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
+
+    def test_backward_epilogue_correctness_multi_output(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2, x * 3
+
+        x = torch.randn(4, requires_grad=True)
+        a, b = f(x)
+        (a.sum() + b.sum()).backward()
+        self.assertEqual(x.grad, torch.full((4,), 5.0))
+
+    def test_backward_epilogue_correctness_with_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x):
+            return x * 2
+
+        a_ref = torch.randn(4, requires_grad=True)
+        b_ref = torch.randn(4, requires_grad=True)
+        tt_ref = TwoTensor(a_ref, b_ref)
+        out_ref = f(tt_ref)
+        out_ref.sum().backward()
+
+        a = a_ref.clone().detach().requires_grad_(True)
+        b = b_ref.clone().detach().requires_grad_(True)
+        tt = TwoTensor(a, b)
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(tt)
+        out.sum().backward()
+
+        self.assertEqual(tt.grad.a, tt_ref.grad.a)
+        self.assertEqual(tt.grad.b, tt_ref.grad.b)
+
+    def test_backward_epilogue_subclass_emits_wrap(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        with capture_codegen_source("backward_epilogue") as captured:
+
+            def f(x):
+                return x * 2
+
+            a = torch.randn(4, requires_grad=True)
+            b = torch.randn(4, requires_grad=True)
+            tt = TwoTensor(a, b)
+            compiled_f = torch.compile(f, backend="aot_eager")
+            out = compiled_f(tt)
+            out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_wrap_", source)
+
+    def test_backward_epilogue_includes_tokens_when_nonzero(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op = self._make_effectful_op("bw_epilogue_token_bwd")
+        fwd_op = self._make_effectful_op("bw_epilogue_token_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epilogue_token_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+            with capture_codegen_source("backward_epilogue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.ops.test.bw_epilogue_token_fwd(x) * 2
+
+                x = torch.randn(4, requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            source = captured[0]
+            self.assertIn("[:-", source)
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    def test_backward_epilogue_tokens_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op = self._make_effectful_op("bw_epilogue_tok_corr_bwd")
+        fwd_op = self._make_effectful_op("bw_epilogue_tok_corr_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epilogue_tok_corr_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.ops.test.bw_epilogue_tok_corr_fwd(x) * 2
+
+            x = torch.randn(4, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+
+            self.assertEqual(x.grad, torch.full((4,), 2.0))
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_backward_epilogue_rng_codegen(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("backward_epilogue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_set_offset_", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_backward_epilogue_rng_correctness(self):
+        def f(x):
+            return torch.rand_like(x) + x * 2
+
+        x_ref = torch.randn(4, device="cuda", requires_grad=True)
+        torch.manual_seed(42)
+        out_ref = f(x_ref)
+        out_ref.sum().backward()
+
+        x = x_ref.clone().detach().requires_grad_(True)
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f_compiled(x):
+                return torch.rand_like(x) + x * 2
+
+            torch.manual_seed(42)
+            out = f_compiled(x)
+            out.sum().backward()
+
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_backward_epilogue_create_graph(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * x
+
+        x = torch.randn(4, requires_grad=True)
+        out = f(x)
+        (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
+        self.assertEqual(grad_x, 2 * x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_backward_epilogue_tokens_and_rng_codegen(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op = self._make_effectful_op("bw_epi_tok_rng_bwd")
+        fwd_op = self._make_effectful_op("bw_epi_tok_rng_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epi_tok_rng_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+            with torch._functorch.config.patch(functionalize_rng_ops=True):
+                with capture_codegen_source("backward_epilogue") as captured:
+
+                    @torch.compile(backend="aot_eager")
+                    def f(x):
+                        return torch.ops.test.bw_epi_tok_rng_fwd(
+                            x
+                        ) * 2 + torch.rand_like(x)
+
+                    x = torch.randn(4, device="cuda", requires_grad=True)
+                    f(x).sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            source = captured[0]
+            self.assertIn("[:-", source)
+            self.assertIn("_set_offset_", source)
+            token_pos = source.index("[:-")
+            rng_pos = source.index("_set_offset_")
+            self.assertLess(token_pos, rng_pos)
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_backward_epilogue_tokens_and_rng_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op = self._make_effectful_op("bw_epi_tokrng_c_bwd")
+        fwd_op = self._make_effectful_op("bw_epi_tokrng_c_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epi_tokrng_c_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+            with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.ops.test.bw_epi_tokrng_c_fwd(x) * 2 + torch.rand_like(
+                        x
+                    )
+
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                f(x).sum().backward()
+
+            self.assertEqual(x.grad, torch.full((4,), 2.0, device="cuda"))
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    def test_backward_epilogue_subclass_and_tokens_codegen(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        bwd_op = self._make_effectful_op("bw_epi_sub_tok_bwd")
+        fwd_op = self._make_effectful_op("bw_epi_sub_tok_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epi_sub_tok_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+            with capture_codegen_source("backward_epilogue") as captured:
+
+                def f(x):
+                    return torch.ops.test.bw_epi_sub_tok_fwd(x) * 2
+
+                a = torch.randn(4, requires_grad=True)
+                b = torch.randn(4, requires_grad=True)
+                tt = TwoTensor(a, b)
+                compiled_f = torch.compile(f, backend="aot_eager")
+                out = compiled_f(tt)
+                out.sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            source = captured[0]
+            self.assertIn("[:-", source)
+            self.assertIn("_wrap_", source)
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    @unittest.skip(
+        "TwoTensor + effectful tokens backward interaction not yet supported"
+    )
+    def test_backward_epilogue_subclass_and_tokens_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        bwd_op = self._make_effectful_op("bw_epi_sub_tok_c_bwd")
+        fwd_op = self._make_effectful_op("bw_epi_sub_tok_c_fwd")
+
+        def setup_context(ctx, inputs, output):
+            pass
+
+        def backward(ctx, grad):
+            return torch.ops.test.bw_epi_sub_tok_c_bwd(grad)
+
+        fwd_op.register_autograd(backward, setup_context=setup_context)
+        h1 = _register_effectful_op(fwd_op, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op, EffectType.ORDERED)
+        try:
+
+            def f(x):
+                return torch.ops.test.bw_epi_sub_tok_c_fwd(x) * 2
+
+            a = torch.randn(4, requires_grad=True)
+            b = torch.randn(4, requires_grad=True)
+            tt = TwoTensor(a, b)
+            compiled_f = torch.compile(f, backend="aot_eager")
+            out = compiled_f(tt)
+            out.sum().backward()
+
+            self.assertEqual(a.grad, torch.full((4,), 2.0))
+            self.assertEqual(b.grad, torch.full((4,), 2.0))
+        finally:
+            h1.destroy()
+            h2.destroy()
+
+    def test_backward_epilogue_multi_token_codegen(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op1 = self._make_effectful_op("bw_epi_mt_bwd1")
+        fwd_op1 = self._make_effectful_op("bw_epi_mt_fwd1")
+        bwd_op2 = self._make_effectful_op("bw_epi_mt_bwd2")
+        fwd_op2 = self._make_effectful_op("bw_epi_mt_fwd2")
+
+        def setup_context1(ctx, inputs, output):
+            pass
+
+        def backward1(ctx, grad):
+            return torch.ops.test.bw_epi_mt_bwd1(grad)
+
+        def setup_context2(ctx, inputs, output):
+            pass
+
+        def backward2(ctx, grad):
+            return torch.ops.test.bw_epi_mt_bwd2(grad)
+
+        fwd_op1.register_autograd(backward1, setup_context=setup_context1)
+        fwd_op2.register_autograd(backward2, setup_context=setup_context2)
+        h1 = _register_effectful_op(fwd_op1, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op1, EffectType.ORDERED)
+        h3 = _register_effectful_op(fwd_op2, EffectType.ORDERED)
+        h4 = _register_effectful_op(bwd_op2, EffectType.ORDERED)
+        try:
+            with capture_codegen_source("backward_epilogue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    y = torch.ops.test.bw_epi_mt_fwd1(x)
+                    return torch.ops.test.bw_epi_mt_fwd2(y) * 2
+
+                x = torch.randn(4, requires_grad=True)
+                f(x).sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            source = captured[0]
+            self.assertIn("[:-1]", source)
+        finally:
+            h1.destroy()
+            h2.destroy()
+            h3.destroy()
+            h4.destroy()
+
+    def test_backward_epilogue_multi_token_correctness(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        bwd_op1 = self._make_effectful_op("bw_epi_mtc_bwd1")
+        fwd_op1 = self._make_effectful_op("bw_epi_mtc_fwd1")
+        bwd_op2 = self._make_effectful_op("bw_epi_mtc_bwd2")
+        fwd_op2 = self._make_effectful_op("bw_epi_mtc_fwd2")
+
+        def setup_context1(ctx, inputs, output):
+            pass
+
+        def backward1(ctx, grad):
+            return torch.ops.test.bw_epi_mtc_bwd1(grad)
+
+        def setup_context2(ctx, inputs, output):
+            pass
+
+        def backward2(ctx, grad):
+            return torch.ops.test.bw_epi_mtc_bwd2(grad)
+
+        fwd_op1.register_autograd(backward1, setup_context=setup_context1)
+        fwd_op2.register_autograd(backward2, setup_context=setup_context2)
+        h1 = _register_effectful_op(fwd_op1, EffectType.ORDERED)
+        h2 = _register_effectful_op(bwd_op1, EffectType.ORDERED)
+        h3 = _register_effectful_op(fwd_op2, EffectType.ORDERED)
+        h4 = _register_effectful_op(bwd_op2, EffectType.ORDERED)
+        try:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                y = torch.ops.test.bw_epi_mtc_fwd1(x)
+                return torch.ops.test.bw_epi_mtc_fwd2(y) * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+            self.assertEqual(x.grad, torch.full((4,), 2.0))
+        finally:
+            h1.destroy()
+            h2.destroy()
+            h3.destroy()
+            h4.destroy()
+
+    def test_backward_epilogue_subclass_and_rng_codegen(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=True,
+            num_outputs_rng_offset=1,
+        )
+
+        def dummy_wrap(out):
+            return out
+
+        with capture_codegen_source("backward_epilogue") as captured:
+            _codegen_backward_epilogue(
+                fw_metadata, SimpleNamespace(grad_input_metas=[]), dummy_wrap
+            )
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_set_offset_", source)
+        self.assertIn("_wrap_", source)
+        self.assertNotIn("[:-", source)
+
+    def test_backward_epilogue_subclass_tokens_and_rng_codegen(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=2,
+            is_rng_op_functionalized=True,
+            num_outputs_rng_offset=1,
+        )
+
+        def dummy_wrap(out):
+            return out
+
+        with capture_codegen_source("backward_epilogue") as captured:
+            _codegen_backward_epilogue(
+                fw_metadata, SimpleNamespace(grad_input_metas=[]), dummy_wrap
+            )
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("[:-2]", source)
+        self.assertIn("_set_offset_", source)
+        self.assertIn("_wrap_", source)
+        token_pos = source.index("[:-2]")
+        rng_pos = source.index("_set_offset_")
+        wrap_pos = source.index("_wrap_")
+        self.assertLess(token_pos, rng_pos)
+        self.assertLess(rng_pos, wrap_pos)
+
+    def test_backward_epilogue_subclass_fallback_codegen(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[])
+
+        with capture_codegen_source("backward_epilogue") as captured:
+            _codegen_backward_epilogue(fw_metadata, subclass_meta, None)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_wrap_subclasses_", source)
+        self.assertNotIn("_wrap_(", source)
+
+    def test_backward_epilogue_subclass_fallback_none_metas_raises(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=None)
+
+        with self.assertRaises(AssertionError):
+            _codegen_backward_epilogue(fw_metadata, subclass_meta, None)
+
+    def test_backward_epilogue_make_subclass_override_codegen(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[])
+
+        def dummy_wrap(out):
+            return out
+
+        with capture_codegen_source("backward_epilogue") as captured:
+            _codegen_backward_epilogue(fw_metadata, subclass_meta, dummy_wrap)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("make_subclass_override", source)
+        self.assertIn("_wrap_(", source)
+        self.assertIn("_wrap_subclasses_(", source)
+
+    def test_backward_epilogue_make_subclass_override_fast_path(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[])
+
+        call_log = []
+
+        def fast_wrap(out):
+            call_log.append("fast")
+            return out
+
+        fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
+        fn([1, 2, 3])
+        self.assertEqual(call_log, ["fast"])
+
+    def test_backward_epilogue_make_subclass_override_slow_path(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+        subclass_meta = SimpleNamespace(grad_input_metas=[])
+
+        call_log = []
+
+        def fast_wrap(out):
+            call_log.append("fast")
+            return out
+
+        def override(meta, is_runtime, args):
+            call_log.append("override")
+            return args[0]
+
+        fn = _codegen_backward_epilogue(fw_metadata, subclass_meta, fast_wrap)
+        fn([], make_subclass_override=override)
+        self.assertNotIn("fast", call_log)
+
+    def test_backward_epilogue_no_subclass_no_override_param(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _codegen_backward_epilogue,
+        )
+
+        fw_metadata = SimpleNamespace(
+            num_backward_tokens=0,
+            is_rng_op_functionalized=False,
+        )
+
+        with capture_codegen_source("backward_epilogue") as captured:
+            _codegen_backward_epilogue(fw_metadata, None, None)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("make_subclass_override", source)
+
+    # --- Compiled autograd + backward epilogue integration tests ---
+
+    def _run_with_compiled_autograd(self, fn, compiler_fn=None):
+        from torch._dynamo import compiled_autograd
+
+        if compiler_fn is None:
+
+            def compiler_fn(gm):
+                return torch.compile(
+                    gm, backend="aot_eager", fullgraph=True, dynamic=True
+                )
+
+        torch._dynamo.reset()
+        with (
+            compiled_autograd._enable(compiler_fn),
+            torch.autograd.set_multithreading_enabled(False),
+        ):
+            return fn()
+
+    def test_backward_epilogue_compiled_autograd_basic(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2
+
+        def run():
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+            return x.grad
+
+        expected = run()
+        torch._dynamo.reset()
+        actual = self._run_with_compiled_autograd(run)
+        self.assertEqual(actual, expected)
+
+    def test_backward_epilogue_compiled_autograd_multi_output(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2, x * 3
+
+        def run():
+            x = torch.randn(4, requires_grad=True)
+            a, b = f(x)
+            (a.sum() + b.sum()).backward()
+            return x.grad
+
+        expected = run()
+        torch._dynamo.reset()
+        actual = self._run_with_compiled_autograd(run)
+        self.assertEqual(actual, expected)
+
+    def test_backward_epilogue_compiled_autograd_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+
+        def run():
+            a = torch.randn(4, requires_grad=True)
+            b = torch.randn(4, requires_grad=True)
+            tt = TwoTensor(a, b)
+            out = compiled_f(tt)
+            out.sum().backward()
+            return a.grad, b.grad
+
+        expected = run()
+        torch._dynamo.reset()
+        actual = self._run_with_compiled_autograd(run)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1], expected[1])
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
