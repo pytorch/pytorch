@@ -147,8 +147,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
     at::SmallVector<void *, 8> data_ptrs;
     at::SmallVector<int64_t, 8> uids;
-    data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
-                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
+    data_ptrs = {input.mutable_data_ptr<int8_t>(), weight_transposed.mutable_data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
