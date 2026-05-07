@@ -5,9 +5,11 @@ dependencies = [
     "pyyaml==6.0.2",
     "GitPython==3.1.47",
     "docker==7.1.0",
-    "pytest==7.3.2",
     "uv==0.11.6"
 ]
+
+[project.optional-dependencies]
+test = ["pytest==9.0.3"]
 
 [tool.setuptools]
 packages = ["cli"]

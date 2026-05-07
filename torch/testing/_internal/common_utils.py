@@ -174,7 +174,9 @@ class TestEnvironment:
     #     implied_by_fn (Callable): Thunk returning a bool to imply this flag as enabled
     #         by something outside of its primary environment variable setting. For example,
     #         this can be useful if the value of another environment variable implies the flag
-    #         as enabled. Default: Lambda returning False to indicate no implications.
+    #         as enabled. If the primary env var is set explicitly (to any value, including
+    #         "0"), the env var wins and implied_by_fn is not consulted. Default: Lambda
+    #         returning False to indicate no implications.
     @staticmethod
     def def_flag(
         name,
@@ -190,8 +192,10 @@ class TestEnvironment:
         if env_var is not None:
             env_var_val = os.getenv(env_var)
             enabled = enabled_fn(env_var_val, default)
-        implied = implied_by_fn()
-        enabled = enabled or implied
+        implied = False
+        if env_var_val is None:
+            implied = implied_by_fn()
+            enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
             TestEnvironment.repro_env_vars[env_var] = env_var_val
 
@@ -313,6 +317,20 @@ OPINFO_SAMPLE_INPUT_INDEX: int | None = TestEnvironment.def_setting(
     include_in_repro=False,
     parse_fn=lambda val: None if val is None else int(val),
 )
+
+# Possibly restrict OpInfo tests to a single DSL runtime.
+# Example inputs: "triton", "cutedsl", all possible values
+# given by: torch.backends.python_native.all_dsls
+OPINFO_RESTRICT_TO_DSL: str | None = TestEnvironment.def_setting(
+    "OPINFO_RESTRICT_TO_DSL",
+    env_var="OPINFO_RESTRICT_TO_DSL",
+    default=None,
+    # Don't include the env var value in the repro command because the info will
+    # be queried from the tracked sample input instead
+    include_in_repro=True,
+    parse_fn=lambda val: None if val is None else str(val),
+)
+
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = 'slow_tests.json'
@@ -2151,6 +2169,12 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
 
+        if isinstance(fn, type):
+            if TEST_WITH_ROCM:
+                fn.__unittest_skip__ = True  # type: ignore[attr-defined]
+                fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
+            return fn
+
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if TEST_WITH_ROCM:
@@ -3310,6 +3334,9 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    _prev_torch_function_mode_stack_len: int = 0
+    _prev_torch_function_state = torch._C._TorchFunctionState.ENABLED
+
     # Always use difflib to print diffs on multi line equality.
     # Undocumented feature in unittest
     _diffThreshold = sys.maxsize
@@ -3722,6 +3749,8 @@ class TestCase(expecttest.TestCase):
 
         # attempt to reset some global state at the end of the test
         self._prev_grad_state = torch.is_grad_enabled()
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -3743,6 +3772,25 @@ class TestCase(expecttest.TestCase):
         # attribute may not be defined, per above
         if hasattr(self, '_prev_grad_state'):
             torch.set_grad_enabled(self._prev_grad_state)
+
+        # torch.set_default_device pushes a DeviceContext onto the torch
+        # function mode stack, so this check also catches leaked default devices.
+        after = torch._C._len_torch_function_stack()
+        if after != self._prev_torch_function_mode_stack_len:
+            for _ in range(after - self._prev_torch_function_mode_stack_len):
+                torch._C._pop_torch_function_stack()
+            raise AssertionError(
+                f"torch function mode stack was leaked: "
+                f"length changed from {self._prev_torch_function_mode_stack_len} to {after}"
+            )
+
+        tf_state = torch._C._get_torch_function_state()
+        if tf_state != self._prev_torch_function_state:
+            torch._C._set_torch_function_state(self._prev_torch_function_state)
+            raise AssertionError(
+                f"torch function state was leaked: "
+                f"changed from {self._prev_torch_function_state} to {tf_state}"
+            )
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -6008,7 +6056,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(
-        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)*',
         repl_frame,
         s,
     )
@@ -6031,9 +6079,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
-    # Normalize caret-only lines by stripping leading whitespace, since
-    # col_offset in bytecode positions can vary across Python point releases
-    s = re.sub(r"^[ ]+(\^+)$", r"\1", s, flags=re.MULTILINE)
     return s
 
 
