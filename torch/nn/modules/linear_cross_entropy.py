@@ -359,13 +359,7 @@ def _linear_cross_entropy_batch_chunked(
         requires_grad=False,
     )
 
-    if not use_acc_dtype and is_mps:
-        # Workaround: on MPS, MPS's mm/addmm misbehaves when an
-        # operand is the user's autograd-tracked tensor
-        # directly. Forcing a fresh copy of linear_weight via clone()
-        # avoids the issue.
-        linear_weight_ = linear_weight.clone()
-    elif use_acc_dtype and (compute_input_grad or not is_cuda):
+    if use_acc_dtype and (compute_input_grad or not is_cuda):
         linear_weight_ = linear_weight.to(logits_buf.dtype)
     else:
         linear_weight_ = linear_weight
@@ -398,8 +392,8 @@ def _linear_cross_entropy_batch_chunked(
         (batch_chunk_size, in_features)
         if (
             compute_input_grad
-            and grad_input.dtype != linear_weight_.dtype
             and not is_cuda
+            and (grad_input.dtype != linear_weight_.dtype or is_mps)
         )
         else (0, 0)
     )
@@ -422,12 +416,6 @@ def _linear_cross_entropy_batch_chunked(
     # chunking along batches dimension:
     for bchunk_start, bchunk_size in _chunk_iter(num_batches, batch_chunk_size):
         input_chunk = input.narrow(0, bchunk_start, bchunk_size)
-        if is_mps and not use_acc_dtype:
-            # MPS diagnostic: test whether MPS mm/addmm misbehaves
-            # when an operand is a narrow view of an autograd-tracked
-            # tensor. Clones input_chunk so all subsequent ops in
-            # this chunk see a fresh, contiguous, non-narrow tensor.
-            input_chunk = input_chunk.clone()
         target_chunk = target.narrow(0, bchunk_start, bchunk_size)
         weight_chunk = neg_weight_target.narrow(0, bchunk_start, bchunk_size)
         logits = (
@@ -484,7 +472,7 @@ def _linear_cross_entropy_batch_chunked(
 
         if compute_input_grad:
             grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
-            if grad_x.dtype == linear_weight_.dtype or is_cuda:
+            if is_cuda or (grad_x.dtype == linear_weight_.dtype and not is_mps):
                 torch.mul(
                     torch.index_select(linear_weight_, 0, target_chunk),
                     weight_chunk.unsqueeze(1),
@@ -495,6 +483,9 @@ def _linear_cross_entropy_batch_chunked(
                 # CPU: addmm is strict on dtype, and a bf16 subtract
                 # loses precision; compute in acc_dtype and cast at
                 # the end.
+                # MPS: addmm with M aliasing out= on a narrow view of
+                # grad_input misbehaves; route through a non-narrow
+                # scratch buffer and copy_ into grad_x.
                 input_grad_acc_chunk = input_grad_acc_buf.narrow(0, 0, bchunk_size)
                 torch.mul(
                     torch.index_select(linear_weight_, 0, target_chunk),
