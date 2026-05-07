@@ -704,8 +704,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   @autoreleasepool {
     auto tensor_key = attn_bias.has_value() ? getTensorsStringKey({query, key, value, *attn_bias})
                                             : getTensorsStringKey({query, key, value});
-    auto key_name = __func__ + tensor_key + ":causal=" + std::to_string(is_causal) +
-        ":bias=" + std::to_string(attn_bias.has_value()) + ":lse=" + std::to_string(compute_log_sumexp);
+    auto key_name = fmt::format(
+        "{}{}:causal={}:bias={}:lse={}",
+        __func__,
+        tensor_key,
+        static_cast<int>(is_causal),
+        static_cast<int>(attn_bias.has_value()),
+        static_cast<int>(compute_log_sumexp));
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(
         key_name, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
           auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
