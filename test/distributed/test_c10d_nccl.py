@@ -4819,6 +4819,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(nccl_cfg_2.min_ctas, 4)
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_max_p2p_peers(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "max_p2p_peers"):
+            raise SkipTest(
+                "max_p2p_peers binding absent (PyTorch might be built against NCCL < 2.30)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_max_p2p_peers = 1
+        pg_opts.config.max_p2p_peers = new_max_p2p_peers
+        self.assertEqual(pg_opts.config.max_p2p_peers, new_max_p2p_peers)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
