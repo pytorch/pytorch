@@ -2860,7 +2860,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
 
     T p = T(1.0);
     T q = x;
-    T r;
+    T r = x;
 
     for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;

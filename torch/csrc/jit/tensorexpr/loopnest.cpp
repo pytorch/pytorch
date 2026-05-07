@@ -690,7 +690,7 @@ class FunctionInliner : public IRMutator {
         success_ = false;
         return nullptr;
       }
-      // Add a mapping for each function parameter to it's source name.
+      // Add a mapping for each function parameter to its source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
       GRAPH_DEBUG(
           "ComputeInline: Inline mapping: ",

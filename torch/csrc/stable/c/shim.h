@@ -159,7 +159,7 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
-// Shims for the a few dtypes not already in
+// Shims for a few dtypes not already in
 // torch/csrc/inductor/aoti_torch/c/shim.h
 AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
 AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
@@ -222,6 +222,19 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     int32_t num_tags);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+/**
+ * The beginning of all shims added in 2.13.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+// Stable corollary to torch::Library method m.set_python_module(...).
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus
 } // extern "C"

@@ -49,7 +49,7 @@ class TestNativeDecompTable(TestCase):
 
         # Snapshot state that registrations / deregistrations touch and
         # that *can* safely be restored. We deliberately do NOT clear
-        # `_defined_native_ops` or `_def_libs` — their contents mirror
+        # `_defined_native_ops` or `_def_libs` -- their contents mirror
         # permanent dispatcher state.
         self._snapshot = {
             "libs": dict(self.registry._libs),
@@ -189,8 +189,8 @@ class TestNativeDecompTable(TestCase):
         the override wins (merged last)."""
         self._register("add.Tensor", _always_true, _make_fill_impl(99))
 
-        # The stored override is a router closure that wraps our impl — not
-        # our impl directly — so we verify table identity against the
+        # The stored override is a router closure that wraps our impl -- not
+        # our impl directly -- so we verify table identity against the
         # closure we queued.
         table = native_decomp_table()
         self.assertIs(
@@ -245,7 +245,7 @@ class TestNativeDecompTable(TestCase):
         self.assertGraphRoutedToNative(ep)
 
     def test_export_with_non_matching_cond_preserves_aten(self):
-        """When cond returns False, the decomp falls through — graph keeps aten::<op>."""
+        """When cond returns False, the decomp falls through -- graph keeps aten::<op>."""
         ep = self._export_add(_always_false, _make_fill_impl(-1))
         self.assertGraphNotRoutedToNative(ep)
 

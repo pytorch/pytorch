@@ -99,7 +99,7 @@ def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    cond: _OpCondFn,
+    cond: _OpCondFn | None,
     impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,

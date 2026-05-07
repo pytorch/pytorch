@@ -10,13 +10,13 @@ When writing native ops, they are required to interact meaningfully with torch's
 
 As a further clarification, ops cannot be labelled as `CompositeImplicitAutograd` in `native_functions.yaml`, as-in the op must have an explicit autograd function registered, or at minimum an explicit implementation registered for the same backend as being overridden/added.
 
-Each override is described by **two callables**: a predicate (`cond`) and an implementation (`impl`). At call time the registry's router evaluates the cond against the op's arguments and, if it returns `True`, routes the call to `impl`. If no registered cond matches, the router transparently falls through to the original aten kernel — there's no need to thread a fallback kernel or a `DispatchKeySet` through your code.
+Each override is described by **two callables**: a predicate (`cond`) and an implementation (`impl`). At call time the registry's router evaluates the cond against the op's arguments and, if it returns `True`, routes the call to `impl`. If no registered cond matches, the router transparently falls through to the original aten kernel -- there's no need to thread a fallback kernel or a `DispatchKeySet` through your code.
 
 For overrides that always apply (no predicate), pass `unconditional_override=True` and omit `cond` (or pass `None`).
 
 ## A Note on Imports
 
-All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get it's version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
+All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get its version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
 
 First, we're going to write the registration function, and a top-level call, being very careful to not pull in the `triton` package early:
 
@@ -85,7 +85,7 @@ from ... import cutedsl_utils as cu
 
 def my_impl(*args, **kwargs) -> ...:
     """
-    Replacement implementation — signature matches aten::_scaled_grouped_mm_v2.
+    Replacement implementation -- signature matches aten::_scaled_grouped_mm_v2.
     """
     pass
 
@@ -104,14 +104,14 @@ def register_kernel_override():
 
 ### Replacing a Subset of Calls
 
-This time we only want to override the behavior of a subset of `aten._scaled_grouped_mm_v2` calls, based on some input property. Write a `cond` that returns `True` when the override should fire and `False` otherwise — when it returns `False`, the registry's router transparently falls through to the original aten kernel. You never need to call the fallback yourself.
+This time we only want to override the behavior of a subset of `aten._scaled_grouped_mm_v2` calls, based on some input property. Write a `cond` that returns `True` when the override should fire and `False` otherwise -- when it returns `False`, the registry's router transparently falls through to the original aten kernel. You never need to call the fallback yourself.
 
 ```
 from ... import cutedsl_utils as cu
 
 def my_cond(arg1, arg2, *args, **kwargs) -> bool:
     """
-    Decide whether to invoke my_impl. Keep this cheap — it runs on every call.
+    Decide whether to invoke my_impl. Keep this cheap -- it runs on every call.
     Avoid APIs that aren't defined on FakeTensors (e.g. `_is_cow_tensor`) if
     you want the override to apply under torch.export / torch.compile too.
     """
@@ -120,14 +120,14 @@ def my_cond(arg1, arg2, *args, **kwargs) -> bool:
 
 def my_impl(arg1, arg2, *args, **kwargs) -> ...:
     """
-    Replacement implementation — lazy-import the actual kernel and run it.
+    Replacement implementation -- lazy-import the actual kernel and run it.
     """
     from .my_impl_kernel import my_kernel
     return my_kernel(arg1, arg2, *args, **kwargs)
 
 
 # Override `aten::_scaled_grouped_mm_v2` on CUDA only when `my_cond` returns
-# True. For other inputs the native aten kernel runs — the registry captures
+# True. For other inputs the native aten kernel runs -- the registry captures
 # it automatically before installing the override and wires the fallback.
 def register_kernel_override():
     cu.register_op_override(
@@ -140,7 +140,7 @@ def register_kernel_override():
 ```
 
 Notes:
-* `cond` and `impl` have the **same signature as the aten op** — no extra
+* `cond` and `impl` have the **same signature as the aten op** -- no extra
   `dispatch_keys` or `fallback_kernel` parameters.
 * Multiple overrides can be registered for the same op at the same
   dispatch key; the router tries them in registration order and stops at
@@ -173,7 +173,7 @@ ep = ep.run_decompositions(native_decomp_table())
 
 By default `native_decomp_table()` returns `torch.export.default_decompositions()`
 merged with the registered overrides (overrides win on conflicts). Pass
-`overrides_only=True` to get just the override entries — useful when
+`overrides_only=True` to get just the override entries -- useful when
 composing tables manually or for inspection.
 
 The registry intentionally does **not** write into any global compile/export
@@ -190,14 +190,14 @@ During `run_decompositions` / `torch.compile`, your `cond` runs on
 **FakeTensors**. It must avoid APIs that aren't defined on FakeTensors
 (e.g. `_is_cow_tensor`, `.item()`). Conditions based on `dtype`, `device`,
 `ndim`, and static shapes are always safe. Conditions that compare
-symbolic dims introduce guards — they work, but affect specialization.
+symbolic dims introduce guards -- they work, but affect specialization.
 If a cond raises under tracing, the registry treats it as "no match" and
 falls through to the default lowering.
 
 ### Mutating / aliasing ops
 
 Overriding mutating ops (e.g. `add_.Tensor`) is supported. The user's `impl`
-must mutate its inputs in place and return the mutated tensor — just like
+must mutate its inputs in place and return the mutated tensor -- just like
 aten. Don't call the same aten op from inside your impl (e.g. don't write
 `self.add_(other)` inside a `my_add_(self, other)` override), since that
 re-enters the dispatcher and recurses back into the router. Use a
@@ -245,7 +245,7 @@ register_op_override(
 ```
 Register a given implementation to a library.
 
-* `lib_symbol`: namespace you're overriding — `"aten"` for most cases.
+* `lib_symbol`: namespace you're overriding -- `"aten"` for most cases.
 * `op_symbol`: the op to override, either a bare name (`"bmm"`, resolving to `aten.bmm.default`) or overload-qualified (`"add_.Tensor"` → `aten.add_.Tensor`).
 * `dispatch_key`: typically `"CPU"` or `"CUDA"` (or any other backend key).
 * `cond`: predicate choosing when `impl` applies. May be `None` if `unconditional_override=True`, in which case a trivially-true predicate is substituted.
@@ -311,3 +311,27 @@ def example_ordering_fn(op_symbol, dispatch_key, nodes):
 
     return out_nodes
 ```
+
+# Testing Native Ops
+
+Adding operators means that they should be tested. Given that we're dealing with overrides, which by definition change behavior, we need to be a little careful.
+
+The preferred testing method is to co-opt the existing `OpInfo` and `op_db` class/list and benefit from all the infrastructure built around that functionality.
+
+Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with a input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
+
+* `test_ops.py`
+* `test_unary_ufuncs.py`
+* `test_ops_gradients.py`
+* `test_torchinductor_opinfo.py`
+* `test_export_opinfo.py`
+
+## Testing only Native ops
+
+Optionally, one can set the `OPINFO_RESTRICT_TO_DSL` environment variable to enable only the DSL specified for quick testing - this is then used via:
+
+```
+OPINFO_RESTRICT_TO_DSL=triton pytest -sv test/test_binary_ufuncs.py
+```
+
+This will test all triton-based binary operators.
