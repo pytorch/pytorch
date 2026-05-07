@@ -8,7 +8,7 @@ Key classes include:
 - ExceptionVariable: Tracks exception objects
 - RandomVariable: Manages random number generators
 - GetAttrVariable: Tracks attribute access
-- MethodWrapperVariable: Handles method wrappers
+- ConstantMethodWrapperVariable: Handles method wrappers
 - PythonModuleVariable: Tracks Python modules
 - NumpyVariable: Handles numpy functions and types
 - StringFormatVariable: Manages string formatting
@@ -1459,7 +1459,7 @@ class GetAttrVariable(VariableTracker):
         return super().mp_subscript_impl(tx, key)
 
 
-class MethodWrapperVariable(VariableTracker):
+class ConstantMethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper: types.MethodWrapperType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
