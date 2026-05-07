@@ -30,10 +30,12 @@ functional_optim_map = {
 
 def register_functional_optim(key, optim):
     """
-    Interface to insert a new functional optimizer to functional_optim_map
+    Interface to insert a new functional optimizer to functional_optim_map.
     ``fn_optim_key`` and ``fn_optimizer`` are user defined. The optimizer and key
-    need not be of :class:`torch.optim.Optimizer` (e.g. for custom optimizers)
+    need not be of :class:`torch.optim.Optimizer` (e.g. for custom optimizers).
+
     Example::
+
         >>> # import the new functional optimizer
         >>> # xdoctest: +SKIP
         >>> from xyz import fn_optimizer
@@ -43,6 +45,7 @@ def register_functional_optim(key, optim):
     """
     if key not in functional_optim_map:
         functional_optim_map[key] = optim
+
 
 
 def as_functional_optim(optim_cls: type, *args, **kwargs):
