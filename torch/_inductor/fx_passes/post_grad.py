@@ -285,13 +285,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
 
-    if config.dedup_reduce_scatters:
-        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
-
-        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
-            dedup_fsdp_reduce_scatter
-        )
-
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
