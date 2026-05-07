@@ -31,6 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
     validate_sharding_rule_sample,
+    validate_sharding_rule_sample_backward,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import _OpCall, DebugMode
@@ -1125,8 +1126,21 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: {input_placements} -> {tuple(output_placements)} failed",
+                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
+
+            bwd = validate_sharding_rule_sample_backward(
+                aten_op,
+                full_args,
+                full_kwargs,
+                input_placements,
+                mesh,
+            )
+            if bwd is not None:
+                self.assertTrue(
+                    bwd,
+                    f"{op.name}: backward {input_placements} failed",
+                )
 
 
 class TestCompiledDTensorOps(TestDTensorOps):
