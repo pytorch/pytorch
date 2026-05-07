@@ -107,18 +107,19 @@ class AOTInductorModelContainer {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
-    auto* model = get_available_model();
 
     ConstantState& const_folded =
         use_secondary_ ? constant_folded_secondary_ : constant_folded_;
     if (const_folded == ConstantState::INITIALIZED) {
-      // At this point, constant is not ready yet. We need to call constant
-      // folding before we execute the model. We obtain a unique lock at this
-      // point to make sure constant is ready for all.
+      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Holding a model across the upgrade causes a deadlock when another
+      // thread holds a shared lock and waits for the model.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
+        auto* model = get_available_model();
+        // TODO: add try catch block to handle exception.
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
@@ -126,6 +127,11 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
+        {
+          std::lock_guard lk(models_mutex_);
+          pending_models_.push_back(model);
+        }
+        pending_models_available_.notify_one();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -133,6 +139,8 @@ class AOTInductorModelContainer {
       throw std::runtime_error(
           "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
+
+    auto* model = get_available_model();
 
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
@@ -445,18 +453,28 @@ class AOTInductorModelContainer {
 
   // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
+  // When allow_h2d_copy is true, CPU input tensors are silently copied to the
+  // model's device (via the same memcpy path used for same-device copies).
+  // Note: allow_h2d_copy is incompatible with user_managed, since user_managed
+  // mode stores the tensor pointer directly rather than copying.
   void update_constant_buffer(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
       bool use_inactive,
       bool validate_full_update,
-      bool user_managed = false) {
+      bool user_managed = false,
+      bool allow_h2d_copy = false) {
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
+    if (allow_h2d_copy && user_managed) {
+      throw std::runtime_error(
+          "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
+    }
 
+    int32_t cpu_device_type = aoti_torch_device_type_cpu();
     auto num_constants = models_[0]->num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
@@ -474,6 +492,15 @@ class AOTInductorModelContainer {
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_type(it->second, &tensor_device_type));
       if (tensor_device_type != expected_const_device_type) {
+#ifndef USE_MPS
+        if (allow_h2d_copy && tensor_device_type == cpu_device_type) {
+          // CPU input -> non-CPU expected device. The main-blob memcpy path
+          // (e.g. cudaMemcpyDefault, SYCL queue.memcpy) handles the
+          // direction. MPS is excluded: aoti_torch_mps_copy_buffer expects
+          // an MTLBuffer source, not a host pointer.
+          continue;
+        }
+#endif
         throw std::runtime_error(
             "update_constant_buffer: constant '" + constant_name +
             "' is on device type " + std::to_string(tensor_device_type) +
@@ -483,7 +510,6 @@ class AOTInductorModelContainer {
     }
 
     int32_t model_device_type = models_[0]->get_device_type();
-    int32_t cpu_device_type = aoti_torch_device_type_cpu();
 
     ConstantState& const_folded = use_inactive == use_secondary_
         ? constant_folded_

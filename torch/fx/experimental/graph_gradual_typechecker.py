@@ -807,7 +807,7 @@ def element_wise_eq(n: Node) -> list[Any]:
     Note that it takes two iterations for this result. One iteration to establish
     equality between certain dimensions of the operands (requiring the whole solver
     including unification) and another iteration to establish equality between the operands
-    and the resulting type, requiring another round of constraint generation and unificaiton.
+    and the resulting type, requiring another round of constraint generation and unification.
     """
     res: list[Any] = []
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
