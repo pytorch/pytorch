@@ -585,7 +585,7 @@ class TestWithNCCL(DistributedTestBase):
                 try:
                     func(arg)
                     compiled(arg)
-                except BaseException as exc:  # noqa: B036
+                except BaseException as exc:
                     self.exc = exc
 
             def join(self):

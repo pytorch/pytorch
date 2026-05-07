@@ -230,7 +230,7 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
 
 def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available acceleator devices.
+    Collects RNG state from all available accelerator devices.
 
     Returns:
         List of RNG state tensors, one for each accelerator device.
@@ -1240,6 +1240,10 @@ class LocalTensorMode(TorchDispatchMode):
     functions over ranks.
     """
 
+    @classmethod
+    def ignore_compile_internals(cls) -> bool:
+        return True
+
     # What ranks this local tensor mode is operating over
     def __init__(self, ranks: int | frozenset[int]):
         if isinstance(ranks, int):
@@ -1891,7 +1895,7 @@ class _ExceptionRaisingThread(threading.Thread):
     def run(self):
         try:
             super().run()
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             self.exception = e
 
     def join(self, timeout=None):

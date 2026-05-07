@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import warnings
+
 import torch
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
@@ -48,21 +50,21 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('placeholder', 'l_x_', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
             """\
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'mul_1', {'pp_stage': 0, 'cuda_stream': 2, 'fsdp_bucket': 1})
 ('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
-('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
+('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",
         )
 
     def test_activation_checkpointing(self):
@@ -93,17 +95,17 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'wrap_body_0', {'ac_sin': 0})
 [('placeholder', 'l_x_', {'ac_sin': 0}), ('call_function', 'sin', {'ac_sin': 0}), ('output', 'output', {'ac_sin': 0})]
 ('call_function', 'tag_activation_checkpoint', {'ac_sin': 0})
-('call_function', 'ac', {'ac_sin': 0})""",  # noqa: B950
+('call_function', 'ac', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
-            """('call_function', 'sin', {'ac_sin': 0})""",  # noqa: B950
+            """('call_function', 'sin', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'cos', {'ac_sin': 0})
-('call_function', 'mul', {'ac_sin': 0})""",  # noqa: B950
+('call_function', 'mul', {'ac_sin': 0})""",
         )
 
     def test_activation_checkpointing_annotation_inside(self):
@@ -131,17 +133,17 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         bw_metadata = fx_traceback._get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
-            """[('call_function', 'p', {'stage': 0})]""",  # noqa: B950
+            """[('call_function', 'p', {'stage': 0})]""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
-            """('call_function', 'sin', {'stage': 0})""",  # noqa: B950
+            """('call_function', 'sin', {'stage': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'cos', {'stage': 0})
-('call_function', 'mul', {'stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'stage': 0})""",
         )
 
     @requires_cuda_and_triton
@@ -203,7 +205,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'mask_fn_0', {'compile_inductor': 0})
 [('placeholder', 'child', {'compile_inductor': 0}), ('placeholder', 'child_1', {'compile_inductor': 0}), ('placeholder', 'child_2', {'compile_inductor': 0}), ('placeholder', 'child_3', {'compile_inductor': 0}), ('call_function', 'ge', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('call_function', 'flex_attention', {'compile_inductor': 0})
-('call_function', 'out', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'out', {'compile_inductor': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
@@ -216,7 +218,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'getitem', {'compile_inductor': 0})
 ('call_function', 'getitem_1', {'compile_inductor': 0})
 ('call_function', 'detach_1', {'compile_inductor': 0})
-('call_function', 'detach_3', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'detach_3', {'compile_inductor': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
@@ -234,8 +236,58 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'flex_attention_backward', {'compile_inductor': 0})
 ('call_function', 'getitem_3', {'compile_inductor': 0})
 ('call_function', 'getitem_4', {'compile_inductor': 0})
-('call_function', 'getitem_5', {'compile_inductor': 0})""",  # noqa: B950
+('call_function', 'getitem_5', {'compile_inductor': 0})""",
         )
+
+    @requires_cuda_and_triton
+    def test_flex_attention_backward_tag_does_not_leak(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        def causal_mask(batch, head, q_idx, kv_idx):
+            del batch, head
+            return q_idx >= kv_idx
+
+        q = torch.randn(
+            1, 2, 128, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 2, 128, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 2, 128, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        block_mask = create_block_mask(causal_mask, 1, 2, 128, 128, device="cuda")
+
+        def fn(q, k, v, block_mask):
+            with fx_traceback.annotate({"ac_region_id": 0}):
+                y = flex_attention(q, k, v, block_mask=block_mask)
+                torch.autograd.grad(y, (q, k, v), torch.ones_like(y))
+                return y.cos()
+
+        warnings.filterwarnings(
+            "ignore",
+            message="flex_attention called without torch.compile",
+        )
+        with (
+            torch._dynamo.config.patch(error_on_nested_fx_trace=False),
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_autograd_grad(),
+            preserve_node_meta(),
+        ):
+            gm = make_fx(fn, record_stack_traces=True)(q, k, v, block_mask)
+
+        backward_nodes = [
+            node for node in gm.graph.nodes if node.meta.get("autograd_backward", False)
+        ]
+        self.assertTrue(backward_nodes)
+
+        flex_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flex_attention
+        )
+        self.assertEqual(len(flex_nodes), 1)
+        self.assertNotIn("autograd_backward", flex_nodes[0].meta)
+        self.assertEqual(flex_nodes[0].meta.get("custom", {}), {"ac_region_id": 0})
 
     def test_as_decorator(self):
         class Mod(torch.nn.Module):
@@ -270,21 +322,21 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('placeholder', 'l_x_', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
             """\
 ('call_function', 'sin', {'pp_stage': 0, 'fdsp_bucket': 0})
 ('call_function', 'sub', {'pp_stage': 0})
-('call_function', 'mul', {'pp_stage': 0})""",  # noqa: B950
+('call_function', 'mul', {'pp_stage': 0})""",
         )
         self.assertExpectedInline(
             str(bw_metadata),
             """\
 ('call_function', 'mul_1', {'pp_stage': 0})
 ('call_function', 'cos', {'pp_stage': 0, 'fdsp_bucket': 0})
-('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",  # noqa: B950
+('call_function', 'mul_2', {'pp_stage': 0, 'fdsp_bucket': 0})""",
         )
 
     def test_graph_break(self):
@@ -326,7 +378,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'mul_1', {'moo': 0})
 ('call_function', 'ge', {'moo': 0})
 ('call_function', '_check', {'moo': 0})
-('call_function', 'mul', {'moo': 0})""",  # noqa: B950
+('call_function', 'mul', {'moo': 0})""",
         )
 
 

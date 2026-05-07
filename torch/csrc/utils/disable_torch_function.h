@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/DispatchKey.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/python_headers.h>
 
 namespace torch {
@@ -17,6 +18,11 @@ void set_disabled_torch_dispatch_impl(PyObject* value);
 // using mode here will improperly cause you to add ALL objects to the
 // overloaded list even if they don't actually have __torch_function__
 bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
+
+inline bool has_torch_function(PyObject* obj) {
+  return check_has_torch_function(obj);
+}
+bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
 struct DisableTorchDispatch {
   DisableTorchDispatch()
