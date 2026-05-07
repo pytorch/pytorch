@@ -211,37 +211,21 @@ def swap_in_optimizer_state(
     not on the swap-in tensors you wanted it to operate on.
 
     Args:
-        optimizer: Live ``torch.optim.Optimizer``. Must already have
-            initialized state (i.e. its ``state`` dict is non-empty).
-        swapin_parameters: Replacement parameter tensors that get installed
-            into ``optimizer.param_groups[*]["params"]`` in
-            ``model.named_parameters()`` order. Values are flattened and
-            sliced per group to match the existing
-            ``optimizer.param_groups`` layout. The dict keys (FQNs) are not
-            consumed; only iteration order matters.
-        swapin_optim_state: A dict in the exact format produced by
-            ``optimizer.state_dict()``, with two top-level keys:
-
-            * ``"state"``: a dict keyed by **packed integer parameter ids**
-              (not tensors, not parameter names). Each value is a per-param
-              state dict (e.g. ``{"step": ..., "exp_avg": ..., ...}``). Ids
-              that do not appear in any ``param_groups[i]["params"]`` list
-              are rejected. Per-param dicts are shallow-copied on swap-in:
-              in-place tensor mutations propagate back to the input dict,
-              but structural changes (assigning a new tensor to a key,
-              adding/removing keys) stay local to the trace.
-            * ``"param_groups"``: a list with the same length as
-              ``optimizer.param_groups``. Each entry is a dict whose
-              ``"params"`` field is a list of packed integer ids; the
-              remaining keys are the optimizer's per-group hyperparameters
-              (``lr``, ``betas``, ``weight_decay``, ``foreach``,
-              ``capturable``, ``fused``, etc.) and must already exist on
-              the live group. Group sizes must match the live optimizer.
-
-            The same packed-id contract applies as in
-            ``Optimizer.state_dict()``: the i-th id in
-            ``param_groups[g]["params"]`` is the lookup key for the
-            corresponding entry in ``"state"``.
+        optimizer: the live optimizer; its state must already be
+            initialized.
+        swapin_parameters: tensors to use as parameters during the context,
+            in ``model.named_parameters()`` order. Sliced into the existing
+            param groups by length.
+        swapin_optim_state: an ``optimizer.state_dict()``-shaped dict
+            (``{"state": ..., "param_groups": ...}``) holding the state to
+            install. ``"state"`` is keyed by packed integer parameter ids
+            and ``"param_groups"`` mirrors ``optimizer.param_groups``,
+            with each ``"params"`` entry as a list of those packed ids
+            and the remaining keys carrying per-group hyperparameters
+            (``lr``, ``betas``, ``foreach``, ``capturable``, ...). The
+            per-param state dicts are shallow-copied on swap-in: in-place
+            tensor edits propagate back to ``swapin_optim_state``, but
+            assigning a new tensor or adding/removing keys does not.
 
     Example:
 
