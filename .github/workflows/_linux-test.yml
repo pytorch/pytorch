@@ -15,6 +15,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      ci-docker-hash:
+        required: false
+        type: string
+        default: ""
+        description: Git tree hash of .ci/docker, used to construct docker image tags.
       sync-tag:
         required: false
         type: string
@@ -177,6 +182,7 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image }}
+          ci-docker-hash: ${{ inputs.ci-docker-hash }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror

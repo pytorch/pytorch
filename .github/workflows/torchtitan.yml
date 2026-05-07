@@ -26,6 +26,7 @@ jobs:
     with:
       build-environment: linux-jammy-cuda13.0-py3-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
       # torchtitan_h100_integration disabled pending runner availability
@@ -43,5 +44,6 @@ jobs:
     with:
       build-environment: linux-jammy-cuda13.0-py3-gcc11
       docker-image: ${{ needs.build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
     secrets: inherit

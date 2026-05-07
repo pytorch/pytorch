@@ -38,6 +38,7 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-cudnn9-py3-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.9'
       test-matrix: |
         { include: [
@@ -51,5 +52,6 @@ jobs:
     with:
       build-environment: ${{ needs.periodic-quantization-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-quantization-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.periodic-quantization-build.outputs.test-matrix }}
     secrets: inherit

@@ -36,6 +36,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+          ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
           working-directory: .
 
       - name: Use following to pull public copy of the image

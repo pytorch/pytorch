@@ -20,5 +20,6 @@ jobs:
     with:
       build-environment: linux-s390x-binary-manywheel
       docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.s390x
     secrets: inherit

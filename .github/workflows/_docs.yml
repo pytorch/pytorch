@@ -11,6 +11,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      ci-docker-hash:
+        required: false
+        type: string
+        default: ""
+        description: Git tree hash of .ci/docker, used to construct docker image tags.
       push:
         required: false
         type: boolean
@@ -126,6 +131,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
+          ci-docker-hash: ${{ inputs.ci-docker-hash }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main

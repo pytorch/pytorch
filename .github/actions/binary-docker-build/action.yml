@@ -12,6 +12,10 @@ inputs:
   custom-tag-prefix:
     description: Custom tag prefix for the docker image
     required: false
+  ci-docker-hash:
+    description: Git tree hash of .ci/docker, used to construct docker image tags.
+    required: false
+    default: ""
   DOCKER_TOKEN:
     description: Docker token for authentication
     required: true
@@ -30,6 +34,7 @@ runs:
       uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
       with:
         docker-image-name: ${{ inputs.docker-image-name }}
+        ci-docker-hash: ${{ inputs.ci-docker-hash }}
         docker-build-dir: .ci/docker
         custom-tag-prefix: ${{ inputs.custom-tag-prefix }}
         docker-build-script: ${{ inputs.docker-build-dir }}/build.sh

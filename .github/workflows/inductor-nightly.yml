@@ -40,6 +40,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
@@ -59,6 +60,7 @@ jobs:
     with:
       build-environment: ${{ needs.nightly-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.nightly-dynamo-benchmarks-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.nightly-dynamo-benchmarks-build.outputs.test-matrix }}
       timeout-minutes: 720
     secrets: inherit

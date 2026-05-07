@@ -49,6 +49,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi355
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
@@ -66,5 +67,6 @@ jobs:
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
     secrets: inherit

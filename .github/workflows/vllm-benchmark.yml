@@ -92,6 +92,7 @@ jobs:
         with:
           working-directory: pytorch/pytorch
           docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
+          ci-docker-hash: ""
 
   build:
     name: Build PyTorch and vLLM

@@ -109,6 +109,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ci-image:${{ matrix.docker-image-name }}
+          ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
           always-rebuild: true
           push: true
 

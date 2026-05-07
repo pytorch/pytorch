@@ -40,6 +40,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
@@ -61,6 +62,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
@@ -86,6 +88,7 @@ jobs:
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
     secrets: inherit
 
@@ -98,6 +101,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10-client
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-client
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
@@ -112,6 +116,7 @@ jobs:
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.test-matrix }}
     secrets: inherit
 

@@ -37,6 +37,7 @@ jobs:
     with:
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-py3.12-pallas
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       runner: linux.8xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -53,6 +54,7 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.test-matrix }}
     secrets: inherit
 
@@ -64,6 +66,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
       docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
@@ -77,5 +80,6 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.docker-image }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.test-matrix }}
     secrets: inherit
