@@ -1772,9 +1772,7 @@
     "Optional",
     "Union"
   ],
-  "torch.fx.experimental.migrate_gradual_types.constraint": [
-    "TensorType"
-  ],
+  "torch.fx.experimental.migrate_gradual_types.constraint": [],
   "torch.fx.experimental.migrate_gradual_types.constraint_generator": [
     "ApplyBroadcasting",
     "BatchNorm2d",
@@ -1830,6 +1828,7 @@
     "IndexSelect",
     "List",
     "Prod",
+    "Sequence",
     "T",
     "TGreatestUpperBound",
     "TVar",
@@ -1844,6 +1843,7 @@
     "BinConstraintD",
     "BinConstraintT",
     "Conj",
+    "Constraint",
     "ConstraintGenerator",
     "D",
     "DVar",
@@ -2009,7 +2009,7 @@
     "fx_placeholder_targets",
     "fx_placeholder_vals",
     "guard_bool",
-    "has_hint",
+    "has_guarding_hint",
     "is_symbolic",
     "parallel_and",
     "parallel_or",

@@ -113,7 +113,6 @@ index 6b37094ed5f..c5e96a6a3dd 100644
              is sys._getframe().f_code
          )
  
-+    @unittest.expectedFailure
      def test_getframemodulename(self):
          # Default depth gets ourselves
          self.assertEqual(__name__, sys._getframemodulename())

@@ -11,8 +11,7 @@ load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
-load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
-load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
+load("//tools/build_defs/apple:build_mode_defs.bzl", "build_mode_select")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -71,15 +70,19 @@ def read_bool(section, field, default, required = True):
     else:
         fail("`{}:{}`: no value set".format(section, field))
 
-def _is_build_mode_dev():
-    if is_production_build_android():
-        # Android Prod builds
-        return False
-    if is_production_build_ios() or is_profile_build_ios():
-        # iOS Prod builds
-        return False
+def _select_if_build_mode_dev(dev_value, default = []):
+    dev_select = select({
+        "DEFAULT": default,
+        "ovr_config//build_mode:optimization[dev]": dev_value,
+    })
+    return build_mode_select(
+        local = dev_select,
+        development = dev_select,
+        production = default,
+        profile = default,
+        release = dev_select,
+    )
 
-    return True
 
 def _get_enable_lightweight_dispatch():
     return read_bool("pt", "enable_lightweight_dispatch", False)
@@ -93,10 +96,27 @@ def get_enable_mobile_dispatch_keys_trimming():
 def get_disable_per_op_profiling():
     return read_bool("pt", "disable_per_op_profiling", True)
 
-def get_strip_error_messages():
+def strip_error_messages_select(value, default = []):
     if IS_OSS:
-        return True  # always strip in OSS CI to expose potential issues
-    return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
+        return value  # always strip in OSS CI to expose potential issues
+    strip_error = read_bool("pt", "strip_error_messages", default = None, required = False)
+
+    if strip_error == None:
+        opt_select = select({
+            "DEFAULT": default,
+            "ovr_config//build_mode:optimization[opt]": value,
+        })
+        return build_mode_select(
+            local = opt_select,
+            development = opt_select,
+            production = value,
+            profile = value,
+            release = opt_select,
+        )
+
+    if strip_error:
+        return value
+    return default
 
 def get_disable_warn():
     return read_bool("pt", "disable_warn", False)
@@ -249,9 +269,7 @@ _COMMON_PREPROCESSOR_FLAGS = [
     "-DNO_EXPORT",
 ] + (
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
-) + (
-    ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
-) + (
+) + strip_error_messages_select(["-DSTRIP_ERROR_MESSAGES"]) + (
     ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
@@ -282,9 +300,9 @@ def get_aten_preprocessor_flags():
         "-DUSE_RUY_QMATMUL",
     ]
     if get_disable_per_op_profiling():
-        ATEN_PREPROCESSOR_FLAGS.append("-DPYTORCH_DISABLE_PER_OP_PROFILING")
+        ATEN_PREPROCESSOR_FLAGS += ["-DPYTORCH_DISABLE_PER_OP_PROFILING"]
     if _get_enable_record_kernel_dtype():
-        ATEN_PREPROCESSOR_FLAGS.append("-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
+        ATEN_PREPROCESSOR_FLAGS += ["-DENABLE_RECORD_KERNEL_FUNCTION_DTYPE"]
     return ATEN_PREPROCESSOR_FLAGS
 
 def get_pt_preprocessor_flags():
@@ -295,8 +313,7 @@ def get_pt_preprocessor_flags():
         "-DNO_CUDNN_DESTROY_HANDLE",
     ]
 
-    if _is_build_mode_dev():
-        PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
+    PT_PREPROCESSOR_FLAGS += _select_if_build_mode_dev(["-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS"])
     return PT_PREPROCESSOR_FLAGS
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore
@@ -399,7 +416,6 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
-        "core/enum_tag.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
@@ -672,6 +688,11 @@ def pt_operator_query_codegen(
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_3.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_4.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_5.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_6.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_7.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_8.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_9.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_1.cpp]".format(unboxing_and_autograd_genrule),
     ] if train else []) + ([
@@ -905,6 +926,7 @@ def define_buck_targets(
             ("aten/src", "ATen/ops/*.h"),
             # ATen Base
             ("aten/src", "ATen/*.h"),
+            ("aten/src", "ATen/accelerator/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
             ("aten/src", "ATen/functorch/**/*.h"),
@@ -932,6 +954,11 @@ def define_buck_targets(
             ("aten/src", "ATen/native/mkl/*.h"),
             ("aten/src", "ATen/native/mkldnn/*.h"),
         ]),
+        # ATen/core/enum_tag.h is a forwarding header that includes from
+        # torch/headeronly, so we need to export that dependency.
+        exported_deps = [
+            "//xplat/caffe2/torch/headeronly:torch_headeronly",
+        ],
         visibility = ["PUBLIC"],
         labels = labels,
     )
@@ -955,31 +982,70 @@ def define_buck_targets(
         labels = labels,
     )
 
+    _torch_headers_exclude = [
+        # Don't need on mobile.
+        "torch/csrc/Exceptions.h",
+        "torch/csrc/python_headers.h",
+        "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
+    ]
+
+    # On Windows/MSVC, the ("", "torch/csrc/**/*.h") glob creates duplicate
+    # header map entries for files under torch/csrc/api/include/ (e.g.
+    # torch/ordered_dict.h AND torch/csrc/api/include/torch/ordered_dict.h).
+    # MSVC's #pragma once uses the symlink path, not the target, so it sees
+    # these as separate files and produces C2953 redefinition errors.
+    # Fix: on Windows, exclude torch/csrc/api/include/ from the torch/csrc/**
+    # glob so each header has exactly one entry, and add include_directories
+    # so long-path includes (torch/csrc/api/include/torch/X.h) still resolve.
+    _torch_headers_common_globs = [
+        ("torch/csrc/api/include", "torch/**/*.h"),
+        ("", "torch/nativert/**/*.h"),
+        ("", "torch/headeronly/**/*.h"),
+        ("", "torch/script.h"),
+        ("", "torch/library.h"),
+        ("", "torch/custom_class.h"),
+        ("", "torch/custom_class_detail.h"),
+        # Add again due to namespace difference from aten_header.
+        ("", "aten/src/ATen/*.h"),
+        ("", "aten/src/ATen/functorch/**/*.h"),
+        ("", "aten/src/ATen/quantized/*.h"),
+    ]
+
+    _torch_headers_all = subdir_glob(
+        _torch_headers_common_globs + [
+            ("", "torch/csrc/**/*.h"),
+        ],
+        exclude = _torch_headers_exclude,
+    )
+
     fb_xplat_cxx_library(
         name = "torch_headers",
         header_namespace = "",
-        exported_headers = subdir_glob(
-            [
-                ("torch/csrc/api/include", "torch/**/*.h"),
-                ("", "torch/csrc/**/*.h"),
-                ("", "torch/nativert/**/*.h"),
-                ("", "torch/headeronly/**/*.h"),
-                ("", "torch/script.h"),
-                ("", "torch/library.h"),
-                ("", "torch/custom_class.h"),
-                ("", "torch/custom_class_detail.h"),
-                # Add again due to namespace difference from aten_header.
-                ("", "aten/src/ATen/*.h"),
-                ("", "aten/src/ATen/functorch/**/*.h"),
-                ("", "aten/src/ATen/quantized/*.h"),
-            ],
-            exclude = [
-                # Don't need on mobile.
-                "torch/csrc/Exceptions.h",
-                "torch/csrc/python_headers.h",
-                "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
-            ],
-        ),
+        exported_headers = select({
+            "DEFAULT": _torch_headers_all,
+            # On Windows, use raw_headers instead of exported_headers to
+            # avoid duplicate header map entries that break MSVC #pragma once.
+            "ovr_config//os:windows": {},
+        }),
+        raw_headers = select({
+            "DEFAULT": [],
+            "ovr_config//os:windows": glob([
+                "torch/csrc/**/*.h",
+                "torch/nativert/**/*.h",
+                "torch/headeronly/**/*.h",
+                "torch/script.h",
+                "torch/library.h",
+                "torch/custom_class.h",
+                "torch/custom_class_detail.h",
+                "aten/src/ATen/*.h",
+                "aten/src/ATen/functorch/**/*.h",
+                "aten/src/ATen/quantized/*.h",
+            ], exclude = _torch_headers_exclude),
+        }),
+        public_include_directories = select({
+            "DEFAULT": [],
+            "ovr_config//os:windows": ["torch/csrc/api/include", "."],
+        }),
         labels = labels,
         visibility = ["PUBLIC"],
         deps = [
@@ -1219,7 +1285,6 @@ def define_buck_targets(
             "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
-            "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
         }),
         labels = labels,
     )
@@ -1485,6 +1550,25 @@ def define_buck_targets(
         ],
     )
 
+    # Standalone target for the C++ API enum tag definitions
+    # (torch/csrc/api/src/enum.cpp). Lets consumers link only the enum
+    # globals without pulling in the full torch C++ API.
+    # @lint-ignore BUCKLINT link_whole
+    pt_xplat_cxx_library(
+        name = "torch_enum",
+        srcs = ["torch/csrc/api/src/enum.cpp"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        link_whole = True,
+        linker_flags = get_no_as_needed_linker_flag(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":aten_cpu",
+            ":torch_headers",
+            C10,
+        ],
+    )
+
     pt_xplat_cxx_library(
         name = "torch_core",
         srcs = core_sources_full_mobile_no_backend_interface_xplat,
@@ -1519,7 +1603,12 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/api/src/data/samplers/random.cpp",
             "torch/csrc/api/src/data/samplers/sequential.cpp",
+            "torch/csrc/api/src/optim/adagrad.cpp",
+            "torch/csrc/api/src/optim/adam.cpp",
+            "torch/csrc/api/src/optim/adamw.cpp",
+            "torch/csrc/api/src/optim/lbfgs.cpp",
             "torch/csrc/api/src/optim/optimizer.cpp",
+            "torch/csrc/api/src/optim/rmsprop.cpp",
             "torch/csrc/api/src/optim/serialize.cpp",
             "torch/csrc/api/src/optim/sgd.cpp",
             "torch/csrc/api/src/serialize/input-archive.cpp",

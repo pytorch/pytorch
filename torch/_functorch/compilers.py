@@ -55,10 +55,12 @@ def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
 
 @contextmanager
 def _disable_jit_autocast() -> Generator[None, None, None]:
+    # pyrefly: ignore [missing-attribute]
     old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
     try:
         yield
     finally:
+        # pyrefly: ignore [missing-attribute]
         torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
 
@@ -100,6 +102,7 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
 
         f = torch.jit.script(fx_g)
 
+        # pyrefly: ignore [missing-attribute]
         torch._C._jit_pass_remove_mutation(f.graph)
 
         f = torch.jit.freeze(f.eval())
@@ -331,7 +334,8 @@ with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
-    from foo import FxModule  # pyrefly: ignore[missing-import]
+    # pyrefly: ignore[missing-import, missing-module-attribute]
+    from foo import FxModule
 
     FxModule().cuda()(*inps)
 
@@ -443,8 +447,8 @@ def _save_fx_default(
         if dump_example_input:
             torch.save(
                 args,
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
-            )  # noqa: E501
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",
+            )
 
     def graph_saver_forward(
         gm: fx.GraphModule, example_inputs: list[torch.Tensor]

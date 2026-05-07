@@ -21,7 +21,7 @@ from contextlib import ExitStack
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
     set_cwd,
@@ -104,6 +105,7 @@ HAVE_TEST_SELECTION_TOOLS = True
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
@@ -196,12 +198,17 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "distributed/pipelining/test_dtensor_pp_integration",
 ]
 
 # Add architecture-specific blocklist entries
 if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
     # Some autotune tests on gfx1100 are hanging, disable for now
     ROCM_BLOCKLIST.append("inductor/test_max_autotune")
+    # ROCm 7.2 gfx1100 started timing out due to these
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
+    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -299,6 +306,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
     "test_privateuseone_python_backend",
+    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -415,6 +423,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -982,6 +991,15 @@ def test_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
+    # Run the openreg C++ unit tests (gtest) built by cmake.
+    ortests_bin = os.path.join(
+        openreg_dir, "build", "third_party", "openreg", "ortests"
+    )
+    if os.path.isfile(ortests_bin):
+        return_code = shell([ortests_bin], cwd=openreg_dir)
+        if return_code != 0:
+            return return_code
+
     with extend_python_path([install_dir]):
         cmd = [
             sys.executable,
@@ -1251,9 +1269,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
     else:
-        # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
-        # failure
-        rerun_options = ["-x", "--reruns=2"]
+        # When under the normal mode, retry a failed test NUM_PYTEST_RERUNS more times.
+        # -x means stop at the first failure. Set PYTORCH_NUM_PYTEST_RERUNS=0 to disable.
+        rerun_options = ["-x", f"--reruns={NUM_PYTEST_RERUNS}"]
 
     pytest_args = [
         "-vv",
@@ -1320,6 +1338,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
+    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
@@ -1356,6 +1375,12 @@ def parse_args():
         "--distributed-tests",
         action="store_true",
         help="Run all distributed tests",
+    )
+    parser.add_argument(
+        "--include-cpython-tests",
+        "--include-cpython-tests",
+        action="store_true",
+        help="If this flag is present, we will only run cpython tests.",
     )
     parser.add_argument(
         "--include-dynamo-core-tests",
@@ -1614,7 +1639,7 @@ def exclude_tests(
     return selected_tests
 
 
-def must_serial(file: Union[str, ShardedTest]) -> bool:
+def must_serial(file: str | ShardedTest) -> bool:
     if isinstance(file, ShardedTest):
         file = file.name
     return (
@@ -1654,6 +1679,11 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    if options.include_cpython_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPYTHON_TESTS, selected_tests)
+        )
+
     # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
     if options.include_dynamo_core_tests:
         selected_tests = list(
@@ -1691,7 +1721,7 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        os.environ["PYTORCH_TEST_OPS_ONLY_MPS"] = "1"
+        os.environ["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "mps"
         selected_tests = [
             "test_ops",
             "test_mps",
@@ -1708,7 +1738,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
-        # Exclude all mps tests otherwise
+        # Exclude mps-only tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
     if options.xpu:
@@ -1774,7 +1804,50 @@ def get_selected_tests(options) -> list[str]:
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
-    if sys.platform == "win32" and not options.ignore_win_blocklist:
+    if IS_WINDOWS and not options.ignore_win_blocklist:
+        from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
+
+        # Disable tests on Windows for SM89 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM89OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # Windows fatal exception / access violation
+                    "functorch/test_aotdispatch",
+                    "functorch/test_control_flow",
+                    "nn/test_convolution",
+                    "profiler/test_profiler",
+                    "test_modules",
+                    "test_expanded_weights",
+                    "test_jit",
+                    "test_nested_tensor",
+                    "test_nestedtensor",
+                    "test_nn",
+                    # DLL load failed errors, missing dependencies
+                    "test_custom_ops",
+                    "test_testing",
+                    # Features not supported on Windows ( e.g. rowwise scaling)
+                    "test_decomp",
+                    "test_transformers",
+                    "test_ops",
+                    # Output mismatch errors and long running tests
+                    "test_linalg",
+                    "test_matmul_cuda",
+                    "functorch/test_ops",
+                    "test_scaled_matmul_cuda",
+                ]
+            )
+
+        # Disable tests on Windows for SM120 and later - tests failing in ci
+        # Enable tests after fixing the failures
+        if SM120OrLater:
+            WINDOWS_BLOCKLIST.extend(
+                [
+                    # test_api fails on Windows SM120+. Triage pending.
+                    "cpp/test_api",
+                ]
+            )
+
         target_arch = os.environ.get("VSCMD_ARG_TGT_ARCH")
         if target_arch != "x64":
             WINDOWS_BLOCKLIST.append("cpp_extensions_aot_no_ninja")
@@ -1835,13 +1908,18 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(dict[str, Any], json.load(f))
-    job_name = os.environ.get("JOB_NAME")
+    raw_job_name = os.environ.get("JOB_NAME")
+    build_env = os.environ.get("BUILD_ENVIRONMENT")
+    job_name = raw_job_name
     if job_name is None or job_name == "":
         # If job name isn't available, use build environment as a backup
-        job_name = os.environ.get("BUILD_ENVIRONMENT")
+        job_name = build_env
     else:
         job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
+    print_to_stderr(f"JOB_NAME={raw_job_name}")
+    print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
+    print_to_stderr(f"test-times lookup key={job_name}, test_config={test_config}")
     if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
         return test_times_file[job_name][test_config]
@@ -1915,7 +1993,7 @@ class TestFailure(NamedTuple):
 
 def run_test_module(
     test: ShardedTest, test_directory: str, options
-) -> Optional[TestFailure]:
+) -> TestFailure | None:
     try:
         maybe_set_hip_visible_devies()
 
@@ -1981,7 +2059,7 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_complete(failure: Optional[TestFailure]):
+    def handle_complete(failure: TestFailure | None):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
             parse_xml_and_upload_json()

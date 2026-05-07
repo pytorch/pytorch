@@ -1,5 +1,5 @@
 """
-Collective runtime estimation using CUDA events and power-of-2 rounding.
+Node runtime estimation for overlap scheduling.
 """
 
 from __future__ import annotations
@@ -8,11 +8,14 @@ import functools
 import itertools
 import operator
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx as fx
-from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
+from torch._inductor.fx_passes.bucketing import (
+    _resolve_group_name,
+    _schedulable_wait_node,
+)
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
 from torch.fx.operator_schemas import normalize_function
@@ -38,10 +41,13 @@ def _get_collective_key(coll_node: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    group_name = kwargs.get("group_name", None)
+    raw_group_name = kwargs.get("group_name", None)
+    group_name = (
+        _resolve_group_name(raw_group_name) if raw_group_name is not None else None
+    )
     group_size = kwargs.get("group_size", None)
 
-    tensor_bytes: Optional[int] = None
+    tensor_bytes: int | None = None
     success, args, kw = fx_utils.get_fake_args_kwargs(coll_node)
     if success:
 
@@ -93,7 +99,7 @@ def _get_collective_cache() -> dict[str, float]:
     return {}
 
 
-def get_cached_runtime(key: str) -> Optional[float]:
+def get_cached_runtime(key: str) -> float | None:
     """Get cached runtime from process-local cache."""
     return _get_collective_cache().get(key)
 
@@ -103,7 +109,7 @@ def set_cached_runtime(key: str, value: float) -> None:
     _get_collective_cache()[key] = value
 
 
-def get_hint(x: int | torch.SymInt) -> Optional[int]:
+def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
     assert isinstance(x, torch.SymInt)
@@ -219,14 +225,14 @@ def benchmark_collective_with_cuda_events_impl(
         normalize_to_only_use_kwargs=True,
     )
     assert opt_args_kwargs is not None
-    group_name = opt_args_kwargs[1]["group_name"]
+    group_name = _resolve_group_name(opt_args_kwargs[1]["group_name"])
     group_size = _get_group_size_by_name(group_name)
 
     if not success:
         return None, ""
 
     # Extract actual input size in BYTES (first tensor argument)
-    actual_bytes: Optional[int] = None
+    actual_bytes: int | None = None
 
     def extract_tensor_info(t: torch.Tensor) -> torch.Tensor:
         nonlocal actual_bytes
@@ -242,7 +248,8 @@ def benchmark_collective_with_cuda_events_impl(
 
             actual_bytes = total_elems * t.dtype.itemsize
         else:
-            raise RuntimeError(f"should only be one input tensor to collective {n}")
+            # out-variants (e.g. all_gather_into_tensor_out) can have multiple tensors
+            pass
         return t
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
@@ -353,9 +360,9 @@ def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> 
 
 def _log_collective_benchmarks(
     collective_nodes: list[fx.Node],
-    collective_keys: Optional[list[str]] = None,
-    benchmarked_medians: Optional[list[float]] = None,
-    world_size: Optional[int] = None,
+    collective_keys: list[str] | None = None,
+    benchmarked_medians: list[float] | None = None,
+    world_size: int | None = None,
     artifact_name: str = "fx_collectives_analytical_estimation",
 ) -> None:
     """Log collective estimations for tlparse. Includes benchmarks if provided."""

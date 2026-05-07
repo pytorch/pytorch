@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import sys
 from copy import deepcopy
 
 import torch
@@ -21,6 +22,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     run_subtests,
     skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
 from torch.testing._internal.common_utils import run_tests
@@ -55,6 +57,8 @@ class ReplicateTest(MultiProcContinuousTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         if torch.accelerator.is_available():
+            if torch.accelerator.device_count() < world_size:
+                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
             torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 

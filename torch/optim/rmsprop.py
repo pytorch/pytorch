@@ -27,7 +27,7 @@ from .optimizer import (
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):  # noqa: D101
+class RMSprop(Optimizer):
     def __init__(
         self,
         params: ParamsT,
@@ -41,7 +41,7 @@ class RMSprop(Optimizer):  # noqa: D101
         foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -69,7 +69,7 @@ class RMSprop(Optimizer):  # noqa: D101
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -149,7 +149,7 @@ class RMSprop(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:

@@ -11,30 +11,31 @@ architectures:
     * Latest XPU
 """
 
+from __future__ import annotations
+
+import ast
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
-from typing import Optional
 
 
 SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
-CUDA_STABLE = "12.8"
+CUDA_ARCHES = ["12.6", "13.0", "13.2"]
+CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
-    "12.8": "12.8.1",
-    "12.9": "12.9.1",
     "13.0": "13.0.2",
+    "13.2": "13.2.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
-    "12.8": "9",
-    "12.9": "9",
     "13.0": "9",
+    "13.2": "9",
 }
 
 ROCM_ARCHES = ["7.1", "7.2"]
@@ -45,40 +46,40 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aarch64"]
+CUDA_AARCH64_ARCHES = [
+    "12.6-aarch64",
+    "13.0-aarch64",
+    "13.2-aarch64",
+]
 
 
+# WARNING: For CUDA 13.0, cublas is pinned to a version range rather
+# than an exact version. A broken cublas release within that range will be
+# silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
-    "12.8": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
-    ),
-    "12.9": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
-    ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings==13.0.3; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.17.1.4; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "
+        "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+    ),
+    "13.2": (
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -162,7 +163,7 @@ def read_nccl_pin(arch_version: str) -> str:
     # Single source of truth for NCCL version
     from optional_submodules import read_nccl_pin
 
-    return read_nccl_pin()
+    return read_nccl_pin(arch_version)
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
@@ -172,6 +173,131 @@ def validate_nccl_dep_consistency(arch_version: str) -> None:
         raise RuntimeError(
             f"{arch_version} NCCL release tag version {nccl_release_tag} "
             f"does not correspond to wheel version {wheel_ver}"
+        )
+
+
+def _parse_linux_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from install_cuda.sh."""
+    text = (REPO_ROOT / ".ci" / "docker" / "common" / "install_cuda.sh").read_text()
+    results: dict[str, str] = {}
+    func_re = re.compile(r"^function install_(\d+)\s*\{")
+    cudnn_re = re.compile(r"^\s*CUDNN_VERSION=(\S+)")
+    current_func: str | None = None
+    for line in text.splitlines():
+        m = func_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_func = digits[:-1] + "." + digits[-1]
+            continue
+        if current_func is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_func] = m.group(1)
+                current_func = None
+    return results
+
+
+def _parse_windows_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from cuda_install.bat."""
+    text = (
+        REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    ).read_text()
+    results: dict[str, str] = {}
+    label_re = re.compile(r"^:cuda(\d+)\s*$")
+    cudnn_re = re.compile(
+        r"^set CUDNN_FOLDER=cudnn-windows-x86_64-([0-9.]+)_cuda\d+-archive"
+    )
+    current_label: str | None = None
+    for line in text.splitlines():
+        m = label_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_label = digits[:-1] + "." + digits[-1]
+            continue
+        if current_label is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_label] = m.group(1)
+                current_label = None
+    return results
+
+
+def validate_cudnn_version_consistency(arch_version: str) -> None:
+    linux_versions = _parse_linux_cudnn_versions()
+    windows_versions = _parse_windows_cudnn_versions()
+    linux_ver = linux_versions.get(arch_version)
+    windows_ver = windows_versions.get(arch_version)
+    if linux_ver is None or windows_ver is None:
+        return
+    if linux_ver != windows_ver:
+        raise RuntimeError(
+            f"cuDNN version mismatch for CUDA {arch_version}: "
+            f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
+            f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
+        )
+
+
+_BUILD_CUDA_SH = REPO_ROOT / ".ci" / "manywheel" / "build_cuda.sh"
+_RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
+
+
+def _extract_arch_list_block() -> str:
+    """Extract the self-contained arch-list logic from build_cuda.sh."""
+    text = _BUILD_CUDA_SH.read_text()
+    start_marker = "# Function to remove architectures from a list"
+    end_marker = "export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}"
+    start = text.index(start_marker)
+    end = text.index(end_marker)
+    return text[start:end]
+
+
+def _build_arch_list(cuda_version: str, arch: str) -> set[int]:
+    """Run the build_cuda.sh arch-list logic for (cuda_version, arch)."""
+    block = _extract_arch_list_block()
+    cmd = (
+        f'CUDA_VERSION="{cuda_version}" ARCH="{arch}"\n'
+        f"{{\n{block}\n}} >/dev/null\n"
+        'printf "%s" "$TORCH_CUDA_ARCH_LIST"\n'
+    )
+    out = subprocess.run(
+        ["bash", "-c", cmd], check=True, capture_output=True, text=True
+    ).stdout
+    result: set[int] = set()
+    for part in out.split(";"):
+        part = part.strip().removesuffix("+PTX")
+        if not part:
+            continue
+        major, minor = part.split(".")
+        result.add(int(major) * 10 + int(minor))
+    return result
+
+
+def _read_runtime_release_table() -> dict[str, dict[str, set[int]]]:
+    """Parse PYTORCH_RELEASES_CODE_CC out of torch/cuda/__init__.py."""
+    tree = ast.parse(_RUNTIME_CUDA_INIT.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "PYTORCH_RELEASES_CODE_CC"
+            and node.value is not None
+        ):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py")
+
+
+def validate_runtime_release_table_consistency() -> None:
+    """Ensure torch/cuda/__init__.py recommendation table matches the build matrix."""
+    expected = {
+        cuda: {arch: _build_arch_list(cuda, arch) for arch in ("x86_64", "aarch64")}
+        for cuda in CUDA_ARCHES
+    }
+    actual = _read_runtime_release_table()
+    if actual != expected:
+        raise RuntimeError(
+            "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
+            "with .ci/manywheel/build_cuda.sh.\n"
+            f"Expected: {expected}\nActual:   {actual}"
         )
 
 
@@ -204,17 +330,11 @@ WHEEL_CONTAINER_IMAGES = {
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
-    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
+    "cpu-s390x": "manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"
 DEBUG = "debug"
-
-LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
-    **{gpu_arch: f"libtorch-cxx11-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
-    **{gpu_arch: f"libtorch-cxx11-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
-    "cpu": "libtorch-cxx11-builder:cpu",
-}
 
 FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
@@ -238,20 +358,13 @@ def list_without(in_list: list[str], without: list[str]) -> list[str]:
 def generate_libtorch_matrix(
     os: str,
     release_type: str,
-    arches: Optional[list[str]] = None,
-    libtorch_variants: Optional[list[str]] = None,
+    arches: list[str] | None = None,
+    libtorch_variants: list[str] | None = None,
 ) -> list[dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
-        if os == "linux":
+        if os == "windows":
             arches += CUDA_ARCHES
-            arches += ROCM_ARCHES
-        elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            arches += windows_cuda_arches
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -265,9 +378,6 @@ def generate_libtorch_matrix(
         for libtorch_variant in libtorch_variants:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and ("without-deps" in libtorch_variant):
-                continue
             ret.append(
                 {
                     "gpu_arch_type": gpu_arch_type,
@@ -277,16 +387,8 @@ def generate_libtorch_matrix(
                     ),
                     "libtorch_config": release_type,
                     "libtorch_variant": libtorch_variant,
-                    "container_image": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[0]
-                        if os not in ("windows", "windows-arm64")
-                        else ""
-                    ),
-                    "container_image_tag_prefix": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[1]
-                        if os not in ("windows", "windows-arm64")
-                        else ""
-                    ),
+                    "container_image": "",
+                    "container_image_tag_prefix": "",
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{release_type}".replace(
                         ".", "_"
@@ -298,8 +400,8 @@ def generate_libtorch_matrix(
 
 def generate_wheels_matrix(
     os: str,
-    arches: Optional[list[str]] = None,
-    python_versions: Optional[list[str]] = None,
+    arches: list[str] | None = None,
+    python_versions: list[str] | None = None,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
@@ -315,11 +417,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            arches += windows_cuda_arches + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -355,7 +453,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.0", "12.9", "12.8", "12.6"]
+                arch_version in ["13.2", "13.0", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -410,6 +508,9 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
+                            if gpu_arch_type == "cpu"
+                            and os in ("windows", "macos-arm64")
                             else ""
                         ),
                     }
@@ -418,10 +519,59 @@ def generate_wheels_matrix(
     return ret
 
 
+def generate_libtorch_extraction_configs(
+    os: str,
+    wheel_configs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Generate libtorch extraction configs from existing wheel build configs.
+
+    For each unique arch variant in wheel_configs, find the py3.10 config
+    (py3.11 for windows-arm64) and produce a config that the CI template
+    uses to add an extraction job that depends on that wheel's build job.
+    """
+    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+
+    # Group wheel configs by (gpu_arch_type, gpu_arch_version)
+    arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
+    for config in wheel_configs:
+        key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
+        if config.get("python_version") == preferred_python:
+            arch_to_config[key] = config
+
+    ret: list[dict[str, str]] = []
+    for (gpu_arch_type, gpu_arch_version), source_config in arch_to_config.items():
+        # No libtorch for XPU
+        if gpu_arch_type == "xpu":
+            continue
+
+        desired_cuda = source_config["desired_cuda"]
+        libtorch_variant = "shared-with-deps"
+        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+            ".", "_"
+        )
+
+        ret.append(
+            {
+                "source_wheel_build_name": source_config["build_name"],
+                "build_name": build_name,
+                "package_type": "libtorch",
+                "libtorch_variant": libtorch_variant,
+                "libtorch_config": RELEASE,
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+            }
+        )
+
+    return ret
+
+
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
+    validate_cudnn_version_consistency(arch_version)
 del arch_version
+validate_runtime_release_table_consistency()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/custom_class.h>
 #include <limits>
+#include <vector>
 
 #ifdef FBCODE_CAFFE2
 #include <folly/container/F14Map.h>
@@ -241,7 +242,6 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
 /// @endcode
 ///
 class MemoryPlanner;
-class StaticNodeInfo;
 class ProcessedNode;
 class StaticRuntime;
 
@@ -294,6 +294,36 @@ class TORCH_API ProcessedFunction {
   Kind kind_{ProcessedFunction::Kind::kOutVariant};
   bool check_memory_overlap_{false};
   size_t num_outputs_{0};
+};
+
+class TORCH_API StaticNodeInfo {
+ public:
+  StaticNodeInfo(
+      Node* n,
+      ProcessedFunction* fn,
+      ProcessedNodeInputs inputs,
+      uint16_t outputs_offset);
+
+  Node* node() const {
+    return node_;
+  }
+
+  size_t num_outputs() const {
+    DCHECK(fn_ != nullptr);
+    return fn_->num_outputs();
+  }
+
+  bool has_out_variant() const {
+    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
+  }
+
+ private:
+  friend class ProcessedNode;
+
+  Node* node_;
+  const ProcessedFunction* fn_;
+  ProcessedNodeInputs inputs_;
+  uint16_t outputs_offset_;
 };
 
 // A `BlockInfo` instance stores all of the shared state that each
@@ -815,36 +845,6 @@ class TORCH_API BlockRunner {
   std::vector<ProcessedNode> nodes_;
 };
 
-class TORCH_API StaticNodeInfo {
- public:
-  StaticNodeInfo(
-      Node* n,
-      ProcessedFunction* fn,
-      ProcessedNodeInputs inputs,
-      uint16_t outputs_offset);
-
-  Node* node() const {
-    return node_;
-  }
-
-  size_t num_outputs() const {
-    DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
-  }
-
-  bool has_out_variant() const {
-    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
-  }
-
- private:
-  friend class ProcessedNode;
-
-  Node* node_;
-  const ProcessedFunction* fn_;
-  ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
-};
-
 inline size_t BlockInfo::num_nodes() const {
   return nodes_.size();
 }
@@ -1112,30 +1112,28 @@ class TORCH_API StaticRuntime {
   class IValueArray {
    public:
     IValueArray() = default;
-    explicit IValueArray(size_t size) : array_(allocate(size)), size_(size) {}
+    IValueArray(const IValueArray&) = delete;
+    IValueArray& operator=(const IValueArray&) = delete;
 
-    IValue* data() const {
-      return array_.get();
+    IValueArray(IValueArray&&) noexcept = default;
+    IValueArray& operator=(IValueArray&&) noexcept = default;
+
+    explicit IValueArray(size_t size) : array_(size) {}
+
+    IValue* data() {
+      return array_.empty() ? nullptr : array_.data();
+    }
+
+    const IValue* data() const {
+      return array_.empty() ? nullptr : array_.data();
     }
 
     size_t size() const {
-      return size_;
+      return array_.size();
     }
 
    private:
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-    static std::unique_ptr<IValue[]> allocate(size_t size) {
-      if (size) {
-        return std::make_unique<IValue[]>(size);
-      }
-      return nullptr;
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-    std::unique_ptr<IValue[]> array_ = nullptr;
-    size_t size_ = 0;
+    std::vector<IValue> array_;
   };
 
   std::unique_ptr<BlockRunner> block_;

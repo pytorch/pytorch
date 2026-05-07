@@ -8,7 +8,7 @@ from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -326,7 +326,7 @@ def _pipe_split():
 
 
 @torch.library.register_fake("pippy::_pipe_split")  # type: ignore[no-redef]
-def _pipe_split():  # noqa: F811
+def _pipe_split():
     return None
 
 
@@ -364,7 +364,7 @@ class MultiUseParameterConfig(Enum):
     REPLICATE = 2
 
 
-MultiUseParamSpec = Union[MultiUseParameterConfig, dict[str, MultiUseParameterConfig]]
+MultiUseParamSpec = MultiUseParameterConfig | dict[str, MultiUseParameterConfig]
 
 
 class DetachExecutor(fx.Interpreter):

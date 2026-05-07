@@ -1030,6 +1030,16 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
 
 class TestSparseCSR(TestCase):
 
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_empty_plain_indices_with_stride_zero(self, device, dtype):
+        # Test that empty plain_indices with stride 0 works.
+        crow_indices = torch.tensor([0, 0], dtype=torch.int32, device=device)
+        col_indices = torch.as_strided(torch.empty((0,), device=device, dtype=torch.int32), (0,), (0,))
+        values = torch.empty(0, dtype=dtype, device=device)
+        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 100), dtype=dtype, device=device)
+        self.assertEqual(t._nnz(), 0)
+
     def test_csr_stride(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
 
@@ -1743,7 +1753,7 @@ class TestSparseCSR(TestCase):
         mat[mat.real < 0] = 0
         sparse_mat = mat.to_sparse_csr()
         mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
-        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
+        avec = torch.randn((mat.size(0),), dtype=dtype, device=device)
         ref_output = torch.addmv(avec, mat, mvec)
         output = torch.addmv(avec, sparse_mat, mvec)
         self.assertEqual(ref_output, output)
