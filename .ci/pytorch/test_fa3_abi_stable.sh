@@ -16,7 +16,7 @@ env
 echo "Testing FA3 stable wheel still works with currently built torch"
 
 echo "Installing ABI Stable FA3 wheel"
-$MAYBE_SUDO pip -q install flash-attn-3 –-index-url=https://download.pytorch.org/whl/cu13
+$MAYBE_SUDO pip -q install flash-attn-3 --index-url https://download.pytorch.org/whl/cu130
 
 pushd flash-attention/hopper
 export FLASH_ATTENTION_ENABLE_OPCHECK=TRUE  # Enable testing for compile on the smoke tests
