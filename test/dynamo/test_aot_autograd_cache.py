@@ -3165,6 +3165,68 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             )
         compile_fx.compile_fx(gm, [[fake_x, fake_y]])
 
+    @unittest.skipIf(not HAS_GPU, "requires accelerator")
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_autocast_cache_distinguishes_dtype(self):
+        """
+        Ensure AOTAutograd cache key includes autocast dtype so that
+        graphs compiled under different autocast dtypes are not reused.
+        """
+
+        class TwoLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(64, 64)
+                self.fc2 = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.fc2(torch.nn.functional.gelu(self.fc1(x)))
+
+        with fresh_cache():
+            model = TwoLinear().to(GPU_TYPE).eval()
+            x = torch.randn(2, 64, device=GPU_TYPE)
+
+            # Run 1: compile under bfloat16 autocast
+            torch._dynamo.reset()
+            compiled1 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.bfloat16):
+                out_bf16 = compiled1(x)
+            self.assertEqual(out_bf16.dtype, torch.bfloat16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 2: compile under float16 autocast
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.float16):
+                out_fp16 = compiled2(x)
+            self.assertEqual(out_fp16.dtype, torch.float16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 3: compile under bfloat16 again
+            counters.clear()
+            torch._dynamo.reset()
+            compiled3 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.bfloat16):
+                out_bf16_2 = compiled3(x)
+            self.assertEqual(out_bf16_2.dtype, torch.bfloat16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            # Run 4: compile under float16 again
+            counters.clear()
+            torch._dynamo.reset()
+            compiled4 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.float16):
+                out_fp16_2 = compiled4(x)
+            self.assertEqual(out_fp16_2.dtype, torch.float16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
