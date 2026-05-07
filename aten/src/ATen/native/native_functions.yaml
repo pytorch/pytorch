@@ -9,7 +9,7 @@
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
-# DEPRECATED. DO NOT USE
+# DEPRECATED. DO USE AND EXPECT NITPICKER TO COMPLAIN
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
