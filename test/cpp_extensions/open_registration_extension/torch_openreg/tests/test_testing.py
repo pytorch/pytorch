@@ -89,15 +89,13 @@ op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
 
 
 @contextmanager
-def _temp_attrs(obj, **attrs):
-    backup = {k: getattr(obj, k) for k in attrs}
-    for k, v in attrs.items():
-        setattr(obj, k, v)
+def _temp_test_configs(obj, **configs):
+    backup = {k: getattr(obj, k, None) for k in configs}
+    obj.set_test_configs(**configs)
     try:
         yield
     finally:
-        for k, v in backup.items():
-            setattr(obj, k, v)
+        obj.set_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -235,7 +233,7 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
-with _temp_attrs(
+with _temp_test_configs(
     PrivateUse1TestBase,
     op_overrides={
         "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
