@@ -368,7 +368,7 @@ class Library:
         handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
         self._registration_handles.append(handle)
 
-    def _resolve_op_name(self, op_name):
+    def _resolve_op_name(self, op_name, api_name):
         """Resolve op_name (str or OpOverload) to (name, op_overload_or_none)."""
         if isinstance(op_name, str):
             return op_name, None
@@ -380,7 +380,7 @@ class Library:
             return name, op_name
         else:
             raise RuntimeError(
-                "Expected a name (str) or an OpOverload object "
+                f"{api_name} should be passed either a name or an OpOverload object "
                 f"as the first argument, got {type(op_name)}"
             )
 
@@ -406,7 +406,7 @@ class Library:
                 f"dispatch_key {dispatch_key} does not have Dense in its keyset"
             )
 
-        name, _ = self._resolve_op_name(op_name)
+        name, _ = self._resolve_op_name(op_name, "_impl_with_aoti_compile")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
@@ -461,7 +461,7 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
-        name, _ = self._resolve_op_name(op_name)
+        name, _ = self._resolve_op_name(op_name, "impl")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if (not allow_override) and key in _impls:
@@ -528,20 +528,14 @@ class Library:
             >>> my_lib.define("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor")
             >>> my_lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
         """
-        name, op_overload = self._resolve_op_name(op_name)
+        name, _ = self._resolve_op_name(op_name, "register_symm_mem_args")
         if "::" in name:
             qualname = name
         else:
             qualname = f"{self.ns}::{name}"
 
-        if op_overload is None:
-            try:
-                op_overload = torch._library.utils.lookup_op(qualname)
-            except (ValueError, AttributeError):
-                pass
-
         entry = torch._library.simple_registry.singleton.find(qualname)
-        handle = entry.symm_mem_args.register(arg_names, op_overload=op_overload)
+        handle = entry.symm_mem_args.register(arg_names)
         self._registration_handles.append(handle)
 
     def fallback(self, fn, dispatch_key="", *, with_keyset=False):

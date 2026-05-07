@@ -17,25 +17,22 @@ from torch.library import Library  # noqa: TOR901
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-def register_symm_mem_args(op, arg_names, validate=True):
+def register_symm_mem_args(op, arg_names):
     """Helper function for tests to register symm_mem args."""
     from torch._ops import OpOverload
 
     if isinstance(op, str):
         qualname = op
-        op_overload = None
     elif isinstance(op, OpOverload):
         qualname = op.__qualname__
-        op_overload = op if validate else None
     else:
         if hasattr(op, "__qualname__"):
             qualname = op.__qualname__
-            op_overload = op if validate else None
         else:
             raise TypeError(f"Expected OpOverload or string, got {type(op)}")
 
     entry = singleton.find(qualname)
-    entry.symm_mem_args.register(arg_names, op_overload=op_overload)
+    entry.symm_mem_args.register(arg_names)
 
 
 class TestSymmMemRegistry(TestCase):
@@ -62,7 +59,6 @@ class TestSymmMemRegistry(TestCase):
         register_symm_mem_args(
             "test_namespace::test_op",
             ["input"],
-            validate=False,
         )
 
         entry = singleton.find("test_namespace::test_op")
@@ -74,7 +70,6 @@ class TestSymmMemRegistry(TestCase):
         register_symm_mem_args(
             "test_namespace::test_op",
             ["input", "output", "buffer"],
-            validate=False,
         )
 
         entry = singleton.find("test_namespace::test_op")
@@ -87,7 +82,7 @@ class TestSymmMemRegistry(TestCase):
     def test_empty_arg_list_raises(self):
         """Test that registering empty arg list raises ValueError."""
         with self.assertRaisesRegex(ValueError, "Cannot register empty arg_names"):
-            register_symm_mem_args("test_namespace::test_op", [], validate=False)
+            register_symm_mem_args("test_namespace::test_op", [])
 
     def test_unregistered_op_queries(self):
         """Test querying unregistered operators."""
@@ -102,49 +97,29 @@ class TestSymmMemRegistry(TestCase):
         op = torch.ops.aten.add.Tensor
 
         # Register without validation (since we're using arbitrary arg names)
-        register_symm_mem_args(op, ["self"], validate=False)
+        register_symm_mem_args(op, ["self"])
 
         qualname = op.__qualname__
         entry = singleton.find(qualname)
         self.assertTrue(entry.symm_mem_args.is_registered())
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("self"))
 
-    def test_validation_with_valid_args(self):
-        """Test that validation passes with valid argument names."""
-        op = torch.ops.aten.add.Tensor
-
-        # 'self' and 'other' are valid arguments for add.Tensor
-        register_symm_mem_args(op, ["self", "other"], validate=True)
-
-        qualname = op.__qualname__
-        entry = singleton.find(qualname)
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("self"))
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("other"))
-
-    def test_validation_with_invalid_args(self):
-        """Test that validation fails with invalid argument names."""
-        op = torch.ops.aten.add.Tensor
-
-        # 'nonexistent_arg' is not a valid argument for add.Tensor
-        with self.assertRaisesRegex(ValueError, "Invalid argument names"):
-            register_symm_mem_args(op, ["nonexistent_arg"], validate=True)
-
     def test_overwrite_registration(self):
         """Test that re-registering an op overwrites previous registration."""
         qualname = "test_namespace::test_op"
 
-        register_symm_mem_args(qualname, ["input"], validate=False)
+        register_symm_mem_args(qualname, ["input"])
         entry = singleton.find(qualname)
         self.assertEqual(set(entry.symm_mem_args.get()), {"input"})
 
         # Overwrite with different args
-        register_symm_mem_args(qualname, ["output"], validate=False)
+        register_symm_mem_args(qualname, ["output"])
         self.assertEqual(set(entry.symm_mem_args.get()), {"output"})
 
     def test_get_all_registered(self):
         """Test getting all registered operators."""
-        register_symm_mem_args("ns1::op1", ["a"], validate=False)
-        register_symm_mem_args("ns2::op2", ["b", "c"], validate=False)
+        register_symm_mem_args("ns1::op1", ["a"])
+        register_symm_mem_args("ns2::op2", ["b", "c"])
 
         # Check that both are registered
         entry1 = singleton.find("ns1::op1")
@@ -157,7 +132,7 @@ class TestSymmMemRegistry(TestCase):
         new_holder = SymmMemArgsHolder("test::op")
 
         # Register in singleton
-        register_symm_mem_args("test::op", ["input"], validate=False)
+        register_symm_mem_args("test::op", ["input"])
 
         # New holder should be empty
         self.assertFalse(new_holder.is_registered())
