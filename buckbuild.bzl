@@ -688,6 +688,11 @@ def pt_operator_query_codegen(
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_3.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_4.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_5.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_6.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_7.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_8.cpp]".format(unboxing_and_autograd_genrule),
+        ":{}[autograd/generated/VariableType_9.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_1.cpp]".format(unboxing_and_autograd_genrule),
     ] if train else []) + ([
@@ -1542,6 +1547,25 @@ def define_buck_targets(
         exported_deps = [
             ":torch",
             ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
+        ],
+    )
+
+    # Standalone target for the C++ API enum tag definitions
+    # (torch/csrc/api/src/enum.cpp). Lets consumers link only the enum
+    # globals without pulling in the full torch C++ API.
+    # @lint-ignore BUCKLINT link_whole
+    pt_xplat_cxx_library(
+        name = "torch_enum",
+        srcs = ["torch/csrc/api/src/enum.cpp"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        link_whole = True,
+        linker_flags = get_no_as_needed_linker_flag(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":aten_cpu",
+            ":torch_headers",
+            C10,
         ],
     )
 
