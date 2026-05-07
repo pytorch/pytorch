@@ -57,7 +57,7 @@ intermediate or output values of an operation will remain finite. For workflows
 that are sensitive to non-finite values, consider normalizing or clamping extremal
 inputs and using {func}`torch.isfinite` to detect them.
 
-(Linear-Algebra-Stability)=
+(Linear Algebra Stability)=
 
 ## Linear algebra (``torch.linalg``)
 
