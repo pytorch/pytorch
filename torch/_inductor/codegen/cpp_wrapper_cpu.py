@@ -484,6 +484,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for device in V.graph.device_types:
             if device != "meta":
                 self.add_device_include(device)
+        if not self.included_devices:
+            # When only meta device is present, add_device_include is never
+            # called so we need to pull in the common header explicitly.
+            if V.graph.aot_mode:
+                self.header.writeline(
+                    "#include <torch/csrc/inductor/aoti_include/common.h>"
+                )
+            else:
+                self.header.writeline(
+                    "#include <torch/csrc/inductor/cpp_wrapper/common.h>"
+                )
 
         if V.graph.aot_mode:
             self._write_aoti_interface_header()
