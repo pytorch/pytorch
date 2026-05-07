@@ -826,6 +826,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tx, f"object of type {self.python_type_name()} has no positive"
         )
 
+    def nb_absolute_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__abs__")
+        if m:
+            source = self.source and AttrSource(self.source, "__abs__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx,
+            f"bad operand type for abs(): '{self.python_type_name()}'",
+        )
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -1858,6 +1870,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         return self.call_method(tx, "__pos__", [], {})
+
+    def nb_absolute_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_absolute calls __abs__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9406
+        type_attr = self.lookup_class_mro_attr("__abs__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx,
+                f"bad operand type for abs(): '{self.python_type_name()}'",
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__abs__")
+        if method is None:
+            raise_type_error(
+                tx,
+                f"bad operand type for abs(): '{self.python_type_name()}'",
+            )
+
+        return self.call_method(tx, "__abs__", [], {})
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):

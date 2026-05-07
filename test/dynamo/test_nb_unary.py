@@ -2,6 +2,7 @@
 """Tests for nb_negative / nb_positive: unary ops via PyNumber_Negative/Positive."""
 
 import operator
+import sys
 
 import torch
 import torch._dynamo.testing
@@ -15,48 +16,49 @@ from torch.testing._internal.common_utils import (
 
 
 UNARY_OPS = [
-    subtest((operator.neg, "-", "__neg__"), name="neg"),
-    subtest((operator.pos, "+", "__pos__"), name="pos"),
+    subtest((operator.neg, "__neg__"), name="neg"),
+    subtest((operator.pos, "__pos__"), name="pos"),
+    subtest((operator.abs, "__abs__"), name="abs"),
 ]
 
 
 class NbUnaryTests(TestCase):
     # --- int (ConstantVariable) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_int(self, op, symbol, dunder):
+    def test_int(self, op, dunder):
         self.assertEqual(op(42), op(42))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_int_negative_value(self, op, symbol, dunder):
+    def test_int_negative_value(self, op, dunder):
         self.assertEqual(op(-7), op(-7))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_int_zero(self, op, symbol, dunder):
+    def test_int_zero(self, op, dunder):
         self.assertEqual(op(0), op(0))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_int_large(self, op, symbol, dunder):
+    def test_int_large(self, op, dunder):
         self.assertEqual(op(2**100), op(2**100))
 
     # --- float (ConstantVariable) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_float(self, op, symbol, dunder):
+    def test_float(self, op, dunder):
         self.assertEqual(op(3.14), op(3.14))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_float_negative_value(self, op, symbol, dunder):
+    def test_float_negative_value(self, op, dunder):
         self.assertEqual(op(-2.5), op(-2.5))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_float_zero_copysign(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_float_zero_copysign(self, op, dunder):
         import math
 
         def fn(x):
@@ -66,8 +68,8 @@ class NbUnaryTests(TestCase):
         expected = op(0.0)
         self.assertEqual(math.copysign(1.0, result), math.copysign(1.0, expected))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_float_double_apply_zero(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_float_double_apply_zero(self, op, dunder):
         import math
 
         def fn(x):
@@ -77,22 +79,22 @@ class NbUnaryTests(TestCase):
         expected = op(op(0.0))
         self.assertEqual(math.copysign(1.0, result), math.copysign(1.0, expected))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_float_inf(self, op, symbol, dunder):
+    def test_float_inf(self, op, dunder):
         import math
 
         self.assertEqual(op(math.inf), op(math.inf))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_float_neg_inf(self, op, symbol, dunder):
+    def test_float_neg_inf(self, op, dunder):
         import math
 
         self.assertEqual(op(-math.inf), op(-math.inf))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_float_nan(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_float_nan(self, op, dunder):
         import math
 
         def fn(x):
@@ -103,40 +105,40 @@ class NbUnaryTests(TestCase):
 
     # --- complex (ConstantVariable) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_complex(self, op, symbol, dunder):
+    def test_complex(self, op, dunder):
         self.assertEqual(op(3 + 4j), op(3 + 4j))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_complex_zero(self, op, symbol, dunder):
+    def test_complex_zero(self, op, dunder):
         self.assertEqual(op(0 + 0j), op(0 + 0j))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_complex_real_only(self, op, symbol, dunder):
+    def test_complex_real_only(self, op, dunder):
         self.assertEqual(op(5 + 0j), op(5 + 0j))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_complex_imag_only(self, op, symbol, dunder):
+    def test_complex_imag_only(self, op, dunder):
         self.assertEqual(op(0 + 3j), op(0 + 3j))
 
     # --- bool (ConstantVariable, inherits slot from int) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_bool_true(self, op, symbol, dunder):
+    def test_bool_true(self, op, dunder):
         self.assertEqual(op(True), op(True))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_bool_false(self, op, symbol, dunder):
+    def test_bool_false(self, op, dunder):
         self.assertEqual(op(False), op(False))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_bool_result_type(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_bool_result_type(self, op, dunder):
         def fn(x):
             return op(True)
 
@@ -146,53 +148,53 @@ class NbUnaryTests(TestCase):
 
     # --- operator.X on constants ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_operator_int(self, op, symbol, dunder):
+    def test_operator_int(self, op, dunder):
         self.assertEqual(op(10), op(10))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_operator_float(self, op, symbol, dunder):
+    def test_operator_float(self, op, dunder):
         self.assertEqual(op(2.5), op(2.5))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_operator_bool(self, op, symbol, dunder):
+    def test_operator_bool(self, op, dunder):
         self.assertEqual(op(True), op(True))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_operator_complex(self, op, symbol, dunder):
+    def test_operator_complex(self, op, dunder):
         self.assertEqual(op(1 + 2j), op(1 + 2j))
 
     # --- dunder method on constants ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_dunder_int(self, op, symbol, dunder):
+    def test_dunder_int(self, op, dunder):
         self.assertEqual(getattr(42, dunder)(), op(42))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_dunder_float(self, op, symbol, dunder):
+    def test_dunder_float(self, op, dunder):
         self.assertEqual(getattr(3.14, dunder)(), op(3.14))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_dunder_bool(self, op, symbol, dunder):
+    def test_dunder_bool(self, op, dunder):
         self.assertEqual(getattr(True, dunder)(), op(True))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_dunder_complex(self, op, symbol, dunder):
+    def test_dunder_complex(self, op, dunder):
         self.assertEqual(getattr(1 + 2j, dunder)(), op(1 + 2j))
 
     # --- TypeError for types without the slot ---
     # CPython: "bad operand type for unary <symbol>: '<type>'"
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_str_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_str_raises(self, op, dunder):
         def fn(x):
             try:
                 return op("hello")
@@ -203,8 +205,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_list_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_list_raises(self, op, dunder):
         def fn(x):
             try:
                 return op([1, 2, 3])
@@ -215,8 +217,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_dict_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_dict_raises(self, op, dunder):
         def fn(x):
             try:
                 return op({"a": 1})
@@ -227,8 +229,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_set_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_set_raises(self, op, dunder):
         def fn(x):
             try:
                 return op({1, 2})
@@ -239,8 +241,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tuple_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tuple_raises(self, op, dunder):
         def fn(x):
             try:
                 return op(())
@@ -251,8 +253,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_none_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_none_raises(self, op, dunder):
         def fn(x):
             try:
                 return op(None)
@@ -263,8 +265,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_bytes_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_bytes_raises(self, op, dunder):
         def fn(x):
             try:
                 return op(b"hello")
@@ -275,8 +277,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_operator_none_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_operator_none_raises(self, op, dunder):
         def fn(x):
             try:
                 return op(None)
@@ -289,8 +291,8 @@ class NbUnaryTests(TestCase):
 
     # --- Tensor (TensorVariable, proxy-based) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor(self, op, dunder):
         def fn(x):
             return op(x)
 
@@ -298,8 +300,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor_integer_dtype(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor_integer_dtype(self, op, dunder):
         def fn(x):
             return op(x)
 
@@ -307,8 +309,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor_complex_dtype(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor_complex_dtype(self, op, dunder):
         def fn(x):
             return op(x)
 
@@ -316,8 +318,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor_creates_graph_node(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor_creates_graph_node(self, op, dunder):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         @torch.compile(backend=backend, fullgraph=True)
@@ -329,8 +331,8 @@ class NbUnaryTests(TestCase):
         graph_str = backend.graphs[0].print_readable(False)
         self.assertIn(op.__name__, graph_str.lower())
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor_operator(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor_operator(self, op, dunder):
         def fn(x):
             return op(x)
 
@@ -338,8 +340,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_tensor_dunder(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_tensor_dunder(self, op, dunder):
         def fn(x):
             return getattr(x, dunder)()
 
@@ -349,8 +351,8 @@ class NbUnaryTests(TestCase):
 
     # --- SymNodeVariable ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_symnode(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_symnode(self, op, dunder):
         def fn(x):
             s = x.size(0)
             return x[: op(s)]
@@ -359,8 +361,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_symnode_operator(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_symnode_operator(self, op, dunder):
         def fn(x):
             s = x.size(0)
             return x[: op(s)]
@@ -369,8 +371,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_symnode_dunder(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_symnode_dunder(self, op, dunder):
         def fn(x):
             s = x.size(0)
             return x[: getattr(s, dunder)()]
@@ -381,8 +383,8 @@ class NbUnaryTests(TestCase):
 
     # --- UserDefinedObjectVariable ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined(self, op, dunder):
         class MyNum:
             def __init__(self, val):
                 self.val = val
@@ -396,8 +398,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -10)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_operator(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_operator(self, op, dunder):
         class MyNum:
             def __init__(self, val):
                 self.val = val
@@ -411,8 +413,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -7)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_dunder(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_dunder(self, op, dunder):
         class MyNum:
             def __init__(self, val):
                 self.val = val
@@ -426,8 +428,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -3)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_no_slot_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_no_slot_raises(self, op, dunder):
         class NoSlot:
             pass
 
@@ -443,8 +445,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_returns_arbitrary_type(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_returns_arbitrary_type(self, op, dunder):
         class Weird:
             pass
 
@@ -457,8 +459,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, "applied")
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_raising_exception_propagates(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_raising_exception_propagates(self, op, dunder):
         class Raising:
             pass
 
@@ -477,8 +479,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, "custom error")
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_user_defined_subclass(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_user_defined_subclass(self, op, dunder):
         class Base:
             def __init__(self, v):
                 self.v = v
@@ -498,8 +500,8 @@ class NbUnaryTests(TestCase):
 
     # --- nn.Module ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_nn_module(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_nn_module(self, op, dunder):
         class OpModule(torch.nn.Module):
             def forward(self, x):
                 return x
@@ -518,8 +520,8 @@ class NbUnaryTests(TestCase):
     # In CPython, op(SomeClass) calls type(SomeClass)->nb_slot,
     # i.e. the metaclass's dunder, not the class's.
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_metaclass(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_metaclass(self, op, dunder):
         class Meta(type):
             pass
 
@@ -534,8 +536,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, "applied A")
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_metaclass_no_slot_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_metaclass_no_slot_raises(self, op, dunder):
         class Bar(type):
             pass
 
@@ -552,8 +554,8 @@ class NbUnaryTests(TestCase):
         eager_result = fn(torch.tensor(0))
         self.assertEqual(result, eager_result)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_metaclass_inherited(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_metaclass_inherited(self, op, dunder):
         class Meta(type):
             pass
 
@@ -571,8 +573,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, "applied D")
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_default_metaclass_raises(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_default_metaclass_raises(self, op, dunder):
         class Plain:
             pass
 
@@ -588,8 +590,8 @@ class NbUnaryTests(TestCase):
 
     # --- Unbound method calls: Type.dunder(instance) ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_unbound_user_defined(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_unbound_user_defined(self, op, dunder):
         class MyNum:
             def __init__(self, v):
                 self.v = v
@@ -603,8 +605,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -5)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_unbound_parent_class(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_unbound_parent_class(self, op, dunder):
         class Base:
             def __init__(self, v):
                 self.v = v
@@ -622,40 +624,40 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -10)
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_unbound_builtin_int(self, op, symbol, dunder):
+    def test_unbound_builtin_int(self, op, dunder):
         self.assertEqual(getattr(int, dunder)(42), op(42))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_unbound_builtin_float(self, op, symbol, dunder):
+    def test_unbound_builtin_float(self, op, dunder):
         self.assertEqual(getattr(float, dunder)(3.14), op(3.14))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_unbound_builtin_complex(self, op, symbol, dunder):
+    def test_unbound_builtin_complex(self, op, dunder):
         self.assertEqual(getattr(complex, dunder)(1 + 2j), op(1 + 2j))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_unbound_builtin_bool(self, op, symbol, dunder):
+    def test_unbound_builtin_bool(self, op, dunder):
         self.assertEqual(getattr(bool, dunder)(True), op(True))
 
     # --- Double application ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_double_apply_int(self, op, symbol, dunder):
+    def test_double_apply_int(self, op, dunder):
         self.assertEqual(op(op(42)), op(op(42)))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
+    @parametrize("op,dunder", UNARY_OPS)
     @make_dynamo_test
-    def test_double_apply_float(self, op, symbol, dunder):
+    def test_double_apply_float(self, op, dunder):
         self.assertEqual(op(op(3.14)), op(op(3.14)))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_double_apply_tensor(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_double_apply_tensor(self, op, dunder):
         def fn(x):
             return op(op(x))
 
@@ -665,8 +667,8 @@ class NbUnaryTests(TestCase):
 
     # --- Used in expressions ---
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_in_arithmetic(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_in_arithmetic(self, op, dunder):
         def fn(x):
             return x + op(x)
 
@@ -674,8 +676,8 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
 
-    @parametrize("op,symbol,dunder", UNARY_OPS)
-    def test_constant_in_tensor_op(self, op, symbol, dunder):
+    @parametrize("op,dunder", UNARY_OPS)
+    def test_constant_in_tensor_op(self, op, dunder):
         def fn(x):
             val = op(5)
             return x + val
@@ -683,6 +685,24 @@ class NbUnaryTests(TestCase):
         x = torch.ones(3)
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
+
+    # --- op specific tests ---    
+
+    # --- complex abs overflow (OverflowError from _Py_c_abs) ---
+    # CPython's complex_abs calls _Py_c_abs which sets errno=ERANGE when
+    # hypot(real, imag) overflows a double, then raises OverflowError.
+
+    def test_complex_abs_overflow(self):
+        def fn(x):
+            try:
+                return abs(complex(sys.float_info.max, sys.float_info.max))
+            except OverflowError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.tensor(0)
+        )
+        self.assertEqual(result, "absolute value too large")
 
 
 instantiate_parametrized_tests(NbUnaryTests)
