@@ -19,10 +19,14 @@ except ImportError:
     HAS_CUTLASS = False
 
 if HAS_CUTLASS:
+    from torch._inductor import config as inductor_config
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
-    from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.codegen.cutedsl.cutedsl_scheduling import CuteDSLScheduling
+    from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+    from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
     from torch._inductor.select_algorithm import PartialRender
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+    from torch.testing._internal.common_cuda import IS_SM90
 
 
 CUTEDSL_ADD_TEMPLATE = r"""
@@ -641,6 +645,66 @@ class TestCuteDSLScheduling(TestCase):
     def test_can_fuse_horizontal_returns_false(self):
         sched = CuteDSLScheduling(scheduler=None)
         self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not HAS_CUTLASS or not ensure_flash_available(),
+        "Flash attention (CUTE) library is not available",
+    )
+    @unittest.skipIf(not IS_SM90, "FLASH backend requires SM90 (H100)")
+    @inductor_config.patch(score_fusion_memory_threshold=0)
+    def test_can_fuse_horizontal_compile_dispatch(self):
+        """End-to-end: compile a graph that puts a cutedsl FLASH template
+        next to non-template siblings (pointwise/reduction reading the same
+        Q/K/V) so the scheduler reaches
+        ``CUDACombinedScheduling.can_fuse_horizontal`` and dispatches into
+        ``CuteDSLScheduling.can_fuse_horizontal``. Without the override,
+        this falls through to ``BaseScheduling.can_fuse_horizontal`` and
+        raises ``NotImplementedError`` during compilation.
+
+        ``score_fusion_memory_threshold=0`` ensures any sibling pair becomes
+        a fusion candidate, surfacing the dispatch deterministically on a
+        small graph.
+        """
+        device = "cuda"
+        dtype = torch.bfloat16
+        B, H_, Q_LEN, KV_LEN, D = 4, 8, 512, 1024, 128
+
+        def causal(b, h, q, k):
+            return q >= k
+
+        def model(q, k, v, bias_q, bias_kv):
+            block_mask = create_block_mask(
+                causal, B=None, H=None, Q_LEN=Q_LEN, KV_LEN=KV_LEN, device=device,
+            )
+            a1 = flex_attention(
+                q, k, v, block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            a2 = flex_attention(
+                q + bias_q, k, v, block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            a3 = flex_attention(
+                q, k + bias_kv, v + bias_kv, block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            s1 = (q * 2.0).relu().sum(dim=-2, keepdim=True)
+            s2 = (k * 3.0).relu().sum(dim=-2, keepdim=True)
+            s3 = (v * 4.0).relu().sum(dim=-2, keepdim=True)
+            return a1 + a2 + a3 + s1 + s2 + s3
+
+        compiled = torch.compile(model, dynamic=False)
+
+        q = torch.randn(B, H_, Q_LEN, D, device=device, dtype=dtype)
+        k = torch.randn(B, H_, KV_LEN, D, device=device, dtype=dtype)
+        v = torch.randn(B, H_, KV_LEN, D, device=device, dtype=dtype)
+        bias_q = torch.randn(B, H_, Q_LEN, D, device=device, dtype=dtype)
+        bias_kv = torch.randn(B, H_, KV_LEN, D, device=device, dtype=dtype)
+
+        out = compiled(q, k, v, bias_q, bias_kv)
+        self.assertEqual(tuple(out.shape), (B, H_, Q_LEN, D))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
