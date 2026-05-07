@@ -288,7 +288,7 @@ def _extract_fake_inputs(gm, args, kwargs):
         # fake (and symbolic) inputs. The way currently it's implemented
         # is by looking at the node.meta["val"] of the placeholder nodes.
         # This doesn't work when the graph is Dynamo flattened, because now
-        # plceholder nodes doesn't have the ordering like pytree inputs do.
+        # placeholder nodes doesn't have the ordering like pytree inputs do.
         # Instead, we need to look at how the inputs are shuffled, and map
         # the inputs to their actual fake inputs and symbolic inputs.
         # Since inputs can also contain symints, we cannot simply use the
