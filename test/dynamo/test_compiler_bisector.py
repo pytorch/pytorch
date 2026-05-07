@@ -401,6 +401,7 @@ class TestCompilerBisector(TestCase):
                 stdout=subprocess.PIPE,
                 check=True,
                 text=True,
+                timeout=300,
             )
         expected_result = (
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
