@@ -497,7 +497,7 @@ class ConstantVariable(VariableTracker):
         v, w = self_.as_python_constant(), other_.as_python_constant()
         try:
             return VariableTracker.build(tx, v - w)
-        except OverflowError as e:
+        except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
     def nb_negative_impl(
@@ -528,7 +528,7 @@ class ConstantVariable(VariableTracker):
         v, w = self_.as_python_constant(), other_.as_python_constant()
         try:
             return VariableTracker.build(tx, v + w)
-        except OverflowError as e:
+        except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
 
