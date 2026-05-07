@@ -37,7 +37,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   // TODO: contiguous is called for further jit optimizations.
   auto input_contig = input.contiguous();
   const auto* input_ptr =
-      reinterpret_cast<uint8_t*>(input_contig.data_ptr<c10::quint8>());
+      reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>());
 
   TORCH_CHECK(
       input.dim() >= 2,

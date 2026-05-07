@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 import torch.library
 
@@ -20,10 +20,8 @@ log = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R")
 
-_OpOverrideFn = Callable[Concatenate[torch.DispatchKeySet, P], R]
-_OpReplaceFn = Callable[P, R]
-
-_OpFn = _OpOverrideFn | _OpReplaceFn
+_OpCondFn = Callable[P, bool]
+_OpImplFn = Callable[P, R]
 
 
 @dataclass
@@ -33,7 +31,13 @@ class _OverrideNode:
     dsl_name: str
     op_symbol: str
     dispatch_key: str
-    override_fn: _OpFn
+    cond_fn: _OpCondFn
+    impl_fn: _OpImplFn
+    # Identifier of the opaque `_native::<node_id>` op that carries this
+    # override's impl. Assigned once at registration time and never reused —
+    # reorder / deregister / reenable do not change it, so the cached
+    # `_defined_native_ops` entry remains valid.
+    node_id: str
     unconditional_override: bool = False
     active: bool = True
 
@@ -146,6 +150,21 @@ _dsl_name_to_lib_graph: _MappingType = {}
 _dispatch_key_to_lib_graph: _MappingType = {}
 _op_symbol_to_lib_graph: _MappingType = {}
 
+# Monotonic counter used to mint stable, unique `_native::<id>` op names.
+# Must never decrease across the process, since `_defined_native_ops`
+# pins a fake kernel for each minted id.
+_node_id_counter: int = 0
+
+# Dispatch keys where installing an override would break the registry's
+# assumptions. The eager router is wired at a backend key so aten's
+# higher-priority Autograd/Autocast kernels handle those layers, and the
+# fake kernel for `_native::<id>` redispatches to the aten op's meta — if
+# the override lived at Meta or CompositeImplicitAutograd, that
+# redispatch would loop back into the router.
+_DISALLOWED_DISPATCH_KEYS: frozenset[str] = frozenset(
+    {"Meta", "CompositeImplicitAutograd", "CompositeExplicitAutograd"}
+)
+
 
 def _build_key_set(
     dsl_names: str | Iterable[str] | None,
@@ -202,24 +221,126 @@ def _print_override_graphs(*, print_inactive: bool = False) -> None:
                 print(s)
 
 
-def _get_or_create_library(op_symbol: str, dispatch_key: str) -> torch.library.Library:
+# One DEF/FRAGMENT library per namespace — only one is allowed per process.
+_def_libs: dict[str, torch.library.Library] = {}
+# Ops that have already been `define`d on the _native namespace.
+_defined_native_ops: set[str] = set()
+# IMPL libraries on the aten namespace, keyed by (op_symbol, dispatch_key).
+# One library per op/key pair so we can call `_destroy()` on it to tear down
+# just that one override without affecting other ops at the same dispatch
+# key. Torch's Library has no per-kernel removal API — `_destroy` on the
+# library is the only teardown mechanism.
+_aten_override_libs: dict[tuple[str, str], torch.library.Library] = {}
+
+
+def _get_def_library(namespace: str) -> torch.library.Library:
+    if namespace not in _def_libs:
+        _def_libs[namespace] = torch.library.Library(namespace, "FRAGMENT")
+    return _def_libs[namespace]
+
+
+def _get_or_create_library(dispatch_key: str) -> torch.library.Library:
     """
-    Get or create a torch.library.Library instance for the given key.
+    Get or create the _native IMPL library for a given dispatch key.
 
-    Args:
-        op_symbol: The operation symbol
-        dispatch_key: The dispatch key
-
-    Returns:
-        torch.library.Library: The library instance
+    One library per dispatch key is shared across all overridden ops.
     """
     global _libs
 
-    key = (op_symbol, dispatch_key)
+    key = ("_native", dispatch_key)
     if key not in _libs:
-        _libs[key] = torch.library.Library("aten", "IMPL", dispatch_key)
+        _libs[key] = torch.library.Library("_native", "IMPL", dispatch_key)
 
     return _libs[key]
+
+
+def _install_aten_override(op_symbol: str, dispatch_key: str, kernel: Callable) -> None:
+    """
+    Install (or replace) an aten kernel at (op_symbol, dispatch_key).
+
+    Creates a fresh Library per (op, key) so we can tear down just this
+    one override via `_destroy_aten_override` without affecting any other
+    override at the same dispatch key.
+    """
+    key = (op_symbol, dispatch_key)
+    # Destroy any existing library so its kernel is fully removed before
+    # we install the new one. `_destroy` calls into the dispatcher to
+    # unregister all kernels on the library.
+    existing = _aten_override_libs.pop(key, None)
+    if existing is not None:
+        existing._destroy()
+
+    lib = torch.library.Library("aten", "IMPL", dispatch_key)
+    lib.impl(op_symbol, kernel, dispatch_key, with_keyset=True)
+    _aten_override_libs[key] = lib
+
+
+def _destroy_aten_override(op_symbol: str, dispatch_key: str) -> None:
+    """Tear down the aten override at (op_symbol, dispatch_key), if any."""
+    lib = _aten_override_libs.pop((op_symbol, dispatch_key), None)
+    if lib is not None:
+        lib._destroy()
+
+
+def _resolve_aten_overload(op_symbol: str) -> "torch._ops.OpOverload | None":
+    """
+    Resolve `op_symbol` to a concrete OpOverload on `torch.ops.aten`.
+
+    Accepts bare names ("bmm" → aten.bmm.default) and overload-qualified
+    names ("add_.Tensor" → aten.add_.Tensor). Returns None if the op is not
+    registered (e.g. a test-only op_symbol that never hit the C++ dispatcher).
+    """
+    name, _, overload_name = op_symbol.partition(".")
+    overload_name = overload_name or "default"
+    try:
+        packet = getattr(torch.ops.aten, name)
+        return getattr(packet, overload_name)
+    except AttributeError:
+        return None
+
+
+def _aten_schema_tail(op_symbol: str) -> str:
+    """Return the schema of at::<op_symbol> with the `aten::<name>` prefix stripped.
+
+    Accepts bare names ("bmm" → aten.bmm.default) and overload-qualified
+    names ("add_.Tensor" → aten.add_.Tensor).
+    """
+    overload = _resolve_aten_overload(op_symbol)
+    if overload is None:
+        raise AttributeError(f"aten op not found for op_symbol={op_symbol!r}")
+    s = str(overload._schema)
+    # "aten::bmm(Tensor self, Tensor mat2) -> Tensor" -> "(Tensor self, Tensor mat2) -> Tensor"
+    _, rest = s.split("::", 1)
+    _, args = rest.split("(", 1)
+    return f"({args}"
+
+
+def _define_native_op_once(name: str, op_symbol: str) -> None:
+    # Invariant: callers must only install the eager router at a real backend
+    # dispatch key (CPU, CUDA, XPU, ...). The fake kernel below redispatches
+    # to the aten op, and if the router were installed at Meta /
+    # CompositeImplicitAutograd that redispatch would re-enter the router.
+    # `register_op_override` enforces this via `_DISALLOWED_DISPATCH_KEYS`.
+    if name in _defined_native_ops:
+        return
+    _get_def_library("_native").define(f"{name}{_aten_schema_tail(op_symbol)}")
+    # Fake/meta kernel: required so export / dynamo / AOTAutograd can shape-infer
+    # through the opaque _native op. Reusing the aten op's meta is safe because
+    # the schema (and therefore shape rules) is cloned from it.
+    aten_overload = _resolve_aten_overload(op_symbol)
+    torch.library.register_fake(f"_native::{name}")(
+        lambda *args, _aten_overload=aten_overload, **kwargs: _aten_overload(
+            *args, **kwargs
+        )
+    )
+    # No autograd or autocast kernels are registered on _native::<id>. Because
+    # the router is registered at the backend dispatch key (e.g. CUDA), aten's
+    # own higher-priority kernels on aten::<op> handle both:
+    #   - Autograd: AutogradCUDA sees aten::<op> in the autograd graph and
+    #     uses aten's built-in derivative formula.
+    #   - Autocast: AutocastCUDA casts inputs to the autocast dtype before
+    #     redispatching down to our CUDA-level router.
+    _defined_native_ops.add(name)
 
 
 def _register_node_impl(
@@ -233,11 +354,17 @@ def _register_node_impl(
         node: The override node to register
         dispatch_key: The dispatch key for registration
     """
+    if not node.node_id:
+        raise ValueError(
+            f"_OverrideNode must have a non-empty node_id before registration "
+            f"(dsl_name={node.dsl_name!r}, op_symbol={node.op_symbol!r})"
+        )
+    _define_native_op_once(node.node_id, node.op_symbol)
     lib.impl(
-        node.op_symbol,
-        node.override_fn,
+        node.node_id,
+        node.impl_fn,
         dispatch_key,
-        with_keyset=not node.unconditional_override,
+        with_keyset=False,
         allow_override=True,
     )
 
@@ -414,12 +541,17 @@ def _update_registration_maps(
     _get_new_entry_or_append(_dispatch_key_to_lib_graph, dispatch_key, key)
 
 
+def _always_true(*args: object, **kwargs: object) -> bool:
+    return True
+
+
 def register_op_override(
     backend: str,
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    impl: _OpOverrideFn | _OpReplaceFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -434,29 +566,58 @@ def register_op_override(
         lib_symbol: Library you're overriding symbols in (must be "aten")
         op_symbol: Name of the operation you're overriding
         dispatch_key: Dispatch key to override
+        cond: Predicate choosing whether `impl` applies to a given call. May
+            be None if `unconditional_override=True`.
         impl: Implementation function for the override
         allow_multiple_override: Allow overriding an existing override
         unconditional_override: Implementation doesn't have a fallback and
-            doesn't require torch.DispatchKeySet as the first argument
+            doesn't require torch.DispatchKeySet as the first argument. When
+            True, a trivially-True predicate is supplied for the router if
+            `cond` is None.
 
     Raises:
-        ValueError: If lib_symbol is not "aten"
+        ValueError: If lib_symbol is not "aten", if dispatch_key is in
+            _DISALLOWED_DISPATCH_KEYS (Meta / CompositeImplicitAutograd /
+            CompositeExplicitAutograd), or if cond is None without
+            unconditional_override=True.
     """
     if lib_symbol != "aten":
         raise ValueError(f'Unsupported lib_symbol (must be "aten", got: "{lib_symbol}"')
 
+    if dispatch_key in _DISALLOWED_DISPATCH_KEYS:
+        raise ValueError(
+            f"dispatch_key={dispatch_key!r} is not supported. Overrides must be "
+            f"installed at a backend key (e.g. CPU, CUDA, XPU); the router's fake "
+            f"kernel redispatches to aten and would recurse otherwise."
+        )
+
+    if cond is None:
+        if not unconditional_override:
+            raise ValueError("cond must be provided unless unconditional_override=True")
+        cond = _always_true
+
     key = (op_symbol, dispatch_key)
 
-    global _graphs
+    global _graphs, _node_id_counter
     op_graph = _graphs.get(key, [])
+
+    # Mint a stable id for the opaque `_native::<node_id>` op. `_sanitized`
+    # strips dots from overload-qualified names so the result is a valid op
+    # name. The monotonic counter guarantees uniqueness even if the same
+    # (op_symbol, dsl_name) is registered, deregistered, and re-registered.
+    _sanitized = op_symbol.replace(".", "_")
+    node_id = f"{_sanitized}_{backend}_{_node_id_counter}"
+    _node_id_counter += 1
 
     op_graph.append(
         _OverrideNode(
             dsl_name=backend,
             op_symbol=op_symbol,
             dispatch_key=dispatch_key,
-            override_fn=impl,
+            cond_fn=cond,
+            impl_fn=impl,
             unconditional_override=unconditional_override,
+            node_id=node_id,
         )
     )
     _graphs[key] = op_graph
@@ -496,9 +657,10 @@ def _cleanup_and_reregister_graph(
     filter_state: _FilterState | None = None,
 ) -> None:
     """
-    Clean up existing library and reregister a graph.
+    Reregister a graph's routes from scratch.
 
-    This is the common pattern used across reorder, deregister, and reenable operations.
+    Used by reorder / deregister / reenable. Libraries are intentionally
+    long-lived singletons; we rebuild the per-op router closure here.
 
     Args:
         op_symbol: The operation symbol
@@ -506,21 +668,12 @@ def _cleanup_and_reregister_graph(
         graph: The graph to register
         filter_state: Optional filter state for conditional registration
     """
-    key = (op_symbol, dispatch_key)
-
-    # Remove existing library if it exists
-    if key in _libs:
-        del _libs[key]
-
-    # Only create a library if the graph has nodes
-    # Empty graphs (disabled operations) shouldn't get libraries
-    if graph:
-        _register_overrides_from_graph(
-            op_symbol,
-            dispatch_key,
-            graph,
-            filter_state=filter_state,
-        )
+    _register_overrides_from_graph(
+        op_symbol,
+        dispatch_key,
+        graph,
+        filter_state=filter_state,
+    )
 
 
 def _apply_graph_transformation(
@@ -620,9 +773,13 @@ def _register_overrides_from_graph(
         graph: List of override nodes to register
         filter_state: Optional filter state for conditional registration
     """
-    key = (op_symbol, dispatch_key)
-    lib = _get_or_create_library(*key)
+    lib = _get_or_create_library(dispatch_key)
 
+    cond_impl: list[tuple[_OpCondFn, str]] = []
+
+    # node.node_id is minted once at `register_op_override` time and is
+    # stable across reorder / deregister / reenable — never regenerate it
+    # here, since `_defined_native_ops` pins a fake kernel against each id.
     for node in graph:
         enable = True
         if filter_state:
@@ -630,9 +787,57 @@ def _register_overrides_from_graph(
 
         if enable:
             _register_node_impl(lib, node, dispatch_key)
+            cond_impl.append((node.cond_fn, node.node_id))
             node.active = True
         else:
             node.active = False
+
+    # Tear down any existing aten override so either (a) the op cleanly
+    # reverts to native aten (empty cond_impl), or (b) the subsequent
+    # `get_kernel` call returns the native kernel rather than a stale
+    # previously-installed router.
+    _destroy_aten_override(op_symbol, dispatch_key)
+
+    # If no active conds remain for this (op, key), leave the native op
+    # behavior intact.
+    if not cond_impl:
+        return
+
+    # Capture the prior kernel at this (op, dispatch_key) *before* we install
+    # our override. The fallback path calls it via `call_boxed`, which
+    # re-enters the dispatcher with the original kernel handle — bypassing
+    # our just-registered router and avoiding the recursion that would
+    # otherwise appear in aten's backward formulas (e.g. bmm's backward
+    # calls bmm, which would route back to us).
+    fallback_kernel = torch.library.get_kernel(f"aten::{op_symbol}", dispatch_key)
+
+    # First-match-wins dispatch over `cond_impl`. Factored into a helper so
+    # the router closure stays small and so other routers (e.g. for the
+    # compile/export path) can share the same matching logic.
+    _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
+
+    def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
+        for cond, impl_name in cond_impl:
+            try:
+                matched = cond(*args, **kwargs)
+            except Exception:
+                if not swallow_cond_exceptions:
+                    raise
+                continue
+            if matched:
+                return getattr(torch.ops._native, impl_name)(*args, **kwargs)
+        return _NO_MATCH
+
+    # Eager router: cond exceptions indicate a genuine bug (we're on real
+    # tensors); missing a match falls back to the captured native kernel.
+    def eager_router(keyset, *args, _fallback=fallback_kernel, **kwargs):
+        result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
+        if result is _NO_MATCH:
+            return _fallback.call_boxed(keyset, *args, **kwargs)
+        return result
+
+    # Install a fresh aten override for this (op, key).
+    _install_aten_override(op_symbol, dispatch_key, eager_router)
 
 
 def _register_all_overrides() -> None:

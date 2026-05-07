@@ -58,7 +58,6 @@ self-hosted-runner:
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
     - linux.rocm.mi210.docker-cache
-    - linux.rocm.mi250.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1
     - linux.rocm.gpu.gfx942.4
@@ -74,6 +73,7 @@ self-hosted-runner:
     - macos-latest-xlarge
     - macos-13-xlarge
     - macos-14-xlarge
+    - macos-26
     - macos-26-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
