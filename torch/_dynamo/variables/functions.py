@@ -4126,7 +4126,6 @@ class StaticMethodVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, staticmethod)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
@@ -4172,7 +4171,6 @@ class ClassMethodVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, classmethod)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:

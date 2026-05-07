@@ -506,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Step 5: Plain attribute.
             return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
-        # TODO - Revisit if we can use new descriptor VTs here.
+        # TODO(tp_descr_get) - Revisit if we can use new descriptor VTs here.
         # Step 6: Metaclass non-data descriptor or plain attr.
         # These are non-data descriptors on the metaclass (e.g. type.__call__,
         # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
@@ -612,11 +612,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return UserDefinedObjectVariable(cls_attr)
 
-        # TODO - There is an ordering issue - if we move this code to after the
-        # wrapper and method descriptor logic, the test fails
-        # PYTORCH_TEST_WITH_DYNAMO=1 pytest -vs test/dynamo/cpython/3_13/test_collections.py::TestUserObjects::test_list_copy
-        # Revisit this once we implement tp_richcompare slot
-
+        # TODO(tp_descr_get) - Comparison dunders must be checked before
+        # WrapperDescriptor/MethodDescriptor to avoid VT type mismatches in
+        # identity checks. Revisit once we implement tp_richcompare slot.
         # Comparison dunders inherited from object — defer to runtime.
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
@@ -658,11 +656,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # TODO - Claude tells me this is related to instancemethod. Investigate
-        # if we need a separate VT.
-        # Build directly when the attribute lives in the class's own __dict__
-        # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
-        # OrderedDict's C-level methods are handled at runtime.
+        # TODO(tp_descr_get) - C-level descriptors not matched above (e.g.
+        # instancemethod, or wrapper/method descriptors on torch classes that
+        # need trace_rules). OrderedDict's C-level methods are handled at
+        # runtime.
         if inspect.ismethoddescriptor(cls_attr):
             if (
                 source
@@ -2801,15 +2798,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # TODO - Investigate if we need a separate descriptor for these
+        # TODO(tp_descr_get) - Investigate if we need a separate descriptor
+        # VT for instancemethod and cython functions.
         if (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
-        # TODO - Investigate if we need these now - its unclear why __get__ is
-        # not called for these.
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
         if can_use_mro_source:
