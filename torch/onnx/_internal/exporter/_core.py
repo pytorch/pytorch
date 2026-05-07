@@ -830,10 +830,9 @@ def _translate_fx_graph(
             elif node.op == "get_attr":
                 if isinstance(node.target, str) and node.target not in owned_graphs:
                     # Nested invoke_subgraph tracing can leave lifted tensor
-                    # constants (e.g. ``repeated_subgraph0._tensor_constant0``)
-                    # attached as get_attr nodes that are not registered
-                    # subgraphs. Materialize them as ONNX initializers so the
-                    # exported model has the data available at save time.
+                    # constants attached as get_attr nodes that are not
+                    # registered subgraphs. Materialize them so the exported
+                    # model has the data available at save time.
                     tensor_value = node.meta.get("val", None)
                     if tensor_value is None:
                         tensor_value = node.meta.get("example_value", None)
@@ -844,7 +843,28 @@ def _translate_fx_graph(
                     _set_shape_type(
                         value, tensor_value, complex_to_float=lower != "none"
                     )
-                    model.graph.initializers[node.name] = value
+                    if isinstance(graph_like, ir.Graph):
+                        # Root graph: add as a named initializer.
+                        model.graph.initializers[node.name] = value
+                    else:
+                        # ONNX function scope: ONNX functions cannot reference
+                        # outer-scope initializers, so emit a Constant node
+                        # inline so the tensor is self-contained.
+                        const_node = ir.Node(
+                            "",
+                            "Constant",
+                            inputs=[],
+                            attributes=[
+                                ir.Attr(
+                                    "value",
+                                    ir.AttributeType.TENSOR,
+                                    value.const_value,
+                                )
+                            ],
+                            outputs=[value],
+                            name=node.name,
+                        )
+                        graph_like.append(const_node)
                     node_name_to_values[node.name] = value
                 else:
                     _handle_get_attr_node(

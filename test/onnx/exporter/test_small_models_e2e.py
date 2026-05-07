@@ -992,11 +992,32 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         onnx_program = self.export(RepeatedBlockModel(), (x,), optimize=False)
 
-        # The subgraph should be preserved as an ONNX function rather than
-        # inlined, and the lifted tensor constant must be materialized as an
-        # initializer so the saved model is self-contained.
-        self.assertGreaterEqual(len(onnx_program.model.functions), 1)
-        self.assertGreaterEqual(len(list(onnx_program.model.graph.initializers)), 1)
+        # Regardless of whether the subgraph is preserved as an ONNX function
+        # or inlined by the version converter, the lifted tensor constant must
+        # be self-contained in the exported model: no ONNX function should
+        # silently reference a root-graph initializer from its outer scope
+        # (which is invalid ONNX and was the bug being fixed).
+        root_initializer_names = {
+            initializer.name
+            for initializer in onnx_program.model.graph.initializers.values()
+        }
+        for function in onnx_program.model.functions.values():
+            function_value_names = {value.name for value in function.inputs}
+            for node in function:
+                for input_value in node.inputs:
+                    if input_value is None:
+                        continue
+                    if (
+                        input_value.name in root_initializer_names
+                        and input_value.name not in function_value_names
+                    ):
+                        self.fail(
+                            f"ONNX function {function.name} captures root graph "
+                            f"initializer {input_value.name}"
+                        )
+                function_value_names.update(
+                    output.name for output in node.outputs if output is not None
+                )
 
 
 if __name__ == "__main__":
