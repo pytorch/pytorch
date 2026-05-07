@@ -10,10 +10,15 @@ from __future__ import annotations
 import math
 
 import torch
-from torch._vendor.quack import cute_dsl_utils as _cute_dsl_utils, rmsnorm as _quack_rmsnorm
 
 
+# quack imports `cutlass`, which is only installed on CUDA-enabled x86 Linux
+# builds. Keep the import lazy so `torch._native.ops.norm.norms` stays
+# importable on CPU-only builds (test_public_bindings /
+# test_circular_dependencies walk every module under `torch.`).
 def _torch2cute(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
+    from torch._vendor.quack import cute_dsl_utils as _cute_dsl_utils
+
     if t is None:
         return None
     return _cute_dsl_utils.torch2cute_dtype_map[t.dtype]
@@ -56,7 +61,9 @@ def quack_rmsnorm_fwd(
     out_dtype = _torch2cute(out)
     weight_dtype = _torch2cute(weight)
 
-    kernel = _quack_rmsnorm._compile_rmsnorm_fwd(
+    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_fwd
+
+    kernel = _compile_rmsnorm_fwd(
         dtype,
         out_dtype,
         None,
@@ -95,7 +102,9 @@ def quack_rmsnorm_bwd(
     rstd_flat = _flatten_rstd(rstd, M)
 
     dx = torch.empty_like(x)
-    sm_count = _quack_rmsnorm._get_sm_count(N, x.device)
+    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_bwd, _get_sm_count
+
+    sm_count = _get_sm_count(N, x.device)
 
     # quack's kernel requires a contiguous 1-D weight with matching dtype.
     if weight is not None:
@@ -114,7 +123,7 @@ def quack_rmsnorm_bwd(
     dx_dtype = _torch2cute(dx)
     weight_dtype = _torch2cute(weight)
 
-    kernel = _quack_rmsnorm._compile_rmsnorm_bwd(
+    kernel = _compile_rmsnorm_bwd(
         N,
         dtype,
         dout_dtype,
