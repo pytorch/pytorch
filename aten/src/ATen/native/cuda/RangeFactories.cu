@@ -8,6 +8,9 @@
 #include <ATen/native/RangeUtils.h>
 #include <cmath>
 #include <limits>
+#if defined(USE_ROCM)
+#include <algorithm>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -48,12 +51,49 @@ __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename func
   }
 }
 
+#if defined(USE_ROCM)
+// HIP does not support launches with gridDim.x * blockDim.x >= 2^32:
+// depending on the ROCm version the launch returns
+// hipErrorInvalidConfiguration or is accepted silently with the kernel
+// never executing, leaving zero-initialized output. A grid-stride kernel
+// with a fixed grid sized to device occupancy avoids the limit.
+template<typename index_t, typename func_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void elementwise_kernel_with_index_grid_stride(
+    index_t N, func_t f,
+    typename function_traits<func_t>::result_type *data) {
+  index_t idx = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const index_t stride = static_cast<index_t>(gridDim.x) * blockDim.x;
+  for (; idx < N; idx += stride) {
+    data[idx] = f(idx);
+  }
+}
+#endif
+
 template<typename func_t>
 void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   int64_t N = output.numel();
   if (N == 0) {
     return;
   }
+#if defined(USE_ROCM)
+  constexpr int blocks_per_sm = 4;
+  const int sm_count =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int64_t orig_grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = std::min<int64_t>(
+      orig_grid, static_cast<int64_t>(sm_count) * blocks_per_sm);
+  grid = std::max<int64_t>(grid, 1);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  using scalar_t = typename function_traits<func_t>::result_type;
+  if (N <= std::numeric_limits<int>::max()) {
+    elementwise_kernel_with_index_grid_stride<int><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    elementwise_kernel_with_index_grid_stride<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+#else
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
@@ -64,6 +104,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
     elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.mutable_data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
+#endif
 }
 
 }  // namespace
