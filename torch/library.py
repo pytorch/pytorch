@@ -369,15 +369,15 @@ class Library:
         self._registration_handles.append(handle)
 
     def _resolve_op_name(self, op_name, api_name):
-        """Resolve op_name (str or OpOverload) to (name, op_overload_or_none)."""
+        """Resolve op_name (str or OpOverload) to a name string."""
         if isinstance(op_name, str):
-            return op_name, None
+            return op_name
         elif isinstance(op_name, OpOverload):
             name = op_name._schema.name
             overload_name = op_name._schema.overload_name
             if overload_name:
                 name = name + "." + overload_name
-            return name, op_name
+            return name
         else:
             raise RuntimeError(
                 f"{api_name} should be passed either a name or an OpOverload object "
@@ -406,7 +406,7 @@ class Library:
                 f"dispatch_key {dispatch_key} does not have Dense in its keyset"
             )
 
-        name, _ = self._resolve_op_name(op_name, "_impl_with_aoti_compile")
+        name = self._resolve_op_name(op_name, "_impl_with_aoti_compile")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
@@ -461,7 +461,7 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
-        name, _ = self._resolve_op_name(op_name, "impl")
+        name = self._resolve_op_name(op_name, "impl")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if (not allow_override) and key in _impls:
@@ -528,7 +528,7 @@ class Library:
             >>> my_lib.define("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor")
             >>> my_lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
         """
-        name, _ = self._resolve_op_name(op_name, "register_symm_mem_args")
+        name = self._resolve_op_name(op_name, "register_symm_mem_args")
         if "::" in name:
             qualname = name
         else:
