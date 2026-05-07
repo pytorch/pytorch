@@ -28,7 +28,9 @@ from torch.testing._internal.common_fsdp import (
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     run_tests,
+    skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
@@ -442,6 +444,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         self._test_norm_modules(mp_policy)
 
     @skip_if_lt_x_gpu(1)
+    @skipIfRocmArch(MI300_ARCH)  # segfaults in BatchNorm2d backward on ROCm MI300
     def test_norm_modules_fp16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
         self._test_norm_modules(mp_policy)
