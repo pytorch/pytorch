@@ -82,8 +82,7 @@ struct GridSamplerBackwardParams {
             interpolation_mode_ != GridSamplerInterpolation::Nearest) {
     using at::native::safe_downcast;
     for (unsigned dim = 0; dim < N; dim++) {
-      grad_output_strides[dim] =
-          safe_downcast<idx_t>(grad_output.stride(dim));
+      grad_output_strides[dim] = safe_downcast<idx_t>(grad_output.stride(dim));
       grad_input_strides[dim] = grad_input.defined()
           ? safe_downcast<idx_t>(grad_input.stride(dim))
           : 0;
