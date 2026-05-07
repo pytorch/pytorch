@@ -2075,7 +2075,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             type_attr = self.lookup_class_mro_attr("__len__")
             source = self.source and self.get_source_by_walking_mro(tx, "__len__")
             method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
-            if not isinstance(method_var, variables.GetAttrVariable):
+            if not isinstance(
+                method_var,
+                (variables.GetAttrVariable, variables.MethodWrapperVariable),
+            ):
                 return method_var.call_function(tx, [], {})
 
         unimplemented(

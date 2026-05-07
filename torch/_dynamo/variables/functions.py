@@ -21,6 +21,7 @@ The variable trackers here work together with the rest of Dynamo to enable
 accurate graph capture while handling Python's various function-related behaviors.
 """
 
+import _collections  # type: ignore[import-not-found]
 import builtins
 import functools
 import importlib.metadata
@@ -4236,7 +4237,6 @@ class MemberDescriptorVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, types.MemberDescriptorType)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
@@ -4387,7 +4387,6 @@ class PropertyVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, property)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
@@ -4436,7 +4435,6 @@ class TupleGetterVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(descriptor, _collections._tuplegetter)
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
