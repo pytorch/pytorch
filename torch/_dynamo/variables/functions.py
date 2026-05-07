@@ -21,7 +21,6 @@ The variable trackers here work together with the rest of Dynamo to enable
 accurate graph capture while handling Python's various function-related behaviors.
 """
 
-import _collections  # type: ignore[import-not-found]
 import builtins
 import functools
 import importlib.metadata

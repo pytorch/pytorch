@@ -88,7 +88,6 @@ from ..utils import (
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
-    is_wrapper_or_member_descriptor,
     istype,
     list_methods,
     namedtuple_fields,
