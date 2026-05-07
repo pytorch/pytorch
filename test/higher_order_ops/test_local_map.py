@@ -217,6 +217,7 @@ def get_local_mapped_functions(mesh):
 
 class TestLocalMap(TestCase):
     def setUp(self):
+        super().setUp()
         torch._dynamo.reset()
         self.exit_stack = ExitStack()
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
