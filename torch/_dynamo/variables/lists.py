@@ -36,7 +36,6 @@ from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
-    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -273,6 +272,41 @@ class BaseListVariable(VariableTracker):
                 args=[f"{self.python_type_name()} index out of range"],
             )
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """list_richcompare / tuplerichcompare: compare same-type containers via polyfills.list_cmp.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/listobject.c#L3352
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L821
+        """
+        from .builder import SourcelessBuilder
+
+        if not isinstance(other, BaseListVariable):
+            return ConstantVariable.create(NotImplemented)
+        # CPython's list_richcompare uses PyList_Check (accepts subclasses),
+        # tuplerichcompare uses PyTuple_Check (accepts subclasses).
+        # Check that both are in the same family (list or tuple), not exact type.
+        try:
+            self_base = list if issubclass(self.python_type(), list) else tuple
+            other_base = list if issubclass(other.python_type(), list) else tuple
+            if self_base is not other_base:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
+            tx,
+            [
+                SourcelessBuilder.create(tx, cmp_name_to_op_mapping[op]),
+                self,
+                other,
+            ],
+            {},
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -280,8 +314,6 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
         if name == "__contains__":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -384,54 +416,6 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items *= val
                 return self
-        elif name in cmp_name_to_op_mapping:
-            if len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-
-            left = self
-            right = args[0]
-            # TODO this type check logic mirrors the following
-            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
-            # But we should probably move it up the stack to so that we don't
-            # need to duplicate it for different VTs.
-            if not isinstance(left, BaseListVariable) or not isinstance(
-                right, BaseListVariable
-            ):
-                if name == "__eq__":
-                    return SourcelessBuilder.create(tx, operator.is_).call_function(
-                        tx, (left, right), {}
-                    )
-                elif name == "__ne__":
-                    return SourcelessBuilder.create(tx, operator.is_not).call_function(
-                        tx, (left, right), {}
-                    )
-                else:
-                    op_str = cmp_name_to_op_str_mapping[name]
-                    left_ty = left.python_type_name()
-                    right_ty = right.python_type_name()
-                    raise_observed_exception(
-                        TypeError,
-                        tx,
-                        args=[
-                            f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
-                        ],
-                    )
-
-            return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
-                tx,
-                [
-                    SourcelessBuilder.create(tx, cmp_name_to_op_mapping[name]),
-                    left,
-                    right,
-                ],
-                {},
-            )
-
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -702,6 +686,36 @@ class RangeVariable(BaseListVariable):
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """range_richcompare: eq/ne via range_equals, NotImplemented for ordering.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L472
+        """
+        from .builder import SourcelessBuilder
+
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            if other.python_type() is not range:
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+
+        if isinstance(other, RangeVariable):
+            cmp = self.range_equals(other)
+        else:
+            cmp = False
+
+        if op == "__eq__":
+            return SourcelessBuilder.create(tx, cmp)
+        else:
+            return SourcelessBuilder.create(tx, not cmp)
+
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -724,30 +738,6 @@ class RangeVariable(BaseListVariable):
                 tx,
                 args=[f"{x} is not in range"],
             )
-        elif name in cmp_name_to_op_mapping:
-            other = args[0]
-            pt = other.python_type()
-            if name not in ("__eq__", "__ne__"):
-                msg = f"{name} not supported between instances of 'range' and '{pt}'"
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[msg],
-                )
-
-            if pt is not range:
-                return VariableTracker.build(tx, NotImplemented)
-
-            if isinstance(other, RangeVariable):
-                cmp = self.range_equals(other)
-            else:
-                cmp = False
-
-            # Two ranges are equal if they produce the same sequence of values
-            if name == "__eq__":
-                return SourcelessBuilder.create(tx, cmp)
-            else:
-                return SourcelessBuilder.create(tx, not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -1728,6 +1718,24 @@ class SliceVariable(VariableTracker):
             raise_type_error(tx, "unhashable type: 'slice'")
         # CPython slicehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667
         return hash(self.as_python_constant()), False
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """slice_richcompare: delegates all 6 ops to (start, stop, step) tuple comparison.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667-L686
+        """
+        from .object_protocol import generic_richcompare
+
+        if not isinstance(other, SliceVariable):
+            return ConstantVariable.create(NotImplemented)
+        self_tuple = TupleVariable(list(self.items))
+        other_tuple = TupleVariable(list(other.items))
+        return generic_richcompare(tx, self_tuple, other_tuple, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)

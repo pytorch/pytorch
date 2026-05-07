@@ -484,37 +484,6 @@ class SetVariable(VariableTracker):
                 raise AssertionError(f"Unexpected inplace set method name: {name}")
             self.call_method(tx, m, args, kwargs)
             return self
-        elif name == "__eq__":
-            if not isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    variables.UserDefinedSetVariable,
-                    DictItemsVariable,
-                    DictKeysVariable,
-                ),
-            ):
-                return ConstantVariable.create(False)
-            r = self.call_method(tx, "symmetric_difference", args, kwargs)
-            return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
-        elif name == "__ne__":
-            eq_result = self.call_method(tx, "__eq__", args, kwargs)
-            return VariableTracker.build(tx, not eq_result.value)  # type: ignore[attr-defined]
-        elif name in cmp_name_to_op_mapping:
-            if not isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    variables.UserDefinedSetVariable,
-                    DictItemsVariable,
-                    DictKeysVariable,
-                ),
-            ):
-                return VariableTracker.build(tx, NotImplemented)
-            return VariableTracker.build(
-                tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
-            )
         elif name == "__contains__":
             if not len(args):
                 raise_args_mismatch(
@@ -615,6 +584,36 @@ class SetVariable(VariableTracker):
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return VariableTracker.build(tx, len(self.set_items))
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        """set_richcompare: subset/superset comparisons for all 6 ops.
+
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
+        CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
+        """
+        try:
+            other_type = other.python_type()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not issubclass(other_type, (set, frozenset)):
+            return ConstantVariable.create(NotImplemented)
+
+        if op == "__eq__":
+            r = self.call_method(tx, "symmetric_difference", [other], {})
+            return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
+        elif op == "__ne__":
+            eq = self.richcompare_impl(tx, other, "__eq__")
+            return VariableTracker.build(tx, not eq.value)  # type: ignore[attr-defined]
+        else:
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[op](self.set_items, other.set_items),  # type: ignore[attr-defined]
+            )
 
 
 class OrderedSetClassVariable(VariableTracker):

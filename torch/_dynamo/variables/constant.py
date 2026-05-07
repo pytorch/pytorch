@@ -15,7 +15,7 @@ from typing_extensions import override
 import torch
 from torch._dynamo.source import GetItemSource
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
 from ..utils import common_constant_types, istype, np, raise_args_mismatch
 from .base import ValueMutationNew, VariableTracker
@@ -205,6 +205,13 @@ class ConstantVariable(VariableTracker):
     def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         return hash(self.value), False
+
+    def richcompare_impl(
+        self, tx: InstructionTranslator, other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
@@ -526,27 +533,29 @@ class FakeIdVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), True
 
+    def richcompare_impl(
+        self, tx: Any, other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # FakeIdVariable holds a compile-time-only id() or hash() value.
+        # Comparing it produces a result that depends on compile-time
+        # object identity, which may not hold at runtime.  Graph-break
+        # to run the comparison eagerly with real values.
+        unimplemented(
+            gb_type="Comparison on compile-time-only id or hash value",
+            context=f"FakeIdVariable({self.value}) {op} {type(other).__name__}",
+            explanation="Cannot compare a compile-time-only id() or hash() "
+            "value. The comparison will run eagerly.",
+            hints=[
+                "Avoid comparing id() or hash() of objects created inside "
+                "the compiled region against other values.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
             return self.value == other.as_python_constant()
         return False
-
-    def call_method(
-        self,
-        tx: InstructionTranslator,
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from ..utils import cmp_name_to_op_mapping
-
-        if name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            other = args[0]
-            if isinstance(other, (FakeIdVariable, ConstantVariable)):
-                return ConstantVariable.create(
-                    cmp_name_to_op_mapping[name](self.value, other.as_python_constant())
-                )
-        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

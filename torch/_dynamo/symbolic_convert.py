@@ -2894,6 +2894,10 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)

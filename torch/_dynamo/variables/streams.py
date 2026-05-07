@@ -412,7 +412,7 @@ class StreamVariable(StreamContextVariable):
         if not hasattr(self.value, name):
             raise AssertionError(f"no stream method found named {name}")
 
-        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
+        from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name == "wait_event":
@@ -486,30 +486,26 @@ class StreamVariable(StreamContextVariable):
                     {},
                 ),
             )
-        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            from ..guards import GuardBuilder, install_guard
-
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-
-            # NB : Checking for mutation is necessary because we compare
-            # constant values
-            other = args[0]
-            if not isinstance(other, StreamVariable):
-                return VariableTracker.build(tx, NotImplemented)
-
-            if other.source:
-                if self.source is None:
-                    raise AssertionError(
-                        "Expected self.source to be set for stream comparison guard"
-                    )
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            return VariableTracker.build(
-                tx,
-                cmp_name_to_op_mapping[name](self.value, other.value),  # type: ignore[arg-type]
-            )
-
         return super().call_method(tx, name, args, kwargs)
+
+    def richcompare_impl(self, tx, other, op):
+        from ..guards import GuardBuilder, install_guard
+        from ..utils import cmp_name_to_op_mapping
+        from .constant import ConstantVariable
+
+        if not isinstance(other, StreamVariable):
+            # Stream's tp_richcompare never returns NotImplemented.
+            # Non-Stream: eq->False, ne->True, ordering->False.
+            return ConstantVariable.create(op == "__ne__")
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        if other.source:
+            install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        op_fn = cmp_name_to_op_mapping[op]
+        return VariableTracker.build(
+            tx,
+            op_fn(self.value, other.value),  # pyrefly: ignore[bad-argument-type]
+        )
 
     def as_proxy(self) -> Proxy:
         return self.proxy
