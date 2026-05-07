@@ -688,6 +688,597 @@ kernel void softmax_backward_2pass_grad(
 // output[i] = (x[i] - max) - log(sum(exp(x - max)))
 // ============================================================================
 
+template <typename T>
+kernel void log_softmax_forward_single_row(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  device const T* x = input + offset_a(tg_id, params);
+  device T* out = output + offset_b(tg_id, params);
+  uint base = tid * N_READS;
+
+  bool contiguous = (sa == 1);
+  float vals[N_READS];
+  float local_max = -INFINITY;
+  if (base + N_READS <= axis_size) {
+    if (contiguous) {
+      float4 v = load_vec4(x + base);
+      vals[0] = v.x; vals[1] = v.y; vals[2] = v.z; vals[3] = v.w;
+    } else {
+      for (int i = 0; i < N_READS; i++)
+        vals[i] = float(x[(base + i) * sa]);
+    }
+    local_max = fmax(fmax(vals[0], vals[1]), fmax(vals[2], vals[3]));
+  } else {
+    for (int i = 0; i < N_READS; i++) {
+      vals[i] = (base + i < axis_size)
+          ? (contiguous ? float(x[base + i]) : float(x[(base + i) * sa]))
+          : -INFINITY;
+      local_max = fmax(local_max, vals[i]);
+    }
+  }
+
+  threadgroup float shared[simdgroup_size];
+  float row_max = c10::metal::threadgroup_max(shared, local_max, tid, tptg);
+
+  float local_sum = 0.0f;
+#pragma unroll
+  for (int i = 0; i < N_READS; i++)
+    local_sum += metal::precise::exp(vals[i] - row_max);
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float total_sum = c10::metal::threadgroup_sum(shared, local_sum, tid, tptg);
+  float shift = row_max + metal::precise::log(total_sum);
+
+  float4 result = float4(vals[0], vals[1], vals[2], vals[3]) - shift;
+  if (base + N_READS <= axis_size) {
+    if (sb == 1) {
+      store_vec4(out + base, result);
+    } else {
+#pragma unroll
+      for (int i = 0; i < N_READS; i++)
+        out[(base + i) * sb] = static_cast<T>(result[i]);
+    }
+  } else {
+    for (int i = 0; i < N_READS; i++) {
+      if (base + i < axis_size)
+        out[(base + i) * sb] = static_cast<T>(result[i]);
+    }
+  }
+}
+
+template <typename T>
+kernel void log_softmax_forward_looped(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  device const T* x = input + offset_a(tg_id, params);
+  device T* out = output + offset_b(tg_id, params);
+  bool contiguous = (sa == 1);
+
+  float local_max = -INFINITY;
+  float local_sum = 0.0f;
+  for (uint r = 0; r < axis_size; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= axis_size) {
+      float4 v;
+      if (contiguous) {
+        v = load_vec4(x + base);
+      } else {
+        v = float4(x[base * sa], x[(base+1) * sa],
+                    x[(base+2) * sa], x[(base+3) * sa]);
+      }
+      float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
+      float new_max = fmax(local_max, chunk_max);
+      local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+          metal::precise::exp(v.x - new_max) +
+          metal::precise::exp(v.y - new_max) +
+          metal::precise::exp(v.z - new_max) +
+          metal::precise::exp(v.w - new_max);
+      local_max = new_max;
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
+        float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        float new_max = fmax(local_max, val);
+        local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+            metal::precise::exp(val - new_max);
+        local_max = new_max;
+      }
+    }
+  }
+
+  float sg_max = simd_max(local_max);
+  local_sum *= metal::precise::exp(local_max - sg_max);
+  float sg_sum = simd_sum(local_sum);
+
+  threadgroup float shared_max[simdgroup_size];
+  threadgroup float shared_sum[simdgroup_size];
+  threadgroup float tg_result[2];
+
+  if (simd_lane_id == 0) {
+    shared_max[simdgroup_id] = sg_max;
+    shared_sum[simdgroup_id] = sg_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simdgroup_id == 0) {
+    float m = shared_max[simd_lane_id];
+    float global_max = simd_max(m);
+    float s = shared_sum[simd_lane_id] * metal::precise::exp(m - global_max);
+    float global_sum = simd_sum(s);
+    if (simd_lane_id == 0) {
+      tg_result[0] = global_max;
+      tg_result[1] = global_sum;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float shift = tg_result[0] + metal::precise::log(tg_result[1]);
+
+  for (uint r = 0; r < axis_size; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= axis_size) {
+      float4 v;
+      if (contiguous) {
+        v = load_vec4(x + base) - shift;
+      } else {
+        v = float4(
+            float(x[base * sa]) - shift,
+            float(x[(base + 1) * sa]) - shift,
+            float(x[(base + 2) * sa]) - shift,
+            float(x[(base + 3) * sa]) - shift);
+      }
+      if (sb == 1) {
+        store_vec4(out + base, v);
+      } else {
+#pragma unroll
+        for (int i = 0; i < N_READS; i++)
+          out[(base + i) * sb] = static_cast<T>(v[i]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
+        float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        out[i * sb] = static_cast<T>(val - shift);
+      }
+    }
+  }
+}
+
+// Log-softmax forward 2-pass: for low-occupancy (outer_size < 4, large axis)
+// Phase 1: each threadgroup computes (chunk_max, chunk_sum) via online algorithm
+template <typename T>
+kernel void log_softmax_forward_2pass_reduce(
+    device const T* input [[buffer(0)]],
+    device float* partials [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint num_chunks = params.num_chunks;
+  uint chunk_id = tg_id % num_chunks;
+  uint row_id = tg_id / num_chunks;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  device const T* x = input + offset_a(row_id, params);
+  bool contiguous = (sa == 1);
+
+  uint elems_per_chunk = (axis_size + num_chunks - 1) / num_chunks;
+  uint start = chunk_id * elems_per_chunk;
+  uint end = min(start + elems_per_chunk, axis_size);
+
+  float local_max = -INFINITY;
+  float local_sum = 0.0f;
+  for (uint r = start; r < end; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= end) {
+      float4 v;
+      if (contiguous) {
+        v = load_vec4(x + base);
+      } else {
+        v = float4(x[base * sa], x[(base+1) * sa],
+                    x[(base+2) * sa], x[(base+3) * sa]);
+      }
+      float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
+      float new_max = fmax(local_max, chunk_max);
+      local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+          metal::precise::exp(v.x - new_max) +
+          metal::precise::exp(v.y - new_max) +
+          metal::precise::exp(v.z - new_max) +
+          metal::precise::exp(v.w - new_max);
+      local_max = new_max;
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), end); i++) {
+        float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        float new_max = fmax(local_max, val);
+        local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+            metal::precise::exp(val - new_max);
+        local_max = new_max;
+      }
+    }
+  }
+
+  // Reduce across simdgroup
+  float sg_max = simd_max(local_max);
+  local_sum *= metal::precise::exp(local_max - sg_max);
+  float sg_sum = simd_sum(local_sum);
+
+  threadgroup float shared_max[simdgroup_size];
+  threadgroup float shared_sum[simdgroup_size];
+
+  if (simd_lane_id == 0) {
+    shared_max[simdgroup_id] = sg_max;
+    shared_sum[simdgroup_id] = sg_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (simdgroup_id == 0) {
+    float m = shared_max[simd_lane_id];
+    float global_max = simd_max(m);
+    float s = shared_sum[simd_lane_id] * metal::precise::exp(m - global_max);
+    float global_sum = simd_sum(s);
+    if (simd_lane_id == 0) {
+      // Store (max, sum) pair as float2
+      partials[(row_id * num_chunks + chunk_id) * 2] = global_max;
+      partials[(row_id * num_chunks + chunk_id) * 2 + 1] = global_sum;
+    }
+  }
+}
+
+// Phase 2: combine partials, compute shift = max + log(sum), write output = x - shift
+template <typename T>
+kernel void log_softmax_forward_2pass_write(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device const float* partials [[buffer(2)]],
+    constant SoftmaxParams& params [[buffer(3)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint num_chunks = params.num_chunks;
+  uint chunk_id = tg_id % num_chunks;
+  uint row_id = tg_id / num_chunks;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  device const T* x = input + offset_a(row_id, params);
+  device T* out = output + offset_b(row_id, params);
+  bool contiguous = (sa == 1);
+
+  // Combine all partial (max, sum) pairs for this row
+  float global_max = -INFINITY;
+  float global_sum = 0.0f;
+  for (uint i = 0; i < num_chunks; i++) {
+    float chunk_max = partials[(row_id * num_chunks + i) * 2];
+    float chunk_sum = partials[(row_id * num_chunks + i) * 2 + 1];
+    float new_max = fmax(global_max, chunk_max);
+    global_sum = global_sum * metal::precise::exp(global_max - new_max) +
+        chunk_sum * metal::precise::exp(chunk_max - new_max);
+    global_max = new_max;
+  }
+  float shift = global_max + metal::precise::log(global_sum);
+
+  uint elems_per_chunk = (axis_size + num_chunks - 1) / num_chunks;
+  uint start = chunk_id * elems_per_chunk;
+  uint end = min(start + elems_per_chunk, axis_size);
+
+  for (uint r = start; r < end; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= end) {
+      float4 v;
+      if (contiguous) {
+        v = load_vec4(x + base) - shift;
+      } else {
+        v = float4(
+            float(x[base * sa]) - shift,
+            float(x[(base + 1) * sa]) - shift,
+            float(x[(base + 2) * sa]) - shift,
+            float(x[(base + 3) * sa]) - shift);
+      }
+      if (sb == 1) {
+        store_vec4(out + base, v);
+      } else {
+#pragma unroll
+        for (int i = 0; i < N_READS; i++)
+          out[(base + i) * sb] = static_cast<T>(v[i]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), end); i++) {
+        float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        out[i * sb] = static_cast<T>(val - shift);
+      }
+    }
+  }
+}
+
+// Log-softmax backward: grad_input = grad_output - exp(output) * sum(grad_output)
+
+template <typename T>
+kernel void log_softmax_backward_single_row(
+    device const T* grad_output [[buffer(0)]],
+    device const T* output [[buffer(1)]],
+    device T* grad_input [[buffer(2)]],
+    constant SoftmaxParams& params [[buffer(3)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint sc = params.stride_c;
+  device const T* dy = grad_output + offset_a(tg_id, params);
+  device const T* y = output + offset_b(tg_id, params);
+  device T* dx = grad_input + offset_c(tg_id, params);
+  uint base = tid * N_READS;
+
+  bool contiguous = (sa == 1) && (sb == 1);
+  float dy_vals[N_READS];
+  float y_vals[N_READS];
+  float local_sum = 0.0f;
+  if (base + N_READS <= axis_size) {
+    if (contiguous) {
+      float4 dy_v = load_vec4(dy + base);
+      float4 y_v = load_vec4(y + base);
+      dy_vals[0] = dy_v.x; dy_vals[1] = dy_v.y;
+      dy_vals[2] = dy_v.z; dy_vals[3] = dy_v.w;
+      y_vals[0] = y_v.x; y_vals[1] = y_v.y;
+      y_vals[2] = y_v.z; y_vals[3] = y_v.w;
+      local_sum = dy_v.x + dy_v.y + dy_v.z + dy_v.w;
+    } else {
+      for (int i = 0; i < N_READS; i++) {
+        dy_vals[i] = float(dy[(base + i) * sa]);
+        y_vals[i] = float(y[(base + i) * sb]);
+        local_sum += dy_vals[i];
+      }
+    }
+  } else {
+    for (int i = 0; i < N_READS; i++) {
+      if (base + i < axis_size) {
+        dy_vals[i] = contiguous ? float(dy[base + i]) : float(dy[(base + i) * sa]);
+        y_vals[i] = contiguous ? float(y[base + i]) : float(y[(base + i) * sb]);
+        local_sum += dy_vals[i];
+      } else {
+        dy_vals[i] = 0;
+        y_vals[i] = 0;
+      }
+    }
+  }
+
+  threadgroup float shared[simdgroup_size];
+  float grad_sum = c10::metal::threadgroup_sum(shared, local_sum, tid, tptg);
+
+  float4 dy_v = float4(dy_vals[0], dy_vals[1], dy_vals[2], dy_vals[3]);
+  float4 exp_y = float4(
+      metal::precise::exp(y_vals[0]), metal::precise::exp(y_vals[1]),
+      metal::precise::exp(y_vals[2]), metal::precise::exp(y_vals[3]));
+  float4 result = dy_v - exp_y * grad_sum;
+  if (base + N_READS <= axis_size) {
+    if (sc == 1) {
+      store_vec4(dx + base, result);
+    } else {
+#pragma unroll
+      for (int i = 0; i < N_READS; i++)
+        dx[(base + i) * sc] = static_cast<T>(result[i]);
+    }
+  } else {
+    for (int i = 0; i < N_READS; i++) {
+      if (base + i < axis_size)
+        dx[(base + i) * sc] = static_cast<T>(
+            dy_vals[i] - metal::precise::exp(y_vals[i]) * grad_sum);
+    }
+  }
+}
+
+template <typename T>
+kernel void log_softmax_backward_looped(
+    device const T* grad_output [[buffer(0)]],
+    device const T* output [[buffer(1)]],
+    device T* grad_input [[buffer(2)]],
+    constant SoftmaxParams& params [[buffer(3)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint sc = params.stride_c;
+  device const T* dy = grad_output + offset_a(tg_id, params);
+  device const T* y = output + offset_b(tg_id, params);
+  device T* dx = grad_input + offset_c(tg_id, params);
+  bool contiguous = (sa == 1) && (sb == 1);
+
+  float local_sum = 0.0f;
+  for (uint r = 0; r < axis_size; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= axis_size) {
+      if (contiguous) {
+        float4 dy_v = load_vec4(dy + base);
+        local_sum += dy_v.x + dy_v.y + dy_v.z + dy_v.w;
+      } else {
+        for (int i = 0; i < N_READS; i++)
+          local_sum += float(dy[(base + i) * sa]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++)
+        local_sum += contiguous ? float(dy[i]) : float(dy[i * sa]);
+    }
+  }
+
+  threadgroup float shared[simdgroup_size];
+  float grad_sum = c10::metal::threadgroup_sum(shared, local_sum, tid, lsize);
+
+  for (uint r = 0; r < axis_size; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= axis_size) {
+      float4 dy_v, y_v;
+      if (contiguous) {
+        dy_v = load_vec4(dy + base);
+        y_v = load_vec4(y + base);
+      } else {
+        dy_v = float4(dy[base * sa], dy[(base+1) * sa], dy[(base+2) * sa], dy[(base+3) * sa]);
+        y_v = float4(y[base * sb], y[(base+1) * sb], y[(base+2) * sb], y[(base+3) * sb]);
+      }
+      float4 exp_y = float4(
+          metal::precise::exp(y_v.x), metal::precise::exp(y_v.y),
+          metal::precise::exp(y_v.z), metal::precise::exp(y_v.w));
+      float4 result = dy_v - exp_y * grad_sum;
+      if (sc == 1) {
+        store_vec4(dx + base, result);
+      } else {
+#pragma unroll
+        for (int i = 0; i < N_READS; i++)
+          dx[(base + i) * sc] = static_cast<T>(result[i]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
+        float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
+        float yi = contiguous ? float(y[i]) : float(y[i * sb]);
+        dx[i * sc] = static_cast<T>(dyi - metal::precise::exp(yi) * grad_sum);
+      }
+    }
+  }
+}
+
+template <typename T>
+kernel void log_softmax_backward_2pass_sum(
+    device const T* grad_output [[buffer(0)]],
+    device float* partial_sums [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint num_chunks = params.num_chunks;
+  uint chunk_id = tg_id % num_chunks;
+  uint row_id = tg_id / num_chunks;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  device const T* dy = grad_output + offset_a(row_id, params);
+  bool contiguous = (sa == 1);
+
+  uint elems_per_chunk = (axis_size + num_chunks - 1) / num_chunks;
+  uint start = chunk_id * elems_per_chunk;
+  uint end = min(start + elems_per_chunk, axis_size);
+
+  float local_sum = 0.0f;
+  for (uint r = start; r < end; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= end) {
+      if (contiguous) {
+        float4 v = load_vec4(dy + base);
+        local_sum += v.x + v.y + v.z + v.w;
+      } else {
+        for (int i = 0; i < N_READS; i++)
+          local_sum += float(dy[(base + i) * sa]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), end); i++)
+        local_sum += contiguous ? float(dy[i]) : float(dy[i * sa]);
+    }
+  }
+
+  threadgroup float shared[simdgroup_size];
+  float s = c10::metal::threadgroup_sum(shared, local_sum, tid, lsize);
+  if (tid == 0)
+    partial_sums[row_id * num_chunks + chunk_id] = s;
+}
+
+template <typename T>
+kernel void log_softmax_backward_2pass_grad(
+    device const T* grad_output [[buffer(0)]],
+    device const T* output [[buffer(1)]],
+    device T* grad_input [[buffer(2)]],
+    device const float* partial_sums [[buffer(3)]],
+    constant SoftmaxParams& params [[buffer(4)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  constexpr int N_READS = 4;
+  uint num_chunks = params.num_chunks;
+  uint chunk_id = tg_id % num_chunks;
+  uint row_id = tg_id / num_chunks;
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint sc = params.stride_c;
+  device const T* dy = grad_output + offset_a(row_id, params);
+  device const T* y = output + offset_b(row_id, params);
+  device T* dx = grad_input + offset_c(row_id, params);
+  bool contiguous = (sa == 1) && (sb == 1);
+
+  float grad_sum = 0.0f;
+  for (uint i = 0; i < num_chunks; i++)
+    grad_sum += partial_sums[row_id * num_chunks + i];
+
+  uint elems_per_chunk = (axis_size + num_chunks - 1) / num_chunks;
+  uint start = chunk_id * elems_per_chunk;
+  uint end = min(start + elems_per_chunk, axis_size);
+
+  for (uint r = start; r < end; r += lsize * N_READS) {
+    uint base = r + tid * N_READS;
+    if (base + N_READS <= end) {
+      float4 dy_v, y_v;
+      if (contiguous) {
+        dy_v = load_vec4(dy + base);
+        y_v = load_vec4(y + base);
+      } else {
+        dy_v = float4(dy[base * sa], dy[(base+1) * sa], dy[(base+2) * sa], dy[(base+3) * sa]);
+        y_v = float4(y[base * sb], y[(base+1) * sb], y[(base+2) * sb], y[(base+3) * sb]);
+      }
+      float4 exp_y = float4(
+          metal::precise::exp(y_v.x), metal::precise::exp(y_v.y),
+          metal::precise::exp(y_v.z), metal::precise::exp(y_v.w));
+      float4 result = dy_v - exp_y * grad_sum;
+      if (sc == 1) {
+        store_vec4(dx + base, result);
+      } else {
+#pragma unroll
+        for (int i = 0; i < N_READS; i++)
+          dx[(base + i) * sc] = static_cast<T>(result[i]);
+      }
+    } else {
+      for (uint i = base; i < min(base + uint(N_READS), end); i++) {
+        float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
+        float yi = contiguous ? float(y[i]) : float(y[i * sb]);
+        dx[i * sc] = static_cast<T>(dyi - metal::precise::exp(yi) * grad_sum);
+      }
+    }
+  }
+}
+
+
+// Tiled forward/backward kernels for non-last-dim softmax.
+// Each thread computes softmax for all axis elements at one inner position.
+// Adjacent threads access adjacent memory — coalesced reads and writes.
+// Uses num_chunks to store the number of inner tiles.
 
 template <typename T>
 kernel void softmax_forward_tiled(
@@ -763,6 +1354,87 @@ kernel void softmax_backward_tiled(
   }
 }
 
+template <typename T>
+kernel void log_softmax_forward_tiled(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint num_tiles = params.num_chunks;
+  uint batch_idx = tg_id / num_tiles;
+  uint tile_idx = tg_id % num_tiles;
+  uint inner_pos = tile_idx * lsize + tid;
+
+  if (inner_pos >= sa) return;
+
+  uint base_a = batch_idx * axis_size * sa + inner_pos;
+  uint base_b = batch_idx * axis_size * sb + inner_pos;
+
+  float local_max = -INFINITY;
+  float local_sum = 0.0f;
+  for (uint b = 0; b < axis_size; b++) {
+    float val = float(input[base_a + b * sa]);
+    float new_max = fmax(local_max, val);
+    local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+        metal::precise::exp(val - new_max);
+    local_max = new_max;
+  }
+  float shift = local_max + metal::precise::log(local_sum);
+
+  for (uint b = 0; b < axis_size; b++) {
+    float val = float(input[base_a + b * sa]);
+    output[base_b + b * sb] = static_cast<T>(val - shift);
+  }
+}
+
+template <typename T>
+kernel void log_softmax_backward_tiled(
+    device const T* grad_output [[buffer(0)]],
+    device const T* output [[buffer(1)]],
+    device T* grad_input [[buffer(2)]],
+    constant SoftmaxParams& params [[buffer(3)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]]) {
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint sc = params.stride_c;
+  uint num_tiles = params.num_chunks;
+  uint batch_idx = tg_id / num_tiles;
+  uint tile_idx = tg_id % num_tiles;
+  uint inner_pos = tile_idx * lsize + tid;
+
+  if (inner_pos >= sa) return;
+
+  uint base_a = batch_idx * axis_size * sa + inner_pos;
+  uint base_b = batch_idx * axis_size * sb + inner_pos;
+  uint base_c = batch_idx * axis_size * sc + inner_pos;
+
+  float grad_sum = 0.0f;
+  for (uint b = 0; b < axis_size; b++)
+    grad_sum += float(grad_output[base_a + b * sa]);
+
+  for (uint b = 0; b < axis_size; b++) {
+    float dyi = float(grad_output[base_a + b * sa]);
+    float yi = float(output[base_b + b * sb]);
+    grad_input[base_c + b * sc] = static_cast<T>(dyi - metal::precise::exp(yi) * grad_sum);
+  }
+}
+
+
+// Coalesced non-last-dim kernels for inner_size < axis_size.
+// Thread t loads input[base + t] (perfectly coalesced).
+// inner_pos = tid % stride_a, axis_tid = tid / stride_a.
+// Multiple axis_tid threads share one inner_pos; reduced in shared memory.
+// num_chunks stores num_axis_threads for the reduction.
+
+template <typename T>
 kernel void softmax_forward_coalesced(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -867,7 +1539,120 @@ kernel void softmax_backward_coalesced(
   }
 }
 
+template <typename T>
+kernel void log_softmax_forward_coalesced(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant SoftmaxParams& params [[buffer(2)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    threadgroup float* smem [[threadgroup(0)]]) {
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint inner_pos = tid % sa;
+  uint axis_tid = tid / sa;
+  uint num_axis_threads = params.num_chunks;
+  uint batch_idx = tg_id;
+  uint base_a = batch_idx * axis_size * sa;
+  uint total = axis_size * sa;
 
+  float local_max = -INFINITY;
+  float local_sum = 0.0f;
+  for (uint off = tid; off < total; off += lsize) {
+    float val = float(input[base_a + off]);
+    float new_max = fmax(local_max, val);
+    local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+        metal::precise::exp(val - new_max);
+    local_max = new_max;
+  }
+
+  threadgroup float* mx = smem;
+  threadgroup float* sm = smem + lsize;
+  mx[tid] = local_max;
+  sm[tid] = local_sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = num_axis_threads / 2; s > 0; s >>= 1) {
+    if (axis_tid < s) {
+      uint o = tid + s * sa;
+      float om = mx[o], os = sm[o], mm = mx[tid], ms = sm[tid];
+      float nm = fmax(mm, om);
+      sm[tid] = (nm > -INFINITY)
+          ? ms * metal::precise::exp(mm - nm) + os * metal::precise::exp(om - nm)
+          : 0.0f;
+      mx[tid] = nm;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  float shift = mx[inner_pos] + metal::precise::log(sm[inner_pos]);
+
+  uint base_b = batch_idx * axis_size * sb;
+  for (uint off = tid; off < total; off += lsize) {
+    float val = float(input[base_a + off]);
+    output[base_b + off] = static_cast<T>(val - shift);
+  }
+}
+
+template <typename T>
+kernel void log_softmax_backward_coalesced(
+    device const T* grad_output [[buffer(0)]],
+    device const T* output [[buffer(1)]],
+    device T* grad_input [[buffer(2)]],
+    constant SoftmaxParams& params [[buffer(3)]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint lsize [[threads_per_threadgroup]],
+    threadgroup float* smem [[threadgroup(0)]]) {
+  uint axis_size = params.axis_size;
+  uint sa = params.stride_a;
+  uint sb = params.stride_b;
+  uint sc = params.stride_c;
+  uint inner_pos = tid % sa;
+  uint axis_tid = tid / sa;
+  uint num_axis_threads = params.num_chunks;
+  uint batch_idx = tg_id;
+  uint base_a = batch_idx * axis_size * sa;
+  uint total = axis_size * sa;
+
+  float local_sum = 0.0f;
+  for (uint off = tid; off < total; off += lsize) {
+    local_sum += float(grad_output[base_a + off]);
+  }
+
+  smem[tid] = local_sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = num_axis_threads / 2; s > 0; s >>= 1) {
+    if (axis_tid < s) smem[tid] += smem[tid + s * sa];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  float grad_sum = smem[inner_pos];
+
+  uint base_b = batch_idx * axis_size * sb;
+  uint base_c = batch_idx * axis_size * sc;
+  for (uint off = tid; off < total; off += lsize) {
+    float dyi = float(grad_output[base_a + off]);
+    float yi = float(output[base_b + off]);
+    grad_input[base_c + off] = static_cast<T>(dyi - metal::precise::exp(yi) * grad_sum);
+  }
+}
+
+// Template instantiations
+
+#define instantiate_softmax_forward_single_row(DTYPE)                     \
+  template [[host_name("softmax_forward_single_row_" #DTYPE)]] [[kernel]] \
+  void softmax_forward_single_row<DTYPE>(                                 \
+      device const DTYPE* input [[buffer(0)]],                            \
+      device DTYPE* output [[buffer(1)]],                                 \
+      constant SoftmaxParams& params [[buffer(2)]],                       \
+      uint tg_id [[threadgroup_position_in_grid]],                        \
+      uint tid [[thread_position_in_threadgroup]],                        \
+      uint tptg [[threads_per_threadgroup]],                              \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                    \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
 #define instantiate_softmax_forward_looped(DTYPE)                          \
@@ -1123,4 +1908,59 @@ instantiate_softmax(bfloat);
   log_softmax_forward_coalesced<DTYPE>(                                           \
       device const DTYPE* input [[buffer(0)]],                                    \
       device DTYPE* output [[buffer(1)]],                                         \
+      constant SoftmaxParams& params [[buffer(2)]],                               \
+      uint tg_id [[threadgroup_position_in_grid]],                                \
+      uint tid [[thread_position_in_threadgroup]],                                \
+      uint lsize [[threads_per_threadgroup]],                                     \
+      threadgroup float* smem [[threadgroup(0)]]);
 
+#define instantiate_log_softmax_backward_coalesced(DTYPE)                          \
+  template [[host_name("log_softmax_backward_coalesced_" #DTYPE)]] [[kernel]] void \
+  log_softmax_backward_coalesced<DTYPE>(                                           \
+      device const DTYPE* grad_output [[buffer(0)]],                               \
+      device const DTYPE* output [[buffer(1)]],                                    \
+      device DTYPE* grad_input [[buffer(2)]],                                      \
+      constant SoftmaxParams& params [[buffer(3)]],                                \
+      uint tg_id [[threadgroup_position_in_grid]],                                 \
+      uint tid [[thread_position_in_threadgroup]],                                 \
+      uint lsize [[threads_per_threadgroup]],                                      \
+      threadgroup float* smem [[threadgroup(0)]]);
+
+#define instantiate_log_softmax_forward_tiled(DTYPE)                          \
+  template [[host_name("log_softmax_forward_tiled_" #DTYPE)]] [[kernel]] void \
+  log_softmax_forward_tiled<DTYPE>(                                           \
+      device const DTYPE* input [[buffer(0)]],                                \
+      device DTYPE* output [[buffer(1)]],                                     \
+      constant SoftmaxParams& params [[buffer(2)]],                           \
+      uint tg_id [[threadgroup_position_in_grid]],                            \
+      uint tid [[thread_position_in_threadgroup]],                            \
+      uint lsize [[threads_per_threadgroup]]);
+
+#define instantiate_log_softmax_backward_tiled(DTYPE)                          \
+  template [[host_name("log_softmax_backward_tiled_" #DTYPE)]] [[kernel]] void \
+  log_softmax_backward_tiled<DTYPE>(                                           \
+      device const DTYPE* grad_output [[buffer(0)]],                           \
+      device const DTYPE* output [[buffer(1)]],                                \
+      device DTYPE* grad_input [[buffer(2)]],                                  \
+      constant SoftmaxParams& params [[buffer(3)]],                            \
+      uint tg_id [[threadgroup_position_in_grid]],                             \
+      uint tid [[thread_position_in_threadgroup]],                             \
+      uint lsize [[threads_per_threadgroup]]);
+
+#define instantiate_log_softmax(DTYPE)                                  \
+  instantiate_log_softmax_forward_single_row(DTYPE)                     \
+      instantiate_log_softmax_forward_looped(DTYPE)                     \
+          instantiate_log_softmax_forward_tiled(DTYPE)                  \
+              instantiate_log_softmax_forward_coalesced(DTYPE)      \
+              instantiate_log_softmax_forward_2pass_reduce(DTYPE)       \
+                  instantiate_log_softmax_forward_2pass_write(DTYPE)    \
+                      instantiate_log_softmax_backward_single_row(DTYPE)\
+                          instantiate_log_softmax_backward_looped(DTYPE)\
+                              instantiate_log_softmax_backward_tiled(DTYPE)     \
+                                  instantiate_log_softmax_backward_coalesced(DTYPE) \
+                                  instantiate_log_softmax_backward_2pass_sum(DTYPE)     \
+                                      instantiate_log_softmax_backward_2pass_grad(DTYPE)
+
+instantiate_log_softmax(float);
+instantiate_log_softmax(half);
+instantiate_log_softmax(bfloat);
