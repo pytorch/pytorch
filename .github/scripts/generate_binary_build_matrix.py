@@ -17,7 +17,6 @@ import ast
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 
@@ -237,67 +236,38 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
-_BUILD_CUDA_SH = REPO_ROOT / ".ci" / "manywheel" / "build_cuda.sh"
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
 _RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
 
 
-def _extract_arch_list_block() -> str:
-    """Extract the self-contained arch-list logic from build_cuda.sh."""
-    text = _BUILD_CUDA_SH.read_text()
-    start_marker = "# Function to remove architectures from a list"
-    end_marker = "export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}"
-    start = text.index(start_marker)
-    end = text.index(end_marker)
-    return text[start:end]
-
-
-def _build_arch_list(cuda_version: str, arch: str) -> set[int]:
-    """Run the build_cuda.sh arch-list logic for (cuda_version, arch)."""
-    block = _extract_arch_list_block()
-    cmd = (
-        f'CUDA_VERSION="{cuda_version}" ARCH="{arch}"\n'
-        f"{{\n{block}\n}} >/dev/null\n"
-        'printf "%s" "$TORCH_CUDA_ARCH_LIST"\n'
-    )
-    out = subprocess.run(
-        ["bash", "-c", cmd], check=True, capture_output=True, text=True
-    ).stdout
-    result: set[int] = set()
-    for part in out.split(";"):
-        part = part.strip().removesuffix("+PTX")
-        if not part:
-            continue
-        major, minor = part.split(".")
-        result.add(int(major) * 10 + int(minor))
-    return result
-
-
-def _read_runtime_release_table() -> dict[str, dict[str, set[int]]]:
-    """Parse PYTORCH_RELEASES_CODE_CC out of torch/cuda/__init__.py."""
-    tree = ast.parse(_RUNTIME_CUDA_INIT.read_text())
+def _read_dict_constant(path: Path, name: str) -> dict[str, dict[str, set[int]]]:
+    """Parse a top-level annotated `name: dict[...] = {...}` literal from a Python file."""
+    tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
-            and node.target.id == "PYTORCH_RELEASES_CODE_CC"
+            and node.target.id == name
             and node.value is not None
         ):
             return ast.literal_eval(node.value)
-    raise RuntimeError("PYTORCH_RELEASES_CODE_CC not found in torch/cuda/__init__.py")
+    raise RuntimeError(f"{name} not found in {path}")
 
 
 def validate_runtime_release_table_consistency() -> None:
-    """Ensure torch/cuda/__init__.py recommendation table matches the build matrix."""
-    expected = {
-        cuda: {arch: _build_arch_list(cuda, arch) for arch in ("x86_64", "aarch64")}
-        for cuda in CUDA_ARCHES
-    }
-    actual = _read_runtime_release_table()
-    if actual != expected:
+    """Ensure torch/cuda/__init__.py's recommendation table matches the build matrix.
+
+    PYTORCH_RELEASES_CODE_CC (runtime) and TORCH_CUDA_ARCH_LIST_TABLE (build)
+    use the same {cuda_version: {host_arch: set[cc_int]}} shape, so a direct
+    dict equality check catches any drift between them.
+    """
+    runtime = _read_dict_constant(_RUNTIME_CUDA_INIT, "PYTORCH_RELEASES_CODE_CC")
+    build = _read_dict_constant(_BUILD_ENV_SETUP, "TORCH_CUDA_ARCH_LIST_TABLE")
+    if runtime != build:
         raise RuntimeError(
             "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
-            "with .ci/manywheel/build_cuda.sh.\n"
-            f"Expected: {expected}\nActual:   {actual}"
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            f"runtime: {runtime}\nbuild:   {build}"
         )
 
 
