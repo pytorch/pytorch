@@ -5715,11 +5715,20 @@ def realize_inputs(*args):
     return [realize_inputs(x) for x in args]
 
 
-def get_strides_with_layout_constraints(node):
+def should_use_layout_constraints(node):
+    # View has its own fixed layout that is not constrained
     if (
-        not isinstance(node, ir.ReinterpretView)
+        getattr(node, "layout", None) is not None
+        and not isinstance(node, ir.ReinterpretView)
+        and not isinstance(node.get_layout(), ir.NonOwningLayout)
         and node.get_name() in V.graph.buffer_layout_constraints
     ):
+        return True
+    return False
+
+
+def get_strides_with_layout_constraints(node):
+    if should_use_layout_constraints(node):
         return V.graph.buffer_layout_constraints[node.get_name()].stride
     return node.get_stride()
 
