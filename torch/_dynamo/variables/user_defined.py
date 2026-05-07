@@ -636,16 +636,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
-        if isinstance(cls_attr, types.WrapperDescriptorType) and not is_torch_class(
-            self.value
+        if (
+            isinstance(cls_attr, types.WrapperDescriptorType)
+            and not is_torch_class(self.value)
+            and name not in ("__get__", "__set__", "__delete__")
         ):
             return variables.WrapperDescriptorVariable(
                 cls_attr, owner=self, source=source
             )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
-        if isinstance(cls_attr, types.MethodDescriptorType) and not is_torch_class(
-            self.value
+        if (
+            isinstance(cls_attr, types.MethodDescriptorType)
+            and not is_torch_class(self.value)
+            and name not in ("__get__", "__set__", "__delete__")
         ):
             return variables.MethodDescriptorVariable(
                 cls_attr, owner=self, source=source
