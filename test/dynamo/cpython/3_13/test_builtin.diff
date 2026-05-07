@@ -48,7 +48,6 @@ index 12a1c48732f..121a4289617 100644
      # float -> integer rounding (floor, ceil, rint, round) for
      # values in the range [2**52, 2**53).  See:
      #
--    #   http://sources.redhat.com/bugzilla/show_bug.cgi?id=5350
 -    #
      # We skip this test on Linux/alpha if it would fail.
      linux_alpha = (platform.system().startswith('Linux') and
