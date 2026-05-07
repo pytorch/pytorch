@@ -399,6 +399,9 @@ class ConstantVariable(VariableTracker):
             tree_map_kwargs,
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
+
     @override
     def call_obj_hasattr(
         self, tx: InstructionTranslator, name: str
@@ -489,8 +492,15 @@ class ConstantVariable(VariableTracker):
         # bool inherits nb_negative from int via slot inheritance.
         return ConstantVariable.create(-self.value)
 
-    def reconstruct_pycode(self, codegen) -> str:
-        return repr(self.value)
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
+        # bool inherits nb_positive from int via slot inheritance.
+        return ConstantVariable.create(+self.value)
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)

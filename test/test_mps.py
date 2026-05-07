@@ -5108,6 +5108,13 @@ class TestMPS(TestCaseMPS):
 
     # TODO: fold into OpInfo-based consistency tests once there's a hook to
     # exercise the two-pass reduction path for scalar outputs.
+    def test_sum_full_reduction_non_contiguous(self):
+        x = torch.randn((2, 4, 256, 64), device="mps")
+        for s in (x[:, :, 128:, :], x.transpose(-1, -2), x[::2]):
+            self.assertEqual(s.sum().cpu(), s.cpu().sum())
+            self.assertEqual(s.mean().cpu(), s.cpu().mean())
+            self.assertEqual(s.count_nonzero().cpu(), s.cpu().count_nonzero())
+
     def test_sum_full_reduction_repeated(self):
         """Regression test for the two-pass full reduction: when
         reduction_size doesn't divide evenly into num_groups, the last TG
@@ -8863,6 +8870,28 @@ class TestLargeTensors(TestCaseMPS):
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def test_bitwise_unaligned_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/182822
+        # Metal `setBuffer:offset:` requires the offset to be 4-byte aligned;
+        # the old custom bitwise kernels passed `storage_offset * element_size`
+        # directly, which dropped sub-4-byte offsets to 0 and read the wrong
+        # element. The TensorIterator-based path uses `device T*` array indexing
+        # which is offset-tolerant.
+        torch.manual_seed(0)
+        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            # Sliced tensor with a non-aligned start (offset 22 bytes for int8/bool, etc.)
+            high = 2 if dtype == torch.bool else 100
+            a_full = torch.randint(0, high, (123,), dtype=dtype, device='mps')
+            b_full = torch.randint(0, high, (101,), dtype=dtype, device='mps')
+            a = a_full[22:101]      # 79 elements, storage_offset=22
+            b = b_full[:79]         # 79 elements, contiguous from offset 0
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, b).cpu(), op(a.cpu(), b.cpu()))
+            # 0-d view (storage_offset=1) - the original bug repro
+            scalar_view = b_full[1]
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, scalar_view).cpu(), op(a.cpu(), scalar_view.cpu()))
 
     def test_logical_not(self):
         def helper(x):
