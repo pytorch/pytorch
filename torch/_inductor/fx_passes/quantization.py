@@ -1212,7 +1212,7 @@ def _register_concat_linear_int8_woq_lowering(
         # Some other pass is making some changes that entails
         # adding a node before it's used, but it can only be found when
         # lint is run. stable_topological_sort() is being run before lint,
-        # so that error was not being being discovered.
+        # so that error was not being discovered.
         # We call stable_topological_sort here as a workaround.
         stable_topological_sort(match.graph)
         with match.graph.inserting_before(user_of_scaling_node):
@@ -1520,7 +1520,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 return _node
             else:
                 assert len(_node.args) >= 1, (
-                    "In in dequant pattern, each node should have more than 1 arg."
+                    "In dequant pattern, each node should have more than 1 arg."
                 )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
@@ -1539,7 +1539,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         for user_node in user_node_list[1:]:
             _source_node = dequant_pattern_end_node
             _user_node = user_node
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore [bad-assignment, non-convergent-recursion]
             while _source_node != dequant_pattern_start_node.args[0]:
                 _user_node = clone_to_new_node(graph, _source_node, _user_node)
                 _source_node = _source_node.args[0]  # type: ignore[assignment]

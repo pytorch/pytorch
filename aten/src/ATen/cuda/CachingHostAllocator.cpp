@@ -3,6 +3,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/Gauge.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -14,6 +16,25 @@ using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event> {
+  void free(void* ctx) override {
+    using Base = CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event>;
+    try {
+      Base::free(ctx);
+    } catch (...) {
+      if (!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+              pinned_free_catch_all()) {
+        TORCH_WARN("Exception in pinned allocator free(), rethrowing");
+        throw;
+      }
+      // pinned_free_catch_all is enabled: suppress the exception to prevent
+      // it from escaping through ~StorageImpl() (implicitly noexcept), which
+      // would cause std::terminate. Allows graceful shutdown to proceed.
+      STATIC_GAUGE(pytorch.CUDACachingHostAllocator.free_fail_catch_all)
+          .record(1);
+      TORCH_WARN("Suppressed exception in pinned allocator free()");
+    }
+  }
+
  private:
   ska::flat_hash_map<void*, bool> use_host_register;
 
@@ -51,8 +72,12 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      if (current_stream_is_capturing_fast_path()) {
+          at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      } else {
+          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
+      }
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -218,9 +243,12 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    AT_CUDA_CHECK(
-        cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    if (current_stream_is_capturing_fast_path()) {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    } else {
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    }
   }
 
   CUDAStream get_current_stream() const override {
@@ -238,9 +266,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(CUDAStream s) const override {
-    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
-    return status != cudaStreamCaptureStatusNone;
+    return s.is_capturing();
   }
 };
 

@@ -56,6 +56,7 @@ def read_resource_file(resource_file: str) -> str:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self.test_error_file = os.path.join(self.test_dir, "error.json")
 
@@ -247,3 +248,10 @@ class ApiTest(unittest.TestCase):
             # it SHOULD re-raise ChildFailedError for any upstream system
             # to handle it.
             self.assertFalse(os.path.isfile(self.test_error_file))
+
+    def test_child_failed_error_signal_name_in_message(self):
+        pf = self.failure_without_error_file(exitcode=-signal.SIGSEGV)
+        ex = ChildFailedError("trainer.par", {0: pf})
+        error_msg = str(ex)
+        self.assertIn("(SIGSEGV)", error_msg)
+        self.assertIn(f"exitcode  : {-signal.SIGSEGV}", error_msg)

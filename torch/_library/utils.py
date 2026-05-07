@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, Literal, Optional, overload, Union
+from typing import Any, Literal, overload
 
 import torch
 import torch.utils._pytree as pytree
@@ -74,6 +74,18 @@ def is_builtin(op: OpOverload) -> bool:
     if not isinstance(op, OpOverload):
         raise AssertionError(f"op must be OpOverload, got {type(op)}")
     return op.namespace in {"aten", "prim", "prims"}
+
+
+def is_out(op: OpOverload) -> bool:
+    """Returns True if the operator has "out" semantics: its mutable arguments
+    are write-only output buffers that are not read from."""
+    return torch.Tag.out in op.tags
+
+
+def is_inplace(op: OpOverload) -> bool:
+    """Returns True if the operator has inplace semantics: it mutates its first
+    positional argument and returns it."""
+    return torch.Tag.inplace in op.tags
 
 
 def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
@@ -286,6 +298,9 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
         # do input metadata mutation (which we have banned on custom ops)
         return False
     schema = op._schema
+    if is_out(op):
+        # Tag.out ops have a trivial fake impl: return the out= args in order.
+        return True
     # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
     if not schema.is_mutable:
         return False
@@ -293,6 +308,22 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
         return False
     # If the op returns nothing, then it has a trivial fake impl.
     return True
+
+
+def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
+    """Generate the result of a trivial fake impl for the given op.
+
+    For ops with no returns: returns None.
+    For Tag.out ops: returns the out= kwargs in declaration order.
+    """
+    if is_out(op):
+        schema = op._schema
+        _, out_kwarg_names = mutated_args_kwargs(schema)
+        out_args = tuple(kwargs[name] for name in out_kwarg_names)
+        if len(out_args) == 1:
+            return out_args[0]
+        return out_args
+    return None
 
 
 def requires_set_python_module() -> bool:
@@ -350,7 +381,7 @@ def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     )
 
 
-def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
+def get_device_arg_index(schema: _C.FunctionSchema) -> int | None:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
@@ -551,7 +582,7 @@ def get_layout_constraint_tag(
 @overload
 def get_layout_constraint_tag(
     fn: Any, *, with_default: Literal[False]
-) -> Optional[_C.Tag]: ...
+) -> _C.Tag | None: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):
@@ -587,8 +618,8 @@ _RANDOM_FUNCTIONS = {
 def is_impure(
     op: Callable,
     *,
-    args: Optional[tuple[Any, ...]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
     impure_random: bool = True,
 ) -> bool:
     """
@@ -609,6 +640,15 @@ def is_impure(
     # Import here to avoid circular dependencies
     from torch._higher_order_ops.effects import _get_effect
     from torch.fx.node import _side_effectful_functions
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        if op in _side_effectful_functions:
+            return True
+        default = getattr(op, "default", None)
+        if default is not None:
+            return is_impure(
+                default, args=args, kwargs=kwargs, impure_random=impure_random
+            )
 
     if isinstance(op, torch._ops.OpOverload):
         schema = getattr(op, "_schema", None)
@@ -632,6 +672,9 @@ def is_impure(
                 return args[0] in _side_effectful_functions
 
         if _get_effect(op) is not None:
+            return True
+
+        if op in _side_effectful_functions:
             return True
 
         return False

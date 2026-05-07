@@ -23,7 +23,7 @@ class TestCustomLowering(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.test_inductor_ops = torch.library.Library(  # noqa: TOR901
+        cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
             "test_inductor_ops", "DEF"
         )
         cls.device_list = ["Meta", "CUDA", "XPU"]
@@ -31,7 +31,7 @@ class TestCustomLowering(InductorTestCase):
             setattr(
                 cls,
                 "impl_" + device.lower(),
-                torch.library.Library(  # noqa: TOR901
+                torch.library.Library(  # noqa: SCOPED_LIBRARY
                     "test_inductor_ops", "IMPL", device
                 ),
             )
@@ -164,8 +164,10 @@ class TestCustomLowering(InductorTestCase):
         def foo_lowering(x):
             return x
 
-        assert torch.ops.helion_test.foo in custom_lowering_dict
-        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
+        if torch.ops.helion_test.foo not in custom_lowering_dict:
+            raise AssertionError
+        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
+            raise AssertionError
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")

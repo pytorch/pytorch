@@ -30,7 +30,7 @@ DistilBertForMaskedLM,pass,0
 
 
 
-DistillGPT2,pass,2
+DistillGPT2,pass,3
 
 
 
@@ -122,7 +122,7 @@ google/gemma-3-4b-it,pass_due_to_skip,0
 
 
 
-openai/whisper-tiny,pass,6
+openai/whisper-tiny,pass,0
 
 
 

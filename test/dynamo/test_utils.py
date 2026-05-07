@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import json
 import os
 import pprint
 import sys
@@ -84,7 +85,6 @@ class TestUtils(TestCase):
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
-            "inline_inbuilt_nn_modules": False,
         }
     )
     def test_graph_break_counting(self):
@@ -102,18 +102,18 @@ class TestUtils(TestCase):
             loss = loss_fn(output, target)
             loss.backward()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def add(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it(x):
             y = x.sum()
             if y > 0:
                 return x + y.item()
             return x - y.item()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it2(x):
             y = x.sum()
             if y > 0:
@@ -194,7 +194,8 @@ class TestUtils(TestCase):
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            y = break_it(z)
+            with torch._dynamo.disable_nested_graph_breaks():
+                y = break_it(z)
             return y * 2
 
         x = torch.randn(3)
@@ -211,6 +212,32 @@ class TestUtils(TestCase):
         traced_code_lists = []
         fn(x)
         self.assertEqual(traced_code_lists, [])
+
+    def test_add_record_function_data(self):
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", False),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data("test_event")
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
 
     def test_reinplace_counters_use_trigger_name_not_enum_value(self):
         """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
@@ -272,6 +299,14 @@ class TestUtils(TestCase):
             "Should not use enum value (integer) in key, should use trigger.name instead",
         )
 
+    def test_get_dynamo_config_for_logging_ignores_logging_functions(self):
+        with dynamo_config.patch(ignore_logging_functions={print}):
+            result = utils._get_dynamo_config_for_logging()
+            parsed = json.loads(result)
+
+        self.assertIsInstance(parsed, dict)
+        self.assertNotIn("ignore_logging_functions", parsed)
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -304,7 +339,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 
@@ -419,7 +454,6 @@ class TestDynamoTimed(TestCase):
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
-            "inline_inbuilt_nn_modules": False,
         }
     )
     @inductor_config.patch(
@@ -572,7 +606,7 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
  'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -605,7 +639,7 @@ class TestDynamoTimed(TestCase):
  'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate the CompilationMetrics logs. We expect a log for the
@@ -662,7 +696,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': set(),
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -681,11 +715,11 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_lineno': None,
  'frame_key': '1',
  'gc_time_us': 0,
- 'graph_input_count': 1,
- 'graph_node_count': 3,
+ 'graph_input_count': 3,
+ 'graph_node_count': 5,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 10,
+ 'guard_count': 31,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -755,7 +789,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': set(),
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -774,11 +808,11 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_lineno': None,
  'frame_key': '1',
  'gc_time_us': 0,
- 'graph_input_count': 1,
- 'graph_node_count': 3,
+ 'graph_input_count': 3,
+ 'graph_node_count': 5,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 10,
+ 'guard_count': 31,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -829,7 +863,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Second event is for the backward
@@ -862,7 +896,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': None,
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -955,7 +989,7 @@ class TestDynamoTimed(TestCase):
  'compile_time_autotune_time_us': None,
  'compiler_config': None,
  'compliant_custom_ops': None,
- 'config_inline_inbuilt_nn_modules': False,
+ 'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
@@ -1029,7 +1063,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
     @dynamo_config.patch(

@@ -74,7 +74,7 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     )
 
     if not eq_spec(received_spec, in_spec):
-        raise ValueError(  # noqa: B904
+        raise ValueError(
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"
@@ -205,7 +205,11 @@ def _convert_guards_code_to_fn(
     code_str += "  return\n"
 
     # populate namespace with sympy globals, materialize function (named `_`)
-    namespace = {**SYMPY_INTERP}
+    namespace = {
+        **SYMPY_INTERP,
+        "math": math,
+        "inf": float("inf"),
+    }
     exec(code_str, namespace)
 
     # create and return a module whose forward is the materialized function
@@ -675,7 +679,9 @@ def _get_input_guards_for_graph(
         if isinstance(meta, int):
             new_guards_code.append(f"{src} == {meta}")
         if isinstance(meta, float):
-            if meta == math.inf:
+            if math.isnan(meta):
+                new_guards_code.append(f"math.isnan({src})")
+            elif meta == math.inf:
                 new_guards_code.append(f"{src} == math.inf")
             elif meta == -math.inf:
                 new_guards_code.append(f"{src} == -math.inf")

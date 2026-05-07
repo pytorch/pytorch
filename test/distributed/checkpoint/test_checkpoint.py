@@ -2,7 +2,7 @@
 
 import os
 import sys
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -59,8 +59,8 @@ class TestModule(torch.nn.Module):
         super().__init__()
         self.sharded: ShardedTensor = sharded_tensor.zeros(self.spec(), 4, 4)
         self.regular = torch.nn.Parameter(torch.ones(4, 4))
-        self.extra_sharded: Optional[ShardedTensor] = None
-        self.extra_param: Optional[torch.nn.Parameter] = None
+        self.extra_sharded: ShardedTensor | None = None
+        self.extra_param: torch.nn.Parameter | None = None
         self._register_state_dict_hook(state_dict_hook)
 
     def spec(self) -> ChunkShardingSpec:
@@ -173,7 +173,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
         super().__init__(fail_conf)
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         return
 
     def set_up_storage_writer(
@@ -199,7 +199,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_finish")
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return True
 
 
@@ -208,7 +208,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         super().__init__(fail_conf)
         self.metadata = metadata
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         return
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
@@ -231,7 +231,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         return self.metadata
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return True
 
 

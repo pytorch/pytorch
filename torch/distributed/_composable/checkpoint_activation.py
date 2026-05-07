@@ -115,7 +115,8 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
         if checkpoint.state(module).enable_hook:
             try:
                 gen = checkpoint.state(module)._ac_generator
-                assert gen is not None
+                if gen is None:
+                    raise AssertionError
                 next(gen)
             except StopIteration:
                 pass

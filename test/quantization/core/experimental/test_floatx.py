@@ -127,6 +127,8 @@ SPECIAL_NUMBERS = {
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
+FLOAT8_DTYPES_SATURATE_ON_OVERFLOW = [torch.float8_e4m3fn]
+
 
 def _int_bits_to_float(x):
     y = struct.unpack("!f", struct.pack("!I", x))[0]
@@ -178,9 +180,15 @@ def simulate_fp8_precision(input, variant):
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    # Replace overflows with inf/NaN as appropriate (no saturation)
-    have_inf = variant in FLOAT8_DTYPES_WITH_INF
-    vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
+    # Replace overflows: inf for types that have it, saturate to max for types
+    # that use satfinite semantics, NaN otherwise
+    overflow = vals > torch.finfo(variant).max
+    if variant in FLOAT8_DTYPES_WITH_INF:
+        vals[overflow] = torch.inf
+    elif variant in FLOAT8_DTYPES_SATURATE_ON_OVERFLOW:
+        vals[overflow] = torch.finfo(variant).max
+    else:
+        vals[overflow] = torch.nan
 
     return vals * signs
 
@@ -330,7 +338,10 @@ class TestFloat8Dtype(TestCase):
             tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
             tensor_fp8 = tensor_int.view(dtype)
             if number_name == "nan":
-                assert tensor_fp8.isnan()
+                if not tensor_fp8.isnan():
+                    raise AssertionError(
+                        f"Expected NaN for {number_name}, got {tensor_fp8}"
+                    )
             else:
                 tensor_fp32 = tensor_fp8.float()
                 ref_tensor_fp32 = torch.tensor(

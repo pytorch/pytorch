@@ -58,19 +58,19 @@ def scatter(inputs, target_gpus, dim=0):
         if _is_namedtuple(obj):
             return [
                 type(obj)(*args)
-                # pyrefly: ignore [no-matching-overload]
+                # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 for args in zip(*map(scatter_map, obj), strict=False)
             ]
         if isinstance(obj, tuple) and len(obj) > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             return list(zip(*map(scatter_map, obj), strict=False))
         if isinstance(obj, list) and len(obj) > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type, no-matching-overload]
             return [list(i) for i in zip(*map(scatter_map, obj), strict=False)]
         if isinstance(obj, dict) and len(obj) > 0:
             return [
                 type(obj)(i)
-                # pyrefly: ignore [no-matching-overload]
+                # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 for i in zip(*map(scatter_map, obj.items()), strict=False)
             ]
         return [obj for _ in target_gpus]
@@ -136,9 +136,9 @@ def gather(outputs: Any, target_device: int | torch.device, dim: int = 0) -> Any
             # pyrefly: ignore [not-callable]
             return type(out)((k, gather_map([d[k] for d in outputs])) for k in out)
         if _is_namedtuple(out):
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore [bad-argument-type]
             return type(out)._make(map(gather_map, zip(*outputs, strict=True)))
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         return type(out)(map(gather_map, zip(*outputs, strict=True)))
 
     # Recursive function calls like this create reference cycles.

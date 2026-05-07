@@ -67,13 +67,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install sqlite
   fi
 
-  # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) != "aarch64" ]]; then
-    pip_install mkl==2024.2.0
-    pip_install mkl-static==2024.2.0
-    pip_install mkl-include==2024.2.0
-  fi
-
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
@@ -102,6 +95,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
   fi
+
+  # Clean conda package cache
+  as_jenkins conda clean -ya
 
   popd
 fi

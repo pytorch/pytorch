@@ -10,14 +10,14 @@ if(BUILD_LIBTORCHLESS)
 endif()
 
 # ---[ Configure macro file.
-set(C10_HIP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
+set(C10_CUDA_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/hip_cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/hip/impl/hip_cmake_macros.h)
 
 # NB: All previous cu files are renamed into cc files.  This isn't tested at the
 # moment.
-file(GLOB C10_HIP_SRCS
+file(GLOB C10_HIP_SRCS CONFIGURE_DEPENDS
         *.cpp
         *.cc
         impl/*.cpp
@@ -26,10 +26,10 @@ file(GLOB C10_HIP_SRCS
 
 # Mark the cc files as HIP files, so we call the compiler.  (They have to be
 # suffixed with cc, because the hcc compiler won't accept them otherwise.)
-file(GLOB __c10_hip_srcs_cpp *.cc impl/*.cc)
+file(GLOB __c10_hip_srcs_cpp CONFIGURE_DEPENDS *.cc impl/*.cc)
 set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
-file(GLOB_RECURSE C10_HIP_HEADERS *.h)
+file(GLOB_RECURSE C10_HIP_HEADERS CONFIGURE_DEPENDS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
   hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
@@ -42,7 +42,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
 
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
+  target_compile_options(c10_hip PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
