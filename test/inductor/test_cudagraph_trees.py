@@ -5726,6 +5726,21 @@ if HAS_CUDA_AND_TRITON:
                 obs.op_outputs[aten.rand.default][2],
             )
 
+        def test_cudagraph_empty_partition_raises_error(self):
+            """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
+            # 1. Simulate empty partitions returning from the post-compile step
+
+            def f(x):
+                return torch.cond(x.sum() > 0, lambda x: x * 2, lambda x: x * 3, (x,))
+
+            x = torch.randn(4, device="cuda")
+
+            # Enable cudagraph_or_error only for this test to force an error on empty partitions.
+            with config.patch("triton.cudagraph_or_error", True):
+                compiled_fn = torch.compile(f)
+                with self.assertRaisesRegex(RuntimeError, "skipping cudagraphs as len"):
+                    compiled_fn(x)
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestCUDAGraphPolicy)
     instantiate_parametrized_tests(TestSAC)
