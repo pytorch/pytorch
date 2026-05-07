@@ -137,7 +137,10 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   endif()
   if(USE_TSAN)
     if(TARGET Sanitizer::thread)
-      list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::thread)
+      # Use global flags so that all targets (including executables like
+      # torch_shm_manager that don't link torch_cpu) get TSan instrumentation.
+      add_compile_options(-fsanitize=thread)
+      add_link_options(-fsanitize=thread)
     else()
       message(WARNING "TSAN not found. Suppress this warning with -DUSE_TSAN=OFF.")
       caffe2_update_option(USE_TSAN OFF)
@@ -1603,6 +1606,17 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # `fmt` is compatible with a superset of the compilers that PyTorch is, it
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+
+# Keep fmt's header-only type layout stable across mixed C++ modes by forcing
+# one no_unique_address spelling for all translation units.
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set(_fmt_no_unique_address "[[msvc::no_unique_address]]")
+else()
+  set(_fmt_no_unique_address "[[no_unique_address]]")
+endif()
+target_compile_definitions(fmt PUBLIC "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_address}")
+target_compile_definitions(fmt-header-only INTERFACE "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_address}")
+unset(_fmt_no_unique_address)
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
