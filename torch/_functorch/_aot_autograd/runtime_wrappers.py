@@ -1974,15 +1974,14 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         lines.append(f"    _bases = [None] * {num_bases}")
         for base_idx in sorted(base_groups):
             first_orig = base_groups[base_idx][0]
-            lines.append(f"    _a = args[{first_orig}]")
-            lines.append("    if _a._base is not None:")
-            lines.append(f"        _bases[{base_idx}] = _a._base")
-            lines.append("    else:")
-            lines.append(
-                "        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)"
-            )
-            lines.append("        _b.set_(_a.untyped_storage())")
-            lines.append(f"        _bases[{base_idx}] = _b")
+            lines.append(f"""\
+    _a = args[{first_orig}]
+    if _a._base is not None:
+        _bases[{base_idx}] = _a._base
+    else:
+        _b = torch.empty((0,), dtype=_a.dtype, device=_a.device)
+        _b.set_(_a.untyped_storage())
+        _bases[{base_idx}] = _b""")
 
         other_items = ", ".join(f"args[{orig}]" for orig, _ in other_map)
         lines.append(f"    _new_args = _bases + [{other_items}]")
@@ -1991,18 +1990,17 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
             lines.append(f"    _meta_mut = [{meta_items}]")
 
-        lines.append("    args.clear()")
-        lines.append("    _outs = _compiled_fn_(_new_args)")
+        lines.append("""\
+    args.clear()
+    _outs = _compiled_fn_(_new_args)""")
 
         if num_meta_mut > 0:
-            lines.append(f"    _mut_inps = _outs[-{num_meta_mut}:]")
-            lines.append(f"    _user_outs = _outs[:-{num_meta_mut}]")
-            lines.append("    for _inp, _mi in zip(_meta_mut, _mut_inps):")
-            lines.append(
-                "        _inp.as_strided_(_mi.size(), _mi.stride(),"
-                " _mi.storage_offset())"
-            )
-            lines.append("    return _user_outs")
+            lines.append(f"""\
+    _mut_inps = _outs[-{num_meta_mut}:]
+    _user_outs = _outs[:-{num_meta_mut}]
+    for _inp, _mi in zip(_meta_mut, _mut_inps):
+        _inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())
+    return _user_outs""")
         else:
             lines.append("    return _outs")
 
