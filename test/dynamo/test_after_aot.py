@@ -312,6 +312,101 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = compiled(list(args))
         self.assertEqual(result[0].shape, torch.Size([4]))
 
+    def test_symint_expr_serialized(self):
+        """InputWriter serializes symbolic expressions alongside hint values,
+        and InputReader captures them in symint_exprs."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(160, ConstantSource("s0"))
+        s1 = shape_env.create_symbol(200, ConstantSource("s1"))
+
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=160))
+        si1 = torch.SymInt(SymNode(s1, shape_env, int, hint=200))
+        derived = (si0 + si1) // 10
+
+        writer = InputWriter(save_dir=None)
+        writer.symint("free_sym", si0)
+        writer.symint("derived_sym", derived)
+        writer.symint("plain_int", 42)
+
+        lines = writer.lines()
+        code = "\n".join(lines)
+
+        # Free symbol should have expr=
+        self.assertIn("expr=", code)
+        # Plain int should NOT have expr=
+        plain_line = next(l for l in lines if "plain_int" in l)
+        self.assertNotIn("expr=", plain_line)
+
+        # Round-trip: execute load_args and verify reader captures exprs
+        reader = InputReader(save_dir=None)
+        ns: dict = {}
+        exec(compile(code, "<test>", "exec"), ns)
+        ns["load_args"](reader)
+
+        self.assertEqual(len(reader.args), 3)
+        self.assertTrue(hasattr(reader, "symint_exprs"))
+        self.assertGreater(len(reader.symint_exprs), 0)
+        # The derived symint should have an expression with '//'
+        derived_expr = reader.symint_exprs.get(1)
+        self.assertIsNotNone(derived_expr)
+        self.assertIn("//", derived_expr)
+
+    def test_symint_expr_e2e_repro(self):
+        """End-to-end: generate a repro from a symbolically-traced graph
+        with SymInt args, verify expr= appears, and run the repro."""
+        import subprocess
+        import tempfile
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(8, ConstantSource("s0"))
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=8))
+
+        class SimpleGraph(torch.nn.Module):
+            def forward(self, size, x):
+                return (x.sum() + size,)
+
+        mod = SimpleGraph()
+        args = [si0, torch.randn(16)]
+        gm = make_fx(mod, tracing_mode="symbolic")(*args)
+
+        buf = io.StringIO()
+        save_graph_repro(
+            buf,
+            gm,
+            args,
+            "inductor",
+            save_dir=None,
+            tracing_mode="symbolic",
+        )
+        repro_src = buf.getvalue()
+
+        # Verify expr= is serialized for the SymInt arg
+        self.assertIn("expr=", repro_src)
+
+        # Run the generated repro in a subprocess
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+            tmp.write(repro_src)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                res.returncode,
+                0,
+                f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
+            )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
