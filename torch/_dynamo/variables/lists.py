@@ -57,16 +57,16 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-def pytuple_checkexact(obj_type: type) -> bool:
-    return obj_type is tuple
+def pytuple_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is tuple
 
 
-def pytuple_check(obj_type: type) -> bool:
-    return issubclass(obj_type, tuple)
+def pytuple_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), tuple)
 
 
-def pylist_check(obj_type: type) -> bool:
-    return issubclass(obj_type, list)
+def pylist_check(obj: VariableTracker) -> bool:
+    return issubclass(obj.python_type(), list)
 
 
 class BaseListVariable(VariableTracker):
@@ -1181,7 +1181,7 @@ class ListVariable(CommonListMethodsVariable):
     ) -> VariableTracker:
         # Implements PySequence_Concat for sequences
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L725-L773 (list_concat)
-        if not pylist_check(other.python_type()):
+        if not pylist_check(other):
             raise_type_error(
                 tx,
                 f"can only concatenate list (not '{other.python_type_name()}') to list",
@@ -1493,10 +1493,10 @@ class TupleVariable(BaseListVariable):
         other: VariableTracker,
     ):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L441-L486 (tuple_concat)
-        if len(self.items) == 0 and pytuple_checkexact(other.python_type()):
+        if len(self.items) == 0 and pytuple_checkexact(other):
             return other
 
-        if not pytuple_check(other.python_type()):
+        if not pytuple_check(other):
             raise_type_error(
                 tx,
                 f"can only concatenate tuple (not '{other.python_type_name()}') to tuple",
@@ -1754,7 +1754,7 @@ class SizeVariable(TupleVariable):
         torch.Size accepts concatenation with any tuple-like object.
         Ref: torch/csrc/Size.cpp::THPSize_concat
         """
-        if not pytuple_check(other.python_type()):
+        if not pytuple_check(other):
             raise_type_error(
                 tx,
                 f"can only concatenate tuple (not '{other.python_type_name()}') to torch.Size",
