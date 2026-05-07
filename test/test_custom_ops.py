@@ -2273,7 +2273,7 @@ Dynamic shape operator
         def foo_impl2(x):
             return torch.cat([x, x])
 
-        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
+        with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
             torch.library.register_fake(op_name, foo_impl2, lib=lib)
 
         # Override fake kernel to foo_impl2
@@ -4895,6 +4895,7 @@ class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
 
     def setUp(self):
+        super().setUp()
         self.supported_base_types = [
             int,
             float,
