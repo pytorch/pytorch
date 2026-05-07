@@ -10,6 +10,15 @@ namespace torch {
 
 // This is an internal utility, not exposed to users.
 bool torch_function_enabled();
+// Reads and clears the "skip next __torch_function__ dispatch" TLS flag set
+// by skip_one_hop_torch_function. Consumes the flag; use
+// peek_should_skip_torch_function if you only want to observe it. MUST be
+// called at most once per has_torch_function check.
+bool consume_should_skip_torch_function();
+// Non-consuming peek at the "skip next" TLS flag, intended for
+// assertions/diagnostics. Never use this to gate dispatch — that's what
+// consume_should_skip_torch_function is for.
+bool peek_should_skip_torch_function();
 PyObject* disabled_torch_function_impl();
 PyObject* disabled_torch_dispatch_impl();
 void set_disabled_torch_function_impl(PyObject* value);
@@ -20,7 +29,8 @@ void set_disabled_torch_dispatch_impl(PyObject* value);
 bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
 
 inline bool has_torch_function(PyObject* obj) {
-  return check_has_torch_function(obj);
+  return (
+      !consume_should_skip_torch_function() && check_has_torch_function(obj));
 }
 bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
@@ -43,6 +53,7 @@ PyObject* THPModule_DisableTorchFunctionType();
 PyObject* THPModule_DisableTorchFunctionSubclassType();
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* args);
+PyObject* THPModule_skip_one_hop_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg);
 PyObject* THPModule_has_torch_function_unary(
     PyObject* /*unused*/,
