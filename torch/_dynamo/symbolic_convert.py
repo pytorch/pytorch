@@ -44,7 +44,7 @@ import time
 import traceback
 import types
 import weakref
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import TypeIs
 
@@ -1371,6 +1371,19 @@ class InstructionTranslatorBase(
 
     def freevars(self) -> list[str]:
         return self.code_options["co_freevars"]
+
+    def new_pycode_varname(self, prefix: str) -> str:
+        """Generate a fresh, unique pycode-local variable name for the given prefix."""
+        name = f"__{prefix}{next(self._pycode_varname_counter[prefix])}"
+        self._pycode_last_varname[prefix] = name
+        return name
+
+    def reset_pycode_varname_counter(self, prefix: str) -> None:
+        self._pycode_varname_counter[prefix] = itertools.count(0)
+
+    def get_pycode_last_varname(self, prefix: str) -> str:
+        """Return the most recently generated pycode varname for the given prefix."""
+        return self._pycode_last_varname[prefix]
 
     def cell_and_freevars(self) -> list[str]:
         if not hasattr(self, "_cell_and_freevars"):
@@ -5044,6 +5057,12 @@ class InstructionTranslatorBase(
         self.latest_bytecode_queue = deque(maxlen=20)
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
+        # Per-prefix counters for generating fresh pycode-local variable names.
+        self._pycode_varname_counter: defaultdict[str, itertools.count[int]] = (
+            defaultdict(lambda: itertools.count(0))
+        )
+        # Per-prefix record of the most recently generated pycode varname.
+        self._pycode_last_varname: dict[str, str] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -5412,7 +5431,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 "expected not all_stack_locals_metadata[0].stack_null_idxes to be true"
             )
         self.output.add_output_instructions(
-            self.codegen_return_with_pops(inst, all_stack_locals_metadata[0].num_stack)
+            self.codegen_return_with_pops(inst, all_stack_locals_metadata[0].num_stack),
+            [f"__ret = {self.get_pycode_last_varname('stack')}"]
+            if config.generate_pycode
+            else None,
         )
         raise ReturnValueOp
 

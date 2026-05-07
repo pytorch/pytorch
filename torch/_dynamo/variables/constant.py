@@ -403,6 +403,9 @@ class ConstantVariable(VariableTracker):
             tree_map_kwargs,
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
+
     @override
     def call_obj_hasattr(
         self, tx: InstructionTranslator, name: str
