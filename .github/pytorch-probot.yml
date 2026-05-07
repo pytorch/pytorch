@@ -62,4 +62,5 @@ retryable_step_names:
 - Initialize containers
 labeler_config: labeler.yml
 label_to_label_config: label_to_label.yml
+nitpicks_config: nitpicks.yml
 mergebot: true
