@@ -119,7 +119,7 @@ class TestSwapInOptimizerState(TestCase):
                 optimizer,
                 parameters,
                 {"state": [], "param_groups": []},
-                "swapin_optimizer_state_dict['state'] to be a dict",
+                "swapin_optim_state['state'] to be a dict",
             )
 
         with self.subTest("bad_param_groups_field"):
@@ -127,7 +127,7 @@ class TestSwapInOptimizerState(TestCase):
                 optimizer,
                 parameters,
                 {"state": {}, "param_groups": {}},
-                "swapin_optimizer_state_dict['param_groups'] to be a list",
+                "swapin_optim_state['param_groups'] to be a list",
             )
 
         with self.subTest("group_count_mismatch"):

@@ -29,7 +29,7 @@ def _validate_state_field(state: Any) -> dict[Any, Any]:
     """
     if not isinstance(state, dict):
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optimizer_state_dict['state'] to "
+            "swap_in_optimizer_state requires swapin_optim_state['state'] to "
             "be a dict mapping packed parameter ids to per-param state dicts, "
             f"got {type(state).__name__}."
         )
@@ -52,12 +52,12 @@ def _validate_param_groups_field(
     """``param_groups`` must be a list whose length matches the live optimizer."""
     if not isinstance(param_groups, list):
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optimizer_state_dict['param_groups'] "
+            "swap_in_optimizer_state requires swapin_optim_state['param_groups'] "
             f"to be a list of param-group dicts, got {type(param_groups).__name__}."
         )
     if len(optimizer.param_groups) != len(param_groups):
         raise RuntimeError(
-            "swapin_optimizer_state_dict has a different number of parameter groups than "
+            "swapin_optim_state has a different number of parameter groups than "
             "the live optimizer."
         )
     return param_groups
@@ -89,7 +89,7 @@ def _validate_group_against_live(
         )
     if len(group["params"]) != len(swapin_param_ids):
         raise RuntimeError(
-            "swapin_optimizer_state_dict param group does not match the size of "
+            "swapin_optim_state param group does not match the size of "
             f"live optimizer param group {idx}."
         )
     missing_group_keys = [k for k in swapin_group if k != "params" and k not in group]
@@ -104,8 +104,8 @@ def _validate_group_against_live(
 
 def _prepare_swap_in(
     optimizer: "torch.optim.Optimizer",
-    parameters: dict[str, Tensor],
-    swapin_optimizer_state_dict: dict[str, Any],
+    swapin_parameters: dict[str, Tensor],
+    swapin_optim_state: dict[str, Any],
 ) -> tuple[dict[Any, Any], list[_GroupSwapinInfo]]:
     """
     Validate and normalize optimizer state for ``swap_in_optimizer_state``.
@@ -120,22 +120,22 @@ def _prepare_swap_in(
         raise RuntimeError(
             "swap_in_optimizer_state requires initialized optimizer state."
         )
-    if not isinstance(swapin_optimizer_state_dict, dict):
+    if not isinstance(swapin_optim_state, dict):
         raise RuntimeError(
             "swap_in_optimizer_state requires a DCP-style optimizer state_dict."
         )
-    swapin_state = _validate_state_field(swapin_optimizer_state_dict.get("state"))
+    swapin_state = _validate_state_field(swapin_optim_state.get("state"))
     swapin_param_groups = _validate_param_groups_field(
-        optimizer, swapin_optimizer_state_dict.get("param_groups")
+        optimizer, swapin_optim_state.get("param_groups")
     )
 
     # Raw optimizer state_dicts address parameters by packed integer ids, so we
     # align explicit parameter tensors with optimizer.param_groups by order.
     # Example: if param_groups[*]["params"] is [[0, 1], [2]] and
-    # parameters.values() is [fake_p0, fake_p1, fake_p2], then the first
-    # optimizer group is swapped onto [fake_p0, fake_p1] and the second
-    # onto [fake_p2].
-    flat_parameters = list(parameters.values())
+    # swapin_parameters.values() is [fake_p0, fake_p1, fake_p2], then the
+    # first optimizer group is swapped onto [fake_p0, fake_p1] and the
+    # second onto [fake_p2].
+    flat_parameters = list(swapin_parameters.values())
     flat_param_offset = 0
     seen_param_ids: set[int] = set()
     group_swapin_infos = []
@@ -185,7 +185,7 @@ def _prepare_swap_in(
     extra_keys = [k for k in swapin_state if k not in seen_param_ids]
     if extra_keys:
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optimizer_state_dict['state'] to "
+            "swap_in_optimizer_state requires swapin_optim_state['state'] to "
             "be keyed only by packed parameter ids from "
             f"param_groups[*]['params']; got extra keys {extra_keys!r}."
         )
@@ -195,62 +195,84 @@ def _prepare_swap_in(
 @contextlib.contextmanager
 def swap_in_optimizer_state(
     optimizer: "torch.optim.Optimizer",
-    parameters: dict[str, Tensor],
-    swapin_optimizer_state_dict: dict[str, Any],
+    swapin_parameters: dict[str, Tensor],
+    swapin_optim_state: dict[str, Any],
 ):
-    """A context manager that temporarily swaps an optimizer onto
-    user-supplied parameter and state tensors, so ``optimizer.step()`` runs
-    against those stand-ins during the context manager.
+    """Temporarily replace an optimizer's parameters and state with the
+    supplied params and optim states, then restore them on exit.
 
-    ``optimizer.load_state_dict`` cannot serve this purpose: it only restores
-    state values into the existing live params (its ``update_group`` writes
-    ``new_group["params"] = group["params"]``, always discarding the input's
-    ``params``). For tracing we need ``optimizer.step()`` to operate on
-    stand-in tensors (e.g. FakeTensors / functional copies) without
-    permanently mutating the live optimizer — so we must swap the params
-    themselves, not just their state values, and put both back on exit.
+    Inside the context manager, ``optimizer.step()`` (and any hooks) run on
+    ``swapin_parameters`` and ``swapin_optim_state`` instead of the live
+    optimizer's. 
+
+    Note that ``optimizer.load_state_dict`` only updates the optimizer's
+    state and leaves the parameters in ``param_groups`` untouched, so
+    ``optimizer.step()`` would still act on the live parameter tensors —
+    not on the swap-in tensors you wanted it to operate on.
 
     Args:
-        optimizer: Live ``torch.optim.Optimizer``. Its ``state`` and each
-            ``param_groups[i]["params"]`` are swapped for the duration of the
-            context and restored on exit. Must already have initialized state.
-        parameters: Replacement parameter tensors to swap into
-            ``optimizer.param_groups[*]["params"]``, in
-            ``model.named_parameters()`` order.
-        swapin_optimizer_state_dict: Raw ``optimizer.state_dict()``-format dict, i.e.
-            ``{"state": {<packed_id>: {...}, ...}, "param_groups": [...]}``.
-            Swapped into the live optimizer for the duration of the context.
-            Per-param state dicts are shallow-copied (tensor values shared
-            with the input — in-place ops on existing entries propagate back;
-            structural changes stay local).
+        optimizer: Live ``torch.optim.Optimizer``. Must already have
+            initialized state (i.e. its ``state`` dict is non-empty).
+        swapin_parameters: Replacement parameter tensors that get installed
+            into ``optimizer.param_groups[*]["params"]`` in
+            ``model.named_parameters()`` order. Values are flattened and
+            sliced per group to match the existing
+            ``optimizer.param_groups`` layout. The dict keys (FQNs) are not
+            consumed; only iteration order matters.
+        swapin_optim_state: A dict in the exact format produced by
+            ``optimizer.state_dict()``, with two top-level keys:
 
-    Example::
+            * ``"state"``: a dict keyed by **packed integer parameter ids**
+              (not tensors, not parameter names). Each value is a per-param
+              state dict (e.g. ``{"step": ..., "exp_avg": ..., ...}``). Ids
+              that do not appear in any ``param_groups[i]["params"]`` list
+              are rejected. Per-param dicts are shallow-copied on swap-in:
+              in-place tensor mutations propagate back to the input dict,
+              but structural changes (assigning a new tensor to a key,
+              adding/removing keys) stay local to the trace.
+            * ``"param_groups"``: a list with the same length as
+              ``optimizer.param_groups``. Each entry is a dict whose
+              ``"params"`` field is a list of packed integer ids; the
+              remaining keys are the optimizer's per-group hyperparameters
+              (``lr``, ``betas``, ``weight_decay``, ``foreach``,
+              ``capturable``, ``fused``, etc.) and must already exist on
+              the live group. Group sizes must match the live optimizer.
 
-        # Trace optimizer.step() against fake parameters and fake optimizer
-        # state, leaving the live optimizer untouched.
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._subclasses import FakeTensorMode
+            The same packed-id contract applies as in
+            ``Optimizer.state_dict()``: the i-th id in
+            ``param_groups[g]["params"]`` is the lookup key for the
+            corresponding entry in ``"state"``.
 
-        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
-        with fake_mode:
-            fake_params = {
-                n: fake_mode.from_tensor(p) for n, p in model.named_parameters()
-            }
-            fake_osd = pytree.tree_map_only(
-                torch.Tensor, fake_mode.from_tensor, optimizer.state_dict()
-            )
+    Example:
 
+        One use of this API is to run ``optimizer.step()`` against
+        ``FakeTensor`` versions of the parameters and state for nonstrict
+        tracing — capturing an FX graph of the step without touching the
+        live optimizer::
 
-        def step_fn(params, osd):
-            with swap_in_optimizer_state(optimizer, params, osd):
-                optimizer.step()
-            return params, osd
+            from torch.fx.experimental.proxy_tensor import make_fx
+            from torch._subclasses import FakeTensorMode
+            from torch.utils import _pytree as pytree
 
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            with fake_mode:
+                fake_params = {
+                    n: fake_mode.from_tensor(p)
+                    for n, p in model.named_parameters()
+                }
+                fake_osd = pytree.tree_map_only(
+                    torch.Tensor, fake_mode.from_tensor, optimizer.state_dict()
+                )
 
-        gm = make_fx(step_fn)(fake_params, fake_osd)
+            def step_fn(params, osd):
+                with swap_in_optimizer_state(optimizer, params, osd):
+                    optimizer.step()
+                return params, osd
+
+            gm = make_fx(step_fn)(fake_params, fake_osd)
     """
     state, group_swapin_infos = _prepare_swap_in(
-        optimizer, parameters, swapin_optimizer_state_dict
+        optimizer, swapin_parameters, swapin_optim_state
     )
 
     original_state = optimizer.state
