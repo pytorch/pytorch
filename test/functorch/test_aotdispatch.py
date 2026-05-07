@@ -8787,6 +8787,22 @@ def forward(self, primals_1, tangents_1):
         out2.sum().backward()
         self.assertEqual(x2.grad, eager_grad)
 
+    def test_size_of_void_returning_nodes(self):
+        # Void-returning ops have no `val` metadata. _size_of must return 0
+        # for them instead of raising RuntimeError.
+        from torch._functorch.partitioners import _size_of
+
+        g = torch.fx.Graph()
+        for target in (
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
+            torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.sym_constrain_range.default,
+            torch.ops.aten._assert_tensor_metadata.default,
+        ):
+            node = g.call_function(target, args=())
+            self.assertEqual(_size_of(node), 0)
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
