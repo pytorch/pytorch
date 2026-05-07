@@ -4103,3 +4103,103 @@ class ClassMethodDescriptorVariable(VariableTracker):
         # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
+
+
+class StaticMethodVariable(VariableTracker):
+    """staticmethod descriptor wrapping a callable.
+
+    CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
+    whose tp_descr_get (sm_descr_get) simply returns the wrapped callable,
+    ignoring both obj and type.
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1520
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: staticmethod,  # type: ignore[type-arg]
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        return f"StaticMethodVariable({func_name})"
+
+    def python_type(self) -> type:
+        return staticmethod
+
+    def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
+        return self.descriptor
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # sm_descr_get returns sm->sm_callable unconditionally.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+
+
+class ClassMethodVariable(VariableTracker):
+    """classmethod descriptor wrapping a callable.
+
+    CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
+    whose tp_descr_get (cm_descr_get) creates a bound method of the
+    wrapped callable bound to the class (via PyMethod_New).
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1314
+    https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: classmethod,  # type: ignore[type-arg]
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        return f"ClassMethodVariable({func_name})"
+
+    def python_type(self) -> type:
+        return classmethod
+
+    def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
+        return self.descriptor
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # cm_descr_get binds the wrapped function to the class.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        bound_source = (
+            AttrSource(owner.source, self.descriptor.__func__.__name__)
+            if owner.source
+            else None
+        )
+        return UserMethodVariable(
+            self.descriptor.__func__,
+            owner,
+            source_fn=func_source,
+            source=bound_source,
+        )
