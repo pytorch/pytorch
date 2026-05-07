@@ -1545,6 +1545,36 @@ void index_reduce_func_cuda_impl(
 
 TORCH_IMPL_FUNC(index_add_cuda_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+#if defined(__HIP_PLATFORM_AMD__)
+  // On AMD MI350X, scatter_add_ outperforms the indexFuncLargeIndex
+  // atomicAdd path across all measured source sizes (>=1.0x at 1K rising
+  // to ~2x for uniform / ~5x for Zipf-distributed indices). Always
+  // redirect for the matching shape; see bench_index_add_powerlaw.py.
+  // When deterministicAlgorithms() is enabled, fall through to
+  // index_add_cuda_impl so its index_put_ deterministic path is honored.
+  // scatter_add_ on HIP uses non-deterministic atomicAdd.
+  // Skip complex types and Bool: index_add_cuda_impl supports them via
+  // AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(Bool, Half, BFloat16, ComplexHalf, ...),
+  // but scatter_add_'s reduce-path dispatch in ScatterGatherKernel.cu uses
+  // AT_DISPATCH_ALL_TYPES_AND2(Half, BFloat16, ...) which has no entries for
+  // complex or Bool. Redirecting those would surface as an unsupported-dtype
+  // failure (e.g. test_consistency_SparseCSR_mul_cuda_complex32 on ROCm,
+  // which reaches index_add_ via sparse_csr_to_dense for hybrid layouts).
+  if (alpha.equal(1) && dim == 0 && self.dim() == 2 &&
+      !globalContext().deterministicAlgorithms() &&
+      !c10::isComplexType(self.scalar_type()) &&
+      self.scalar_type() != at::kBool) {
+    // Mirror index_add_cuda_impl's structured-kernel pre-copy: for
+    // out-of-place / index_add(out=...) the result is uninitialized
+    // and must be seeded with self before accumulating.
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    auto expanded_index = index.to(at::kLong).unsqueeze(1).expand_as(source);
+    result.scatter_add_(dim, expanded_index, source);
+    return;
+  }
+#endif
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 

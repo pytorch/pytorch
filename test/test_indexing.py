@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     skipMPS,
@@ -2125,6 +2126,223 @@ class TestIndexing(TestCase):
             100,
             "3D vec4 sliceSize=128",
         )
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_index_add_correctness_2d_large(self, device, dtype):
+        # Correctness for the path used on HIP when index_add_ is redirected
+        # to scatter_add_ (alpha=1, dim=0, 2D). Uses duplicate indices
+        # (200K src into 1K dest) to stress-test atomic accumulation.
+        # On NVIDIA CUDA this exercises the original index_add_ kernel and
+        # is still useful coverage. Selection is verified separately by
+        # test_index_add_redirect_kernel_selection_hip.
+        num_dest, dim = 1000, 64
+        num_src = 200_000
+
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=dtype, device=device)
+        dst = torch.zeros(num_dest, dim, dtype=dtype, device=device)
+
+        # Reference on CPU in float32
+        dst_ref = torch.zeros(num_dest, dim, dtype=torch.float32)
+        dst_ref.index_add_(0, idx.cpu(), src.cpu().float())
+
+        dst.index_add_(0, idx, src)
+
+        # ~200 atomicAdds per row vs sequential CPU sum: bf16/fp16 accumulate
+        # rounding error up to several tenths in worst-case elements (use L2
+        # relative error to avoid outlier flakes); fp32 atomic-add ordering
+        # gives ~1e-4 max-abs deviation from a CPU sequential reference.
+        if dtype in (torch.bfloat16, torch.half):
+            err = (dst.cpu().float() - dst_ref).norm().item()
+            ref_norm = max(dst_ref.norm().item(), 1e-8)
+            self.assertLess(
+                err / ref_norm,
+                5e-2,
+                f"index_add_ {dtype} L2 rel err too high: {err / ref_norm}",
+            )
+        else:
+            self.assertEqual(
+                dst.cpu(),
+                dst_ref,
+                atol=1e-3,
+                rtol=1e-3,
+                msg=f"index_add_ correctness failed for {dtype}",
+            )
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_index_add_correctness_2d_out_of_place(self, device, dtype):
+        # Regression test: torch.index_add (out-of-place) and
+        # torch.index_add(..., out=) hit the same TORCH_IMPL_FUNC as the
+        # in-place variant via structured_delegate. The HIP redirect must
+        # seed `result` with self before scattering, otherwise out-of-place
+        # accumulates into uninitialized memory.
+        num_dest, dim, num_src = 200, 32, 5000
+
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=dtype, device=device)
+        self_ = torch.randn(num_dest, dim, dtype=dtype, device=device)
+
+        # Reference: CPU fp32 in-place starting from self
+        ref = self_.cpu().float().clone()
+        ref.index_add_(0, idx.cpu(), src.cpu().float())
+
+        # Functional out-of-place: returns a fresh tensor.
+        out_func = torch.index_add(self_, 0, idx, src)
+        # Out-explicit: caller-provided destination tensor.
+        out_explicit = torch.empty_like(self_)
+        torch.index_add(self_, 0, idx, src, out=out_explicit)
+
+        if dtype == torch.bfloat16:
+            # ~25 atomicAdds per dest row on NVIDIA's index_add_ kernel
+            # produce per-element rounding too large for max-abs tolerance;
+            # use L2 relative error like test_index_add_correctness_2d_large.
+            ref_norm = max(ref.norm().item(), 1e-8)
+            err_func = (out_func.cpu().float() - ref).norm().item() / ref_norm
+            err_explicit = (out_explicit.cpu().float() - ref).norm().item() / ref_norm
+            self.assertLess(err_func, 5e-2, f"bf16 functional L2 rel err: {err_func}")
+            self.assertLess(err_explicit, 5e-2, f"bf16 out= L2 rel err: {err_explicit}")
+        else:
+            self.assertEqual(out_func.cpu().float(), ref, atol=1e-3, rtol=1e-3)
+            self.assertEqual(out_explicit.cpu().float(), ref, atol=1e-3, rtol=1e-3)
+        # self must be untouched by out-of-place form.
+        self.assertFalse(out_func.data_ptr() == self_.data_ptr())
+
+    @onlyCUDA
+    def test_index_add_correctness_2d_alpha(self, device):
+        # Correctness with alpha != 1, which bypasses the HIP redirect and
+        # always hits index_add_'s native alpha-scaling path on both HIP
+        # and CUDA.
+        num_dest, dim = 100, 32
+        num_src = 200_000
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+        src = torch.randn(num_src, dim, dtype=torch.float32, device=device)
+        dst = torch.zeros(num_dest, dim, dtype=torch.float32, device=device)
+
+        dst_ref = torch.zeros(num_dest, dim, dtype=torch.float32)
+        dst_ref.index_add_(0, idx.cpu(), src.cpu(), alpha=2.0)
+
+        dst.index_add_(0, idx, src, alpha=2.0)
+        # ~2000 atomic adds per dest row in fp32: ordering produces ~1e-4
+        # per-element deviation from a CPU sequential reference.
+        self.assertEqual(dst.cpu(), dst_ref, atol=1e-3, rtol=1e-3)
+
+    @onlyCUDA
+    def test_index_add_redirect_kernel_selection_hip(self, device):
+        # Verify the HIP-only redirect actually fires for matching cases
+        # and does NOT fire for any unmet condition. The redirect calls
+        # scatter_add_ from inside the index_add_ implementation, which
+        # surfaces in the profiler as an aten::scatter_add_ event nested
+        # under aten::index_add_. CUDA (NVIDIA) has no redirect.
+        if not torch.version.hip:
+            raise unittest.SkipTest("redirect is HIP-only")
+
+        n_dest, dim, n_src = 100, 32, 1024
+        idx = torch.randint(0, n_dest, (n_src,), device=device, dtype=torch.int64)
+
+        def saw_scatter_add(fn):
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU]
+            ) as prof:
+                fn()
+                torch.cuda.synchronize()
+            return any(e.name == "aten::scatter_add_" for e in prof.events())
+
+        # 1. Conditions met (alpha=1, dim=0, 2D, float): redirect MUST fire.
+        dst = torch.zeros(n_dest, dim, dtype=torch.float32, device=device)
+        src = torch.randn(n_src, dim, dtype=torch.float32, device=device)
+        self.assertTrue(
+            saw_scatter_add(lambda: dst.index_add_(0, idx, src)),
+            "redirect should fire when alpha=1, dim=0, 2D, float",
+        )
+
+        # 2. alpha != 1 -> bypass.
+        self.assertFalse(
+            saw_scatter_add(lambda: dst.index_add_(0, idx, src, alpha=2.0)),
+            "alpha != 1 must bypass redirect",
+        )
+
+        # 3. dim != 0 -> bypass.
+        dst_t = torch.zeros(dim, n_dest, dtype=torch.float32, device=device)
+        src_t = torch.randn(dim, n_src, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_t.index_add_(1, idx, src_t)),
+            "dim != 0 must bypass redirect",
+        )
+
+        # 4. 1D self -> bypass.
+        dst_1d = torch.zeros(n_dest, dtype=torch.float32, device=device)
+        src_1d = torch.randn(n_src, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_1d.index_add_(0, idx, src_1d)),
+            "1D self must bypass redirect",
+        )
+
+        # 5. 3D self -> bypass.
+        dst_3d = torch.zeros(n_dest, 4, 8, dtype=torch.float32, device=device)
+        src_3d = torch.randn(n_src, 4, 8, dtype=torch.float32, device=device)
+        self.assertFalse(
+            saw_scatter_add(lambda: dst_3d.index_add_(0, idx, src_3d)),
+            "3D self must bypass redirect",
+        )
+
+        # 6. Complex / Bool dtypes -> bypass (scatter_add_ has no dispatch
+        # entry for these; redirect must fall through to index_add_cuda_impl).
+        # Regression for the second revert of #181955: ROCm sparse_csr mul on
+        # complex32 reached this path via sparse_csr_to_dense and crashed.
+        for unsupported_dtype in (torch.complex32, torch.complex64, torch.bool):
+            if unsupported_dtype == torch.bool:
+                src_bad = torch.ones(n_src, dim, dtype=torch.bool, device=device)
+                dst_bad = torch.zeros(n_dest, dim, dtype=torch.bool, device=device)
+            else:
+                src_bad = torch.randn(
+                    n_src, dim, dtype=torch.float32, device=device
+                ).to(unsupported_dtype)
+                dst_bad = torch.zeros(
+                    n_dest, dim, dtype=unsupported_dtype, device=device
+                )
+            self.assertFalse(
+                saw_scatter_add(lambda: dst_bad.index_add_(0, idx, src_bad)),
+                f"{unsupported_dtype} must bypass redirect (scatter_add_ "
+                f"does not support it)",
+            )
+
+    @onlyCUDA
+    @dtypes(torch.complex32, torch.complex64, torch.complex128, torch.bool)
+    def test_index_add_2d_complex_and_bool(self, device, dtype):
+        # Regression for the second revert of #181955. The HIP redirect of
+        # index_add_ -> scatter_add_ must skip dtypes that scatter_add_'s
+        # reduce-path dispatch does not support (complex types and Bool).
+        # Without the dtype gate, this path crashes on ROCm and produces the
+        # test_consistency_SparseCSR_mul_cuda_complex32 failure.
+        # On NVIDIA this test exercises the unmodified index_add_ path and
+        # still serves as live coverage that complex/Bool 2D index_add works.
+        num_dest, dim, num_src = 50, 16, 1000
+        idx = torch.randint(0, num_dest, (num_src,), device=device, dtype=torch.int64)
+
+        if dtype == torch.bool:
+            src = torch.ones(num_src, dim, dtype=torch.bool, device=device)
+            dst = torch.zeros(num_dest, dim, dtype=torch.bool, device=device)
+            dst_ref = torch.zeros(num_dest, dim, dtype=torch.bool)
+            # bool index_add_: bool atomicAdd is OR semantics in PyTorch.
+            dst_ref.index_add_(0, idx.cpu(), src.cpu())
+            dst.index_add_(0, idx, src)
+            self.assertEqual(dst.cpu(), dst_ref)
+        else:
+            src = torch.randn(num_src, dim, dtype=dtype, device=device)
+            dst = torch.zeros(num_dest, dim, dtype=dtype, device=device)
+
+            ref_dtype = torch.complex64 if dtype == torch.complex32 else dtype
+            dst_ref = torch.zeros(num_dest, dim, dtype=ref_dtype)
+            dst_ref.index_add_(0, idx.cpu(), src.cpu().to(ref_dtype))
+
+            dst.index_add_(0, idx, src)
+            # complex32 has limited mantissa; ~20 atomic adds per row on
+            # average can drift by a few %.
+            atol = 1e-1 if dtype == torch.complex32 else 1e-3
+            rtol = 1e-1 if dtype == torch.complex32 else 1e-3
+            self.assertEqual(dst.cpu().to(ref_dtype), dst_ref, atol=atol, rtol=rtol)
 
     @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
