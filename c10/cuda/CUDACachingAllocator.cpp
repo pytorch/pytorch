@@ -171,9 +171,6 @@ static bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
-  using BlockSet = std::set<Block*, Comparison>;
-  using iterator = BlockSet::iterator;
-
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
       : blocks(BlockComparatorSizeCounterAddress),
         blocks_by_addr(BlockComparatorAddress),
@@ -181,20 +178,19 @@ struct BlockPool {
         is_small(small),
         owner_PrivatePool(private_pool) {}
 
-  // Do not insert a Block into blocks or blocks_by_addr directly; use
-  // insert_into_blocks() instead.
-  BlockSet blocks;
-  BlockSet blocks_by_addr;
-  BlockSet unmapped;
+  // Do not insert a Block to blocks directly; use insert_into_blocks(),
+  // instead.
+  std::set<Block*, Comparison> blocks;
+  std::set<Block*, Comparison> blocks_by_addr;
+  std::set<Block*, Comparison> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
 
-  // Add a Block into the cached free block indices with updating gc counter.
-  std::pair<iterator, bool> insert_into_blocks(Block* block);
-  void erase_from_blocks(Block* block);
-  void erase_from_blocks(iterator it);
+  // Add a Block into blocks set with updating gc counter.
+  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
+      Block* block);
 
   MempoolId_t owner_MempoolId() const;
 };
@@ -271,26 +267,10 @@ struct Block {
   }
 };
 
-std::pair<BlockPool::iterator, bool> BlockPool::insert_into_blocks(
-    Block* block) {
+std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
+    insert_into_blocks(Block* block) {
   block->gc_count_base = get_free_blocks_call_count;
-  auto inserted = blocks.insert(block);
-  auto inserted_by_addr = blocks_by_addr.insert(block);
-  TORCH_INTERNAL_ASSERT(inserted.second == inserted_by_addr.second);
-  return inserted;
-}
-
-void BlockPool::erase_from_blocks(Block* block) {
-  auto erased = blocks.erase(block);
-  auto erased_by_addr = blocks_by_addr.erase(block);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == erased_by_addr);
-}
-
-void BlockPool::erase_from_blocks(iterator it) {
-  Block* block = *it;
-  blocks.erase(it);
-  auto erased_by_addr = blocks_by_addr.erase(block);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased_by_addr == 1);
+  return blocks.insert(block);
 }
 
 struct SegmentRange {
@@ -1667,10 +1647,50 @@ class DeviceCachingAllocator {
     return context_recorder_.load()();
   }
 
+  Block* get_free_block_by_exact_address(
+      BlockPool& pool,
+      size_t size,
+      cudaStream_t stream,
+      void* addr) {
+    Block search_key(device_id, stream, 0);
+    auto it = pool.blocks.lower_bound(&search_key);
+    for (; it != pool.blocks.end() && (*it)->stream == stream; ++it) {
+      if ((*it)->ptr == addr && (*it)->size >= size) {
+        Block* block = *it;
+        pool.blocks.erase(it);
+        return block;
+      }
+    }
+    return nullptr;
+  }
+
+  Block* get_free_block_containing_address(
+      BlockPool& pool,
+      size_t size,
+      cudaStream_t stream,
+      void* addr) {
+    const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
+    Block search_key(device_id, stream, 0);
+    auto it = pool.blocks.lower_bound(&search_key);
+    for (; it != pool.blocks.end() && (*it)->stream == stream; ++it) {
+      Block* block = *it;
+      const auto block_begin = reinterpret_cast<uintptr_t>(block->ptr);
+      const auto block_end = block_begin + block->size;
+      if (block_begin <= requested_addr &&
+          requested_addr + size <= block_end) {
+        return block;
+      }
+    }
+    return nullptr;
+  }
+
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(size_t orig_size, cudaStream_t stream) {
+  Block* malloc(
+      size_t orig_size,
+      cudaStream_t stream,
+      void* addr = nullptr) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1716,11 +1736,20 @@ class DeviceCachingAllocator {
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
-    bool block_found =
-        // Search pool
-        get_free_block(params)
-        // Trigger callbacks and retry search
-        || (trigger_free_memory_callbacks(params) && get_free_block(params));
+    bool block_found = false;
+    if (addr != nullptr) {
+      params.block = get_free_block_by_exact_address(pool, size, stream, addr);
+      if (!params.block) {
+        return nullptr;
+      }
+      block_found = true;
+    } else {
+      block_found =
+          // Search pool
+          get_free_block(params)
+          // Trigger callbacks and retry search
+          || (trigger_free_memory_callbacks(params) && get_free_block(params));
+    }
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
@@ -1929,44 +1958,51 @@ class DeviceCachingAllocator {
         params, orig_size, std::move(context), split_remainder);
   }
 
-  Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
+  Block* mallocWithAddress(
+      size_t orig_size,
+      cudaStream_t stream,
+      void* addr) {
     auto context = maybeGatherContext(RecordContext::STATE);
-    auto free_context = maybeGatherContext(RecordContext::ALL);
-
     std::unique_lock<std::recursive_mutex> lock(mutex);
-
     if (C10_LIKELY(captures_underway.empty())) {
       process_events(context);
     } else if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
       free_safe_blocks_in_capture(context, stream);
     }
 
-    size_t size = round_size(orig_size);
+    const size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
-    const size_t alloc_size = get_allocation_size(size);
-    bool active_user_pool =
-        pool.owner_PrivatePool && pool.owner_PrivatePool->allocator();
-    bool is_expandable_segments_active =
-        CUDAAllocatorConfig::expandable_segments() && !active_user_pool;
-    AllocParams params(
-        device_id,
-        size,
-        stream,
-        &pool,
-        alloc_size,
-        is_expandable_segments_active);
-    params.stat_types = get_stat_types_for_pool(pool);
+    Block* containing_block =
+        get_free_block_containing_address(pool, size, stream, addr);
+    if (!containing_block) {
+      return nullptr;
+    }
 
-    Block* block = alloc_block_at_address(
-        addr, params, orig_size, context, free_context);
-    TORCH_CHECK(
-        block != nullptr,
-        "Could not allocate CUDA storage at exact address ",
-        addr,
-        " with size ",
-        orig_size,
-        " bytes");
-    return block;
+    const auto block_begin = reinterpret_cast<uintptr_t>(containing_block->ptr);
+    const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
+    const size_t prefix_size = requested_addr - block_begin;
+
+    Block* prefix_block = nullptr;
+    if (prefix_size > 0) {
+      prefix_block = malloc(prefix_size, stream, containing_block->ptr);
+      if (!prefix_block) {
+        return nullptr;
+      }
+    }
+
+    Block* requested_block = malloc(orig_size, stream, addr);
+    if (!requested_block) {
+      if (prefix_block) {
+        free(prefix_block);
+      }
+      return nullptr;
+    }
+
+    if (prefix_block) {
+      free(prefix_block);
+    }
+    TORCH_INTERNAL_ASSERT(requested_block->ptr == addr);
+    return requested_block;
   }
 
   bool try_mempool_fallback(
@@ -2330,11 +2366,15 @@ class DeviceCachingAllocator {
     }
   }
 
-  void free_allocated_block(
-      Block* block,
-      const std::shared_ptr<GatheredContext>& context) {
+  void free(Block* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
     block->allocated = false;
 
+    // following logic might modifying underlying Block, causing the size
+    // changed. We store ahead for reporting
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
@@ -2358,26 +2398,10 @@ class DeviceCachingAllocator {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
-    if (block->size >= AcceleratorAllocatorConfig::max_split_size()) {
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
-    }
 
-    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
-    free_block(block, context);
-
-    c10::reportMemoryUsageToProfiler(
-        orig_block_ptr,
-        -static_cast<int64_t>(orig_block_size),
-        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        c10::Device(c10::DeviceType::CUDA, block->device));
-  }
-
-  void free(Block* block) {
-    std::shared_ptr<GatheredContext> context =
-        maybeGatherContext(RecordContext::ALL);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-
+    // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(is_capture_context())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
@@ -2395,18 +2419,16 @@ class DeviceCachingAllocator {
         // If not in a capture, insert events for the block.
         insert_events(block);
       }
-
-      c10::reportMemoryUsageToProfiler(
-          orig_block_ptr,
-          -static_cast<int64_t>(orig_block_size),
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current,
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current,
-          c10::Device(c10::DeviceType::CUDA, block->device));
     } else {
-      free_allocated_block(block, context);
+      free_block(block, context);
     }
+
+    c10::reportMemoryUsageToProfiler(
+        orig_block_ptr,
+        -static_cast<int64_t>(orig_block_size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, block->device));
   }
 
   void* getBaseAllocation(Block* block, size_t* outSize) {
@@ -2701,7 +2723,7 @@ class DeviceCachingAllocator {
           &pool,
           block_state.size,
           curr_block->expandable_segment_ != nullptr);
-      pool.erase_from_blocks(curr_block);
+      pool.blocks.erase(curr_block);
       params.block = curr_block;
       params.stat_types = get_stat_types_for_pool(pool);
 
@@ -3428,7 +3450,7 @@ class DeviceCachingAllocator {
       }
       candidate = new_candidate;
     }
-    pool->erase_from_blocks(candidate);
+    pool->blocks.erase(candidate);
     return candidate;
   }
 
@@ -3537,8 +3559,7 @@ class DeviceCachingAllocator {
     dst->size += subsumed_size;
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto erased =
-        src->mapped ? (pool.erase_from_blocks(src), size_t{1})
-                    : pool.unmapped.erase(src);
+        src->mapped ? pool.blocks.erase(src) : pool.unmapped.erase(src);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
     delete src;
 
@@ -3695,69 +3716,8 @@ class DeviceCachingAllocator {
          p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
-    pool.erase_from_blocks(it);
+    pool.blocks.erase(it);
     return true;
-  }
-
-  Block* alloc_block_at_address(
-      void* addr,
-      const AllocParams& params,
-      size_t orig_size,
-      const std::shared_ptr<GatheredContext>& context,
-      const std::shared_ptr<GatheredContext>& free_context) {
-    BlockPool& pool = *params.pool;
-    Block search_key(params.device(), params.stream(), 0);
-    search_key.ptr = addr;
-    auto it = pool.blocks_by_addr.upper_bound(&search_key);
-    if (it == pool.blocks_by_addr.begin()) {
-      return nullptr;
-    }
-    --it;
-
-    Block* block = *it;
-    auto requested_addr = reinterpret_cast<uintptr_t>(addr);
-    auto block_start = reinterpret_cast<uintptr_t>(block->ptr);
-    if (block->stream != params.stream() || requested_addr < block_start) {
-      return nullptr;
-    }
-
-    size_t prefix_size = requested_addr - block_start;
-    if (prefix_size > block->size ||
-        params.size() > block->size - prefix_size) {
-      return nullptr;
-    }
-
-    pool.erase_from_blocks(block);
-
-    if (prefix_size == 0) {
-      AllocParams target_params = params;
-      target_params.block = block;
-      return alloc_found_block(
-          target_params, orig_size, context, block->size > params.size());
-    }
-
-    AllocParams prefix_params(
-        params.device(),
-        prefix_size,
-        params.stream(),
-        &pool,
-        prefix_size,
-        params.is_expandable_segments_active);
-    prefix_params.block = block;
-    prefix_params.stat_types = params.stat_types;
-
-    Block* prefix = alloc_found_block(
-        prefix_params, prefix_size, context, block->size > prefix_size);
-    Block* target = prefix->next;
-    TORCH_INTERNAL_ASSERT(target != nullptr);
-    TORCH_INTERNAL_ASSERT(target->ptr == addr);
-
-    AllocParams target_params = params;
-    target_params.block = target;
-    Block* allocated = alloc_found_block(
-        target_params, orig_size, context, target->size > params.size());
-    free_allocated_block(prefix, free_context ? free_context : context);
-    return allocated;
   }
 
   bool trigger_free_memory_callbacks(AllocParams& p) {
@@ -4159,7 +4119,7 @@ class DeviceCachingAllocator {
 
     if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_segments.decrease(1);
-    pool->erase_from_blocks(block);
+    pool->blocks.erase(block);
     delete block;
   }
 
@@ -4171,7 +4131,7 @@ class DeviceCachingAllocator {
     if (unmapped.size == 0) {
       return;
     }
-    block->pool->erase_from_blocks(block);
+    block->pool->blocks.erase(block);
 
     ptrdiff_t before_size = unmapped.ptr - static_cast<char*>(block->ptr);
     if (before_size > 0) {
@@ -4627,8 +4587,12 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    Block* block = device_allocator[device]->mallocWithAddress(
-        size, stream, addr);
+    Block* block =
+        device_allocator[device]->mallocWithAddress(size, stream, addr);
+    TORCH_CHECK(
+        block != nullptr && block->ptr == addr,
+        "Could not allocate CUDA storage at exact address ",
+        addr);
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -4968,31 +4932,25 @@ class NativeCachingAllocator : public CUDAAllocator {
 
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
+
   DataPtr allocateWithAddress(size_t size, void* addr) {
-    constexpr size_t one_exa_bytes = 1152921504606846976ULL;
-    TORCH_CHECK_WITH(
-        OutOfMemoryError,
-        size < one_exa_bytes,
-        "CUDA out of memory. Tried to allocate more than 1EB memory.");
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    void* devPtr = nullptr;
-    void (*deleteFunc)(void*) = &local_raw_delete;
-    CUDAStream stream = cuda::getCurrentCUDAStream(device);
-
     TORCH_CHECK(
         !forceUncachedAllocator() && isEnabled(),
-        "Exact-address allocation requires the native CUDA caching allocator");
+        "Exact-address allocation is only supported by the native CUDA caching allocator");
+    void* devPtr = nullptr;
+    CUDAStream stream = cuda::getCurrentCUDAStream(device);
     if (size != 0) {
-      this->mallocWithAddress(&devPtr, device, size, stream, addr);
+      mallocWithAddress(&devPtr, device, size, stream, addr);
     }
-
     if (size && TORCH_SDT_IS_ENABLED(malloc)) {
       TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
     }
-
-    return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
+    return {
+        devPtr, devPtr, &local_raw_delete, Device(DeviceType::CUDA, device)};
   }
+
   DeleterFnPtr raw_deleter() const override {
     if (forceUncachedAllocator() || !isEnabled()) {
       return &uncached_delete;
@@ -5311,6 +5269,13 @@ CUDAAllocator* allocator();
 
 } // namespace CudaMallocAsync
 
+DataPtr allocateWithAddress(size_t size, void* addr) {
+  TORCH_CHECK(
+      get() == &Native::allocator,
+      "Exact-address allocation is only supported by the native CUDA caching allocator");
+  return Native::allocator.allocateWithAddress(size, addr);
+}
+
 struct BackendStaticInitializer {
   // Parses the environment configuration for CUDA/ROCm allocator backend at
   // load time. This duplicates some logic from CUDAAllocatorConfig to ensure
@@ -5378,13 +5343,5 @@ struct BackendStaticInitializer {
 
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
-
-DataPtr allocateWithAddress(size_t size, void* addr) {
-  auto* current = get();
-  TORCH_CHECK(
-      current == &Native::allocator,
-      "Exact-address allocation requires the native CUDA caching allocator");
-  return Native::allocator.allocateWithAddress(size, addr);
-}
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10

@@ -15,11 +15,9 @@
 namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
-  TORCH_CHECK(
-      storage->resizable(), "Trying to resize storage that is not resizable");
+  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   auto allocator = storage->allocator();
-  TORCH_CHECK(
-      allocator != nullptr, "Trying to resize storage without an allocator");
+  TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
 
   c10::Device device = storage->device();
 
@@ -30,9 +28,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   }
 
   c10::cuda::CUDAGuard guard(device.index());
-
   at::DataPtr data = allocator->allocate(size_bytes);
-
   if (storage->data_ptr()) {
     at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
