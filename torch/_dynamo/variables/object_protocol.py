@@ -127,6 +127,9 @@ type_implements_sq_concat = partial(
 type_implements_sq_inplace_concat = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_CONCAT
 )
+type_implements_sq_ass_item = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_ASS_ITEM
+)
 
 
 def type_implements_mp_length(obj_type: type) -> bool:
@@ -163,6 +166,12 @@ def type_implements_mp_subscript(obj_type: type) -> bool:
     """Check whether obj_type has tp_as_mapping->mp_subscript."""
     _, map_slots, _, _ = _get_cached_slots(obj_type)
     return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
+
+
+def type_implements_mp_ass_subscript(obj_type: type) -> bool:
+    """Check whether obj_type has tp_as_mapping->mp_ass_subscript."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, PyMappingSlots.MP_ASS_SUBSCRIPT)
 
 
 def type_implements_nb_negative(obj_type: type) -> bool:
@@ -206,6 +215,12 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pyindex_check(obj_type: type) -> bool:
+    """Implements _PyIndex_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/3.13/Include/internal/pycore_abstract.h#L11-L17
+    return type_implements_nb_index(obj_type)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
@@ -389,6 +404,52 @@ def vt_sequence_getitem(
         raise_type_error(tx, f"'{obj.python_type_name()}' is not a sequence")
 
     raise_type_error(tx, f"'{obj.python_type_name()}' object does not support indexing")
+
+
+def vt_sequence_setitem(
+    tx: "InstructionTranslator",
+    s: VariableTracker,
+    i: VariableTracker,
+    o: VariableTracker,
+) -> None:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1926-L1957 (PySequence_SetItem)
+    s_type = maybe_get_python_type(s)
+    if type_implements_sq_ass_item(s_type):
+        if i.as_python_constant() < 0:
+            if type_implements_sq_length(s_type):
+                l = s.sq_length(tx)
+                vt_inplace_add(tx, i, l)
+        return s.sq_ass_item_impl(tx, i, o)
+
+    if type_implements_mp_ass_subscript(s_type):
+        raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
+
+    raise_type_error(
+        tx, f"'{s.python_type_name()}' object does not support item assignment"
+    )
+
+
+def generic_setitem(
+    tx: "InstructionTranslator",
+    o: VariableTracker,
+    key: VariableTracker,
+    value: VariableTracker,
+) -> None:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L222-L254
+    o_type = maybe_get_python_type(o)
+    if type_implements_mp_ass_subscript(o_type):
+        return o.mp_ass_subscript_impl(tx, key, value)
+
+    if pyindex_check(key.python_type()):
+        key = key.nb_index_impl(tx)
+        return vt_sequence_setitem(tx, o, key, value)
+    elif type_implements_sq_ass_item(o_type):
+        raise_type_error(
+            tx, f"sequence index must be integer, not '{key.python_type_name()}'"
+        )
+    raise_type_error(
+        tx, f"'{o.python_type_name()}' object does not support item assignment"
+    )
 
 
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:

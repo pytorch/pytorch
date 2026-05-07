@@ -742,6 +742,11 @@ class ConstDictVariable(VariableTracker):
         self.call_method(tx, "update", [other], {})
         return self
 
+    def mp_ass_subscript_impl(
+        self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
+    ) -> None:
+        raise_type_error(tx, "missing impl")
+
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()

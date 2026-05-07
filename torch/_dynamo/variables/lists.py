@@ -1174,6 +1174,19 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
 
+    def sq_ass_item(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> None:
+        raise_type_error(tx, "missing impl")
+
+    def mp_ass_subscript_impl(
+        self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
+    ) -> None:
+        raise_type_error(tx, "missing impl")
+
     def sq_concat_impl(
         self,
         tx: "InstructionTranslator",
@@ -1256,6 +1269,11 @@ class DequeVariable(CommonListMethodsVariable):
             return self.items[index]
         except IndexError:
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
+
+    def sq_ass_item_impl(
+        self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
+    ) -> None:
+        raise_type_error(tx, "missing impl")
 
     def sq_concat_impl(
         self,
