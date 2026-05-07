@@ -1116,6 +1116,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
 
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+        return [f"borrow_arrayref_tensor_as_tensor({arg})" for arg in tensor_call_args]
+
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
