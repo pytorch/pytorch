@@ -112,7 +112,7 @@ static Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
           inH * inW,
           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
-          (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
+          reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()) /* output data */,
           outC);
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,

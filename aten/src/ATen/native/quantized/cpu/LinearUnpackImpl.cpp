@@ -45,7 +45,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
 
   // packB->printPackedMatrix("packedB inside fbgemm_unpack
   // (QLinearUnpackWeightInt8): ");
@@ -70,7 +70,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     // points with padding & casting etc
     at::Tensor weight_origin;
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    float* weight_scales_data = w_scales.mutable_data_ptr<float>();
     if (q_scheme == c10::kPerTensorAffine) {
       weight_origin = at::_empty_affine_quantized(
           weight_sizes,
@@ -99,7 +99,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
       TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
     }
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
     w->unpackWeights(w_zero_points.data(), weight_ptr_int8);
     // See for the subtraction 128
     // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp#L319

@@ -134,7 +134,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
-  auto output_data = reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>());
+  auto output_data = reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>());
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -198,7 +198,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -233,7 +233,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -370,7 +370,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
       output.options().dtype(at::kInt),
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  auto output_data = output.data_ptr<float>();
+  auto output_data = output.mutable_data_ptr<float>();
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -411,7 +411,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -443,7 +443,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -644,9 +644,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
     auto bias_fp32 = bias_;
-    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    int8_t* w_data = reinterpret_cast<int8_t*>(weight_contig.mutable_data_ptr<c10::qint8>());
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    float* weight_scales_data = w_scales.mutable_data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
@@ -658,7 +658,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
         w_zero_points[0]);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -736,7 +736,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       (uint8_t*)input_contig.const_data_ptr<c10::quint8>(),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
-      (uint8_t*)output.data_ptr<c10::quint8>(),
+      reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
       rows_w /* output_stride */,
       // TODO (Ashkan): Disabling temporarily.
       // Throws a floating point exception with OSS pthreadpool.

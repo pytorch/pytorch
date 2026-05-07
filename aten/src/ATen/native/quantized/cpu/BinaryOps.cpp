@@ -211,11 +211,11 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_add_nc_q8(
       qnnpack_operator /* add op */,
       qa_contig.size(0) /* batch size */,
-      (uint8_t*)qa_contig.data_ptr<c10::quint8>() /* a data */,
+      reinterpret_cast<uint8_t*>(qa_contig.mutable_data_ptr<c10::quint8>()) /* a data */,
       num_elems /* A stride */,
-      (uint8_t*)qb_contig.data_ptr<c10::quint8>() /* b data */,
+      reinterpret_cast<uint8_t*>(qb_contig.mutable_data_ptr<c10::quint8>()) /* b data */,
       num_elems /* B stride */,
-      (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+      reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()) /* output data */,
       num_elems /* sum stride */);
   TORCH_INTERNAL_ASSERT(
       setupStatus == pytorch_qnnp_status_success,
@@ -364,9 +364,9 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       runtime_ptr, &xnn_delete_runtime);
 
   std::array<xnn_external_value, 3> external = {
-    xnn_external_value{input0_id, reinterpret_cast<void*>(qa_contig.data_ptr<scalar_t>())},
-    xnn_external_value{input1_id, reinterpret_cast<void*>(qb_contig.data_ptr<scalar_t>())},
-    xnn_external_value{output_id, reinterpret_cast<void*>(qy.data_ptr<scalar_t>())}};
+    xnn_external_value{input0_id, reinterpret_cast<void*>(qa_contig.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{input1_id, reinterpret_cast<void*>(qb_contig.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{output_id, reinterpret_cast<void*>(qy.mutable_data_ptr<scalar_t>())}};
 
   status = xnn_setup_runtime(
     runtime_ptr,

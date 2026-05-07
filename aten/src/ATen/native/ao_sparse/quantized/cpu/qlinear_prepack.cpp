@@ -190,10 +190,10 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       at::device(c10::kCPU).dtype(c10::kQUInt8),
       weight_scales_data[0],
       w_zero_points_[0]);
-  auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+  auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
   auto wt_numel = weight_contig.numel();
   int8_t* w_data =
-      reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_contig.mutable_data_ptr<c10::qint8>());
   for (const auto i : c10::irange(wt_numel)) {
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }

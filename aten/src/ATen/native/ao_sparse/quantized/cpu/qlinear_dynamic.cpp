@@ -128,7 +128,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
           reinterpret_cast<const uint8_t*>(q_input_contig.const_data_ptr<c10::quint8>()),
           cols_input, /* num input channels */
           bias_.const_data_ptr<float>(),
-          output.data_ptr<float>(),
+          output.mutable_data_ptr<float>(),
           output_channels_);
   TORCH_CHECK(
       status == pytorch_qnnp_status_success,

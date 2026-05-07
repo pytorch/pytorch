@@ -156,7 +156,7 @@ void _calculate_moving_average(
 
   at::Tensor x_min, x_max;
 
-  int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
+  int64_t* observer_on_data = observer_on.mutable_data_ptr<int64_t>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (per_row_fq) {
@@ -165,11 +165,11 @@ void _calculate_moving_average(
     const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
-          scalar_t* x_min_data = x_min.data_ptr<scalar_t>();
-          scalar_t* x_max_data = x_max.data_ptr<scalar_t>();
+          scalar_t* x_min_data = x_min.mutable_data_ptr<scalar_t>();
+          scalar_t* x_max_data = x_max.mutable_data_ptr<scalar_t>();
 
-          scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
-          scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
+          scalar_t* running_min_data = running_min.mutable_data_ptr<scalar_t>();
+          scalar_t* running_max_data = running_max.mutable_data_ptr<scalar_t>();
 
           // Moving Average Min/Max observer for activations
           MovingAverageMinMax<<<num_blocks, num_threads, 0, cuda_stream>>>(
@@ -186,11 +186,11 @@ void _calculate_moving_average(
     std::tie(x_min, x_max) = at::aminmax(x);
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
-          scalar_t* x_min_data = x_min.data_ptr<scalar_t>();
-          scalar_t* x_max_data = x_max.data_ptr<scalar_t>();
+          scalar_t* x_min_data = x_min.mutable_data_ptr<scalar_t>();
+          scalar_t* x_max_data = x_max.mutable_data_ptr<scalar_t>();
 
-          scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
-          scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
+          scalar_t* running_min_data = running_min.mutable_data_ptr<scalar_t>();
+          scalar_t* running_max_data = running_max.mutable_data_ptr<scalar_t>();
 
           // Moving Average Min/Max observer for activations
           MovingAverageMinMax<<<1, 1, 0, cuda_stream>>>(
@@ -222,12 +222,12 @@ void _calc_moving_avg_qparams_helper(
   device_guard.set_index(x.get_device());
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
+  int64_t* fake_quant_on_data = fake_quant_on.mutable_data_ptr<int64_t>();
   if (per_row_fq) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
-          scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
-          scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
+          scalar_t* running_min_data = running_min.mutable_data_ptr<scalar_t>();
+          scalar_t* running_max_data = running_max.mutable_data_ptr<scalar_t>();
           int num_threads = std::min(size, (int64_t)512);
           const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
           ChooseQuantizationParamsKernelImpl<<<
@@ -249,8 +249,8 @@ void _calc_moving_avg_qparams_helper(
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
-          scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
-          scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
+          scalar_t* running_min_data = running_min.mutable_data_ptr<scalar_t>();
+          scalar_t* running_max_data = running_max.mutable_data_ptr<scalar_t>();
           ChooseQuantizationParamsKernelImpl<<<1, 1, 0, cuda_stream>>>(
               fake_quant_on_data,
               running_min_data,
@@ -326,8 +326,8 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
         per_row_fq);
   }
 
-  float* scale_ptr = scale.data_ptr<float>();
-  int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  float* scale_ptr = scale.mutable_data_ptr<float>();
+  int32_t* zp_ptr = zero_point.mutable_data_ptr<int32_t>();
 
   _calc_moving_avg_qparams_helper(
       x_contig,

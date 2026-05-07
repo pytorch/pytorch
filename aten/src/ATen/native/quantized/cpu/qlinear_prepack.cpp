@@ -361,7 +361,7 @@ namespace at::native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float* weight_contig_ptr = weight_contig.mutable_data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }

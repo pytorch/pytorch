@@ -108,7 +108,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         "bias should have N elements: " + std::to_string(N));
     // TODO: contiguous is called for further jit optimizations.
     auto bias_contig = bias_vec.contiguous();
-    bias_ptr = bias_contig.data_ptr<float>();
+    bias_ptr = bias_contig.mutable_data_ptr<float>();
   }
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input. Here are two examples:
@@ -180,8 +180,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C=*/output.mutable_data_ptr<float>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -214,8 +214,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C=*/output.mutable_data_ptr<float>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -289,7 +289,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       /*max=*/x_max,
       /*qmin=*/0,
       /*qmax=*/255);
-  float* weight_scales_data = w_scales.data_ptr<float>();
+  float* weight_scales_data = w_scales.mutable_data_ptr<float>();
 
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
@@ -312,8 +312,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
         w_zero_points[0]);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
+    int8_t* w_data = reinterpret_cast<int8_t*>(weight_contig.mutable_data_ptr<c10::qint8>());
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -370,7 +370,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       bias_ptr,
-      output.data_ptr<float>(),
+      output.mutable_data_ptr<float>(),
       rows_w /* output_stride */,
       caffe2::pthreadpool_() /* threadpool */);
 
@@ -422,7 +422,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
-  auto output_data = output.data_ptr<float>();
+  auto output_data = output.mutable_data_ptr<float>();
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
