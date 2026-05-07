@@ -1906,6 +1906,12 @@ class ConstructorMoverPass:
             if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
+            if (
+                torch._inductor.config.fallback_random
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
+                continue
+
             constructors.append(node)
 
         # not handling multiple target devices initially
