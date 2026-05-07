@@ -731,8 +731,8 @@ Tensor& addmm_out_sparse_compressed_cpu(
       " without MKL. PyTorch built with MKL has better support for addmm with sparse CPU tensors.");
 #else
   sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
-#endif
   return result;
+#endif
 }
 
 Tensor addmm_sparse_compressed_dense(
@@ -1097,8 +1097,8 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values_acc = std::get<1>(acc_buffer);
   new_values_acc.fill_(rop.identity());
 
-  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
+  const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
   acc_t* new_values_acc_ptr =
       new_values_acc.data_ptr<acc_t>();
 
@@ -1186,7 +1186,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
-    index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
+    const index_t* crow_indices_ptr = crow_indices.const_data_ptr<index_t>();
     index_t* new_crow_indices_ptr = new_crow_indices.data_ptr<index_t>();
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;

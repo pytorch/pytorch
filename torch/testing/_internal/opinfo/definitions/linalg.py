@@ -29,9 +29,14 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_LINUX,
+    MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -476,7 +481,8 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             return None
         if kwarg_type == "float":
             return 1.0
-        assert kwarg_type == "tensor"
+        if kwarg_type != "tensor":
+            raise AssertionError(f"Expected kwarg_type == 'tensor', got {kwarg_type!r}")
         return torch.ones(inp.shape[:-2], device=device)
 
     for tol_type in ["float", "tensor"]:
@@ -488,7 +494,10 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             for sample in sample_inputs_linalg_invertible(
                 op_info, device, dtype, requires_grad
             ):
-                assert sample.kwargs == {}
+                if sample.kwargs != {}:
+                    raise AssertionError(
+                        f"Expected sample.kwargs == {{}}, got {sample.kwargs}"
+                    )
                 sample.kwargs = {
                     "atol": make_tol_arg(atol_type, sample.input),
                     "rtol": make_tol_arg(rtol_type, sample.input),
@@ -1178,6 +1187,18 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
         check_batched_gradgrad=False,
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.diagonal",
@@ -1203,6 +1224,19 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            # Exception: linalg.cholesky: The factorization could not be completed because the input is not positive-definite
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.cholesky_ex",
@@ -1215,6 +1249,23 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_cholesky,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.bfloat16, torch.float16}. The following dtypes did
+            # not work in backward but are listed by the OpInfo:
+            # {torch.complex64}.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            # RuntimeError: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.vecdot",
@@ -1274,6 +1325,8 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1313,6 +1366,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1350,6 +1405,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1386,6 +1443,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1423,6 +1482,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1431,6 +1492,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.householder_product,
         aliases=("orgqr",),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_and_complex_types_and(torch.bfloat16, torch.float16),
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         # TODO: backward uses in-place operations that vmap doesn't like
@@ -1453,6 +1515,13 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.complex128,),
             ),
+            # Exception: "orgqr_cpu" not implemented for 'Half'
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConsistency",
+                device_type="mps",
+                dtypes=(torch.bfloat16, torch.float16),
+            ),
             skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
     ),
@@ -1463,6 +1532,10 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.ldl_factor_ex",
@@ -1471,6 +1544,10 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.ldl_solve",
@@ -1483,6 +1560,10 @@ op_db: list[OpInfo] = [
             skipCUDAIfRocm,
             skipCPUIfNoLapack,
         ],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.lstsq",
@@ -1520,6 +1601,17 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # see https://github.com/pytorch/pytorch/issues/177249
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+                dtypes=[torch.complex64],
+                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+            ),
         ),
     ),
     OpInfo(
@@ -1549,6 +1641,8 @@ op_db: list[OpInfo] = [
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
             ),
+            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1569,6 +1663,30 @@ op_db: list[OpInfo] = [
                 "TestConsistency",
                 "test_output_grad_match",
                 device_type="mps",
+            ),
+            # RuntimeError: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=MACOS_VERSION < 26.0,
             ),
         ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
@@ -1610,6 +1728,15 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.long,),
             ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=MACOS_VERSION < 26.0,
+            ),
         ),
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
@@ -1643,6 +1770,40 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -1673,6 +1834,40 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -1702,6 +1897,28 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -1709,6 +1926,7 @@ op_db: list[OpInfo] = [
         aten_name="linalg_qr",
         op=torch.linalg.qr,
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # In-place ops
@@ -1725,6 +1943,18 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.vander",
@@ -1780,6 +2010,20 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
+            # Exception: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1800,6 +2044,20 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
+            ),
+            # Exception: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -1823,6 +2081,20 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
+            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1841,6 +2113,24 @@ op_db: list[OpInfo] = [
                 unittest.skip("Tests different backward paths"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
+            ),
+            # RuntimeError: The size of tensor a (5) must match the size of tensor b (4) at non-singleton dimension 1
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            # AssertionError: The values for attribute 'shape' do not match: torch.Size([3, 4]) != torch.Size([0]).
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # RuntimeError: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
@@ -1878,6 +2168,16 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1912,6 +2212,16 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1932,6 +2242,16 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="cpu",
+            ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ],
         skips=(
@@ -1998,6 +2318,16 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -2007,7 +2337,23 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(skipCPUIfNoLapack,),
+        skips=(
+            skipCPUIfNoLapack,
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # Exception: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),
@@ -2040,6 +2386,25 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=[torch.complex64, torch.float32],
             ),
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -2064,6 +2429,25 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
             ),
         ),
     ),
@@ -2099,6 +2483,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -2179,6 +2564,40 @@ op_db: list[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
+            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_requires_grad_error",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
+            # see https://github.com/pytorch/pytorch/issues/177264
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                device_type="cpu",
+                dtypes=[torch.float32],
+                active_if=IS_ARM64 and IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -2198,27 +2617,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_svd,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
         skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestFakeTensor",
@@ -2267,6 +2665,8 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -2284,6 +2684,16 @@ op_db: list[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
+            ),
+            # Exception: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2317,10 +2727,15 @@ op_db: list[OpInfo] = [
             ),
         ],
         skips=(
+            # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
-                unittest.skip("Unsupported on MPS for now"),
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
                 "TestCommon",
-                "test_numpy_ref_mps",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2367,6 +2782,23 @@ python_ref_db: list[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
+        skips=(
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float32, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float32, torch.complex64),
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.norm",
@@ -2376,6 +2808,23 @@ python_ref_db: list[OpInfo] = [
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
         op_db=op_db,
+        skips=(
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float32, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float32, torch.complex64),
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svd",
@@ -2388,5 +2837,20 @@ python_ref_db: list[OpInfo] = [
         torch_opinfo_name="linalg.svdvals",
         supports_out=True,
         op_db=op_db,
+        skips=(
+            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+            ),
+        ),
     ),
 ]

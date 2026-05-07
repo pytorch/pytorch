@@ -10,7 +10,6 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import (
@@ -39,7 +38,8 @@ def count_ops(
         return False
 
     if op is not None:
-        assert not isinstance(op, list)
+        if isinstance(op, list):
+            raise AssertionError("Expected op to not be a list")
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -52,17 +52,20 @@ def count_ops(
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
-            assert actual_count == freq, err_msg
+            if actual_count != freq:
+                raise AssertionError(err_msg)
     else:
-        assert freqs_ge is not None
+        if freqs_ge is None:
+            raise AssertionError("Expected freqs_ge to not be None")
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert actual_count >= freq_ge, (
-                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
-            )
+            if actual_count < freq_ge:
+                raise AssertionError(
+                    f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+                )
     return gm
 
 
@@ -93,6 +96,33 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIn("inductor_compiled_code", debug_string)
 
         # Result should be correct
+        expected = torch.matmul(x, y)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    def test_wrap_name_visible_in_debug_mode(self):
+        """Test that named compiled regions surface their name in DebugMode"""
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+            name="flex_attention",
+        )
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+
+        with DebugMode() as debug_mode:
+            result = fn(x, y)
+
+        debug_string = debug_mode.debug_string()
+
+        self.assertIn("inductor_compiled_code", debug_string)
+        self.assertIn("name=flex_attention", debug_string)
+
         expected = torch.matmul(x, y)
         self.assertEqual(result, expected)
 
@@ -459,7 +489,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertNotIn("inductor_compiled_code", debug_unwrapped.debug_string())
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_wrapper_basic(self):
         """Test that flex_attention works with wrap_inductor_compiled_regions=True"""
 
@@ -496,7 +525,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(output, output_unwrapped, rtol=1e-3, atol=1e-3)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_wrapper_visible_in_debug_mode(self):
         """Test that inductor_compiled_code HOP is visible to DebugMode when wrapper is enabled"""
 
@@ -547,7 +575,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         )
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_wrapper_with_backward(self):
         """Test that wrapper works correctly with backward pass"""
 
@@ -605,7 +632,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -675,7 +701,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(result1, result2)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_sac_must_save(self):
         """
         Test that SAC policy MUST_SAVE for flex_attention_hop
@@ -760,7 +785,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(v.grad)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_sac_prefer_recompute(self):
         """
         Test that SAC policy PREFER_RECOMPUTE for flex_attention_hop
@@ -926,6 +950,60 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(y.grad, y_eager.grad)
 
     @requires_cuda_and_triton
+    def test_sac_outer_compile_inner_name_visible_to_policy(self):
+        """Test that SAC policies can inspect torch.compile region names"""
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+            name="flex_attention",
+        )
+        def inner_compiled_matmul(x, y):
+            return torch.matmul(x, y)
+
+        seen_region_names = []
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
+            if op == inductor_compiled_code:
+                seen_region_names.append(kwargs.get("name"))
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def checkpointed_fn(x, y):
+            a = inner_compiled_matmul(x, y)
+            return torch.relu(a)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        x_eager = x.detach().clone().requires_grad_(True)
+        y_eager = y.detach().clone().requires_grad_(True)
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        output = checkpoint(
+            checkpointed_fn,
+            x,
+            y,
+            use_reentrant=False,
+            context_fn=context_fn,
+        )
+        loss = output.sum()
+        loss.backward()
+
+        a_eager = torch.matmul(x_eager, y_eager)
+        b_eager = torch.relu(a_eager)
+        loss_eager = b_eager.sum()
+        loss_eager.backward()
+
+        self.assertIn("flex_attention", seen_region_names)
+        self.assertEqual(output, b_eager)
+        self.assertEqual(x.grad, x_eager.grad)
+        self.assertEqual(y.grad, y_eager.grad)
+
+    @requires_cuda_and_triton
     def test_wrap_no_dispatch_mode_no_hop_invoked(self):
         """
         Test that without TorchDispatchMode, the HOP is NOT invoked.
@@ -989,7 +1067,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             self.assertEqual(result_with, expected2)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_sac_outer_compile_inner_flex_attention(self):
         """
         Test SAC(compile(foo)) with flex_attention - the key motivating use case.
@@ -1071,6 +1148,76 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(q.grad, q2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
+
+    def test_fake_tensor_mode_works(self):
+        """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+
+            # The FX graph is now serialized using SerializedGraphModule, so it
+            # survives cache serialization/deserialization and works with caching
+            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+                # This should now work - the inductor_compiled_code HOP will
+                # use the stored FX graph to propagate fake tensors
+                result = torch.compile(model)(inp)
+                # Verify the result has the expected shape
+                self.assertEqual(result.shape, (4, 4))
+
+    def test_proxy_tensor_mode_works(self):
+        """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""
+        from torch._higher_order_ops.wrap import (
+            inductor_code_side_table,
+            inductor_compiled_code,
+            InductorCompiledCallable,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Reset the side table for a clean test
+        inductor_code_side_table.reset_table()
+
+        # Create a simple FX graph
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel()
+        gm = torch.fx.symbolic_trace(model)
+
+        # Create an InductorCompiledCallable
+        # The compiled callable should match FX graph's output convention
+        def simple_compiled(inputs):
+            return inputs[0] + 1
+
+        callable_obj = InductorCompiledCallable(simple_compiled, gm)
+
+        # Wrapper that uses the HOP
+        def wrapper(x):
+            return inductor_compiled_code(callable_obj, [x])
+
+        inp = torch.randn(4, 4)
+        traced = make_fx(wrapper)(inp)
+
+        # Verify the traced graph contains the inductor_compiled_code HOP
+        hop_found = False
+        for node in traced.graph.nodes:
+            if node.op == "call_function" and "inductor_compiled_code" in str(
+                node.target
+            ):
+                hop_found = True
+                # Verify the callable index is an int
+                self.assertIsInstance(node.args[0], int)
+                break
+        self.assertTrue(
+            hop_found, "inductor_compiled_code HOP not found in traced graph"
+        )
+
+        # Verify the traced graph can be executed and produces correct results
+        result = traced(inp)
+        expected = inp + 1
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,3 @@
-ERROR
-  File "/tmp/tmp03wy1dek/su/csuqy7tiuk2igasnq3hbfiifzvoi43xnrkyjxpr64pgludu3vd7b.py", line 16, in pallas_fused_avg_pool2d_backward_f1aa9c16_kernel
-    tmp2 = max(0, (1 + y0) // 2)
-           ^^^^^^^^^^^^^^^^^^^^^
-ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+FAIL
+AssertionError: Tensor-likes are not close!
+Numerical accuracy issue in avg_pool backward

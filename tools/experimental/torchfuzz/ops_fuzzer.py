@@ -38,19 +38,9 @@ def _get_template_filtered_operators(
     registry. Otherwise, the template's supported_ops are used. If neither are
     specified, all operators are returned.
     """
-    # Instantiate template
-    if template == "dtensor":
-        from torchfuzz.codegen import DTensorFuzzTemplate
+    from torchfuzz.codegen import make_template
 
-        fuzz_template = DTensorFuzzTemplate()
-    elif template == "unbacked":
-        from torchfuzz.codegen import UnbackedFuzzTemplate
-
-        fuzz_template = UnbackedFuzzTemplate()
-    else:
-        from torchfuzz.codegen import DefaultFuzzTemplate
-
-        fuzz_template = DefaultFuzzTemplate()
+    fuzz_template = make_template(template)
 
     all_operators = _get_cached_operators()
 
@@ -59,6 +49,9 @@ def _get_template_filtered_operators(
 
     # If no supported_ops specified, return all operators
     if not allowed_ops:
+        for operator in all_operators.values():
+            if hasattr(operator, "set_template"):
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
         return all_operators
 
     # Filter operators based on allowed_ops
@@ -71,7 +64,7 @@ def _get_template_filtered_operators(
         if torch_op is None:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
             continue
 
@@ -91,7 +84,7 @@ def _get_template_filtered_operators(
         if should_include:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
 
     return filtered_ops
@@ -235,19 +228,9 @@ def fuzz_spec(template: str = "default") -> Spec:
     """
     # Try to use template's custom distribution if available
     try:
-        # Instantiate template
-        if template == "dtensor":
-            from torchfuzz.codegen import DTensorFuzzTemplate
+        from torchfuzz.codegen import make_template
 
-            fuzz_template = DTensorFuzzTemplate()
-        elif template == "unbacked":
-            from torchfuzz.codegen import UnbackedFuzzTemplate
-
-            fuzz_template = UnbackedFuzzTemplate()
-        else:
-            from torchfuzz.codegen import DefaultFuzzTemplate
-
-            fuzz_template = DefaultFuzzTemplate()
+        fuzz_template = make_template(template)
 
         # Use template's custom spec generation
         return fuzz_template.fuzz_spec_custom()

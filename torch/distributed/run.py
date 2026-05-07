@@ -277,6 +277,19 @@ Membership Changes
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
 
+NUMA Binding
+------------
+
+On multi-GPU systems with NUMA (Non-Uniform Memory Access) architecture, you can improve
+performance by binding worker processes to CPUs near their assigned GPUs. Use the
+``--numa-binding`` flag:
+
+::
+
+    torchrun --numa-binding=node --nproc-per-node=8 train.py
+
+See :ref:`numa-api` for more details.
+
 Important Notices
 -----------------
 
@@ -367,7 +380,7 @@ utility
 
     if __name__ == "__main__":
         main()
-"""  # noqa: E501
+"""
 
 import os
 import sys
@@ -609,7 +622,8 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training.",
+        help="Rank of the node for multi-node distributed training. It is only used for static "
+        "rendezvous (i.e., when ``--rdzv-backend=static``).",
     )
     parser.add_argument(
         "--master-addr",
@@ -625,11 +639,11 @@ def get_args_parser() -> ArgumentParser:
     parser.add_argument(
         "--master-port",
         "--master_port",
-        default=29500,
+        default=None,
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training. It is only used for static rendezvous.",
+        "training. It is only used for static rendezvous. Defaults to 29500.",
     )
     parser.add_argument(
         "--local-addr",
@@ -657,23 +671,8 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         choices=[mode.value for mode in _AffinityMode],
         default=None,
-        help="""
-        If provided, we will affinitize the worker processes based on NUMA nodes
-        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
-        same NUMA node.)
-
-        NOTE: This is currently only supported for GPUs, and we assume
-        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
-        accurate for your workload, this feature may be a pessimization.
-
-        Available options are:
-          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
-          but other options may perform even slightly better in some cases.
-          - socket: Processes are bound to cpu cores within a socket.
-          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
-          - core-complex: Processes are bound to cpu cores in a core-complex.
-          NOTE: The core-complex option might not achieve optimal performance on architectures
-          featuring a single L3 cache per socket.""",
+        help="Bind worker processes to CPUs near their assigned GPUs for better performance. "
+        "See torch/numa/binding.py for available modes and details.",
     )
 
     parser.add_argument(
@@ -685,6 +684,17 @@ def get_args_parser() -> ArgumentParser:
         help="Comma-separated list of signals to handle and forward to subprocesses. "
         "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
         "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
+    parser.add_argument(
+        "--shutdown-timeout",
+        "--shutdown_timeout",
+        action=env,
+        type=int,
+        default=None,
+        help="Time in seconds to wait for graceful shutdown of worker processes before "
+        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
+        "variable or defaults to 30 seconds.",
     )
 
     parser.add_argument(
@@ -738,7 +748,7 @@ def determine_local_world_size(nproc_per_node: str):
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
-            num_proc = os.cpu_count()
+            num_proc = torch._utils.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
@@ -760,7 +770,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = torch.accelerator.device_count()
                 device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
-                num_proc = os.cpu_count()
+                num_proc = torch._utils.cpu_count()
                 device_type = "cpu"
         else:
             raise ValueError(
@@ -819,7 +829,7 @@ def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
             )
 
         logger.info(
-            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, logs_specs_cls
         )
     else:
         logs_specs_cls = DefaultLogsSpecs
@@ -845,6 +855,17 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
+        )
+
+    if (
+        hasattr(args, "node_rank")
+        and args.node_rank != 0
+        and args.rdzv_backend != "static"
+    ):
+        logger.warning(
+            "node_rank is only used for static rdzv_backend. It will be ignored "
+            "for rdzv_backend=%s.",
+            args.rdzv_backend,
         )
 
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
@@ -883,7 +904,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -917,6 +938,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
         virtual_local_rank=args.virtual_local_rank,
+        shutdown_timeout=args.shutdown_timeout,
     )
 
     with_python = not args.no_python
@@ -978,6 +1000,20 @@ def run(args):
             args.rdzv_endpoint,
             args.rdzv_id,
         )
+    elif (
+        args.rdzv_backend == "static"
+        and not args.rdzv_endpoint
+        and args.master_port is None
+    ):
+        _, max_nodes = parse_min_max_nnodes(args.nnodes)
+        if max_nodes == 1:
+            args.rdzv_backend = "c10d"
+            args.rdzv_endpoint = "localhost:0"
+            args.rdzv_id = str(uuid.uuid4())
+
+    # master_port is only used for the static rendezvous backend, not c10d
+    if args.master_port is None:
+        args.master_port = 29500
 
     config, cmd, cmd_args = config_from_args(args)
     elastic_launch(

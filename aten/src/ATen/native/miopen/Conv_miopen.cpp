@@ -278,7 +278,7 @@ BenchmarkCache<size_t> bwd_filter_wssizes;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+    data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = delete;
@@ -286,7 +286,7 @@ struct Workspace {
   Workspace& operator=(Workspace&&) = delete;
   ~Workspace() {
     if (data) {
-      c10::hip::HIPCachingAllocator::raw_delete(data);
+      c10::cuda::CUDACachingAllocator::raw_delete(data);
     }
   }
 
@@ -588,7 +588,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   wsscache.insert(args.params, perfResults.memory);
 
   if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
-      c10::hip::HIPCachingAllocator::emptyCache();
+      c10::cuda::CUDACachingAllocator::emptyCache();
   }
 
 }
@@ -1088,7 +1088,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
     grad_bias = miopen_convolution_backward_bias(grad_output);
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 // ---------------------------------------------------------------------
@@ -1572,7 +1572,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     }
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 Tensor miopen_convolution_transpose_forward(
@@ -1761,7 +1761,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
     grad_bias = miopen_convolution_backward_bias(grad_output);
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 // ---------------------------------------------------------------------

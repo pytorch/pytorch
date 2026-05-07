@@ -60,7 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_MTIA,
     TestCase,
 )
-from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._import_utils import import_dill
 from pickle import UnpicklingError
 
@@ -136,8 +136,10 @@ def up_size(size):
 class UInt4Tensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, **kwargs):
-        assert elem.dtype is torch.uint8
-        assert not kwargs.get("requires_grad", False)
+        if elem.dtype is not torch.uint8:
+            raise AssertionError(f"expected dtype torch.uint8, got {elem.dtype}")
+        if kwargs.get("requires_grad", False):
+            raise AssertionError("requires_grad must be False")
         kwargs["requires_grad"] = False
         return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.uint4, **kwargs)
 
@@ -152,8 +154,10 @@ class UInt4Tensor(torch.Tensor):
 class Int4Tensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, **kwargs):
-        assert elem.dtype is torch.uint8
-        assert not kwargs.get("requires_grad", False)
+        if elem.dtype is not torch.uint8:
+            raise AssertionError(f"expected dtype torch.uint8, got {elem.dtype}")
+        if kwargs.get("requires_grad", False):
+            raise AssertionError("requires_grad must be False")
         kwargs["requires_grad"] = False
         return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.int4, **kwargs)
 
@@ -1214,6 +1218,10 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
+            # Delete the original model before loading another one to
+            # reduce peak memory from ~12GB to ~8GB
+            del big_model
+            gc.collect()
             f.seek(0)
             torch.load(f)
 
@@ -4665,7 +4673,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             try:
                 old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
-                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807
+                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()
                 unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
                 self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
             finally:
@@ -4882,14 +4890,16 @@ class TestSerialization(TestCase, SerializationMixin):
                 [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
             ], dtype=torch.uint8))
 
-            assert x.dtype == dtype
+            if x.dtype != dtype:
+                raise AssertionError(f"expected x.dtype == {dtype}, got {x.dtype}")
 
             with tempfile.NamedTemporaryFile() as checkpoint:
                 torch.save(x, checkpoint)
                 checkpoint.seek(0)
                 y = torch.load(checkpoint)
 
-            assert x.dtype == y.dtype
+            if x.dtype != y.dtype:
+                raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipIfTorchDynamo("getrefcount does not work in dynamo")
     def test_serializaion_no_storage_leak(self):
@@ -4902,6 +4912,41 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(state_dict, checkpoint)
         ref2 = sys.getrefcount(storage)
         self.assertEqual(ref1, ref2)
+
+    def test_load_safetensors(self):
+        # Test loading .safetensors files
+        try:
+            import safetensors.torch
+        except ImportError:
+            self.skipTest("safetensors not installed")
+
+        # Create a simple state dict
+        state_dict = {
+            'tensor1': torch.randn(3, 4),
+            'tensor2': torch.randn(5, 6),
+            'tensor3': torch.tensor([1, 2, 3, 4, 5]),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "state.safetensors")
+            safetensors.torch.save_file(state_dict, path)
+
+            # Test loading with torch.load (no map_location)
+            loaded = torch.load(path)
+            self.assertEqual(len(loaded), len(state_dict))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded[key]))
+
+            # Test loading with map_location as string
+            loaded_cpu = torch.load(path, map_location='cpu')
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu[key]))
+                self.assertEqual(loaded_cpu[key].device.type, 'cpu')
+
+            # Test loading with map_location as torch.device
+            loaded_cpu2 = torch.load(path, map_location=torch.device('cpu'))
+            for key in state_dict:
+                self.assertTrue(torch.equal(state_dict[key], loaded_cpu2[key]))
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
@@ -5126,6 +5171,154 @@ class TestSubclassSerialization(TestCase):
                 self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
                 self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
                 self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
+
+    @parametrize("opcode,opcode_name", [
+        (b's', "SETITEM"),
+        (b'u', "SETITEMS"),
+    ])
+    def test_weights_only_setitem_on_non_dict_rejected(self, opcode, opcode_name):
+        # Test that SETITEM/SETITEMS cannot be used on non-dict types (tensor, list, etc.)
+        # This tests the fix that restricts SETITEM/SETITEMS to dict, OrderedDict, Counter
+        # This prevents using SETITEM/SETITEMS to write out of bounds on a tensor
+
+        t = torch.zeros(10)
+        buffer = io.BytesIO()
+        torch.save(t, buffer)
+        buffer.seek(0)
+
+        with zipfile.ZipFile(buffer, 'r') as zf:
+            original_pkl = zf.read('archive/data.pkl')
+
+        # The original pickle ends with STOP (b'.')
+        # We'll modify it to:
+        # 1. Remove the STOP
+        # 2. Add: MARK (for SETITEMS), push index, push value, SETITEM/SETITEMS, STOP
+        # This will try to call tensor.__setitem__(100, 42.0) which should fail
+        if not original_pkl.endswith(b'.'):
+            raise AssertionError("Expected pickle to end with STOP opcode")
+
+        if opcode == b'u':  # SETITEMS needs a MARK
+            malicious_pkl = (
+                original_pkl[:-1] +  # Remove STOP
+                b'(' +  # MARK
+                b'K\x64' +  # BININT1 100 - index (out of bounds)
+                b'G@E\x00\x00\x00\x00\x00\x00' +  # BINFLOAT 42.0 - value
+                opcode +  # SETITEMS
+                b'.'  # STOP
+            )
+        else:  # SETITEM
+            malicious_pkl = (
+                original_pkl[:-1] +  # Remove STOP
+                b'K\x64' +  # BININT1 100 - index (out of bounds)
+                b'G@E\x00\x00\x00\x00\x00\x00' +  # BINFLOAT 42.0 - value
+                opcode +  # SETITEM
+                b'.'  # STOP
+            )
+
+        # Create a modified archive with the malicious pickle
+        modified_buffer = io.BytesIO()
+        with zipfile.ZipFile(modified_buffer, 'w') as zf_out:
+            with zipfile.ZipFile(buffer, 'r') as zf_in:
+                for name in zf_in.namelist():
+                    if name == 'archive/data.pkl':
+                        zf_out.writestr(name, malicious_pkl)
+                    else:
+                        zf_out.writestr(name, zf_in.read(name))
+
+        modified_buffer.seek(0)
+
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError,
+            f"Can only {opcode_name} for dict, collections.OrderedDict, collections.Counter"
+        ):
+            torch.load(modified_buffer, weights_only=True)
+
+    def test_weights_only_arbitrary_numel_in_persistent_id_rejected(self):
+        # Test that a mismatched numel in persistent_id causes an error
+        # The C++ code checks that record size == numel * element_size
+        t = torch.randn(10)  # 10 float32 elements = 40 bytes
+
+        with BytesIOContext() as f:
+            torch.save(t, f)
+            f.seek(0)
+            valid_data = f.getvalue()
+
+        with zipfile.ZipFile(io.BytesIO(valid_data), 'r') as zf:
+            original_pkl = zf.read('archive/data.pkl')
+            original_data = zf.read('archive/data/0')
+
+        self.assertEqual(len(original_data), 40)
+
+        # Create a modified archive where the storage is smaller than what the pickle requests
+        # We keep the original pickle (which requests 10 elements = 40 bytes)
+        # but replace the storage data with fewer bytes
+        modified_archive = io.BytesIO()
+        with zipfile.ZipFile(modified_archive, 'w') as zf:
+            # Write the original pickle that expects 10 elements (40 bytes)
+            zf.writestr('archive/data.pkl', original_pkl)
+            # Write truncated storage data (only 20 bytes instead of 40)
+            zf.writestr('archive/data/0', original_data[:20])
+            # Copy other necessary files
+            with zipfile.ZipFile(io.BytesIO(valid_data), 'r') as orig_zf:
+                for name in orig_zf.namelist():
+                    if name not in ['archive/data.pkl', 'archive/data/0']:
+                        zf.writestr(name, orig_zf.read(name))
+
+        modified_archive.seek(0)
+
+        with self.assertRaisesRegex(RuntimeError, r"record size \(20 bytes\) does not match expected size \(40 bytes"):
+            torch.load(modified_archive, weights_only=True)
+
+    def test_weights_only_invalid_persistent_id_type_in_error_message(self):
+        # Test that the error message for invalid persistent_id shows the type, not the value
+        t = torch.randn(10)
+
+        buffer = io.BytesIO()
+        torch.save(t, buffer)
+        buffer.seek(0)
+
+        with zipfile.ZipFile(buffer, 'r') as zf:
+            original_pkl = zf.read('archive/data.pkl')
+
+        # Find the BINPERSID opcode (0x51 = 'Q') in the pickle
+        # The persistent_id tuple on the stack before BINPERSID should have "storage" as first element
+        # We'll craft a pickle that has a different first element type
+
+        # Build a malicious pickle that puts a tuple with an integer as first element
+        # then calls BINPERSID on it
+        # Pickle opcodes:
+        # PROTO 2: b'\x80\x02'
+        # EMPTY_TUPLE: b')'
+        # BININT1 42: b'K*'  (42 as the first element instead of "storage")
+        # TUPLE1: b'\x85'  (make a 1-tuple from the top stack item)
+        # BINPERSID: b'Q'
+        # STOP: b'.'
+        malicious_pkl = (
+            b'\x80\x02'  # PROTO 2
+            + b'K*'  # BININT1 42
+            + b'\x85'  # TUPLE1 - creates (42,)
+            + b'Q'  # BINPERSID - calls persistent_load with (42,)
+            + b'.'  # STOP
+        )
+
+        # Create a modified archive with the malicious pickle
+        modified_buffer = io.BytesIO()
+        with zipfile.ZipFile(modified_buffer, 'w') as zf_out:
+            with zipfile.ZipFile(buffer, 'r') as zf_in:
+                for name in zf_in.namelist():
+                    if name == 'archive/data.pkl':
+                        zf_out.writestr(name, malicious_pkl)
+                    else:
+                        zf_out.writestr(name, zf_in.read(name))
+
+        modified_buffer.seek(0)
+
+        # The error should show the type (int) not the value (42)
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError,
+            r"Only persistent_load of storage is allowed, but got <class 'int'>"
+        ):
+            torch.load(modified_buffer, weights_only=True)
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.fx.experimental.symbolic_shapes import has_free_symbols, optimization_hint
 from torch.utils._ordered_set import OrderedSet
 
 from .. import ir, mkldnn_ir
@@ -104,7 +104,7 @@ if torch._C._has_mkldnn:
             # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
             packed_weight_inputs = (
                 transpose_weight_node,
-                batch_size.node.shape_env.size_hint(batch_size.node.expr)
+                optimization_hint(batch_size)
                 if has_free_symbols(batch_size)
                 else batch_size,
             )
@@ -361,8 +361,15 @@ if torch._C._has_mkldnn:
         )
 
     def _silu_fusion(computation_call):
+        # Match: x / (exp(-x) + 1) pattern used by inductor's silu decomposition
         return CallFunction(
-            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
+            aten.div,
+            computation_call,
+            CallFunction(
+                aten.add,
+                CallFunction(aten.exp, CallFunction(aten.neg, computation_call)),
+                1,
+            ),
         )
 
     def _hardsigmoid_fusion(computation_call):
@@ -716,7 +723,6 @@ if torch._C._has_mkldnn:
             if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
-                # pyrefly: ignore [missing-attribute]
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):

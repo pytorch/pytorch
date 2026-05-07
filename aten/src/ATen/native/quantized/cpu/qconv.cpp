@@ -1490,7 +1490,9 @@ static at::Tensor _fp8_convolution_onednn_ref(
       y_f32 = y_f32.to(at::kHalf);
     }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
-    return x1;
+    // Return a copy: custom ops must not return tensors that alias inputs.
+    // The accum buffer has already been mutated in-place above.
+    return x1.clone();
   } else {
     TORCH_CHECK(
         false,
@@ -1625,7 +1627,11 @@ static at::Tensor _quantized_convolution_onednn(
     func_name, ": dilation should contain ", kSpatialDim, " elements for ",
     kSpatialDim, "D convolution.");
   bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
+#ifdef ONEDNN_FP8_QCONV_SUPPORTED
+  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#else
   if (is_fp8) {
+#endif
     TORCH_CHECK(act_dtype == c10::ScalarType::Float8_e4m3fn,
       func_name, ": expect input tensor to have fp8 data type, but got ", act_dtype);
     TORCH_CHECK(act_zero_point == 0,
@@ -1747,7 +1753,9 @@ static at::Tensor _quantized_convolution_onednn(
               c10::MemoryFormat::ChannelsLast3d)
     );
   if (output.numel() == 0) {
-    return output;
+    // When has_accum_postop_sum, output aliases accum (the input). Custom ops
+    // must not return tensors that alias inputs, so return a copy.
+    return has_accum_postop_sum ? output.clone() : output;
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
   static ideep::tensor::desc dummy_accum_desc;
@@ -1881,10 +1889,12 @@ static at::Tensor _quantized_convolution_onednn(
 
   if (is_1d) {
     output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-    return output;
   }
   if (has_accum_postop_sum) {
-    return accum.value();
+    // When has_accum_postop_sum, output aliases accum (the input) — see
+    // assignment above. Return a copy: custom ops must not return tensors
+    // that alias inputs.
+    return output.clone();
   } else {
     return output;
   }

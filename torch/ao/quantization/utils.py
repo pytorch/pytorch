@@ -4,12 +4,12 @@ Utils shared by different modes of quantization (eager/graph)
 """
 
 import functools
-import sys
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Union
+from typing import Any
+from typing_extensions import TypeAliasType
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -17,15 +17,9 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-if sys.version_info < (3, 12):
-    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-    NodePattern.__module__ = "torch.ao.quantization.utils"
-else:
-    from typing import TypeAliasType
-
-    NodePattern = TypeAliasType(
-        "NodePattern", tuple[Node, Node] | tuple[Node, tuple[Node, Node]] | Any
-    )
+NodePattern = TypeAliasType(
+    "NodePattern", tuple[Node, Node] | tuple[Node, tuple[Node, Node]] | Any
+)
 
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
@@ -39,24 +33,14 @@ QuantizerCls = Any
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
 
-if sys.version_info < (3, 12):
-    Pattern = Union[
-        Callable,
-        tuple[Callable, Callable],
-        tuple[Callable, tuple[Callable, Callable]],
-        Any,
-    ]
-    Pattern.__module__ = "torch.ao.quantization.utils"
-else:
-    from typing import TypeAliasType
 
-    Pattern = TypeAliasType(
-        "Pattern",
-        Callable
-        | tuple[Callable, Callable]
-        | tuple[Callable, tuple[Callable, Callable]]
-        | Any,
-    )
+Pattern = TypeAliasType(
+    "Pattern",
+    Callable
+    | tuple[Callable, Callable]
+    | tuple[Callable, tuple[Callable, Callable]]
+    | Any,
+)
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -257,14 +241,17 @@ def get_swapped_custom_module_class(
     custom_module, custom_module_class_mapping, qconfig
 ):
     """Get the observed/quantized custom module class that we need
-    to swap `custom_module` to
+    to swap ``custom_module`` to.
+
     Input:
-        custom_module: input, can be an instance of either a float or observed custom module
-        custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
-        qconfig: qconfig configured for the custom module
+
+    - custom_module: input, can be an instance of either a float or observed custom module
+    - custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
+    - qconfig: qconfig configured for the custom module
 
     Output:
-        corresponding observed/quantized custom module class for input custom module instance
+
+    Corresponding observed/quantized custom module class for input custom module instance.
     """
     quant_type = get_quant_type(qconfig)
     class_mapping = custom_module_class_mapping.get(quant_type, {})
@@ -749,24 +736,24 @@ def get_fqn_to_example_inputs(
 ) -> dict[str, tuple[Any, ...]]:
     """Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
-    e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
-          "sub.linear1": (tensor4,), ...}
+    e.g. ``{"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
+    "sub.linear1": (tensor4,), ...}``
 
     Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword
     arguments as positional arguments and fill in the missing keyword args with default
-    values, e.g. if we have a forward function:
-    def forward(self, x, key1=3, key2=3):
-        ...
+    values, e.g. if we have a forward function::
 
-    and we call it with self.submodule(x, key2=6)
-    we'll get example_inputs: (x, 3, 6)
+        def forward(self, x, key1=3, key2=3): ...
 
-    user can also override `key1` with positional arguments as well:
-    for self.submodule(x, 5, key2=6)
-    we'll get: (x, 5, 6)
+    and we call it with ``self.submodule(x, key2=6)``
+    we'll get ``example_inputs: (x, 3, 6)``
+
+    user can also override ``key1`` with positional arguments as well:
+    for ``self.submodule(x, 5, key2=6)``
+    we'll get: ``(x, 5, 6)``
 
     variable positional arguments and variable positional keyword arguments in forward
     function are not supported currently, so please make sure no submodules is using

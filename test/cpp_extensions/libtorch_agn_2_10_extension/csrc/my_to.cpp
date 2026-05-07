@@ -36,7 +36,7 @@ Tensor my_to_dtype_layout(
       memory_format);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_to_device(Tensor self, Device device) -> Tensor");
   m.def("my_to_dtype(Tensor self, ScalarType dtype) -> Tensor");
   m.def(
@@ -44,7 +44,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_10,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_to_device", TORCH_BOX(&my_to_device));

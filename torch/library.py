@@ -4,7 +4,6 @@ import functools
 import inspect
 import re
 import sys
-import traceback
 import weakref
 from collections.abc import Callable, Sequence
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
@@ -20,7 +19,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.effects import EffectType
-from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._library.infer_schema import infer_schema
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 from torch.types import _dtype
@@ -65,6 +64,143 @@ def fallthrough_kernel():
     raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 
+def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
+    """Validate that a schema has valid out semantics, i.e., it can be tagged with torch.Tag.out.
+
+    Requirements:
+    - Must have at least one mutable argument
+    - All returns must alias the mutable args in declaration order
+
+    torchgen has equivalent checks (torchgen/model.py), but we reimplement them here
+    because (1) it's simple and (2) torchgen uses a different schema object
+    (torchgen.model.FunctionSchema vs torch._C.FunctionSchema) so it's difficult to
+    share the function.
+    """
+    if isinstance(schema, str):
+        schema = torch._C.parse_schema(schema)
+    mutable_args = [
+        arg
+        for arg in schema.arguments
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    if not mutable_args:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.out must have at least one mutable argument. "
+            f"Got: {schema}"
+        )
+    positional_mutable = [arg for arg in mutable_args if not arg.kwarg_only]
+    if positional_mutable:
+        names = [a.name for a in positional_mutable]
+        raise ValueError(
+            f"Schema tagged with torch.Tag.out requires all mutable arguments to be "
+            f"keyword-only (after the *). Found mutable positional args: {names}. "
+            f"Got: {schema}"
+        )
+    unsupported_mutable = [
+        arg
+        for arg in mutable_args
+        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+    ]
+    if unsupported_mutable:
+        names = [a.name for a in unsupported_mutable]
+        raise ValueError(
+            f"Schema tagged with torch.Tag.out only supports Tensor mutable arguments. "
+            f"Found unsupported mutable args: {names}. Got: {schema}"
+        )
+    returns = schema.returns
+    if len(returns) != len(mutable_args):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.out must return all mutable arguments "
+            f"(got {len(mutable_args)} mutable args but {len(returns)} returns). "
+            f"Got: {schema}"
+        )
+    for i, (ret, arg) in enumerate(zip(returns, mutable_args, strict=True)):
+        arg_alias = arg.alias_info
+        ret_alias = ret.alias_info
+        if ret_alias is None:
+            raise ValueError(
+                f"Return {i} of schema tagged with torch.Tag.out must alias mutable arg '{arg.name}'. "
+                f"Got: {schema}"
+            )
+        if not ret_alias.is_write:
+            raise ValueError(
+                f"Return {i} of schema tagged with torch.Tag.out must be a mutable alias "
+                f"(e.g., Tensor(a!), not Tensor(a)) of arg '{arg.name}'. "
+                f"Got: {schema}"
+            )
+        # arg_alias is guaranteed non-None by the mutable_args filter above
+        if ret_alias.before_set != arg_alias.before_set:  # type: ignore[union-attr]
+            raise ValueError(
+                f"Return {i} of schema tagged with torch.Tag.out must alias mutable arg '{arg.name}' "
+                f"(return aliases {ret_alias.before_set} but arg aliases {arg_alias.before_set}). "  # type: ignore[union-attr]
+                f"Got: {schema}"
+            )
+
+
+def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
+    """Validate that a schema has valid inplace semantics, i.e., it can be tagged with torch.Tag.inplace.
+
+    Requirements:
+    - The first positional argument must be a mutable Tensor (Tensor(a!))
+    - Must return exactly that Tensor
+    - Only the first positional argument may be mutable
+
+    Native inplace ops (defined in native_functions.yaml) have relaxed requirements:
+    they may have Tensor[] self and multiple mutable arguments. This validation is
+    stricter because it is only used for custom ops defined via torch.library.
+    """
+    if isinstance(schema, str):
+        schema = torch._C.parse_schema(schema)
+    args = schema.arguments
+    if not args or args[0].kwarg_only:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must have at least one positional argument. "
+            f"Got: {schema}"
+        )
+    first_arg = args[0]
+    if first_arg.alias_info is None or not first_arg.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be mutable (e.g., Tensor(a!)). Got: {schema}"
+        )
+    if not isinstance(first_arg.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace requires the first positional argument "
+            f"to be a Tensor. Got type '{first_arg.type}' for arg '{first_arg.name}'. "
+            f"Got: {schema}"
+        )
+    # Must return exactly one Tensor aliasing the first arg
+    returns = schema.returns
+    if len(returns) != 1:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return exactly one value "
+            f"(the first argument). Got {len(returns)} returns. Got: {schema}"
+        )
+    ret = returns[0]
+    if ret.alias_info is None:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must alias the first argument). Got: {schema}"
+        )
+    if ret.alias_info.before_set != first_arg.alias_info.before_set:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return aliases {ret.alias_info.before_set} but first arg aliases "
+            f"{first_arg.alias_info.before_set}). Got: {schema}"
+        )
+    other_mutable = [
+        arg
+        for arg in args[1:]
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    if other_mutable:
+        names = [a.name for a in other_mutable]
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must only mutate the first positional argument. "
+            f"Found additional mutable args: {names}. Got: {schema}"
+        )
+
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -88,16 +224,15 @@ class Library:
         from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
 
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
-            raise ValueError("Unsupported kind: ", kind)
+            raise ValueError(f"Unsupported kind: {kind}")
 
         if ns in _reserved_namespaces and (kind == "DEF" or kind == "FRAGMENT"):
             raise ValueError(
-                ns,
-                " is a reserved namespace. Please try creating a library with another name.",
+                f"{ns} is a reserved namespace. Please try creating a library with another name."
             )
 
-        frame = traceback.extract_stack(limit=2)[0]
-        filename, lineno = frame.filename, frame.lineno
+        f = sys._getframe(1)
+        filename, lineno = f.f_code.co_filename, f.f_lineno
         self.m: Any | None = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
         )
@@ -161,6 +296,11 @@ class Library:
         has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
             getattr(torch.ops, self.ns), packet_name
         )
+
+        if torch.Tag.out in tags:
+            _validate_out_schema(schema)
+        if torch.Tag.inplace in tags:
+            _validate_inplace_schema(schema)
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
@@ -432,21 +572,28 @@ class Library:
         self._registration_handles.clear()
         global _impls
         _impls -= self._op_impls
-        for name in self._op_defs:
-            # Delete the cached torch.ops.ns.foo if it was registered.
-            # Otherwise, accessing it leads to a segfault.
-            # It's possible that we only registered an overload in this Library
-            # and another library owns an alive overload.
-            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
-            # recomputed to point at the right collection of overloads.
-            ns, name_with_overload = name.split("::")
-            name = name_with_overload.split(".")[0]
-            if not hasattr(torch.ops, ns):
-                continue
-            namespace = getattr(torch.ops, ns)
-            if not hasattr(namespace, name):
-                continue
-            delattr(namespace, name)
+        _clear_torch_ops_cache(self._op_defs)
+
+
+def _clear_torch_ops_cache(op_defs):
+    # Delete the cached torch.ops.ns.foo if it was registered.
+    # Otherwise, accessing it leads to a segfault, or to enumerations
+    # over the namespace (e.g. _collect_all_valid_cia_ops) tripping on
+    # an OpOverloadPacket whose underlying overload was just removed.
+    # It's possible that we only registered an overload in this Library
+    # and another library owns an alive overload.
+    # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+    # recomputed to point at the right collection of overloads.
+    for qualname in op_defs:
+        ns, name_with_overload = qualname.split("::")
+        name = name_with_overload.split(".")[0]
+        if not hasattr(torch.ops, ns):
+            continue
+        namespace = getattr(torch.ops, ns)
+        if not hasattr(namespace, name):
+            continue
+        delattr(namespace, name)
+        if name in namespace._dir:
             namespace._dir.remove(name)
 
 
@@ -477,6 +624,8 @@ def _del_library(
 
     if m is not None:
         m.reset()
+
+    _clear_torch_ops_cache(op_defs)
 
 
 @contextlib.contextmanager
@@ -792,6 +941,31 @@ _op_identifier = Union[
 ]
 
 
+def _resolve_op_for_registration(
+    op: _op_identifier, registration_name: str
+) -> str | CustomOpDef:
+    if not isinstance(op, (str, OpOverload, CustomOpDef)):
+        raise ValueError(
+            f"{registration_name}({op}): got unexpected type for op: {type(op)}"
+        )
+    if isinstance(op, OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    return op
+
+
+def _library_for_registration(namespace: str, lib: Library | None) -> Library:
+    if lib is not None:
+        return lib
+    use_lib = Library(namespace, "FRAGMENT")
+    _keep_alive.append(use_lib)
+    return use_lib
+
+
 def register_kernel(
     op: _op_identifier,
     device_types: device_types_t,
@@ -842,19 +1016,9 @@ def register_kernel(
 
     """
 
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_kernel({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_kernel(device_types, func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_kernel")
+    if isinstance(op, CustomOpDef):
+        return op.register_kernel(device_types, func)
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
 
@@ -903,30 +1067,17 @@ def register_autocast(
         >>> assert y.dtype == torch.float16
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_autocast({op}): got unexpected type for op: {type(op)}"
-        )
+    op = _resolve_op_for_registration(op, "register_autocast")
     if device_type not in ["cpu", "cuda"]:
         raise ValueError(f"Unknown device type: {device_type}")
 
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_autocast(device_type, cast_inputs)
-
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    if isinstance(op, CustomOpDef):
+        return op.register_autocast(device_type, cast_inputs)
     qualname = op
     _op = torch._library.utils.lookup_op(qualname)
 
     namespace, opname = torch._library.utils.parse_namespace(qualname)
-    if lib is None:
-        lib = Library(namespace, "FRAGMENT")
-        _keep_alive.append(lib)
+    use_lib = _library_for_registration(namespace, lib)
 
     def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
         def inner(kernel):
@@ -953,10 +1104,10 @@ def register_autocast(
         return _autocast_py_impl(*args, **kwargs)
 
     if device_type == "cuda":
-        return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
+        return use_lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
     else:
         # device_type is "cpu"
-        return lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+        return use_lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
 
 
 def register_fake(
@@ -1000,7 +1151,7 @@ def register_fake(
                         and will error you're trying to register a fake impl to
                         an operator that already has a fake impl. This also only
                         applies if the custom operator was not created via
-                        torch.library.custom_op, as overriding and existing fake
+                        torch.library.custom_op, as overriding an existing fake
                         impl is already allowed.
 
     Examples:
@@ -1060,30 +1211,18 @@ def register_fake(
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(f"register_fake({op}): got unexpected type for op: {type(op)}")
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
+    op = _resolve_op_for_registration(op, "register_fake")
+    if isinstance(op, CustomOpDef):
         if func is None:
-            return opdef.register_fake
+            return op.register_fake
         else:
-            return opdef.register_fake(func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+            return op.register_fake(func)
 
     stacklevel = _stacklevel
 
     def register(func):
         namespace, op_name = torch._library.utils.parse_namespace(op)
-        if lib is None:
-            use_lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(use_lib)
-        else:
-            use_lib = lib
+        use_lib = _library_for_registration(namespace, lib)
         use_lib._register_fake(
             op_name, func, _stacklevel=stacklevel + 1, allow_override=allow_override
         )
@@ -1226,21 +1365,11 @@ def register_autograd(
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_autograd({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        opdef.register_autograd(backward, setup_context=setup_context)
+    op = _resolve_op_for_registration(op, "register_autograd")
+    if isinstance(op, CustomOpDef):
+        op.register_autograd(backward, setup_context=setup_context)
         return
 
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
@@ -1260,10 +1389,8 @@ def register_autograd(
     info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
-    if lib is None:
-        lib = Library(namespace, "FRAGMENT")
-        _keep_alive.append(lib)
-    lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
+    use_lib = _library_for_registration(namespace, lib)
+    use_lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
 
 
 def register_torch_dispatch(
@@ -1318,27 +1445,13 @@ def register_torch_dispatch(
         >>> assert torch.allclose(y, x + 1)
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(
-            f"register_torch_dispatch({op}): got unexpected type for op: {type(op)}"
-        )
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_torch_dispatch(torch_dispatch_class, func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_torch_dispatch")
+    if isinstance(op, CustomOpDef):
+        return op.register_torch_dispatch(torch_dispatch_class, func)
 
     def register(func):
         namespace, op_name = torch._library.utils.parse_namespace(op)
-        if lib is None:
-            use_lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(use_lib)
-        else:
-            use_lib = lib
+        use_lib = _library_for_registration(namespace, lib)
         use_lib._register_torch_dispatch_rule(op_name, torch_dispatch_class, func)
         return func
 
@@ -1433,20 +1546,12 @@ def register_vmap(
         keep this in mind.
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
-        raise ValueError(f"register_vmap({op}): got unexpected type for op: {type(op)}")
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-    opdef = _maybe_get_opdef(op)
-    if opdef is not None:
-        return opdef.register_vmap(func)
-    if not isinstance(op, str):
-        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
+    op = _resolve_op_for_registration(op, "register_vmap")
+    if isinstance(op, CustomOpDef):
+        return op.register_vmap(func)
     qualname = op
-    op = torch._library.utils.lookup_op(qualname)
-    schema = op._schema
+    op_overload = torch._library.utils.lookup_op(qualname)
+    schema = op_overload._schema
     if _library.utils.has_kwarg_only_tensors(schema):
         raise NotImplementedError(
             f"register_vmap with kwarg-only Tensor args. In the original "
@@ -1455,12 +1560,12 @@ def register_vmap(
         )
 
     def register(func):
-        nonlocal op, lib
+        nonlocal lib
 
         namespace, opname = torch._library.utils.parse_namespace(qualname)
+        use_lib = _library_for_registration(namespace, lib)
         if lib is None:
-            lib = Library(namespace, "FRAGMENT")
-            _keep_alive.append(lib)
+            lib = use_lib
 
         from torch._functorch.autograd_function import custom_function_call_vmap_helper
         from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
@@ -1468,10 +1573,15 @@ def register_vmap(
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                interpreter, func, op, *args, **kwargs
+                # pyrefly: ignore[bad-argument-type]
+                interpreter,
+                func,
+                op_overload,
+                *args,
+                **kwargs,
             )
 
-        lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
+        use_lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
 
     if func is None:
         return register

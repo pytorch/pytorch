@@ -13,7 +13,7 @@ if IS_WINDOWS and IS_CI:
     )
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 import torch
 from torch._C import FileCheck
@@ -134,7 +134,10 @@ class TestMemoryPlanning(TestCase):
 
         # check allocation is done after the unbacked symint is computed
         FileCheck().check("auto u0 = u0_raw;").check(
-            "const int64_t int_array_2[] = {10L, 8L*u0, 32L};"
+            # Shows up as one of the following:
+            #   const int64_t int_array_2[] = {10L, 8L*u0, 32L};
+            #   const int64_t int_array_3[] = {10L, 8L*u0, 32L};
+            "[] = {10L, 8L*u0, 32L};"
         ).check("AtenTensorHandle pool0_handle;").check(
             "aoti_torch_empty_strided(3, int_array_2, int_array_3"
         ).run(code)
@@ -146,9 +149,9 @@ class TestMemoryPlanning(TestCase):
         ).check_count("aoti_torch__alloc_from_pool(pool0", 1, exactly=True).run(code)
 
         FileCheck().check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"  # noqa: B950
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"  # noqa: B950
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_1);").run(code)
 
 

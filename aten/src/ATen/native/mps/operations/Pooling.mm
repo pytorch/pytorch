@@ -69,7 +69,10 @@ static void pool2d_template(const Tensor& input,
   const bool is_backward_pass = grad_output.defined();
   const bool has_indices = indices.defined();
   const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-  const auto suggested_memory_format = input.suggest_memory_format();
+  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
+  // strides but is not NHWC-packed, so the raw-buffer NHWC path would misread
+  // it. See https://github.com/pytorch/pytorch/issues/180984
+  const auto suggested_memory_format = input.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
   // for max_pool2d_with_indices() we cannot pass ChannelsLast (i.e., NHWC) to 'desc.dataLayout' in MPSGraph.
   // Because the returned indices will be selected based on NHWC memory layout which will
   // be incompatible with the PyTorch's global NCHW layout.
@@ -157,11 +160,17 @@ static void pool2d_template(const Tensor& input,
     padH = padW = 0;
   }
   @autoreleasepool {
-    std::string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" +
-        getArrayRefString(kernel_size) + "]:S[" + getArrayRefString(stride) + "]:P[" + getArrayRefString(padding) +
-        "]:D[" + getArrayRefString(dilation) + "]" + (ceil_mode ? ":ceil" : "") +
-        (count_include_pad ? ":include_pad" : "") + (has_divisor ? ":divisor" : "") + ":" +
-        (suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    const auto key = fmt::format("{}{}:K[{}]:S[{}]:P[{}]:D[{}]{}{}{}:{}",
+                                 op_name,
+                                 getTensorsStringKey({input, indices, grad_output}),
+                                 getArrayRefString(kernel_size),
+                                 getArrayRefString(stride),
+                                 getArrayRefString(padding),
+                                 getArrayRefString(dilation),
+                                 ceil_mode ? ":ceil" : "",
+                                 count_include_pad ? ":include_pad" : "",
+                                 has_divisor ? ":divisor" : "",
+                                 suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
 
     MPSShape* inputShape = getMPSShape(input, memory_format);
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
@@ -592,19 +601,6 @@ static void max_unpool_out_mps_template(const Tensor& input,
   output.resize_(output_size, memory_format);
   output.fill_(0);
 
-  if (indices.defined() && indices.numel() > 0) {
-    auto output_image_size = c10::multiply_integers(output_size_);
-
-    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
-    int64_t min_idx = min_idx_tensor.item<int64_t>();
-    int64_t max_idx = max_idx_tensor.item<int64_t>();
-
-    if (min_idx < 0 || max_idx >= output_image_size) {
-      int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
-    }
-  }
-
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = input.numel();
@@ -628,7 +624,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
       [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, output, input, indices, params);
+      mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
       getMPSProfiler().endProfileKernel(PSO);

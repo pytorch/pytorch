@@ -11,7 +11,8 @@ import torch
 # Verifies each given dtype is a torch.dtype
 def _validate_dtypes(*dtypes):
     for dtype in dtypes:
-        assert isinstance(dtype, torch.dtype)
+        if not isinstance(dtype, torch.dtype):
+            raise AssertionError(f"Expected dtype to be torch.dtype, got {type(dtype)}")
     return dtypes
 
 
@@ -20,7 +21,8 @@ class _dispatch_dtypes(tuple):
     __slots__ = ()
 
     def __add__(self, other):
-        assert isinstance(other, tuple)
+        if not isinstance(other, tuple):
+            raise AssertionError(f"Expected other to be a tuple, got {type(other)}")
         return _dispatch_dtypes(tuple.__add__(self, other))
 
 
@@ -218,6 +220,20 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dt
 
 def get_all_qint_dtypes() -> list[torch.dtype]:
     return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
+
+
+def highest_precision_float(device):
+    if torch.device(device).type == "mps":
+        return torch.float32
+    else:
+        return torch.float64
+
+
+def highest_precision_complex(device):
+    if torch.device(device).type == "mps":
+        return torch.complex64
+    else:
+        return torch.complex128
 
 
 float_to_corresponding_complex_type_map = {

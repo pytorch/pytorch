@@ -74,7 +74,7 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     )
 
     if not eq_spec(received_spec, in_spec):
-        raise ValueError(  # noqa: B904
+        raise ValueError(
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{in_spec}\n"
             "but actually got inputs with tree spec of: \n"
@@ -205,7 +205,11 @@ def _convert_guards_code_to_fn(
     code_str += "  return\n"
 
     # populate namespace with sympy globals, materialize function (named `_`)
-    namespace = {**SYMPY_INTERP}
+    namespace = {
+        **SYMPY_INTERP,
+        "math": math,
+        "inf": float("inf"),
+    }
     exec(code_str, namespace)
 
     # create and return a module whose forward is the materialized function
@@ -260,7 +264,11 @@ def _unlift_inputs_as_getattr(
     input_name_to_node = {}
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    assert len(lifted_inputs) == len(placeholder_nodes)
+    if len(lifted_inputs) != len(placeholder_nodes):
+        raise AssertionError(
+            f"Number of lifted inputs ({len(lifted_inputs)}) does not match "
+            f"placeholder nodes ({len(placeholder_nodes)})"
+        )
     for input_node, lifted_node in zip(placeholder_nodes, lifted_inputs):
         if lifted_node is None:
             input_name_to_node[input_node.name] = input_node
@@ -301,7 +309,11 @@ def _insert_copy_for_mutations(
     """
     output_node = gm.graph.output_node()
     outputs = pytree.tree_flatten(output_node.args)[0]
-    assert len(outputs) == len(mutated_outputs)
+    if len(outputs) != len(mutated_outputs):
+        raise AssertionError(
+            f"Number of outputs ({len(outputs)}) does not match "
+            f"mutated outputs ({len(mutated_outputs)})"
+        )
 
     user_output_nodes = []
     return_nodes_to_copy = {}
@@ -667,7 +679,9 @@ def _get_input_guards_for_graph(
         if isinstance(meta, int):
             new_guards_code.append(f"{src} == {meta}")
         if isinstance(meta, float):
-            if meta == math.inf:
+            if math.isnan(meta):
+                new_guards_code.append(f"math.isnan({src})")
+            elif meta == math.inf:
                 new_guards_code.append(f"{src} == math.inf")
             elif meta == -math.inf:
                 new_guards_code.append(f"{src} == -math.inf")
@@ -816,7 +830,8 @@ def _unlift_exported_program_lifted_states(
             )
         ]
 
-    assert ep.call_spec.in_spec is not None
+    if ep.call_spec.in_spec is None:
+        raise AssertionError("ep.call_spec.in_spec cannot be None")
     new_gm = _unlift(
         new_gm,
         lifted_inputs,

@@ -73,7 +73,10 @@ def get_torch_version(sha: str | None = None) -> str:
     else:
         sdist_version = None
     if os.getenv("PYTORCH_BUILD_VERSION"):
-        assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
+        if os.getenv("PYTORCH_BUILD_NUMBER") is None:
+            raise AssertionError(
+                "PYTORCH_BUILD_NUMBER must be set when PYTORCH_BUILD_VERSION is set"
+            )
         build_number = int(os.getenv("PYTORCH_BUILD_NUMBER", ""))
         version = os.getenv("PYTORCH_BUILD_VERSION", "")
         if build_number > 1:
@@ -100,10 +103,11 @@ def get_torch_version(sha: str | None = None) -> str:
         else:
             # local version is absent or platform tag
             source_version = version.partition("+")[0]
-        assert sdist_version == source_version, (
-            f"Source part '{source_version}' of version '{version}' from "
-            f"{origin} does not match version '{sdist_version}' from PKG-INFO"
-        )
+        if sdist_version != source_version:
+            raise AssertionError(
+                f"Source part '{source_version}' of version '{version}' from "
+                f"{origin} does not match version '{sdist_version}' from PKG-INFO"
+            )
     return version
 
 
@@ -124,7 +128,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    assert args.is_debug is not None
+    if args.is_debug is None:
+        raise AssertionError("is_debug argument must be provided")
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
     args.rocm_version = None if args.rocm_version == "" else args.rocm_version

@@ -25,7 +25,7 @@ for the elements of the batches of inputs. An example of this is :meth:`torch.mm
 :meth:`torch.bmm`. It is possible to implement batched computation as a loop over batch elements,
 and apply the necessary math operations to the individual batch elements, for efficiency reasons
 we are not doing that, and typically perform computation for the whole batch. The mathematical
-libraries that we are calling, and PyTorch internal implementations of operations can produces
+libraries that we are calling, and PyTorch internal implementations of operations can produce
 slightly different results in this case, compared to non-batched computations. In particular,
 let ``A`` and ``B`` be 3D tensors with the dimensions suitable for batched matrix multiplication.
 Then ``(A@B)[0]`` (the first element of the batched result) is not guaranteed to be bitwise
@@ -51,6 +51,15 @@ datatype. E.g.:
     a=torch.tensor([1e20, 1e20]) # fp32 type by default
     a.norm() # produces tensor(inf)
     a.double().norm() # produces tensor(1.4142e+20, dtype=torch.float64), representable in fp32
+
+Different backends may use different algorithms, reduction orders, or accumulation
+precision for the same operation. As a result, finite inputs near the limits of a
+dtype may produce finite results on one backend and non-finite results, such as
+``inf`` or ``NaN``, on another backend, such as when moving a computation between
+CPU and CUDA. A value being representable in a dtype does not guarantee that all
+intermediate or output values of an operation will remain finite. For workflows
+that are sensitive to non-finite values, consider normalizing or clamping extremal
+inputs and using :func:`torch.isfinite` to detect them.
 
 .. _Linear Algebra Stability:
 

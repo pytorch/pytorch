@@ -878,9 +878,8 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                TORCH_INTERNAL_ASSERT(
-                    false,
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                throw py::value_error(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
                     pair.first);
               }
             }
@@ -1614,9 +1613,22 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            TORCH_CHECK(
+                size == numel * elementSize(scalar_type),
+                "record size (",
+                size,
+                " bytes) does not match expected size (",
+                numel * elementSize(scalar_type),
+                " bytes = ",
+                numel,
+                " elements * ",
+                elementSize(scalar_type),
+                " bytes/element) for dtype ",
+                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),
@@ -1784,7 +1796,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& op_name) {
+      [](const std::string& op_name) -> py::tuple {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto sortedOps = getAllSortedOperatorsFor(symbol);
@@ -1831,7 +1843,7 @@ void initJITBindings(PyObject* module) {
       "_maybe_call_torch_function_for_op_packet",
       [](py::handle op_overload_packet,
          const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::kwargs& kwargs) -> py::tuple {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
         auto res = _maybe_handle_torch_function(
@@ -1874,6 +1886,12 @@ void initJITBindings(PyObject* module) {
         return torch::jit::isRegisteredOpaqueType(type_name);
       },
       R"doc(Checks if a type name is registered as an opaque type.)doc");
+  m.def(
+      "_unregister_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::unregisterOpaqueType(type_name);
+      },
+      R"doc(Unregisters a type name from the opaque type registry.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -2165,20 +2183,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonFutureWrapper& /* unused */) {
+              [](const PythonFutureWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) {
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 
@@ -2202,20 +2212,12 @@ void initJITBindings(PyObject* module) {
       .def(
           py::pickle(
               /* __getstate__ */
-              [](const PythonAwaitWrapper& /* unused */) {
+              [](const PythonAwaitWrapper& /* unused */) -> py::tuple {
                 TORCH_CHECK(false, "Can not pickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy Pybind API's
-                // requirement.
-                return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) {
+              [](const py::tuple& /* unused */) -> std::nullptr_t {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
-                // Note that this return has no meaning since we always
-                // throw, it's only here to satisfy PyBind's API
-                // requirement.
-                return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
 

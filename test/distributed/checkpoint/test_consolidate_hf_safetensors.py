@@ -263,6 +263,19 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         self.assertEqual(loaded_dict_col.keys(), {"dtensor_col"})
         self.assertTrue(torch.equal(loaded_dict_col["dtensor_col"], global_tensor))
 
+        metadata_path = os.path.join(output_dir, _metadata_fn)
+        self.assertTrue(os.path.exists(metadata_path))
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+            self.assertEqual(metadata["metadata"]["total_size"], 16 * 4 * 2)
+            self.assertEqual(
+                metadata["weight_map"],
+                {
+                    "dtensor": "model-00001-of-00002.safetensors",
+                    "dtensor_col": "model-00002-of-00002.safetensors",
+                },
+            )
+
         dist.barrier()
 
     @with_comms

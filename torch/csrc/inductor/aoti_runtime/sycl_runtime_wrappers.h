@@ -19,7 +19,8 @@
 
 static ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
-    size_t binarySize) {
+    size_t binarySize,
+    bool isSpirv = false) {
   sycl::device& syclDevice =
       c10::xpu::get_raw_device(c10::xpu::current_device());
   auto& syclContext = c10::xpu::get_device_context();
@@ -29,7 +30,8 @@ static ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
 
   const char* buildFlags = "";
-  const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
+  const ze_module_format_t format =
+      isSpirv ? ZE_MODULE_FORMAT_IL_SPIRV : ZE_MODULE_FORMAT_NATIVE;
   ze_module_desc_t moduleDescription = {};
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
@@ -99,8 +101,10 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   OSS << IFS.rdbuf();
   std::string data(OSS.str());
 
+  bool isSpirv = filePath.size() >= 4 &&
+      filePath.compare(filePath.size() - 4, 4, ".spv") == 0;
   auto mod = _createModule(
-      reinterpret_cast<const uint8_t*>(data.c_str()), data.size());
+      reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), isSpirv);
 
   return _createKernel(mod, funcName.c_str());
 }
@@ -110,11 +114,13 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     const void* start,
     const void* end,
     const std::string& funcName,
-    uint32_t sharedMemBytes) {
+    uint32_t sharedMemBytes,
+    bool isSpirv) {
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
 
-  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size);
+  auto mod =
+      _createModule(reinterpret_cast<const uint8_t*>(start), size, isSpirv);
 
   return _createKernel(mod, funcName.c_str());
 }
@@ -128,8 +134,13 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     uint32_t numWarps,
     uint32_t sharedMemory,
     void** params,
-    sycl::queue* queuePtr,
-    uint32_t threadsPerWarp) {
+    sycl::queue* queuePtr) {
+  uint32_t threadsPerWarp = kernelPtr->get_info<
+      sycl::info::kernel_device_specific::compile_sub_group_size>(
+      queuePtr->get_device());
+  if (threadsPerWarp == 0) {
+    threadsPerWarp = 32; // default to 32 if not set
+  }
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();

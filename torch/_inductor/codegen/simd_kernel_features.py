@@ -5,7 +5,7 @@ import dataclasses
 import functools
 import itertools
 import typing
-from typing import Any, Optional, Union
+from typing import Any
 
 import sympy
 
@@ -39,7 +39,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = Union[SchedulerNode, type[NodeScheduleMarker]]
+NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
 
 
 class DisableReduction(NodeScheduleMarker):
@@ -82,7 +82,7 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
@@ -149,8 +149,9 @@ class SIMDKernelFeatures:
             return torch.int32
         return torch.int64
 
-    @cache_on_self
-    def get_reduction_hint(self) -> ReductionHint:
+    def get_reduction_hint(
+        self, tiling_scores: dict[str, int] | None = None
+    ) -> ReductionHint:
         reductions = self.reduction_nodes()
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
@@ -164,6 +165,22 @@ class SIMDKernelFeatures:
                 and self.has_non_contiguous_pw_in_reduction_kernel()
             ):
                 reduction_hint_val = ReductionHint.DEFAULT
+
+            # Upgrade DEFAULT to INNER for inner reductions based on tiling scores
+            if (
+                reduction_hint_val == ReductionHint.DEFAULT
+                and tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # If reduction dimension has much better coalescing than non-reduction dimensions,
+                # this is an inner reduction
+                from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
+
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+                if contiguous_red:
+                    reduction_hint_val = ReductionHint.INNER
         else:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
@@ -213,7 +230,7 @@ class SIMDKernelFeatures:
             return node.node.data.reduction_hint
 
     def memory_stats(
-        self, groups_dict: Optional[dict[str, sympy.Expr]] = None
+        self, groups_dict: dict[str, sympy.Expr] | None = None
     ) -> MemoryStats:
         """Analysis to generate features that can be used in heuristics"""
         if groups_dict is None:

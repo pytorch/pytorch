@@ -7,7 +7,7 @@ import itertools
 import logging
 import math
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -32,8 +32,6 @@ from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from typing import Union
-
     from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
@@ -53,7 +51,7 @@ DTYPE_TO_METAL = {
 }
 
 
-def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
+def value_to_metal(val: float | int | bool | str | CSEVariable) -> str:
     if isinstance(val, float):
         if val == torch.inf:
             return "HUGE_VALF"
@@ -80,6 +78,9 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
+        # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
+        use_safe_mod = div == 65536 and (mod & (mod - 1)) != 0
+
         x = self.doprint(x)
         if div != 1:
             div = self.doprint(div)
@@ -88,11 +89,14 @@ class MetalExprPrinter(ExprPrinter_):
             else:
                 x = f"metal::floor({x}) / ({div})"
         mod = self.doprint(mod)
+        if use_safe_mod:
+            return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -101,6 +105,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -108,10 +113,12 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
@@ -129,12 +136,13 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 2
         x, y = map(self.doprint, expr.args)
-        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
+        return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -165,7 +173,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"metal::log2({x})"
+        return f"metal::precise::log2({x})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -181,7 +189,7 @@ class MetalOverrides(OpOverrides):
     def to_dtype(
         x: CSEVariable,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> str:
         if dtype == torch.double:
@@ -198,7 +206,7 @@ class MetalOverrides(OpOverrides):
         return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
 
     @staticmethod
-    def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(val: bool | float | int, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
     @staticmethod
@@ -212,67 +220,103 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
+        # TODO: Should it be converted to lambda on MacOS-15+?
 
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
+        other_str = value_to_metal(other)
+        scoped_body = IndentedBuffer()
+        with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
+            # Reset the scoped variable counter so that each invocation of the same body
+            # generates identical variable names. Without this reset, repeated calls to
+            # body() would keep incrementing the counter, resulting in different cache key.
+            V.kernel.cse.iter_buffer_ids = itertools.count()
+            # Append "_scoped" to the current prefix so each nesting level gets unique vars
+            V.kernel.cse.name_prefix += "_scoped"
+            rc = body()
 
-        return ops.where(new_mask, result, other)
+        # Compute cache key manually as variable name is needed to actually generate the code
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
+        var = V.kernel.cse.try_get(cache_key)
+        if not var:
+            var = V.kernel.cse.newvar(dtype=rc.dtype)
+            V.kernel.cse.put(cache_key, var)
+            V.kernel.compute.writelines(
+                [f"{DTYPE_TO_METAL[rc.dtype]} {var};", f"if ({mask}) {{"]
+            )
+            with V.kernel.compute.indent():
+                V.kernel.compute.splice(scoped_body)
+                V.kernel.compute.writeline(
+                    f"{var} = static_cast<decltype({var})>({rc});"
+                )
+            V.kernel.compute.writeline(
+                f"}} else {var} = static_cast<decltype({var})>({other_str});"
+            )
+        return var
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : {value_to_metal(c)}"
+        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
         return f"c10::metal::remainder({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::max({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::min({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} || {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} && {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x: CSEVariable) -> str:
         return f"metal::isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x: CSEVariable) -> str:
         return f"metal::isinf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x: CSEVariable) -> str:
-        return f"metal::log({x})"
+        return f"metal::precise::log({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
-        return f"metal::exp({x})"
+        return f"metal::precise::exp({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x: CSEVariable) -> str:
         return f"metal::signbit({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x: CSEVariable) -> str:
         return f"metal::precise::sin({x})"
 
@@ -281,32 +325,39 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::sinc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x: CSEVariable) -> str:
-        return f"metal::tan({x})"
+        return f"metal::precise::tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x: CSEVariable) -> str:
-        return f"metal::asin({x})"
+        return f"metal::precise::asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x: CSEVariable) -> str:
-        return f"metal::acos({x})"
+        return f"metal::precise::acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x: CSEVariable) -> str:
-        return f"metal::atan({x})"
+        return f"metal::precise::atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
-        return f"::metal::atan2({x}, {y})"
+        return f"::metal::precise::atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x: CSEVariable) -> str:
-        return f"metal::sqrt({x})"
+        return f"metal::precise::sqrt({x})"
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
@@ -315,16 +366,19 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x: CSEVariable) -> str:
-        return f"metal::rsqrt({x})"
+        return f"metal::precise::rsqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x: CSEVariable) -> str:
-        return f"metal::tanh({x})"
+        return f"metal::precise::tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x: CSEVariable) -> str:
-        return f"metal::atanh({x})"
+        return f"metal::precise::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
@@ -332,24 +386,29 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::floor_divide({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x: CSEVariable) -> str:
         return f"metal::floor({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
         return f"metal::sign({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x: CSEVariable) -> str:
         return f"metal::trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
         quot = f"{a} / {b}"
         if (a.dtype is not None and a.dtype.is_floating_point) or (
@@ -359,6 +418,7 @@ class MetalOverrides(OpOverrides):
         return quot
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x: CSEVariable) -> str:
         return f"metal::ceil({x})"
 
@@ -380,6 +440,7 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x: CSEVariable) -> str:
         return f"metal::rint({x})"
 
@@ -531,7 +592,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        # pyrefly: ignore [missing-argument]
+
         reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         # Only one thread in the reduction group needs to store the results
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
@@ -540,9 +601,9 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: Union[str | torch.dtype],
-        elem_count: Optional[int] = None,
-        default_value: Optional[Any] = None,
+        dtype: str | torch.dtype,
+        elem_count: int | None = None,
+        default_value: Any | None = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
@@ -565,8 +626,8 @@ class MetalKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         "Caching wrapper around _reduction_nocache"
         cache_key = (src_dtype, reduction_type, value)
         # Return cached reduction
@@ -581,8 +642,8 @@ class MetalKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         """Codegen a reduction operation.
         Only sum and prod operations are somewhat reasonable optimized"""
         assert self.inside_reduction
@@ -598,7 +659,6 @@ class MetalKernel(SIMDKernel):
         reduction_idx = ""
         acc_buf_size = 1
         for rd in self.range_trees:
-            # pyrefly: ignore [missing-argument]
             if not rd.is_reduction:
                 continue
             if reduction_idx:
@@ -695,10 +755,7 @@ class MetalKernel(SIMDKernel):
                 )
                 idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
                 idx_var = next(
-                    t
-                    for t in self.range_tree_nodes.values()
-                    # pyrefly: ignore [missing-argument]
-                    if t.is_reduction
+                    t for t in self.range_tree_nodes.values() if t.is_reduction
                 )
                 cmp_op = ">" if reduction_type == "argmax" else "<"
                 nan_suffix = (
@@ -765,7 +822,6 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        # pyrefly: ignore [missing-argument]
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
             and entry.root.numel <= self.max_threadgroup_size
@@ -781,36 +837,60 @@ class MetalKernel(SIMDKernel):
             else sympy.Symbol(f"{entry.root.prefix}numel", integer=True, positive=True)
         )
 
-        self.multistage_reduction_entry.append(entry)
-        # When reducing the tensor whose size exceeds max threadgroup size
-        # loop over extra indices per reduction thread and perform part of the operation
-        # using values in the shared memory
-
-        # Use floats so that it doesn't do integer division
-        loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
-            self.max_threadgroup_size
+        # Check if we've already generated a loop for this reduction root
+        root_already_processed = any(
+            e.root is entry.root for e in self.multistage_reduction_entry
         )
-        loop_size_str = self.sexpr(loop_size)
 
-        self.body.writeline(
-            f"for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size_str}; ++{entry.name}_cnt) {{"
-        )
-        with self.body.indent():
-            if isinstance(acc_size, sympy.Symbol):
-                self.body.writeline(
-                    f"{self.index_dtype} {entry.name} = {self.max_threadgroup_size} * {entry.name}_cnt + {index_str};"
-                )
-            else:
-                self.body.writeline(
-                    f"{self.index_dtype} {entry.name} = {loop_size_str} * {index_str} + {entry.name}_cnt;"
-                )
+        linear_idx_name = f"{entry.root.prefix}_linear_idx"
 
-            # Check that reduction is performed only within tensor boundary
-            if (
-                isinstance(acc_size, sympy.Symbol)
-                or loop_size * self.max_threadgroup_size != acc_size
-            ):
-                self.body.writeline(f"if ({entry.name} >= {acc_size}) break;")
+        if not root_already_processed:
+            self.multistage_reduction_entry.append(entry)
+            # When reducing the tensor whose size exceeds max threadgroup size
+            # loop over extra indices per reduction thread and perform part of the operation
+            # using values in the shared memory
+
+            # Use floats so that it doesn't do integer division
+            loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
+                self.max_threadgroup_size
+            )
+            loop_size_str = self.sexpr(loop_size)
+
+            root_name = entry.root.name
+
+            self.body.writeline(
+                f"for(auto {entry.root.prefix}_cnt = 0; {entry.root.prefix}_cnt < {loop_size_str}; ++{entry.root.prefix}_cnt) {{"
+            )
+            with self.body.indent():
+                if isinstance(acc_size, sympy.Symbol):
+                    self.body.writeline(
+                        f"{self.index_dtype} {linear_idx_name} = "
+                        f"{self.max_threadgroup_size} * {entry.root.prefix}_cnt + {root_name};"
+                    )
+                else:
+                    self.body.writeline(
+                        f"{self.index_dtype} {linear_idx_name} = {loop_size_str} * {root_name} + {entry.root.prefix}_cnt;"
+                    )
+
+                # Check that reduction is performed only within tensor boundary
+                if (
+                    isinstance(acc_size, sympy.Symbol)
+                    or loop_size * self.max_threadgroup_size != acc_size
+                ):
+                    self.body.writeline(f"if ({linear_idx_name} >= {acc_size}) break;")
+
+                # Compute entry value from linear index by substituting root name
+                sub_index_str = index_str.replace(entry.root.name, linear_idx_name)
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {sub_index_str};"
+                )
+        else:
+            # root is already processed so just need to compute this entry's value inside the existing loop
+            with self.body.indent():
+                sub_index_str = index_str.replace(entry.root.name, linear_idx_name)
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {sub_index_str};"
+                )
 
     def codegen_body(self) -> None:
         """
@@ -849,10 +929,11 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:
+    def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
+        fn_name = name
 
         if V.graph.cpp_wrapper:
             code.writeline('(R"MTL(')
@@ -877,10 +958,7 @@ class MetalKernel(SIMDKernel):
 
             if self.inside_reduction:
                 total_reduction_size = math.prod(
-                    t.numel
-                    for t in self.range_trees
-                    # pyrefly: ignore [missing-argument]
-                    if t.is_reduction
+                    t.numel for t in self.range_trees if t.is_reduction
                 )
                 # If using dynamic shapes, set the threadgroup size to be the
                 # max possible size
@@ -892,7 +970,7 @@ class MetalKernel(SIMDKernel):
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline("kernel void generated_kernel(")
+            code.writeline(f"kernel void {fn_name}(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
@@ -919,6 +997,10 @@ class MetalKernel(SIMDKernel):
                         pass
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
+
+                # Add error buffer parameter if error header is used
+                if "error" in self.headers:
+                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
 
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
@@ -984,7 +1066,6 @@ class MetalKernel(SIMDKernel):
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
-            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction or self.inside_reduction:
                 args.append(str(expr))
                 arg_types.append(int)
@@ -1004,7 +1085,6 @@ class MetalKernel(SIMDKernel):
             threads = [
                 expr_printer(
                     sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
-                    # pyrefly: ignore [missing-argument]
                     if v.is_reduction
                     else v.numel
                 )
@@ -1020,7 +1100,6 @@ class MetalKernel(SIMDKernel):
         if self.inside_reduction:
             threads = [
                 expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
-                # pyrefly: ignore [missing-argument]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()
@@ -1034,6 +1113,13 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
+        # Add error buffer index if error reporting is used
+        # TODO(malfet) Figure out how to do it for aoti
+        if "error" in self.headers and not V.graph.cpp_wrapper:
+            args.append(
+                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
+            )
+
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1042,56 +1128,108 @@ class MetalKernel(SIMDKernel):
             arg_types=arg_types,
         )
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        if V.graph.cpp_wrapper:
+            self.cse.generate(self.compute, f"if (!{cond}) return", assignment=False)
+        else:
+            self.headers.add("error")
+            self.compute.writelines(
+                [
+                    f"if (!{cond}) {{",
+                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    "    return;",
+                    "}",
+                ]
+            )
+
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
         if not (lower or upper):
             return
-        # TODO(malfet): support asserts
-        # See https://github.com/pytorch/pytorch/issues/144634
+
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
+        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        # Generate error reporting code
+        if V.graph.cpp_wrapper:
+            self.cse.generate(
+                self.compute, f"if ({condition}) return", assignment=False
+            )
+        else:
+            # Add error header for error reporting
+            self.headers.add("error")
+            self.compute.writelines(
+                [
+                    f"if ({condition}) {{",
+                    f'    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");',
+                    "    return;",
+                    "}",
+                ]
+            )
 
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+    _kernel_fn_counter: int = 0
 
-    def __init__(self, scheduler: Optional[Scheduler]) -> None:
+    def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        wrapper = V.graph.wrapper_code
-        if wrapper is not None:
-            if not V.graph.cpp_wrapper:
-                wrapper.header.splice(
-                    "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-                )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code]
-        else:
-            # TODO: Merge multiple kernels into a single library
-            # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
+            return wrapper.src_to_kernel[src_code]
+
+        if V.graph.cpp_wrapper:
+            # C++ path: one library per kernel (each has a single "generated_kernel" function)
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
-
-            kernel_name = f"{mps_lib_name}"
+            kernel_name = mps_lib_name
             wrapper.src_to_kernel[src_code] = kernel_name
-
-            if V.graph.cpp_wrapper:
-                # For shimified version, generate source constant instead of direct instantiation
-                src_code = f"const char* {mps_lib_name}_source = " + src_code
-
+            src_code = f"const char* {mps_lib_name}_source = " + src_code
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)
+            wrapper.define_kernel(
+                mps_lib_name, src_code, f"{origins}\n{detailed_origins}", gpu=False
+            )
+            return kernel_name
 
-        return kernel_name
+        # Python path: register kernel with async_compile; wait() will compile all
+        # accumulated Metal kernels into a single library and replace each placeholder.
+        fn_name = f"generated_kernel_{self._kernel_fn_counter}"
+        self._kernel_fn_counter += 1
+        wrapper.src_to_kernel[src_code] = fn_name
+
+        # Extract Metal source from compile_mps_shader('''...''') call
+        metal_src_start = "compile_mps_shader('''"
+        start = src_code.index(metal_src_start) + len(metal_src_start)
+        end = src_code.rindex("''')")
+        metal_src = src_code[start:end]
+
+        # Strip #include lines and rename the kernel function
+        body_lines = []
+        for line in metal_src.split("\n"):
+            if line.strip().startswith("#include"):
+                continue
+            body_lines.append(
+                line.replace("kernel void generated_kernel(", f"kernel void {fn_name}(")
+            )
+
+        headers_repr = repr(sorted(kernel.headers))
+        wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
+        for line in body_lines:
+            wrapper.header.writeline(line)
+        wrapper.header.writeline(f"''', {headers_repr})")
+
+        return fn_name

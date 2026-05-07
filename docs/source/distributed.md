@@ -18,6 +18,66 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.api
+```
+
+```{eval-rst}
+.. autofunction:: get_env_variable_or_raise
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.distributed
+```
+
+```{eval-rst}
+.. autofunction:: get_free_port
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.log_level
+```
+
+```{eval-rst}
+.. autofunction:: get_log_level
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.logging
+```
+
+```{eval-rst}
+.. autofunction:: get_logger
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: register_rendezvous_handler
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters_or_parameter_groups
+```
+
+```{eval-rst}
+.. autofunction:: get_params_to_average
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed
+```
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
@@ -343,11 +403,27 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_config
+```
+
+```{eval-rst}
 .. autofunction:: get_rank
 ```
 
 ```{eval-rst}
 .. autofunction:: get_world_size
+```
+
+```{eval-rst}
+.. autofunction:: get_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: get_node_local_rank
+```
+
+```{eval-rst}
+.. autofunction:: get_pg_count
 ```
 
 ## Shutdown
@@ -409,6 +485,14 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```{eval-rst}
 .. autofunction:: get_process_group_ranks
 
+```
+
+```{eval-rst}
+.. autofunction:: split_group
+```
+
+```{eval-rst}
+.. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
 ## DeviceMesh
@@ -533,6 +617,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: all_reduce_coalesced
+```
+
+```{eval-rst}
 .. autofunction:: reduce
 ```
 
@@ -546,6 +634,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: all_gather_object
+```
+
+```{eval-rst}
+.. autofunction:: all_gather_coalesced
 ```
 
 ```{eval-rst}
@@ -663,6 +755,33 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
+
+## Optimization with Symmetric Memory
+
+### Copy Engine Collectives
+
+When NCCL collective operations are performed on symmetric memory tensors with
+the zero-CTA policy, data movement is offloaded to the GPU's copy engines (DMA
+engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
+SMs for compute work, enabling better overlap of communication and computation.
+
+For setup instructions, requirements, and examples, see
+[Copy Engine Collectives](copy-engine-collectives) in the Symmetric Memory documentation.
+
+### Higher-Precision Reduction
+
+When NCCL collectives such as ``reduce_scatter`` and ``all_reduce`` operate on
+symmetric memory tensors, NCCL's symmetric kernel implementation automatically
+performs internal reduction with higher precision (e.g., BF16/FP16 in → FP32
+accumulate → BF16/FP16 out). This improves numerical accuracy without any code
+changes to the collective call.
+
+For details on scope, supported domains, and version requirements, see
+[Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
+
 ## Multi-GPU collective functions
 
 :::{warning}
@@ -745,7 +864,22 @@ multiple processes per node for distributed training.
 
 ```{eval-rst}
 .. automodule:: torch.distributed.launch
+```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.launch
+```
+
+```{eval-rst}
+.. autofunction:: launch
+```
+
+```{eval-rst}
+.. autofunction:: main
+```
+
+```{eval-rst}
+.. autofunction:: parse_args
 ```
 
 ## Spawn utility
@@ -1217,6 +1351,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.collective_utils
+
+.. autofunction:: torch.distributed.collective_utils.all_gather_object_enforce_type
 ```
 
 ```{eval-rst}
@@ -1365,6 +1501,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.launcher.api
+
+.. autofunction:: torch.distributed.launcher.api.launch_agent
 ```
 
 ```{eval-rst}

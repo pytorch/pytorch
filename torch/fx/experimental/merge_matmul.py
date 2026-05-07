@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import itertools
 import operator
 
@@ -30,11 +29,10 @@ def split_result_tensors(
     else:
         splits = [x.shape[0] for x in inputs]
 
-    # pyrefly: ignore [bad-argument-type]
     return torch.split(result, splits)
 
 
-def may_depend_on(a: Node, b: Node, search_depth: int = 6):
+def may_depend_on(a: Node, b: Node, search_depth: int = 6) -> bool:
     """
     Determine if one node depends on another in a torch.fx.Graph.
 
@@ -71,7 +69,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
     return False
 
 
-def are_nodes_independent(nodes: list[Node]):
+def are_nodes_independent(nodes: list[Node]) -> bool:
     """
     Check if all of the given nodes are pairwise-data independent.
 
@@ -89,16 +87,19 @@ def are_nodes_independent(nodes: list[Node]):
     return True
 
 
-def merge_matmul(in_mod: torch.nn.Module):
+def merge_matmul(in_mod: torch.nn.Module) -> torch.fx.GraphModule:
     """
     A graph transformation that merges matrix multiplication operations that share the same right-hand
     side operand into one large matrix multiplication.
-               ____      _________        _________
-      ----    |    |    |         |     M|  A * C  |
-    M| A  |  T| B  | * K|    C    | =    |---------|
-      ---- ,  |    |    |         |     T|  B * C  |
-       K       ----      ---------        ---------
-                K            R                R
+
+    ::
+
+                   ____      _________        _________
+          ----    |    |    |         |     M|  A * C  |
+        M| A  |  T| B  | * K|    C    | =    |---------|
+          ---- ,  |    |    |         |     T|  B * C  |
+           K       ----      ---------        ---------
+                    K            R                R
     """
     gm = symbolic_trace(in_mod)
 

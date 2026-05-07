@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -755,7 +755,7 @@ class ABCTestCase(__TestCase):
         # everything should work will all required methods are present
         with torch._dynamo.error_on_graph_break(False):
             C = type('C', (abc,), methodstubs)
-        C()
+            C()
 
         # Dynamo raises a hard error here that we can't easily capture
         # Commenting this part as this would also fail in eager if a user
@@ -2420,6 +2420,7 @@ class TestCounter(__TestCase):
         self.assertTrue(c.called)
         self.assertEqual(dict(c), {'a': 5, 'b': 2, 'c': 1, 'd': 1, 'r':2 })
 
+    @slowTest
     def test_multiset_operations_equivalent_to_set_operations(self):
         # When the multiplicities are all zero or one, multiset operations
         # are guaranteed to be equivalent to the corresponding operations

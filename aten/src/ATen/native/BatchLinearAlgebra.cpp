@@ -1843,7 +1843,21 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
 
   cholesky_stub(L.device().type(), L, info, upper);
 
-  if (!cpu) {
+  // On non-CPU devices (MAGMA) the pre-copy doesn't zero the unused triangle,
+  // so we must clean up after. On macOS, Accelerate's LAPACK writes into the
+  // unreferenced triangle for matrices larger than its internal block size
+  // (e.g. n > 64), violating the LAPACK spec which says "not referenced"
+  // elements are "never read, written to, or otherwise accessed"
+  // (see https://www.netlib.org/lapack/lug/node121.html).
+  // We work around this by applying the same cleanup on macOS.
+  // TODO(https://github.com/pytorch/pytorch/issues/179152): always
+  // clean up the unused triangle on all platforms.
+#if defined(__APPLE__)
+  constexpr bool needs_triangle_cleanup = true;
+#else
+  const bool needs_triangle_cleanup = !cpu;
+#endif
+  if (needs_triangle_cleanup) {
     if (upper) {
       L.triu_();
     } else {
@@ -1957,15 +1971,10 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
                                       const Tensor& LU,
                                       const Tensor& pivots,
                                       const Tensor& info) {
-  // Possible optimization: Compute the LU factorization of A^T if A is contiguous
-  // Then we solve A^T X = B with adjoint=True
-  // This saves a copy as A doesn't need to be copied into an F-contig matrix in lu_factor
-  // This optimization makes functorch's batching rule difficult. See NOTE [ solve_ex Batch Rule Contiguity ]
-  const bool use_A_T = A.is_contiguous() && !A.is_complex();
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              use_A_T ? A.mT() : A);
+                              A);
   if (check_errors) {
     at::_linalg_check_errors(info, "torch.linalg.solve_ex", A.dim() == 2);
   }
@@ -1974,7 +1983,7 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
   const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
   auto result_ = vector_case ? result.unsqueeze(-1) : result;
   auto B_ = vector_case ? B.unsqueeze(-1) : B;
-  at::linalg_lu_solve_out(result_, LU, pivots, B_, left, /*adjoint*/use_A_T);
+  at::linalg_lu_solve_out(result_, LU, pivots, B_, left);
 }
 
 std::tuple<Tensor&, Tensor&> linalg_solve_ex_out(const Tensor& A,
@@ -3070,7 +3079,7 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 
   at::linalg_eig_outf(input, values, vectors);
 
-  return std::tuple<Tensor, Tensor>(values, vectors);
+  return std::tuple<Tensor, Tensor>(std::move(values), std::move(vectors));
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
