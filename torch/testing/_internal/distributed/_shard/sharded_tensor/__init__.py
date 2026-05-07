@@ -95,9 +95,11 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
+        acc = torch.accelerator.current_accelerator()
         if backend in ["nccl", "xccl", "hccl"]:
             if (
-                not torch.accelerator.is_available()
+                acc is None
+                or backend != dist.get_default_backend_for_device(acc)
                 or torch.accelerator.device_count() < self.world_size
             ):
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
