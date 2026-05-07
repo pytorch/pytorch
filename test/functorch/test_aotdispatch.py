@@ -7900,6 +7900,120 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("_get_rng_state_", source)
 
+    # --- CompiledFunction.forward codegen tests ---
+
+    def test_compiled_forward_codegen_emitted(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _compiled_forward(", source)
+        self.assertIn("_normalize_as_list_", source)
+
+    def test_compiled_forward_elides_backward_state(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("BackwardState", source)
+
+    def test_compiled_forward_elides_amp(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("DisableAutocast", source)
+
+    def test_compiled_forward_includes_amp_when_active(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            with torch.autocast("cpu"):
+                x = torch.randn(4, requires_grad=True)
+                f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_DisableAutocast_", source)
+
+    def test_compiled_forward_no_codegen_for_inference(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            f(torch.randn(4))
+
+        self.assertEqual(len(captured), 0)
+
+    def test_compiled_forward_elides_rng_when_off(self):
+        with capture_codegen_source("compiled_function_forward") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertNotIn("_rng_add_(ctx, args)", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_compiled_forward_rng_codegen(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("compiled_function_forward") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_rng_add_(ctx, args)", source)
+
+    def test_compiled_forward_correctness(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            return x * y, x + y
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        o1, o2 = f(x, y)
+        (o1.sum() + o2.sum()).backward()
+        self.assertEqual(x.grad, y + 1)
+        self.assertEqual(y.grad, x + 1)
+
     # --- Backward epilogue codegen tests ---
 
     def test_backward_epilogue_codegen_emitted(self):
