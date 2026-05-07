@@ -7987,16 +7987,22 @@ def forward(self, primals_1, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_forward_rng_codegen(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("compiled_function_forward") as captured:
+        # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
+        # requires recomputable RNG ops (e.g. from activation checkpointing).
+        from torch.utils.checkpoint import checkpoint
 
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x) + x
+        with capture_codegen_source("compiled_function_forward") as captured:
 
-                x = torch.randn(4, device="cuda", requires_grad=True)
-                out = f(x)
-                out.sum().backward()
+            def gn(x):
+                return torch.rand_like(x) * x
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return checkpoint(gn, x, use_reentrant=False)
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
@@ -9087,6 +9093,22 @@ def forward(self, primals_1, tangents_1):
         out2 = opt_fn(x2)
         out2.sum().backward()
         self.assertEqual(x2.grad, eager_grad)
+
+    def test_size_of_void_returning_nodes(self):
+        # Void-returning ops have no `val` metadata. _size_of must return 0
+        # for them instead of raising RuntimeError.
+        from torch._functorch.partitioners import _size_of
+
+        g = torch.fx.Graph()
+        for target in (
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
+            torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.sym_constrain_range.default,
+            torch.ops.aten._assert_tensor_metadata.default,
+        ):
+            node = g.call_function(target, args=())
+            self.assertEqual(_size_of(node), 0)
 
 
 class TestAOTDispatch(AOTTestCase):
