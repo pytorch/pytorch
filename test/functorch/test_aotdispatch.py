@@ -7985,6 +7985,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(ctx, args)", source)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_forward_rng_codegen(self):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
             with capture_codegen_source("compiled_function_forward") as captured:
@@ -7993,7 +7994,7 @@ def forward(self, primals_1, tangents_1):
                 def f(x):
                     return torch.rand_like(x) + x
 
-                x = torch.randn(4, requires_grad=True)
+                x = torch.randn(4, device="cuda", requires_grad=True)
                 out = f(x)
                 out.sum().backward()
 
