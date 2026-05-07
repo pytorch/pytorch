@@ -175,9 +175,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
 
   auto grad_output_contig =
-      grad_output_t.contiguous(input_t.suggest_memory_format());
+      grad_output_t.expect_contiguous(input_t.suggest_memory_format());
   TensorArg input{input_t, "input", 1},
-      grad_output{grad_output_contig, "grad_output", 2},
+      grad_output{*grad_output_contig, "grad_output", 2},
       weight{weight_t, "weight", 3}, save_mean{save_mean_t, "save_mean", 4},
       save_var{save_var_t, "save_var", 5};
   CheckedFrom c = "miopen_batch_norm_backward";
