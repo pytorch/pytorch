@@ -776,8 +776,6 @@ class Node(_NodeBase):
 
         # For call_function, delegate to the unified has_side_effects function
         if self.op == "call_function":
-            if getattr(self.target, "_is_impure", False):
-                    return True
 
             from torch._library.utils import is_impure
 
