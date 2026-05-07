@@ -7,7 +7,7 @@ Per-type hook implementations (bool_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
 from torch._C._dynamo import (
@@ -111,10 +111,22 @@ def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     return get_type_slots(obj_type)
 
 
-def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
+def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the given sq slot."""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
     return has_slot(seq_slots, slot)
+
+
+type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
+type_implements_sq_length = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
+)
+type_implements_sq_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_CONCAT
+)
+type_implements_sq_inplace_concat = partial(
+    type_implements_sq_slot, slot=PySequenceSlots.SQ_INPLACE_CONCAT
+)
 
 
 def type_implements_mp_length(obj_type: type) -> bool:
@@ -193,7 +205,7 @@ def pysequence_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1714-L1721
     if issubclass(obj_type, dict):
         return False
-    return type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM)
+    return type_implements_sq_item(obj_type)
 
 
 def maybe_get_python_type(obj: VariableTracker) -> type:
@@ -242,7 +254,7 @@ def vt_mapping_size(
     if type_implements_mp_length(T):
         return obj.mp_length(tx)
 
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_LENGTH):
+    if type_implements_sq_length(T):
         raise_type_error(tx, f"{obj.python_type_name()} is not a mapping")
 
     raise_type_error(tx, f"object of type {obj.python_type_name()} has no len()")
@@ -258,7 +270,7 @@ def generic_len(
     """
 
     T = maybe_get_python_type(obj)
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_LENGTH):
+    if type_implements_sq_length(T):
         return obj.sq_length(tx)
     return vt_mapping_size(tx, obj)
 
@@ -328,7 +340,7 @@ def vt_getitem(
     # Branch 2: sq_item (only if mp_subscript is absent)
     # CPython: abstract.c L168-181 — _PyIndex_Check(key) → PyNumber_AsSsize_t
     #          → PySequence_GetItem (wraps negative, calls sq_item)
-    if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM):
+    if type_implements_sq_item(obj_type):
         key_type = maybe_get_python_type(key)
         if type_implements_nb_index(key_type):
             key = key.nb_index_impl(tx)
@@ -361,12 +373,12 @@ def vt_sequence_getitem(
     """
     obj_type = maybe_get_python_type(obj)
 
-    if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_ITEM):
+    if type_implements_sq_item(obj_type):
         # Negative index wrapping (abstract.c L2175-2183)
         if isinstance(index, ConstantVariable):
             index_val = index.as_python_constant()
             if isinstance(index_val, int) and index_val < 0:
-                if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_LENGTH):
+                if type_implements_sq_length(obj_type):
                     length = obj.sq_length(tx)
                     index = ConstantVariable.create(
                         index_val + length.as_python_constant()
@@ -723,7 +735,7 @@ def vt_add(
         return result
 
     T = maybe_get_python_type(v)
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONCAT):
+    if type_implements_sq_concat(T):
         return v.sq_concat_impl(tx, w)
     binop_type_error(tx, v, w, "+")
 
@@ -738,9 +750,9 @@ def vt_inplace_add(
     result = binary_iop1(tx, v, w, "nb_inplace_add", "nb_add")
     if is_nb_not_implemented(result):
         obj_type = maybe_get_python_type(v)
-        if type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_INPLACE_CONCAT):
+        if type_implements_sq_inplace_concat(obj_type):
             return v.sq_inplace_concat_impl(tx, w)
-        elif type_implements_sequence_slot(obj_type, PySequenceSlots.SQ_CONCAT):
+        elif type_implements_sq_concat(obj_type):
             return v.sq_concat_impl(tx, w)
         else:
             binop_type_error(tx, v, w, "+=")
