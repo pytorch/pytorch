@@ -1240,7 +1240,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
