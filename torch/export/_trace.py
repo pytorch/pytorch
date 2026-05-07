@@ -1120,7 +1120,7 @@ def _get_forward_arg_names(
             names.append(name)
     # order of kwargs matters for input spec
     if kwargs:
-        names.extend([kwarg for kwarg, _ in kwargs.items()])
+        names.extend(kwargs.keys())
 
     return names
 
