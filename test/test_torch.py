@@ -1540,6 +1540,15 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
+    def test_deterministic_replication_pad_tensor_padding(self, device):
+        # gh-182339: 0-d int64 tensor in padding tuple should not crash
+        x = torch.randn(2, 1, 16, device=device)
+        extra_padding = torch.tensor(4, dtype=torch.int64, device=device)
+        with DeterministicGuard(True):
+            result = torch.nn.functional.pad(x, (4, extra_padding), mode='replicate')
+        expected = torch.nn.functional.pad(x, (4, 4), mode='replicate')
+        self.assertEqual(result, expected)
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -10518,32 +10527,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_storage_preserve_nonhermetic_in_hermetic_context(self):
-        from torch.library import Library, impl
+        from torch.library import _scoped_library, impl
         global _my_storage
 
-        my_lib = Library("my_lib", "DEF")  # noqa: TOR901
-        my_lib.define('my_func() -> None')
+        with _scoped_library("my_lib", "DEF") as my_lib:
+            my_lib.define('my_func() -> None')
 
-        a = torch.tensor([1.])
-        _my_storage = a.untyped_storage()
+            a = torch.tensor([1.])
+            _my_storage = a.untyped_storage()
 
-        m, t = Tracker.make()
-        _my_storage._tracker = t
-        del t
+            m, t = Tracker.make()
+            _my_storage._tracker = t
+            del t
 
-        @impl(my_lib, 'my_func', '')
-        def my_func():
-            global _my_storage
-            del _my_storage
+            @impl(my_lib, 'my_func', '')
+            def my_func():
+                global _my_storage
+                del _my_storage
 
-        self.assertFalse(m[0])
-        torch.ops.my_lib.my_func()
-        self.assertFalse(m[0])
+            self.assertFalse(m[0])
+            torch.ops.my_lib.my_func()
+            self.assertFalse(m[0])
 
-        s = a.untyped_storage()
-        del a
-        del s
-        self.assertTrue(m[0])
+            s = a.untyped_storage()
+            del a
+            del s
+            self.assertTrue(m[0])
 
     # FIXME: move to test_autograd?
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")

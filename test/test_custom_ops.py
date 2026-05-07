@@ -108,7 +108,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.libraries.append(result)
         return result
 
@@ -1900,6 +1900,34 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
             torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
+    def test_register_fake_does_not_leak_on_failure(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        # CompositeImplicitAutograd kernel makes lib.impl(..., "Meta", ...)
+        # inside FakeImplHolder.register raise *after* the kernel has been
+        # appended to the holder's singleton kernel list.
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
+        # allow_override=True bypasses the early guard and exercises the
+        # exception-safety path in FakeImplHolder.register.
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=True
+            )
+
+        # The failed registration must not leave a dangling kernel in the
+        # process-wide FakeImplHolder; otherwise teardown leaks it and
+        # corrupts subsequent register_fake() calls for the same qualname.
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -2245,7 +2273,7 @@ Dynamic shape operator
         def foo_impl2(x):
             return torch.cat([x, x])
 
-        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
+        with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
             torch.library.register_fake(op_name, foo_impl2, lib=lib)
 
         # Override fake kernel to foo_impl2
@@ -4867,6 +4895,7 @@ class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
 
     def setUp(self):
+        super().setUp()
         self.supported_base_types = [
             int,
             float,
