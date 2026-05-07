@@ -8923,6 +8923,26 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
 
+    # --- Compiled autograd adaptation test ---
+
+    def test_compiled_autograd_uses_codegen_prologue(self):
+        torch._dynamo.config.compiled_autograd = True
+        try:
+            with self._capture_codegen_source("backward_prologue") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return x * 2
+
+                x = torch.randn(4, requires_grad=True)
+                out = f(x)
+                out.sum().backward()
+
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(x.grad, torch.full((4,), 2.0))
+        finally:
+            torch._dynamo.config.compiled_autograd = False
+
     def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
