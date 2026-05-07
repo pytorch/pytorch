@@ -580,6 +580,7 @@ class TestEnvironmentDefFlag(TestCase):
     """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
 
     def setUp(self):
+        super().setUp()
         import torch.testing._internal.common_utils as _cu
         self._cu = _cu
         self._defined: list[str] = []
@@ -2475,6 +2476,7 @@ class TestImports(TestCase):
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
+                           "torch._vendor.quack",  # depends on cutlass / cuda-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

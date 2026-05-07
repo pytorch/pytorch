@@ -778,7 +778,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   // At large rank counts, TCPStore gets overloaded during the metadata
   // exchange. When PG rendezvous is enabled, route the metadata exchange
   // through the process group's NCCL allgather instead.
-  bool use_pg = group->getUsePgForSymmMemRendezvous();
+  bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
+      group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
   std::vector<RendezvousRequest> reqs = use_pg
       ? pg_all_gather(group, block->device_idx, local_req)
       : storeExchange.all_gather(store, rank, world_size, local_req);
