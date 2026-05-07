@@ -1575,6 +1575,25 @@ class TensorVariable(VariableTracker):
     def method___neg__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_negative_impl(tx)
 
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.pos,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -2347,6 +2366,29 @@ class SymNodeVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.evaluate_expr()), False
+
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.pos(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___pos__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        # Essentially convert the SymNode to a constant variable whenever its
+        # searched for a dict key.
+        return hash(self.evaluate_expr())
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, SymNodeVariable):

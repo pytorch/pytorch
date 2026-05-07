@@ -687,6 +687,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tx, f"object of type {self.python_type_name()} has no negative"
         )
 
+    def nb_positive_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__pos__")
+        if m:
+            source = self.source and AttrSource(self.source, "__pos__")
+            return variables.UserMethodVariable(
+                m, self, source_fn=source
+            ).call_function(tx, [], {})
+        raise_type_error(
+            tx, f"object of type {self.python_type_name()} has no positive"
+        )
+
     def _call_cross_entropy_loss(
         self,
         tx: "InstructionTranslator",
@@ -1665,6 +1676,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         return self.call_method(tx, "__neg__", [], {})
+
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # CPython: slot_nb_positive calls __pos__() via vectorcall_method.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
+        type_attr = self.lookup_class_mro_attr("__pos__")
+        if type_attr is NO_SUCH_SUBOBJ:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no positive"
+            )
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+
+        method = self._maybe_get_baseclass_method("__pos__")
+        if method is None:
+            raise_type_error(
+                tx, f"object of type {self.python_type_name()} has no positive"
+            )
+
+        return self.call_method(tx, "__pos__", [], {})
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
