@@ -3657,9 +3657,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", args: Sequence[VariableTracker]
     ) -> VariableTracker:
         try:
-            res = type(
-                *[x.as_python_constant() for x in args],
-            )
+            name, bases, ns = (x.as_python_constant() for x in args)
+            res = type(name, bases, ns)
         except AsPythonConstantNotImplementedError:
             unimplemented(
                 gb_type="Failed to trace type() with 3 arguments",
