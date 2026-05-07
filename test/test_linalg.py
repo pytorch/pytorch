@@ -2115,6 +2115,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
+    @unittest.skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
