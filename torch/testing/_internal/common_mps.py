@@ -916,7 +916,10 @@ if torch.backends.mps.is_available():
             "nn.functional.dropout2d": [torch.float16, torch.float32],
             "nn.functional.dropout3d": [torch.float16, torch.float32],
             "nn.functional.alpha_dropout": [torch.float16, torch.float32],
-            "nn.functional.feature_alpha_dropoutwith_train": [torch.float16, torch.float32],
+            "nn.functional.feature_alpha_dropoutwith_train": [
+                torch.float16,
+                torch.float32,
+            ],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
