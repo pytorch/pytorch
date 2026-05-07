@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+from torch._functorch._aot_autograd.runtime_wrappers import ComplexWrapper
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
@@ -235,6 +236,15 @@ def _prepare_graph_capture_tracing(
                 joint_fn_handle=joint_fn_handle,
             )
         )
+
+    complex_wrapper = ComplexWrapper()
+    flat_fn, updated_flat_args, updated_flat_args_descs, fw_metadata = complex_wrapper.pre_compile(
+        flat_fn,
+        updated_flat_args,
+        updated_flat_args_descs,
+        aot_config=aot_config,
+        fw_metadata=fw_metadata,
+    )
 
     subclass_tracing_info = aot_dispatch_subclass(
         fn_to_trace,
