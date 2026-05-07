@@ -1948,13 +1948,19 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8, 8]"):
         l_x_ = L_x_
 
-        fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
         autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
-        y: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
+        getitem: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
 
-        sin: "f32[8, 8]" = torch.sin(y);  y = None
+        sin: "f32[8, 8]" = torch.sin(getitem);  getitem = None
         return (sin,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad_out: "f32[8, 8]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (grad_out,)
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
@@ -1963,12 +1969,6 @@ class GraphModule(torch.nn.Module):
 
             view_as: "f32[8, 8]" = l_x_.view_as(l_x_);  l_x_ = None
             return ((view_as,), ())
-
-    class bwd_body_0(torch.nn.Module):
-        def forward(self, grad_out: "f32[8, 8]"):
-            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (grad_out,)
 """,
         )
 
@@ -2470,6 +2470,181 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             out = torch.compile(fn, backend="eager", fullgraph=True)(x)
             out.backward()
+
+    def test_apply_kwargs_old_style(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                ctx.save_for_backward(input)
+                ctx.factor = factor
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        def fn(x):
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        ref.backward()
+        grad_ref = x.grad.clone()
+        x.grad = None
+        res.backward()
+        self.assertEqual(x.grad, grad_ref)
+
+    def test_apply_kwargs_setup_context(self):
+        class MyScale(torch.autograd.Function):
+            @staticmethod
+            def forward(x, factor=1):
+                return factor * x
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, factor = inputs
+                ctx.save_for_backward(x)
+                ctx.factor = factor
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * ctx.factor, None
+
+        def fn(x):
+            return MyScale.apply(x, factor=3)
+
+        x = torch.tensor([2.0], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        ref.backward()
+        grad_ref = x.grad.clone()
+        x.grad = None
+        res.backward()
+        self.assertEqual(x.grad, grad_ref)
+
+    def test_apply_kwargs_all_kwargs(self):
+        class Add(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x + y
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        def fn(x, y):
+            return Add.apply(y=y, x=x)
+
+        x = torch.tensor([2.0], requires_grad=True)
+        y = torch.tensor([3.0], requires_grad=True)
+        ref = fn(x, y)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_inference(self):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, None
+
+        def fn(x):
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812])
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_with_custom_signature(self):
+        # __signature__ is ignored; resolution uses __code__ (matching C++ behavior)
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, factor=1):
+                ctx.save_for_backward(input)
+                ctx.factor = factor
+                return factor * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        # Set a __signature__ with different param names
+        import inspect as _inspect
+
+        MySin.forward.__signature__ = _inspect.Signature(
+            [
+                _inspect.Parameter("ctx", _inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                _inspect.Parameter("x", _inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                _inspect.Parameter(
+                    "scale",
+                    _inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    default=1,
+                ),
+            ]
+        )
+
+        def fn(x):
+            # "factor" matches __code__, not __signature__
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_apply_kwargs_with_wrapped(self):
+        # __wrapped__ is ignored; resolution uses __code__ of the wrapper
+        import functools
+
+        def my_decorator(f):
+            @functools.wraps(f)
+            def wrapper(ctx, input, factor=1):
+                return f(ctx, input, factor)
+
+            return wrapper
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            @my_decorator
+            def forward(ctx, input, multiplier=1):
+                ctx.save_for_backward(input)
+                ctx.factor = multiplier
+                return multiplier * torch.sin(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                return grad_output * ctx.factor * torch.cos(input), None
+
+        def fn(x):
+            # "factor" matches the wrapper's __code__, not the wrapped fn
+            return MySin.apply(x, factor=6)
+
+        x = torch.tensor([0.812], requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):

@@ -209,13 +209,17 @@ class GraphModule(torch.nn.Module):
         add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
 
         partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+
         invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', add);  partitioned_fw_subgraph_0_0 = add = None
+
         getitem: "f32[10, 10]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
         cos: "f32[10, 10]" = torch.ops.aten.cos.default(getitem)
 
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
+
         invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', cos);  partitioned_fw_subgraph_0_1 = cos = None
+
         getitem_1: "f32[10, 10]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
 
         sin: "f32[10, 10]" = torch.ops.aten.sin.default(getitem_1)
@@ -341,7 +345,9 @@ class GraphModule(torch.nn.Module):
         sin: "f32[10, 20]" = torch.ops.aten.sin.default(primals_2)
 
         partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+
         invoke_subgraph_9 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1, primals_2);  partitioned_fw_subgraph_0_0 = None
+
         getitem: "f32[]" = invoke_subgraph_9[0];  invoke_subgraph_9 = None
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
         invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', primals_1, primals_2);  partitioned_fw_subgraph_0_1 = None
@@ -350,10 +356,12 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_2, 'partitioned_fw_subgraph_0_0', primals_1, sin);  partitioned_fw_subgraph_0_2 = None
         getitem_2: "f32[]" = invoke_subgraph_13[0];  invoke_subgraph_13 = None
         partitioned_fw_subgraph_1_0 = self.partitioned_fw_subgraph_1_0
+
         invoke_subgraph_15 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_1_0, 'partitioned_fw_subgraph_1_0', cos, sin);  partitioned_fw_subgraph_1_0 = cos = sin = None
         getitem_19: "f32[]" = invoke_subgraph_15[3]
         getitem_18: "f32[10, 20]" = invoke_subgraph_15[2]
         getitem_17: "f32[10, 10]" = invoke_subgraph_15[1]
+
         getitem_4: "f32[10, 10]" = invoke_subgraph_15[0];  invoke_subgraph_15 = None
 
         sin_1: "f32[]" = torch.ops.aten.sin.default(getitem)
@@ -422,7 +430,9 @@ class GraphModule(torch.nn.Module):
         sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
 
         partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+
         invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1, sum_1);  partitioned_fw_subgraph_0_0 = sum_1 = None
+
         getitem: "f32[]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
         add_1: "f32[]" = torch.ops.aten.add.Tensor(getitem, 2);  getitem = None
@@ -430,7 +440,9 @@ class GraphModule(torch.nn.Module):
         sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
 
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
+
         invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', primals_1, sum_2);  partitioned_fw_subgraph_0_1 = primals_1 = sum_2 = None
+
         getitem_1: "f32[]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
         return (getitem_1,)
 
