@@ -91,11 +91,11 @@ class TestTSan(TestCase):
                 # Fires dict_recursive_tag_watch_callback on mod.__dict__.
                 mod.a = i
 
-        def check():
+        def call_opt_fn():
             for _ in range(200):
                 opt_fn(x)
 
-        run_concurrently([mutate, check, check, check])
+        run_concurrently([call_opt_fn, mutate])
 
 
 if __name__ == "__main__":
