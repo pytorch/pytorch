@@ -1417,9 +1417,8 @@ class ComplexWrapper(CompilerWrapper):
     3) Don't do anything with metadata or descriptors and pray for the best
     """
 
-    complex_wrap_mode: TorchDispatchMode = WrapComplexMode()
-    wrapped_arg_indices: set[int] = field(default_factory=set)
-    did_wrap: bool = False
+    complex_wrap_mode: TorchDispatchMode = field(default_factory=WrapComplexMode)
+    wrapped_arg_indices: list[int] = field(default_factory=list)
 
     @staticmethod
     def is_leaf(arg: Any) -> bool:
@@ -1436,10 +1435,16 @@ class ComplexWrapper(CompilerWrapper):
         return arg.as_interleaved() if isinstance(arg, ComplexTensor) else arg
 
     def wrap_args(self, args):
-        return [
-            ComplexTensor.from_interleaved(a) if i in self.wrapped_arg_indices else a
-            for i, a in enumerate(args)
-        ]
+        new_args = []
+        for i, arg in enumerate(args):
+            if not arg.dtype.is_complex:
+                new_args.append(arg)
+            else:
+                self.wrapped_arg_indices.append(i)
+                complex_arg = ComplexTensor.from_interleaved(arg)
+                new_args.append(complex_arg.re)
+                new_args.append(complex_arg.im)
+        return new_args
 
     def pre_compile(
         self,
@@ -1450,48 +1455,32 @@ class ComplexWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+        if not config.enable_complex_wrapper:
+            return flat_fn, flat_args, flat_args_descs, fw_metadata
+
         @simple_wraps(flat_fn)
         def wrapped_flat_fn(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
             with self.complex_wrap_mode:
                 outs, out_descs = call_and_expect_output_descs(flat_fn, args)
             return outs, out_descs
 
-        if config.enable_complex_wrapper:
-            wrapped_args = pytree.tree_map(self.wrap, flat_args)
-            self.wrapped_arg_indices = {
-                i
-                for i, arg in enumerate(wrapped_args)
-                if isinstance(arg, ComplexTensor)
-            }
-            for idx in self.wrapped_arg_indices:
-                idx_info = fw_metadata.input_info[idx]
-                if idx_info.mutation_type != MutationType.NOT_MUTATED:
-                    raise RuntimeError(
-                        f"For wrapped complex arg {idx}, mutating or aliasing data is not supported."
-                    )
-            for idx, out_info in enumerate(fw_metadata.output_info):
-                if out_info.output_type in (
-                    OutputType.is_input,
-                    OutputType.alias_of_input,
-                ):
-                    raise RuntimeError(
-                        f"For wrapped complex output {idx}, aliasing input data is not supported."
-                    )
-            wrapped_args_descs = [
-                ComplexWrappedAOTInput(inp_desc)
-                if i in self.wrapped_arg_indices
-                else inp_desc
-                for i, inp_desc in enumerate(flat_args_descs)
-            ]
-            updated_metadata = run_functionalized_fw_and_collect_metadata(
-                without_output_descs(wrapped_flat_fn),
-                flat_args_descs=wrapped_args_descs,
-                static_input_indices=aot_config.static_input_indices,
-                keep_input_mutations=fw_metadata.keep_input_mutations,
-            )(*wrapped_args)
-            self.did_wrap = True
-            return (wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata)
-        return (flat_fn, flat_args, flat_args_descs, fw_metadata)
+        wrapped_args = pytree.tree_map(self.wrap, flat_args)
+        if len(self.wrapped_arg_indices) == 0:
+            return flat_fn, flat_args, flat_args_descs, fw_metadata
+        wrapped_args_descs = [
+            ComplexWrappedAOTInput(inp_desc)
+            if i in self.wrapped_arg_indices
+            else inp_desc
+            for i, inp_desc in enumerate(flat_args_descs)
+        ]
+        updated_metadata = run_functionalized_fw_and_collect_metadata(
+            without_output_descs(wrapped_flat_fn),
+            flat_args_descs=wrapped_args_descs,
+            static_input_indices=aot_config.static_input_indices,
+            keep_input_mutations=fw_metadata.keep_input_mutations,
+        )(*wrapped_args)
+        aot_config._did_wrap_complex = True
+        return wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata
 
     def post_compile(
         self,
@@ -1500,7 +1489,7 @@ class ComplexWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        if not self.did_wrap:
+        if not (config.enable_complex_wrapper and aot_config._did_wrap_complex):
             return compiled_fn
 
         @wraps(compiled_fn)
@@ -1511,7 +1500,6 @@ class ComplexWrapper(CompilerWrapper):
             outs_unwrapped = pytree.tree_map(self.unwrap, outs)
             return outs_unwrapped
 
-        wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
         return wrapped_compiled_fn
 
 

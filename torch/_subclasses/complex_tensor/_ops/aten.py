@@ -736,7 +736,7 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
     warnings.warn(
         "`view_as_real` doesn't respect aliasing semantics under `torch.compile`.",
         category=RuntimeWarning,
-        stacklevel=1,
+        stacklevel=3,
     )
     out = torch.stack([self._re, self._im], dim=-1)
     if self.is_neg():

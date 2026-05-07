@@ -62,28 +62,12 @@ class ComplexTests(ComplexDynamoTestCase):
             a[...] = torch.zeros_like(a)
             return out
 
+        a = torch.randn(2, 2, dtype=torch.complex64)
         fn_c = torch.compile(f, fullgraph=True)
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        with self.assertRaises(
-            torch._dynamo.exc.BackendCompilerFailed,
-            msg=r"For wrapped complex arg \d+, mutating data is not supported.",
-        ):
-            fn_c(a)
-
-    @unittest.expectedFailure
-    def test_aliasing_semantics_graphbreak(self):
-        def f(a):
-            out = torch.view_as_real(a)
-            a[...] = torch.zeros_like(a)
-            return out
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=False)
         self.assertEqual(f(a.clone()), fn_c(a.clone()))
 
     def test_aliasing_semantics_2(self):
-        def f(a):
+        def fn(a):
             return a
 
         def mutate(f):
@@ -92,26 +76,8 @@ class ComplexTests(ComplexDynamoTestCase):
             a[...] = torch.zeros_like(a)
             return out
 
-        fn_c = torch.compile(f, fullgraph=True)
-
-        with self.assertRaises(
-            torch._dynamo.exc.BackendCompilerFailed,
-            msg=r"For wrapped complex output \d+, aliasing input data is not supported.",
-        ):
-            mutate(fn_c)
-
-    def test_aliasing_semantics_2_graphbreak(self):
-        def f(a):
-            return a
-
-        def mutate(f):
-            a = torch.ones(2, 2, dtype=torch.complex64)
-            out = f(a)
-            a[...] = torch.zeros_like(a)
-            return out
-
-        fn_c = torch.compile(f, fullgraph=False)
-        self.assertEqual(mutate(f), mutate(fn_c))
+        fn_c = torch.compile(fn, fullgraph=True)
+        self.assertEqual(mutate(fn), mutate(fn_c))
 
 
 instantiate_parametrized_tests(ComplexTests)

@@ -1154,6 +1154,8 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    # Whether the complex wrapper has been applied to the function.
+    _did_wrap_complex: bool = False
 
     def to_cacheable(self) -> CacheableAOTConfig:
         return CacheableAOTConfig(
