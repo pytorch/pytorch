@@ -3556,6 +3556,9 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+#ifdef NCCL_HAS_MAX_P2P_PEERS
+      .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
+#endif
       .def(
           "unsafe_get_ptr",
           [](const ncclConfig_t& self) {
