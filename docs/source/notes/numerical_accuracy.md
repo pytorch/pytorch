@@ -1,4 +1,3 @@
-<!-- markdownlint-disable-file MD041 -->
 (numerical_accuracy)=
 
 # Numerical accuracy
@@ -87,7 +86,6 @@ struggle to converge for these inputs.
 Running the computation in ``float64`` (as NumPy does by default) often helps, but it does not solve these issues in all cases.
 Analyzing the spectrum of the inputs via {func}`torch.linalg.svdvals` or their condition number via {func}`torch.linalg.cond`
 may help to detect these issues.
-
 
 ## TensorFloat-32(TF32) on Nvidia Ampere (and later) devices
 
