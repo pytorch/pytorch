@@ -1060,7 +1060,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
