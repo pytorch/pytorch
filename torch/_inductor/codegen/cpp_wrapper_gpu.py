@@ -29,6 +29,7 @@ from ..utils import (
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
+    is_dual_mode,
     XPU_KERNEL_FORMAT,
 )
 from ..virtualized import V
@@ -841,6 +842,11 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
+        # Pure-AOTI receives the stream as a function parameter; the
+        # JIT side of dual-mode (and pure-JIT) needs to fetch it.
+        if V.graph.aot_mode and not is_dual_mode():
+            return "stream"
+
         name = f"stream{device_idx}"
         self.writeline(
             maybe_hipify_code_wrapper(
@@ -1219,11 +1225,7 @@ static struct TritonKernelCompileInit {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        stream = (
-            "stream"
-            if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, graph_name)
-        )
+        stream = self.write_get_raw_stream(device.index, graph_name)
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -1270,18 +1272,25 @@ static struct TritonKernelCompileInit {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            # Pure-AOTI uses the model's runtime device_idx_; dual-AOTI uses
+            # the literal because the JIT-side function has no `this`.
+            device_idx = (
+                "this->device_idx_"
+                if V.graph.aot_mode and not is_dual_mode()
+                else str(device.index)
+            )
             call_args.append(device_idx)
             call_args.append(stream)
-            if V.graph.aot_mode:
-                call_args.append("kernels")
-                call_args.append("this->cubin_dir_")
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 call_args[: len(arg_types)], kernel_name, arg_types, None
             )
+            base_call = f"{wrapper_name}({', '.join(call_args)}"
+            self.wrapper_call.writeline_jit(f"{base_call});")
             with debug_printer_manager:
-                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
+                self.wrapper_call.writeline_aot(
+                    f"{base_call}, kernels, this->cubin_dir_);"
+                )
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
