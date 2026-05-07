@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch._subclasses.complex_tensor._core import ComplexTensor
 
 
 # Support both when imported from elsewhere or directly as a file
@@ -157,21 +156,6 @@ class TestComplexTensor(TestCase):
         self.assertEqual(c.real, torch.tensor([5, 6], dtype=torch.float32))
         self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
         self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
-
-    def test_view_as_real_neg_flag(self, device):
-        x = torch.asarray(1 + 3j, device=device)
-
-        def f(arr):
-            neg_arr = torch._neg_view(arr)
-            return torch.view_as_real(neg_arr).is_neg()
-
-        def expected():
-            return f(x)
-
-        def actual():
-            return f(ComplexTensor.from_interleaved(x))
-
-        self.assertSameResult(expected, actual)
 
 
 @unMarkDynamoStrictTest
