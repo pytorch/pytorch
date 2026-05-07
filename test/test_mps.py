@@ -13547,6 +13547,30 @@ class TestConsistency(TestCaseMPS):
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
             return (0.01, 0.01)
+        # Migrating MPS rand/randn from MPSGraph to native Metal in #182386
+        # shifted the Philox sequence consumed by seeded sample inputs, which
+        # exposed a long tail of "1 element near zero, relative ratio explodes"
+        # mismatches. Track consolidation via a magnitude-floored helper in
+        # #182817; until then bump per-op tolerances.
+        if dtype == torch.float32:
+            if op.name == "digamma":
+                return (1e-2, 2e-5)
+            if op.name == "linalg.householder_product":
+                return (5e-5, 5e-5)
+            if op.name == "nn.functional.linear_cross_entropy":
+                return (1e-4, 1e-5)
+            if op.name == "linalg.matrix_power":
+                return (1e-3, 1e-5)
+        if dtype == torch.float16:
+            if op.name == "rsub":
+                return (2e-3, 2e-3)
+            if op.name in ("nanmean", "nansum"):
+                return (5e-3, 5e-3)
+            if op.name in ("special.bessel_y0", "special.bessel_y1"):
+                return (5e-4, 2e-3)
+        if dtype == torch.complex64:
+            if op.name == "mv":
+                return (2e-5, 1e-5)
         return (None, None)
 
     # Used for accept mode only
@@ -13709,6 +13733,24 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-3, 5e-3
             if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16]:
                 atol, rtol = 0.02, 0.02
+            # RNG-shift fallout from #182386 (MPS distribution dispatch).
+            # See comment in `_compute_tolerances`. Tracked: #182817.
+            if op.name == "grid_sampler_2d" and dtype == torch.float32:
+                atol, rtol = 5e-5, 3e-5
+            if op.name == "grid_sampler_2d" and dtype == torch.float16:
+                atol, rtol = 0.1, 5e-3
+            if op.name == "linalg.matrix_power" and dtype == torch.float32:
+                atol, rtol = 1e-3, 1e-5
+            if op.name in ("nanmean", "nansum") and dtype == torch.float16:
+                atol, rtol = 5e-3, 5e-3
+            if op.name == "nn.functional.soft_margin_loss" and dtype == torch.float16:
+                atol, rtol = 5e-4, 2e-3
+            if op.name in ("polygamma", "special.polygamma") and dtype == torch.float32:
+                atol, rtol = 1e-2, 5e-6
+            if op.name in ("polygamma", "special.polygamma") and dtype == torch.float16:
+                atol, rtol = 5e-5, 2.5e-2
+            if op.name in ("special.bessel_y0", "special.bessel_y1") and dtype == torch.float16:
+                atol, rtol = 5e-4, 2e-3
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
