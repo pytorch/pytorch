@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
-
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
