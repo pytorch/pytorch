@@ -8431,6 +8431,12 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     """Lower GEMM epilogue HOPs through backend-specific fused template paths."""
     backend = kernel_options.get("backend", "TRITON")
     split_k = kernel_options.get("SPLIT_K", False)
+    if gemm_op == torch.ops.aten._scaled_mm_v2.default:
+        if backend != "TRITON" or split_k:
+            raise NotImplementedError(
+                "_scaled_mm_v2 epilogue lowering currently supports only the default TRITON fallback path"
+            )
+        return process_subgraph_nodes(subgraph.graph_module, list(args))
     split_k_gemm_ops = (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
     if split_k and (
         backend not in ("TRITON", "QUACK") or gemm_op not in split_k_gemm_ops

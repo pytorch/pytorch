@@ -656,6 +656,44 @@ class GemmEpilogueFusionTests(TestCase):
         ).run(code)
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_scaled_mm_v2_epilogue_applies_row_scale(self):
+        if not PLATFORM_SUPPORTS_FP8:
+            self.skipTest("FP8 is not supported")
+
+        def fn(a, b, scale_a, scale_b, row_scale):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc * row_scale,
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.TensorWise,
+                    "scale_recipe_b": F.ScalingType.TensorWise,
+                    "output_dtype": torch.bfloat16,
+                },
+            )
+
+        x = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+        a, scale_a = _quantize_tensorwise(x, torch.float8_e4m3fn)
+        w_fp8, scale_b = _quantize_tensorwise(w, torch.float8_e4m3fn)
+        row_scale = torch.randn(64, 1, device="cuda", dtype=torch.float32)
+        b = w_fp8.t()
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale_a,
+            scale_b,
+            row_scale,
+        )
+
+        torch.testing.assert_close(
+            actual, fn(a, b, scale_a, scale_b, row_scale), atol=0.05, rtol=1e-2
+        )
+        FileCheck().check("_scaled_mm_v2").check("triton_").run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_scaled_mm_relu_to_quack_hook(self):
         if not PLATFORM_SUPPORTS_MX_GEMM:
             self.skipTest("MX GEMM is not supported")
