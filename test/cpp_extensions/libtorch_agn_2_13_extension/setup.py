@@ -19,6 +19,9 @@ CSRC_DIR = ROOT_DIR / "csrc"
 # Include csrc from previous versions for forward compatibility testing
 PREV_CSRC_DIRS = [
     ROOT_DIR.parent / "libtorch_agn_2_9_extension" / "csrc",
+    ROOT_DIR.parent / "libtorch_agn_2_10_extension" / "csrc",
+    ROOT_DIR.parent / "libtorch_agn_2_11_extension" / "csrc",
+    ROOT_DIR.parent / "libtorch_agn_2_12_extension" / "csrc",
 ]
 
 
@@ -28,13 +31,13 @@ class clean(distutils.command.clean.clean):
         distutils.command.clean.clean.run(self)
 
         # Remove extension
-        for path in (ROOT_DIR / "libtorch_agn_2_10").glob("**/*.so"):
+        for path in (ROOT_DIR / "libtorch_agn_2_13").glob("**/*.so"):
             path.unlink()
         # Remove build and dist and egg-info directories
         dirs = [
             ROOT_DIR / "build",
             ROOT_DIR / "dist",
-            ROOT_DIR / "libtorch_agn_2_10.egg-info",
+            ROOT_DIR / "libtorch_agn_2_13.egg-info",
         ]
         for path in dirs:
             if path.exists():
@@ -44,8 +47,8 @@ class clean(distutils.command.clean.clean):
 def get_extension():
     extra_compile_args = {
         "cxx": [
-            "-DTORCH_TARGET_VERSION=0x020a000000000000",
-            "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
+            "-DTORCH_TARGET_VERSION=0x020d000000000000",
+            "-DSTABLE_LIB_NAME=libtorch_agn_2_13",
         ],
     }
     if not IS_WINDOWS:
@@ -63,8 +66,8 @@ def get_extension():
         extra_compile_args["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
-            "-DTORCH_TARGET_VERSION=0x020a000000000000",
-            "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
+            "-DTORCH_TARGET_VERSION=0x020d000000000000",
+            "-DSTABLE_LIB_NAME=libtorch_agn_2_13",
         ]
         extension = CUDAExtension
         sources.extend(CSRC_DIR.glob("**/*.cu"))
@@ -73,7 +76,7 @@ def get_extension():
 
     return [
         extension(
-            "libtorch_agn_2_10._C",
+            "libtorch_agn_2_13._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
@@ -83,12 +86,12 @@ def get_extension():
 
 
 setup(
-    name="libtorch_agn_2_10",
+    name="libtorch_agn_2_13",
     version="0.0",
     author="PyTorch Core Team",
-    description="Example of libtorch agnostic extension for PyTorch 2.10+",
+    description="Example of libtorch agnostic extension for PyTorch 2.13+",
     packages=find_packages(exclude=("test",)),
-    package_data={"libtorch_agn_2_10": ["*.dll", "*.dylib", "*.so"]},
+    package_data={"libtorch_agn_2_13": ["*.dll", "*.dylib", "*.so"]},
     install_requires=[
         "torch",
     ],
