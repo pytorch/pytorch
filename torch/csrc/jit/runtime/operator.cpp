@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
+#include <shared_mutex>
 #include <utility>
 #include <vector>
 
@@ -15,7 +16,7 @@ using OperatorMap =
     std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry {
  private:
-  std::mutex lock;
+  std::shared_mutex lock;
   OperatorMap operators;
   // list of operators whose schema have not yet been parsed, and must
   // be registered before any call to lookup an operator
@@ -42,7 +43,7 @@ struct OperatorRegistry {
   std::unordered_set<c10::OperatorName> registered_operator_names;
 #endif
 
-  // XXX - caller must be holding lock
+  // XXX - caller must be holding exclusive lock
   void registerPendingOperators() {
     for (const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
@@ -52,9 +53,22 @@ struct OperatorRegistry {
     to_register.clear();
   }
 
+  // Flush any pending registrations if needed, acquiring exclusive lock only
+  // when necessary. Returns with no lock held.
+  void ensurePendingOperatorsFlushed() {
+    {
+      std::shared_lock<std::shared_mutex> reader(lock);
+      if (to_register.empty()) {
+        return;
+      }
+    }
+    std::unique_lock<std::shared_mutex> writer(lock);
+    registerPendingOperators();
+  }
+
  public:
   void registerOperator(Operator&& op) {
-    std::lock_guard<std::mutex> guard(lock);
+    std::unique_lock<std::shared_mutex> guard(lock);
 #ifdef C10_MOBILE
     TORCH_INTERNAL_ASSERT(
         0 == registered_operator_names.count(op.schema().operator_name()),
@@ -70,7 +84,7 @@ struct OperatorRegistry {
     Symbol sym = Symbol::fromQualString(schema.name());
     auto sig = canonicalSchemaString(schema);
 
-    std::lock_guard<std::mutex> guard(lock);
+    std::unique_lock<std::shared_mutex> guard(lock);
 #ifdef C10_MOBILE
     TORCH_INTERNAL_ASSERT(
         1 == registered_operator_names.count(schema.operator_name()),
@@ -118,7 +132,20 @@ struct OperatorRegistry {
   }
 
   const std::shared_ptr<Operator>& lookupByLiteral(const char* name) {
-    std::lock_guard<std::mutex> guard(lock);
+    // Fast path: shared lock when no pending registrations and literal is
+    // already cached. This is the common steady-state case.
+    {
+      std::shared_lock<std::shared_mutex> reader(lock);
+      if (to_register.empty()) {
+        auto it = operators_by_sig_literal.find(name);
+        if (it != operators_by_sig_literal.end()) {
+          return it->second;
+        }
+      }
+    }
+    // Slow path: exclusive lock to flush pending operators and/or populate
+    // the literal cache.
+    std::unique_lock<std::shared_mutex> writer(lock);
     registerPendingOperators();
     auto it = operators_by_sig_literal.find(name);
     if (it == operators_by_sig_literal.end()) {
@@ -135,18 +162,31 @@ struct OperatorRegistry {
   }
 
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
-    std::lock_guard<std::mutex> guard(lock);
-    registerPendingOperators();
+    // Fast path: shared lock when no pending registrations.
     static std::vector<std::shared_ptr<Operator>> empty;
+    {
+      std::shared_lock<std::shared_mutex> reader(lock);
+      if (to_register.empty()) {
+        auto it = operators.find(name);
+        if (it != operators.end()) {
+          return it->second;
+        }
+        return empty;
+      }
+    }
+    // Slow path: exclusive lock to flush pending operators.
+    std::unique_lock<std::shared_mutex> writer(lock);
+    registerPendingOperators();
     auto it = operators.find(name);
-    if (it != operators.end())
+    if (it != operators.end()) {
       return it->second;
+    }
     return empty;
   }
 
   std::vector<Symbol> findSimilarOperators(Symbol input_op) {
-    std::lock_guard<std::mutex> guard(lock);
-    registerPendingOperators();
+    ensurePendingOperatorsFlushed();
+    std::shared_lock<std::shared_mutex> reader(lock);
 
     using EntryPair = std::pair<int64_t, Symbol>;
     auto cmp = [](const EntryPair& lhs, const EntryPair& rhs) {
@@ -172,11 +212,10 @@ struct OperatorRegistry {
   }
 
   const std::vector<std::shared_ptr<Operator>> getAllOperators() {
-    std::lock_guard<std::mutex> guard(lock);
-    registerPendingOperators();
+    ensurePendingOperatorsFlushed();
+    std::shared_lock<std::shared_mutex> reader(lock);
     std::vector<std::shared_ptr<Operator>> values;
-    values.clear();
-    for (auto& kv : operators) {
+    for (const auto& kv : operators) {
       values.insert(values.end(), kv.second.begin(), kv.second.end());
     }
     return values;

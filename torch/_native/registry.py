@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 import torch.library
 
@@ -20,13 +20,8 @@ log = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R")
 
-_OpOverrideFn = Callable[Concatenate[torch.DispatchKeySet, P], R]
-_OpReplaceFn = Callable[P, R]
-
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
-
-_OpFn = _OpOverrideFn | _OpReplaceFn
 
 
 @dataclass
@@ -38,9 +33,13 @@ class _OverrideNode:
     dispatch_key: str
     cond_fn: _OpCondFn
     impl_fn: _OpImplFn
+    # Identifier of the opaque `_native::<node_id>` op that carries this
+    # override's impl. Assigned once at registration time and never reused —
+    # reorder / deregister / reenable do not change it, so the cached
+    # `_defined_native_ops` entry remains valid.
+    node_id: str
     unconditional_override: bool = False
     active: bool = True
-    node_id: str = ""
 
 
 UserOrderingFn = Callable[[str, str, list[_OverrideNode]], list[_OverrideNode]]
@@ -150,6 +149,21 @@ _MappingType = dict[str, list[tuple[str, str]]]
 _dsl_name_to_lib_graph: _MappingType = {}
 _dispatch_key_to_lib_graph: _MappingType = {}
 _op_symbol_to_lib_graph: _MappingType = {}
+
+# Monotonic counter used to mint stable, unique `_native::<id>` op names.
+# Must never decrease across the process, since `_defined_native_ops`
+# pins a fake kernel for each minted id.
+_node_id_counter: int = 0
+
+# Dispatch keys where installing an override would break the registry's
+# assumptions. The eager router is wired at a backend key so aten's
+# higher-priority Autograd/Autocast kernels handle those layers, and the
+# fake kernel for `_native::<id>` redispatches to the aten op's meta — if
+# the override lived at Meta or CompositeImplicitAutograd, that
+# redispatch would loop back into the router.
+_DISALLOWED_DISPATCH_KEYS: frozenset[str] = frozenset(
+    {"Meta", "CompositeImplicitAutograd", "CompositeExplicitAutograd"}
+)
 
 
 def _build_key_set(
@@ -302,6 +316,11 @@ def _aten_schema_tail(op_symbol: str) -> str:
 
 
 def _define_native_op_once(name: str, op_symbol: str) -> None:
+    # Invariant: callers must only install the eager router at a real backend
+    # dispatch key (CPU, CUDA, XPU, ...). The fake kernel below redispatches
+    # to the aten op, and if the router were installed at Meta /
+    # CompositeImplicitAutograd that redispatch would re-enter the router.
+    # `register_op_override` enforces this via `_DISALLOWED_DISPATCH_KEYS`.
     if name in _defined_native_ops:
         return
     _get_def_library("_native").define(f"{name}{_aten_schema_tail(op_symbol)}")
@@ -335,6 +354,11 @@ def _register_node_impl(
         node: The override node to register
         dispatch_key: The dispatch key for registration
     """
+    if not node.node_id:
+        raise ValueError(
+            f"_OverrideNode must have a non-empty node_id before registration "
+            f"(dsl_name={node.dsl_name!r}, op_symbol={node.op_symbol!r})"
+        )
     _define_native_op_once(node.node_id, node.op_symbol)
     lib.impl(
         node.node_id,
@@ -552,10 +576,20 @@ def register_op_override(
             `cond` is None.
 
     Raises:
-        ValueError: If lib_symbol is not "aten"
+        ValueError: If lib_symbol is not "aten", if dispatch_key is in
+            _DISALLOWED_DISPATCH_KEYS (Meta / CompositeImplicitAutograd /
+            CompositeExplicitAutograd), or if cond is None without
+            unconditional_override=True.
     """
     if lib_symbol != "aten":
         raise ValueError(f'Unsupported lib_symbol (must be "aten", got: "{lib_symbol}"')
+
+    if dispatch_key in _DISALLOWED_DISPATCH_KEYS:
+        raise ValueError(
+            f"dispatch_key={dispatch_key!r} is not supported. Overrides must be "
+            f"installed at a backend key (e.g. CPU, CUDA, XPU); the router's fake "
+            f"kernel redispatches to aten and would recurse otherwise."
+        )
 
     if cond is None:
         if not unconditional_override:
@@ -564,8 +598,16 @@ def register_op_override(
 
     key = (op_symbol, dispatch_key)
 
-    global _graphs
+    global _graphs, _node_id_counter
     op_graph = _graphs.get(key, [])
+
+    # Mint a stable id for the opaque `_native::<node_id>` op. `_sanitized`
+    # strips dots from overload-qualified names so the result is a valid op
+    # name. The monotonic counter guarantees uniqueness even if the same
+    # (op_symbol, dsl_name) is registered, deregistered, and re-registered.
+    _sanitized = op_symbol.replace(".", "_")
+    node_id = f"{_sanitized}_{backend}_{_node_id_counter}"
+    _node_id_counter += 1
 
     op_graph.append(
         _OverrideNode(
@@ -575,6 +617,7 @@ def register_op_override(
             cond_fn=cond,
             impl_fn=impl,
             unconditional_override=unconditional_override,
+            node_id=node_id,
         )
     )
     _graphs[key] = op_graph
@@ -625,16 +668,12 @@ def _cleanup_and_reregister_graph(
         graph: The graph to register
         filter_state: Optional filter state for conditional registration
     """
-    # Only reregister if the graph has active nodes. Empty graphs (fully
-    # disabled ops) leave the previous registration in place — the next
-    # registration (with allow_override=True) will overwrite.
-    if graph:
-        _register_overrides_from_graph(
-            op_symbol,
-            dispatch_key,
-            graph,
-            filter_state=filter_state,
-        )
+    _register_overrides_from_graph(
+        op_symbol,
+        dispatch_key,
+        graph,
+        filter_state=filter_state,
+    )
 
 
 def _apply_graph_transformation(
@@ -738,13 +777,11 @@ def _register_overrides_from_graph(
 
     cond_impl: list[tuple[_OpCondFn, str]] = []
 
-    # Register all node implementations as _native::<node_id> ops. Replace
-    # any dots in op_symbol (overload-qualified names like "add_.Tensor") so
-    # the generated identifier is a valid op name.
-    _sanitized = op_symbol.replace(".", "_")
-    for i, node in enumerate(graph):
+    # node.node_id is minted once at `register_op_override` time and is
+    # stable across reorder / deregister / reenable — never regenerate it
+    # here, since `_defined_native_ops` pins a fake kernel against each id.
+    for node in graph:
         enable = True
-        node.node_id = f"{_sanitized}_{node.dsl_name}_{i}"
         if filter_state:
             enable = filter_state.check_enabled(node)
 

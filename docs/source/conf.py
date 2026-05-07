@@ -11,6 +11,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+import functools
 import inspect
 import os
 import pkgutil
@@ -156,7 +157,6 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
-    "llm_disabled": os.environ.get("CI") and os.environ.get("WITH_PUSH") != "true",
     "llm_generate_full": "false",
     "icon_links": [
         {
@@ -453,8 +453,6 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.mtia.memory
-    "reset_peak_memory_stats",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -463,12 +461,8 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -477,10 +471,6 @@ coverage_ignore_functions = [
     # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
     "quantization_perchannel_hook",
     "quantization_pertensor_hook",
-    # torch.distributed.algorithms.model_averaging.utils
-    "average_parameters",
-    "average_parameters_or_parameter_groups",
-    "get_params_to_average",
     # torch.distributed.checkpoint.default_planner
     "create_default_global_load_plan",
     "create_default_global_save_plan",
@@ -547,16 +537,10 @@ coverage_ignore_functions = [
     "configure",
     "expires",
     # torch.distributed.elastic.utils.api
-    "get_env_variable_or_raise",
     "get_socket_with_port",
     # torch.distributed.elastic.utils.distributed
     "create_c10d_store",
-    "get_free_port",
     "get_socket_with_port",
-    # torch.distributed.elastic.utils.log_level
-    "get_log_level",
-    # torch.distributed.elastic.utils.logging
-    "get_logger",
     # torch.distributed.elastic.utils.store
     "barrier",
     "get_all",
@@ -582,7 +566,6 @@ coverage_ignore_functions = [
     "as_functional_optim",
     "register_functional_optim",
     # torch.distributed.rendezvous
-    "register_rendezvous_handler",
     "rendezvous",
     # torch.distributed.rpc.api
     "get_worker_info",
@@ -618,6 +601,7 @@ coverage_ignore_functions = [
     "get_tensor_meta",
     # torch.fx.passes.split_module
     "split_module",
+    "split_module_simple",
     # torch.fx.passes.split_utils
     "getattr_recursive",
     "split_by_tags",
@@ -1042,8 +1026,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    "set_checkpoint_early_stop",
-    "set_device_states",
     # torch.utils.cpp_backtrace
     "get_cpp_backtrace",
     # torch.utils.cpp_extension
@@ -1120,7 +1102,6 @@ coverage_ignore_functions = [
     # torch.utils.mkldnn
     "to_mkldnn",
     # torch.utils.mobile_optimizer
-    "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary
     "audio",
     "compute_curve",
@@ -2197,6 +2178,36 @@ master_doc = "index"
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
+@functools.cache
+def _add_docstr_source_lines(module_file):
+    pattern = re.compile(r"^([A-Za-z_]\w*)\s*=\s*_add_docstr\(")
+    source_lines = {}
+    try:
+        with open(module_file, encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                match = pattern.match(line)
+                if match is not None:
+                    source_lines[match.group(1)] = lineno
+    except OSError:
+        return {}
+
+    return source_lines
+
+
+def _find_add_docstr_source(module, fullname):
+    if "." in fullname or not re.match(r"^[A-Za-z_]\w*$", fullname):
+        return None
+
+    module_file = getattr(module, "__file__", None)
+    if module_file is None or not module_file.endswith(".py"):
+        return None
+
+    lineno = _add_docstr_source_lines(module_file).get(fullname)
+    if lineno is None:
+        return None
+    return module_file, lineno
+
+
 def linkcode_resolve(domain, info):
     if domain != "py":
         return None
@@ -2205,15 +2216,21 @@ def linkcode_resolve(domain, info):
 
     try:
         module = __import__(info["module"], fromlist=[""])
+    except Exception:
+        return None
+
+    try:
         obj = module
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
-        # Get the source file and line number
         obj = inspect.unwrap(obj)
         fn = inspect.getsourcefile(obj)
         source, lineno = inspect.getsourcelines(obj)
     except Exception:
-        return None
+        resolved = _find_add_docstr_source(module, info["fullname"])
+        if resolved is None:
+            return None
+        fn, lineno = resolved
 
     # Determine the tag based on the torch_version
     if RELEASE:
@@ -2508,28 +2525,6 @@ def setup(app):
 
     Builder._read_parallel = _serial_read_ignoring_nproc
 
-    # Skip pickling doctrees to disk for the HTML builder. This is only used
-    # for incremental rebuilds which don't apply in CI clean builds. Saves
-    # ~2 minutes by avoiding serializing large autodoc-generated doctrees.
-    # Other builders (doctest, coverage) may need doctrees on disk.
-    from sphinx.builders.html import StandaloneHTMLBuilder
-
-    def _write_doctree_no_disk(self, docname, doctree, *, _cache=True):
-        # Still do the cleanup and in-memory caching, just skip the disk I/O
-        doctree.reporter = None
-        doctree.transformer = None
-        doctree.settings = doctree.settings.copy()
-        doctree.settings.warning_stream = None
-        doctree.settings.env = None
-        from docutils.utils import DependencyList
-
-        doctree.settings.record_dependencies = DependencyList()
-        if _cache:
-            self.env._write_doc_doctree_cache[docname] = doctree
-
-    StandaloneHTMLBuilder.write_doctree = _write_doctree_no_disk
-
-    _skip_git_dates_on_ci(app)
     _fix_katex_server_race(app)
 
     return {"version": "0.1", "parallel_read_safe": True}
@@ -2590,29 +2585,14 @@ def _fix_katex_server_race(app):
     KaTeXServer.start_server_process = _start_with_retry
 
 
-def _skip_git_dates_on_ci(app):
-    """Skip git date lookups on non-release CI builds.
-
-    The pytorch theme runs 2 git subprocess calls per page to display
-    "Created/Updated" dates. On CI preview builds this is wasteful (dates
-    aren't needed) and problematic (treeless clones make git log slow).
-    Release builds (WITH_PUSH=true) keep the original behavior so dates
-    appear in published docs.
-    """
-    if not os.environ.get("CI") or os.environ.get("WITH_PUSH") == "true":
-        return
-
-    try:
-        import pytorch_sphinx_theme2
-    except ImportError:
-        return
-
-    pytorch_sphinx_theme2.get_git_dates = lambda path: ("Unknown", "Unknown")
-
-
 def hide_edit_button_for_pages(app, pagename, templatename, context, doctree):
     if pagename.startswith("generated/"):
         context["theme_use_edit_page_button"] = False
+        # Limit sidebar depth and collapse inactive sections for generated
+        # API pages to avoid embedding ~300 KB of navigation markup per page.
+        # Only the active section's children are shown.
+        context["theme_navigation_depth"] = 2
+        context["theme_collapse_navigation"] = "true"
 
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and

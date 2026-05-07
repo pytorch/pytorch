@@ -428,11 +428,15 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
-
+        compile_id = kwargs.get("compile_id", "")
         if int_key is None:
-            log.info("Recording cudagraph tree for graph without symints")
+            log.info(
+                "[%s] Recording cudagraph tree for graph without symints", compile_id
+            )
         else:
-            log.info("Recording cudagraph tree for symint key %s", int_key)
+            log.info(
+                "[%s] Recording cudagraph tree for symint key %s", compile_id, int_key
+            )
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -1100,7 +1104,7 @@ class CUDAGraphNode:
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
         # if it is, we cached the output tensor and adjust storage liveness tracking to also
         # check if the output tensor does not have an additional python reference.
-        # If a descendent node discovers it has an alias of a prior output, then the output
+        # If a descendant node discovers it has an alias of a prior output, then the output
         # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
         # significant additional complexity with marginal gains

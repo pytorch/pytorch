@@ -16,7 +16,7 @@ For overrides that always apply (no predicate), pass `unconditional_override=Tru
 
 ## A Note on Imports
 
-All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get it's version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
+All registrations will happen at the end of `import torch`. It is expected at that point that **no DSL runtime library is loaded by registration code** - this means that the runtime(s) must only be imported lazily. We can still check the presence of a module, and get its version without importing, but special care must be taken when writing op kernels to not import DSLs too early. An illustrative example is below, using `triton`:
 
 First, we're going to write the registration function, and a top-level call, being very careful to not pull in the `triton` package early:
 
@@ -249,3 +249,27 @@ def example_ordering_fn(op_symbol, dispatch_key, nodes):
 
     return out_nodes
 ```
+
+# Testing Native Ops
+
+Adding operators means that they should be tested. Given that we're dealing with overrides, which by definition change behavior, we need to be a little careful.
+
+The preferred testing method is to co-opt the existing `OpInfo` and `op_db` class/list and benefit from all the infrastructure built around that functionality.
+
+Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with a input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
+
+* `test_ops.py`
+* `test_unary_ufuncs.py`
+* `test_ops_gradients.py`
+* `test_torchinductor_opinfo.py`
+* `test_export_opinfo.py`
+
+## Testing only Native ops
+
+Optionally, one can set the `OPINFO_RESTRICT_TO_DSL` environment variable to enable only the DSL specified for quick testing - this is then used via:
+
+```
+OPINFO_RESTRICT_TO_DSL=triton pytest -sv test/test_binary_ufuncs.py
+```
+
+This will test all triton-based binary operators.

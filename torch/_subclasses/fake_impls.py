@@ -927,7 +927,7 @@ def _padded_dense_to_jagged_forward(
             f"Only one jagged dim is supported, got {len(offsets)} offsets"
         )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1257,7 +1257,7 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
-# takes in multiple-devices, dont default to default device handling
+# takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)

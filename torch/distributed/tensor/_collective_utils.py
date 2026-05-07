@@ -221,7 +221,12 @@ def pad_tensor(
     # skip the no-op pad. Check _are_we_tracing() first to avoid
     # guard_or_false creating a guard that concretizes symbolic pad sizes
     # during make_fx tracing.
-    if not _are_we_tracing() and guard_or_false(pad_size == 0):
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
@@ -238,7 +243,12 @@ def unpad_tensor(
     # skip the no-op narrow. Check _are_we_tracing() first to avoid
     # guard_or_false creating a guard that concretizes symbolic pad sizes
     # during make_fx tracing.
-    if not _are_we_tracing() and guard_or_false(pad_size == 0):
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,

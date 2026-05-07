@@ -34,7 +34,13 @@ from functools import lru_cache, partial
 from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
-from types import ModuleType
+from types import (
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    FunctionType,
+    MethodType,
+    ModuleType,
+)
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -110,7 +116,7 @@ from torch.compiler import config as cconfig
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactManager,
+    CacheArtifactRecorder,
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
@@ -481,6 +487,13 @@ def _ident(x: T) -> T:
     return x
 
 
+def _unpicklable_error(key: str) -> NoReturn:
+    raise RuntimeError(
+        f"Attempted to unpickle an object that was pickled only for cache-key "
+        f"hashing and cannot be reconstructed (key={key!r})"
+    )
+
+
 def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
@@ -493,6 +506,48 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+# Types that pickle handles natively via GLOBAL/INST opcodes even though their
+# __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
+# reducer_override to avoid infinite recursion.
+# We use a tuple for isinstance() checks so subclasses are also matched
+# (e.g. ABCMeta is a subclass of type).
+_PICKLE_NATIVE_TYPES_TUPLE = (
+    FunctionType,
+    BuiltinFunctionType,
+    BuiltinMethodType,
+    MethodType,
+    type,
+)
+
+
+def _get_stable_obj_key(obj: object) -> str | None:
+    """Produce a deterministic string key for an otherwise-unpicklable object.
+
+    Used by FxGraphCachePickler.reducer_override as a fallback for objects
+    whose types don't support default pickling (e.g. pybind11 enums).
+
+    The key is derived from the object's fully-qualified type name plus
+    values obtained via known accessor patterns (pybind11 enum, Python enum,
+    etc.).  Returns ``None`` if no accessor succeeds, letting the caller
+    decide how to handle the failure.
+    """
+    t = type(obj)
+    type_id = f"{t.__module__}.{t.__qualname__}"
+    parts = []
+    for accessor in (
+        lambda o: o.type.name,  # pybind11 enum pattern
+        lambda o: o.name,  # Python enum / named constant pattern
+        lambda o: o.value,  # value-based pattern
+    ):
+        try:
+            parts.append(str(accessor(obj)))
+        except Exception:
+            continue
+    if parts:
+        return f"{type_id}:{repr(parts)}"
+    return None
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -500,6 +555,11 @@ class FxGraphCachePickler(pickle.Pickler):
     objects that don't pickle and/or vary between runs, and we want to capture the
     data that allow us to compute a stable, but safe hash.
     """
+
+    # Cache probe results so we only call __reduce_ex__ once per type.
+    # Maps type -> True (pickleable) or False (unpickleable).
+    # Class-level because a type's picklability doesn't change at runtime.
+    _pickleable_type_cache: dict[type, bool] = {}
 
     def __init__(
         self,
@@ -543,6 +603,52 @@ class FxGraphCachePickler(pickle.Pickler):
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        """Fallback reducer for objects not registered in dispatch_table.
+
+        This handles extension types (e.g. pybind11 enums) that don't support
+        default pickling.  Instead of bypassing the FX graph cache entirely,
+        we serialize a deterministic string representation of the object which
+        is sufficient for cache-key hashing.
+        """
+        t = type(obj)
+        # Types already registered or handled by default pickle.
+        # Use isinstance for _PICKLE_NATIVE_TYPES to cover subclasses
+        # (e.g. ABCMeta is a subclass of type, and pickle handles all
+        # type/class objects natively via GLOBAL opcode).
+        if t in self.dispatch_table or isinstance(obj, _PICKLE_NATIVE_TYPES_TUPLE):
+            return NotImplemented
+        # Fast path: type already probed.
+        if (pickleable := self._pickleable_type_cache.get(t)) is not None:
+            if not pickleable:
+                return self._reduce_unpicklable(obj)
+            return NotImplemented
+        # First encounter: probe whether the default reduce protocol works.
+        try:
+            result = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+        except (TypeError, AttributeError, pickle.PicklingError):
+            self._pickleable_type_cache[t] = False
+            return self._reduce_unpicklable(obj)
+        except RuntimeError as e:
+            if "is not pickleable" in str(e):
+                self._pickleable_type_cache[t] = False
+                return self._reduce_unpicklable(obj)
+            raise
+        # Default pickling works – let pickle handle it.
+        self._pickleable_type_cache[t] = True
+        return result
+
+    @staticmethod
+    def _reduce_unpicklable(obj: Any) -> Any:
+        key = _get_stable_obj_key(obj)
+        if key is None:
+            raise BypassFxGraphCache(
+                f"Cannot produce stable cache key for unpicklable type "
+                f"{type(obj).__qualname__}"
+            )
+        return _unpicklable_error, (key,)
 
     def _reduce_fake_tensor(
         self, t: Tensor
@@ -652,6 +758,11 @@ class FxGraphCachePickler(pickle.Pickler):
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
+            if opaque_object.is_opaque_type(cls):
+                # Opaque types (e.g., DeviceMesh) may have cyclic references
+                # that fast-mode pickling cannot handle.  Disable fast mode
+                # before the subtree is pickled so the memo table tracks cycles.
+                self.fast = False
         return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
     def dumps(self, obj: Any) -> bytes:
@@ -662,7 +773,6 @@ class FxGraphCachePickler(pickle.Pickler):
             self.dump(obj)
             return self._stream.getvalue()
         except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
-            # Some configs options may not pickle.
             CacheabilityValidator.bypass_for_pickle_error(e)
         except RuntimeError as e:
             # pybind11 raises RuntimeError with message like:
@@ -724,20 +834,49 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def build_code_hash(
-    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
-) -> None:
-    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
+def _collect_module_files(
+    roots: list[str] | None, prefix: str
+) -> list[tuple[str, str]]:
+    """Collect all (spec_name, file_path) pairs from a module tree."""
+    result: list[tuple[str, str]] = []
+    for lib in pkgutil.iter_modules(roots, prefix):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
-        with open(module, "rb") as f:
-            hasher.update(spec.name.encode("utf-8"))
-            hasher.update(f.read())
+        result.append((spec.name, module))
         if lib.ispkg:
-            # need to also hash submodules
-            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
+            result.extend(
+                _collect_module_files(spec.submodule_search_locations, f"{spec.name}.")
+            )
+    return result
+
+
+def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
+    """Hash a single module file. Suitable for concurrent execution."""
+    h = hashlib.sha256()
+    h.update(name.encode("utf-8"))
+    with open(path, "rb") as f:
+        if sys.version_info >= (3, 11):
+            h.update(hashlib.file_digest(f, "sha256").digest())
+        else:
+            h.update(f.read())
+    return (name, h.digest())
+
+
+def build_code_hash(
+    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    files = _collect_module_files(roots, prefix)
+    if not files:
+        return
+    with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
+        per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
+    per_file_hashes.sort()
+    for _name, digest in per_file_hashes:
+        hasher.update(digest)
 
 
 def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
@@ -941,7 +1080,7 @@ class CacheabilityValidator:
         from torch._inductor.compiler_bisector import CompilerBisector
 
         if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
+            log.debug("don't cache graph when bisect enabled")
             self.bypass("compiler bisector enabled")
 
     def _check_shape_env(self) -> None:
@@ -998,12 +1137,16 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
         and isinstance(custom_pass, CustomGraphPass)
         and custom_pass.uuid() is not None
     )
+    pass_name = (
+        getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
+        if custom_pass is not None
+        else "<none>"
+    )
 
     if timing == "default":
         supports_late = custom_pass is None or has_uuid
         timing = "late" if supports_late else "early"
         if timing == "early" and custom_pass:
-            pass_name = type(custom_pass).__qualname__
             if pass_name not in _warned_pre_grad_pass_missing_uuid:
                 _warned_pre_grad_pass_missing_uuid.add(pass_name)
                 log.warning(
@@ -1020,7 +1163,7 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 
     if timing == "late" and custom_pass and not has_uuid:
         raise RuntimeError(
-            "pre_grad_custom_pass must implement uuid() to run late "
+            f"pre_grad_custom_pass {pass_name} must implement uuid() to run late "
             "(after cache lookup). Either implement uuid() or set "
             "pre_grad_pass_timing to 'early'."
         )
@@ -1179,7 +1322,9 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        self.inductor_config = config.save_config_portable(ignore_private_configs=False)
+        self.inductor_config = config.save_config_portable(
+            ignore_private_configs=False, readonly_values=True
+        )
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
@@ -1214,7 +1359,9 @@ class FxGraphHashDetails:
 
         # Save custom inductor codegen configs
         self.custom_backend_codegen_configs = {
-            device: custom_config.save_config_portable(ignore_private_configs=False)
+            device: custom_config.save_config_portable(
+                ignore_private_configs=False, readonly_values=True
+            )
             for device, custom_config in custom_backend_codegen_configs.items()
             if custom_config is not None
         }
@@ -1631,6 +1778,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         inductor_meta = autotune_cache.inductor_meta_from_config()
         code = graph.source_code
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+        graph._set_compile_context_for_autotune_cache()
 
         # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
@@ -1741,10 +1889,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 cache_info["cache_status_detailed"] = "guard_miss"
                 return None, cache_info
 
-        if pickled_content is not None:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, pickled_content
-            )
+        CacheArtifactRecorder(InductorCacheArtifact.type(), key).record_if_present(
+            pickled_content
+        )
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1817,9 +1964,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             return
 
         try:
-            CacheArtifactManager.record_artifact(
-                InductorCacheArtifact.type(), key, content
-            )
+            CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
 
@@ -2068,6 +2213,45 @@ class CudaKernelParamCache:
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
         params["asm"] = asm_path
         cls.cache[key] = params
+
+    @classmethod
+    def get(cls, key: str) -> dict[str, Any] | None:
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def get_keys(cls) -> KeysView[str]:
+        return cls.cache.keys()
+
+
+@clear_on_fresh_cache
+class CpuTritonKernelCache:
+    """AOTI counterpart of CudaKernelParamCache for CPU Triton kernels."""
+
+    cache: dict[str, dict[str, Any]] = {}
+    cache_clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(
+        cls,
+        key: str,
+        kernel_bytes: bytes,
+        launcher_bytes: bytes,
+        kernel_symbol: str,
+        signature: dict[str, Any],
+    ) -> None:
+        out_dir = split_aot_inductor_output_path(config.aot_inductor.output_path)[0]
+        _, kernel_so_path = write(
+            kernel_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        _, launcher_so_path = write(
+            launcher_bytes, "so", hash_type="code", specified_dir=out_dir
+        )
+        cls.cache[key] = {
+            "kernel_so_path": kernel_so_path,
+            "launcher_so_path": launcher_so_path,
+            "kernel_symbol": kernel_symbol,
+            "signature": signature,
+        }
 
     @classmethod
     def get(cls, key: str) -> dict[str, Any] | None:
@@ -4778,7 +4962,7 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
         raise NotImplementedError
 
 
@@ -4789,7 +4973,13 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:
+    def result(self, timeout: float | None = None) -> Callable[..., Any]:
+        if timeout is not None and self.future is not None:
+            # Wait on the underlying cross-process future with the caller's
+            # timeout; raises concurrent.futures.TimeoutError if it does not
+            # resolve in time. result_fn will then consume the completed
+            # future without blocking further.
+            self.future.result(timeout=timeout)
         return self.result_fn()
 
 
@@ -4807,7 +4997,10 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
 
-    def result(self) -> CachingAutotuner:
+    def result(self, timeout: float | None = None) -> CachingAutotuner:
+        # timeout is accepted for interface parity with other CodeCacheFuture
+        # subclasses; this work is synchronous in-process and has no pending
+        # future to wait on.
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             self.static_autotuner.recheck_autotune_cache(
