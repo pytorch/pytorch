@@ -1825,25 +1825,20 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [fma_result], {})
         return None
 
-    def sq_contains(
-        self, tx: "InstructionTranslator", item: VariableTracker
+    def method___contains__(
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         # Rewrite __contains__ here so that downstream passes can trace through
         # without dealing with unbacked symbool. Roughly the code we translate is:
         # def __contains__(self, x):
         #     return (x == self).any().item()
         result = variables.TorchInGraphFunctionVariable(torch.eq).call_function(
-            tx, [self, item], {}
+            tx, [self, arg], {}
         )
         result = variables.TorchInGraphFunctionVariable(torch.any).call_function(
             tx, [result], {}
         )
         return result.call_method(tx, "item", [], {})
-
-    def method___contains__(
-        self, tx: "InstructionTranslator", arg: VariableTracker
-    ) -> VariableTracker:
-        return self.sq_contains(tx, arg)
 
     def method_register_hook(
         self,

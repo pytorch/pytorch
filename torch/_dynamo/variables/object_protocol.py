@@ -99,12 +99,6 @@ def _get_cached_slots(obj_type: type) -> tuple[int, int, int, int]:
     return get_type_slots(obj_type)
 
 
-def type_implements_sequence_slot(obj_type: type, slot: int) -> bool:
-    """Check whether obj_type implements the given sq slot."""
-    seq_slots, _, _, _ = _get_cached_slots(obj_type)
-    return has_slot(seq_slots, slot)
-
-
 def type_implements_sq_length(obj_type: type) -> bool:
     """Check whether obj_type implements __len__ as sequence protocol"""
     seq_slots, _, _, _ = _get_cached_slots(obj_type)
@@ -735,24 +729,3 @@ def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     if is_fake:
         return FakeIdVariable(h)
     return ConstantVariable.create(h)
-
-
-def generic_contains(
-    tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
-) -> "VariableTracker":
-    """
-    Implements PySequence_Contains semantics for VariableTracker objects.
-
-    If the object has sq_contains (i.e., __contains__), calls obj.sq_contains(tx, item).
-    Otherwise falls back to iterating over obj and comparing each element.
-    """
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L2272-L2283
-    T = maybe_get_python_type(obj)
-    if type_implements_sequence_slot(T, PySequenceSlots.SQ_CONTAINS):
-        return obj.sq_contains(tx, item)
-    else:
-        # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
-        it = generic_getiter(tx, obj)
-        return VariableTracker.build(
-            tx, polyfills.impl_CONTAINS_OP_fallback
-        ).call_function(tx, [item, it], {})

@@ -737,14 +737,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.len_impl(tx)
 
-    def sq_contains(
-        self, tx: "InstructionTranslator", item: VariableTracker
-    ) -> VariableTracker:
-        m = self._maybe_get_baseclass_method("__contains__")
-        if m:
-            return self.call_method(tx, "__contains__", [item], {})
-        return super().sq_contains(tx, item)
-
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__iter__")
         if m:
@@ -1816,22 +1808,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args,
             kwargs,
         )
-
-    def sq_contains(
-        self, tx: "InstructionTranslator", item: VariableTracker
-    ) -> VariableTracker:
-        method = self._maybe_get_baseclass_method("__contains__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.sq_contains(tx, item)
-
-        if isinstance(method, types.FunctionType):
-            method_var = self.resolve_type_attr(tx, "__contains__", method, self.source)
-            return method_var.call_function(tx, [item], {})
-        return super().sq_contains(tx, item)
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         method = self._maybe_get_baseclass_method("__next__")
