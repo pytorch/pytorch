@@ -1419,7 +1419,7 @@ class CommonTemplate:
                 "triton.persistent_reductions": False,
                 "triton.max_tiles": 2,
             },
-            expected_num_triton_kernels=2
+            expected_num_triton_kernels=2,
         )
 
     def test_mul_broadcast_multi_output(self):
