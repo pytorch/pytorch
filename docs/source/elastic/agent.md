@@ -97,6 +97,9 @@ Additionally, health check server will have callback to check watchdog is alive.
 ```{automodule} torch.distributed.elastic.agent.server.health_check_server
 ```
 
+```{currentmodule} torch.distributed.elastic.agent.server.health_check_server
+```
+
 ```{autoclass} HealthCheckServer
 :members:
 ```
