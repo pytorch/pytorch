@@ -126,3 +126,70 @@ void insufficient_new_struct_usage() {
   NewOpaqueClass* cls = nullptr; // ERROR: requires 2.11, have 2.10
 }
 #endif
+
+// Case 16: Correct usage.
+// - TORCH_DYNAMIC_VERSION_CALL_2_12_0 macro may be used unguarded.
+// - Target function called with TORCH_DYNAMIC_VERSION_CALL_2_12_0 targets 2.12 >= symbol
+// - Fallback function is unversioned_function.
+void correct_versioned_call_2_12_fb_unversioned_target_2_12() {
+  TORCH_DYNAMIC_VERSION_CALL_2_12_0(unversioned_function, function_2_12_0);
+}
+
+// Case 17: Correct usage.
+// - TORCH_DYNAMIC_VERSION_CALL_2_12_0 macro may be used unguarded.
+// - Target function called with TORCH_DYNAMIC_VERSION_CALL_2_12_0 targets 2.12 >= symbol
+// - Fallback function is unversioned_function.
+void correct_versioned_call_2_12_fb_unversioned_target_2_12_newline() {
+  TORCH_DYNAMIC_VERSION_CALL_2_12_0( // newline, fake long function name
+    unversioned_function, // more newline, to test parsing
+    function_2_12_0);
+}
+
+// Case 18: Correct usage.
+// - Target function called with TORCH_DYNAMIC_VERSION_CALL_2_12_0 targets 2.12 >= symbol
+// - Fallback function is function_2_11_0, so valid as its within a 2_11_0 scope.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+void correct_versioned_call_2_12_fb_2_11_0_target_2_12() {
+  TORCH_DYNAMIC_VERSION_CALL_2_12_0(function_2_11_0, function_2_12_0);
+}
+#endif
+
+
+// Case 19: Incorrect usage.
+// - Versioned call is using 2_12_0 but targets 2.13 >= symbol, should be CALL_2_13_0.
+void correct_versioned_call_2_12_fb_unversioned_target_2_13() {
+  TORCH_DYNAMIC_VERSION_CALL_2_12_0(unversioned_function, function_2_13_0);
+}
+
+// Case 20: Correct usage.
+// - Versioned call is using 2_13_0 and targets 2.13 >= symbol.
+void correct_versioned_call_2_13_fb_unversioned_target_2_13() {
+  TORCH_DYNAMIC_VERSION_CALL_2_13_0(unversioned_function, function_2_13_0);
+}
+
+// Case 21: Incorrect usage.
+// - Versioned call is using 2_12_0 but targets 2.11 >= symbol, should be CALL_2_11_0 instead.
+void correct_versioned_call_2_12_fb_unversioned_target_2_11() {
+  TORCH_DYNAMIC_VERSION_CALL_2_12_0(unversioned_function, function_2_11_0);
+}
+
+// Case 22: Incorrect usage.
+// - Target matches call macro.
+// - Fallback is higher than current scope, so can't exist.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+void correct_versioned_call_2_13_fb_2_11_0_target_2_13_but_inside_2_12() {
+  TORCH_DYNAMIC_VERSION_CALL_2_13_0(function_2_12_0, function_2_13_0);
+}
+#endif
+
+
+// Case 23: Incorrect usage with newlines..
+// - Target matches call macro.
+// - Fallback is higher than current scope, so can't exist.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+void correct_versioned_call_2_13_fb_2_11_0_target_2_13_but_inside_2_12_newline() {
+  TORCH_DYNAMIC_VERSION_CALL_2_13_0(function_2_12_0, // things!
+    function_2_13_0 // more things
+  );
+}
+#endif

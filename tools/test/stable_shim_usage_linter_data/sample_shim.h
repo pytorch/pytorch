@@ -105,6 +105,21 @@ AOTI_TORCH_EXPORT const char* function_that_returns_constchar();
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 
+// Functions with their version names in them for readable tests.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+AOTI_TORCH_EXPORT void function_2_11_0();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT void function_2_12_0();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+AOTI_TORCH_EXPORT void function_2_13_0();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

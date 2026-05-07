@@ -184,23 +184,81 @@ def check_file(
     for line_num, line in enumerate(lines, 1):
         is_directive_or_comment = tracker.process_line(line)
 
-        if is_directive_or_comment:
+        dynamic_version_call = tracker.get_dynamic_call_information()
+
+        if is_directive_or_comment and not dynamic_version_call:
             continue
 
         version_of_block = tracker.get_version_of_block()
 
         for func_name, required_version in shim_functions.items():
-            # Look for:
-            # 1. Function calls like: func_name(
-            # 2. Type usage like: func_name variable_name
-            # Use word boundaries to avoid matching partial names
+            major, minor = required_version
+            required_macro = f"TORCH_VERSION_{major}_{minor}_0"
+            if dynamic_version_call:
+                # - Fallback function must be version_of_block or less.
+                # - Target function must be version equal to the macro version.
+                if func_name == dynamic_version_call.fallback_function:
+                    if version_of_block is None:
+                        # Not inside version block, but the fallback has a version.
+                        lint_messages.append(
+                            LintMessage(
+                                path=filename,
+                                line=line_num,
+                                char=None,
+                                code=LINTER_CODE,
+                                severity=LintSeverity.ERROR,
+                                name="dynamic-version-shim-call-fallback",
+                                original=None,
+                                replacement=None,
+                                description=(
+                                    f"Usage of fallback function '{func_name}' requires {required_macro} "
+                                    f"wrap the TORCH_DYNAMIC_VERSION_CALL_...  in:\n"
+                                    f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"  // ... your code calling TORCH_DYNAMIC_VERSION_CALL with {func_name} ...\n"
+                                    f"#endif // TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"(line number always points to last argument of macro)"
+                                ),
+                            )
+                        )
+                    elif version_of_block < required_version:
+                        current_major, current_minor = version_of_block
+                        current_macro = (
+                            f"TORCH_VERSION_{current_major}_{current_minor}_0"
+                        )
+                        lint_messages.append(
+                            LintMessage(
+                                path=filename,
+                                line=line_num,
+                                char=None,
+                                code=LINTER_CODE,
+                                severity=LintSeverity.ERROR,
+                                name="dynamic-version-shim-call-fallback",
+                                original=None,
+                                replacement=None,
+                                description=(
+                                    f"Usage of fallback function '{func_name}' is wrapped in {current_macro} "
+                                    f"but this function requires at least {required_macro}. "
+                                    f"The version guard must be at least the required version:\n"
+                                    f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"  // ... your TORCH_DYNAMIC_VERSION_CALL_ macro calling {func_name} ...\n"
+                                    f"#endif // TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"(line number always points to last argument of macro)"
+                                ),
+                            )
+                        )
 
-            if re.search(rf"\b{re.escape(func_name)}\b", line):
-                major, minor = required_version
-                required_macro = f"TORCH_VERSION_{major}_{minor}_0"
-
-                if version_of_block is None:
-                    # Not inside any version block
+                if (
+                    func_name == dynamic_version_call.target_function
+                    and dynamic_version_call.dynamic_call_version != required_version
+                ):
+                    # Target version is different than macro version.
+                    current_major, current_minor = (
+                        dynamic_version_call.dynamic_call_version
+                    )
+                    current = (
+                        f"TORCH_DYNAMIC_VERSION_CALL_{current_major}_{current_minor}_0"
+                    )
+                    required = f"TORCH_DYNAMIC_VERSION_CALL_{major}_{minor}_0"
                     lint_messages.append(
                         LintMessage(
                             path=filename,
@@ -208,42 +266,69 @@ def check_file(
                             char=None,
                             code=LINTER_CODE,
                             severity=LintSeverity.ERROR,
-                            name="unversioned-shim-call",
+                            name="dynamic-version-shim-call-macro-version",
                             original=None,
                             replacement=None,
                             description=(
-                                f"Usage '{func_name}' from shim.h is not wrapped "
-                                f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
-                                f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
-                                f"  // ... your code calling {func_name} ...\n"
-                                f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
+                                f"Target function '{func_name}' is called with version call macro {current}"
+                                f" but needs to be called with: {required}. \n"
+                                f"(line number always points to last argument of macro)"
                             ),
                         )
                     )
-                elif version_of_block < required_version:
-                    # Inside a version block, but version is too old
-                    current_major, current_minor = version_of_block
-                    current_macro = f"TORCH_VERSION_{current_major}_{current_minor}_0"
-                    lint_messages.append(
-                        LintMessage(
-                            path=filename,
-                            line=line_num,
-                            char=None,
-                            code=LINTER_CODE,
-                            severity=LintSeverity.ERROR,
-                            name="insufficient-version-for-shim-call",
-                            original=None,
-                            replacement=None,
-                            description=(
-                                f"Use of '{func_name}' is wrapped in {current_macro}, "
-                                f"but this function requires at least {required_macro}. "
-                                f"The version guard must be at least the required version:\n"
-                                f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
-                                f"  // ... your code calling {func_name} ...\n"
-                                f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
-                            ),
+
+            else:
+                # Look for:
+                # 1. Function calls like: func_name(
+                # 2. Type usage like: func_name variable_name
+                # Use word boundaries to avoid matching partial names
+                if re.search(rf"\b{re.escape(func_name)}\b", line):
+                    if version_of_block is None:
+                        lint_messages.append(
+                            LintMessage(
+                                path=filename,
+                                line=line_num,
+                                char=None,
+                                code=LINTER_CODE,
+                                severity=LintSeverity.ERROR,
+                                name="unversioned-shim-call",
+                                original=None,
+                                replacement=None,
+                                description=(
+                                    f"Usage '{func_name}' from shim.h is not wrapped "
+                                    f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
+                                    f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"  // ... your code calling {func_name} ...\n"
+                                    f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
+                                ),
+                            )
                         )
-                    )
+                    elif version_of_block < required_version:
+                        # Inside a version block, but version is too old
+                        current_major, current_minor = version_of_block
+                        current_macro = (
+                            f"TORCH_VERSION_{current_major}_{current_minor}_0"
+                        )
+                        lint_messages.append(
+                            LintMessage(
+                                path=filename,
+                                line=line_num,
+                                char=None,
+                                code=LINTER_CODE,
+                                severity=LintSeverity.ERROR,
+                                name="insufficient-version-for-shim-call",
+                                original=None,
+                                replacement=None,
+                                description=(
+                                    f"Use of '{func_name}' is wrapped in {current_macro}, "
+                                    f"but this function requires at least {required_macro}. "
+                                    f"The version guard must be at least the required version:\n"
+                                    f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                                    f"  // ... your code calling {func_name} ...\n"
+                                    f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
+                                ),
+                            )
+                        )
 
     return lint_messages
 

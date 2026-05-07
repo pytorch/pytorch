@@ -10,6 +10,7 @@ sys.path.append(str(REPO_ROOT))
 from tools.linter.adapters.stable_shim_usage_linter import (
     check_file,
     get_shim_functions,
+    PreprocessorTracker,
     write_shim_function_versions,
 )
 
@@ -73,6 +74,10 @@ class TestStableShimUsageLinter(unittest.TestCase):
             "secondary_path": (2, 9),
             # Function with a return type made up of two words.
             "function_that_returns_constchar": (2, 12),
+            # Some functions with their version in the name for testing.
+            "function_2_11_0": (2, 11),
+            "function_2_12_0": (2, 12),
+            "function_2_13_0": (2, 13),
         }
 
         self.assertEqual(result, expected)
@@ -148,6 +153,10 @@ class TestStableShimUsageLinter(unittest.TestCase):
         # Line 110: unversioned call to NewOpaqueStruct (needs 2.11)
         # Line 125: insufficient version (2.10) for NewOpaqueStruct (needs 2.11)
         # Line 126: insufficient version (2.10) for NewOpaqueClass (needs 2.11)
+        # Line 161: Versioned call is using incorrect macro version (2.12), it differs from target version (2.13).
+        # Line 173: Versioned call is using incorrect macro version (2.12), it differs from target version (2.11).
+        # Line 181: Fallback function is higher version (2.13) than the version block we're in (2.11).
+        # Line 193: Fallback function is higher version (2.13) than the version block we're in (2.11).
 
         expected_errors = [
             (15, "unversioned-shim-call", "simple_versioned_func"),
@@ -163,6 +172,26 @@ class TestStableShimUsageLinter(unittest.TestCase):
             (110, "unversioned-shim-call", "NewOpaqueStruct"),
             (125, "insufficient-version-for-shim-call", "NewOpaqueStruct"),
             (126, "insufficient-version-for-shim-call", "NewOpaqueClass"),
+            (
+                161,
+                "dynamic-version-shim-call-macro-version",
+                "function_2_13_0",
+            ),  # target function name
+            (
+                173,
+                "dynamic-version-shim-call-macro-version",
+                "function_2_11_0",
+            ),  # target function name
+            (
+                181,
+                "dynamic-version-shim-call-fallback",
+                "function_2_12_0",
+            ),  # fallback function name
+            (
+                193,
+                "dynamic-version-shim-call-fallback",
+                "function_2_12_0",
+            ),  # fallback function name
         ]
 
         self.assertEqual(
@@ -183,6 +212,53 @@ class TestStableShimUsageLinter(unittest.TestCase):
             self.assertEqual(msg.name, error_name)
             self.assertIsNotNone(msg.description)
             self.assertTrue(func_name in msg.description)
+
+    def test_dynamic_version_call_parser(self):
+        """
+        Verify that the dynamic version macro calls are parsed correctly, and all correct and incorrect ones are found.
+        """
+        test_dir = Path(__file__).parent / "stable_shim_usage_linter_data"
+        sample_usage = test_dir / "sample_usage.h"
+        self.assertTrue(
+            sample_usage.exists(), f"Sample usage not found at {sample_usage}"
+        )
+
+        tracker = PreprocessorTracker()
+
+        with open(sample_usage) as f:
+            lines = f.readlines()
+
+        tracker = PreprocessorTracker()
+
+        # line, macro version, fallback, target
+        expected = [
+            (135, (2, 12), "unversioned_function", "function_2_12_0"),
+            (145, (2, 12), "unversioned_function", "function_2_12_0"),
+            (153, (2, 12), "function_2_11_0", "function_2_12_0"),
+            (161, (2, 12), "unversioned_function", "function_2_13_0"),
+            (167, (2, 13), "unversioned_function", "function_2_13_0"),
+            (173, (2, 12), "unversioned_function", "function_2_11_0"),
+            (181, (2, 13), "function_2_12_0", "function_2_13_0"),
+            (193, (2, 13), "function_2_12_0", "function_2_13_0"),
+        ]
+
+        found = []
+        for line_num, line in enumerate(lines, 1):
+            is_directive_or_comment = tracker.process_line(line)
+
+            dynamic_version_call = tracker.get_dynamic_call_information()
+
+            if is_directive_or_comment and not dynamic_version_call:
+                continue
+            if dynamic_version_call:
+                found.append((line_num, dynamic_version_call))
+
+        self.assertEqual(len(found), len(expected))
+        for (found_line, found_values), expected_values in zip(found, expected):
+            self.assertEqual(expected_values[0], found_line)
+            self.assertEqual(expected_values[1], found_values.dynamic_call_version)
+            self.assertEqual(expected_values[2], found_values.fallback_function)
+            self.assertEqual(expected_values[3], found_values.target_function)
 
 
 if __name__ == "__main__":

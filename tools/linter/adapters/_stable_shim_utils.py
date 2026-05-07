@@ -13,7 +13,7 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import cast, NamedTuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -41,6 +41,81 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
+class DynamicVersionCall(NamedTuple):
+    dynamic_call_version: tuple[int, int]
+    fallback_function: str
+    target_function: str
+
+
+class DynamicVersionCallParser:
+    def __init__(self):
+        self.dynamic_version_call_pattern = re.compile(
+            r"TORCH_DYNAMIC_VERSION_CALL_(\d+)_(\d+)_\d+\("
+        )
+        self.reset()
+
+    def reset(self):
+        # Version of the dynamic version call itself, which must match the target function.
+        self.call_version: tuple[int, int] | None = None
+        # Holds the function names of the first two arguments of the macro, first is the fallback, second the target.
+        self.function_names: list[str] = []
+        # Whether all necessary data is available.
+        self.dynamic_version_call_ready: bool = False
+        # Whether we are currently accumulating data while in a call.
+        self.in_dynamic_version_call: bool = False
+        # Buffer to accumulate lines in to parse function names from.
+        self.argument_contents = ""
+
+    def process_line(self, line: str) -> bool:
+        if self.dynamic_version_call_ready:
+            self.reset()
+
+        start_dynamic_version_call = self.dynamic_version_call_pattern.finditer(line)
+        for match in start_dynamic_version_call:
+            self.in_dynamic_version_call = True
+            self.call_version = (int(match.group(1)), int(match.group(2)))
+            # Strip the part of the line that started the macro call.
+            line = line[match.end() :]
+
+        if self.in_dynamic_version_call:
+            # Ignore the part of the line that is commented because comments may have ')' and ',' in them.
+            self.argument_contents += line[: line.find("//")]
+
+        # Try to obtain information from the argument contents we've collected so far.
+        # We only need to match two situations;
+        #  TORCH_DYNAMIC_VERSION_CALL_2_13_0(A, B, ...)
+        #  TORCH_DYNAMIC_VERSION_CALL_2_13_0(A, B)
+        # Try to find both arguments;
+        arguments = []
+        for match in re.finditer("([^,]+)[,\\)]", self.argument_contents):
+            arguments.append(match.group(1).strip())
+            if len(arguments) == 2:
+                break
+
+        # If we have two arguments now, mark the parsing as complete.
+        if len(arguments) == 2:
+            self.function_names = arguments
+            self.dynamic_version_call_ready = True
+
+        return self.in_dynamic_version_call
+
+    def information(self) -> None | DynamicVersionCall:
+        if not self.dynamic_version_call_ready:
+            return None
+
+        # Cast is safe because version is parsed as pattern detect and must
+        # be set when the call if ready.
+        dynamic_call_version = cast(tuple[int, int], self.call_version)
+        return DynamicVersionCall(
+            dynamic_call_version=dynamic_call_version,
+            fallback_function=self.function_names[0],
+            target_function=self.function_names[1],
+        )
+
+    def is_ready(self) -> bool:
+        return self.dynamic_version_call_ready
+
+
 class PreprocessorTracker:
     """
     Helper class to track preprocessor directives and version blocks.
@@ -66,6 +141,9 @@ class PreprocessorTracker:
         self.version_pattern = re.compile(
             r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
         )
+
+        # Parser for the dynamic version call, since this spans multiple lines we need to accumulate some state.
+        self.dynamic_version_call_parser = DynamicVersionCallParser()
 
     def process_line(self, line: str) -> bool:
         """
@@ -158,6 +236,11 @@ class PreprocessorTracker:
                 self.preprocessor_stack.append((False, None))
             return True
 
+        in_dynamic_section = self.dynamic_version_call_parser.process_line(line)
+        if in_dynamic_section:
+            # Skip lines while the dynamic version call parser is consuming lines.
+            return True
+
         # Not a preprocessor directive or comment
         return False
 
@@ -168,6 +251,12 @@ class PreprocessorTracker:
     def get_version_of_block(self) -> tuple[int, int] | None:
         """Get the current version requirement, or None if not in a version block."""
         return self.version_of_block
+
+    def get_dynamic_call_information(self) -> DynamicVersionCall | None:
+        if not self.dynamic_version_call_parser.is_ready():
+            return None
+
+        return self.dynamic_version_call_parser.information()
 
 
 def get_current_version() -> tuple[int, int, int]:
@@ -186,3 +275,19 @@ def get_current_version() -> tuple[int, int, int]:
         major, minor, patch = parse_version(version)
 
     return (major, minor, patch)
+
+
+if __name__ == "__main__":
+    with open(
+        Path(__file__).parent.parent.parent
+        / "test/stable_shim_usage_linter_data/sample_usage.h"
+    ) as f:
+        lines = f.readlines()
+
+    parser = PreprocessorTracker()
+    for i, line in enumerate(lines):
+        to_handle = parser.process_line(line)
+        print(f"to handle: {to_handle} with {i} line: {line}")
+        dynamic_call_info = parser.get_dynamic_call_information()
+        if dynamic_call_info:
+            print(dynamic_call_info)
