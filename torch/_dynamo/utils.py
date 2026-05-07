@@ -2838,6 +2838,10 @@ def specialize_symnode(arg: Any) -> Any:
             source = arg.original_source()
             value = arg.original_value()
 
+            # ComputedLazyConstantVariable has no source, so it can't be a symnode
+            if source is None:
+                return arg
+
             is_symnode_vt = is_torch_sym(value) or (
                 not config.specialize_int
                 and type(value) is int
@@ -2868,6 +2872,20 @@ def guard_if_dyn(arg: Any) -> Any:
 
 def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
+
+
+def check_args_peekable_as_constant(
+    args: Iterable[Any], kwargs: Mapping[Any, Any]
+) -> bool:
+    """Check if all args can be peeked as constants, including unrealized lazy constants.
+
+    Unlike check_constant_args (which uses is_python_constant and returns False
+    for containers with unrealized lazy items), this uses try_peek_constant to
+    check peekability without triggering realization. Use this when constant
+    folding is desired even if args contain lazy constants (e.g., Enum class
+    creation, namedtuple type creation).
+    """
+    return all(x.try_peek_constant()[0] for x in itertools.chain(args, kwargs.values()))
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
