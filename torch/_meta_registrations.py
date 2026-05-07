@@ -2149,11 +2149,7 @@ def _pad2d_common(input, padding, *, is_reflection):
     if input.ndim == 3:
         return input.new_empty((nplane, output_h, output_w))
     else:
-        output = input.new_empty((nbatch, nplane, output_h, output_w))
-        memory_format = utils.suggest_memory_format(input)
-        if memory_format == torch.channels_last:
-            output = output.to(memory_format=torch.channels_last)
-        return output
+        return input.new_empty((nbatch, nplane, output_h, output_w))
 
 
 @register_meta(aten.reflection_pad2d)
