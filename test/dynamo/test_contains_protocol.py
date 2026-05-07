@@ -458,18 +458,33 @@ class RangeContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
         return thetype(*data)
 
 
-class ContainsReturnsTruthyTest(torch._dynamo.test_case.TestCase):
-    def test_contains(self):
+class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
+    """Test __contains__ that returns non-bool truthy/falsy values."""
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    @make_dynamo_test
+    def test_contains_truthy(self):
         seq = ContainsReturnsTruthy()
-        self.assertTrue(2 in seq)
-        self.assertTrue(None in seq)
+        # Non-bool truthy return values should be coerced to True
+        result1 = 2 in seq
+        result2 = None in seq
+        return result1 and result2
 
-
-class ContainsReturnsFalsyTest(torch._dynamo.test_case.TestCase):
-    def test_contains(self):
+    @make_dynamo_test
+    def test_contains_falsy(self):
         seq = ContainsReturnsFalsy()
-        self.assertFalse(2 in seq)
-        self.assertFalse(None in seq)
+        # Non-bool falsy return values should be coerced to False
+        result1 = 2 in seq
+        result2 = None in seq
+        return not result1 and not result2
 
 
 class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):

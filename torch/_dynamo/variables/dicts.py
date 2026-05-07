@@ -1176,9 +1176,10 @@ class DictItemsVariable(DictViewVariable):
         # Fast path: if item is a known (key, value) pair, use O(1) dict lookup.
         if isinstance(item, variables.TupleVariable) and len(item.items) == 2:
             key, val = item.items
-            if key not in self.dv_dict:
+            key_ht = HashableTracker(key)
+            if key_ht not in self.dv_dict.items:
                 return VariableTracker.build(tx, False)
-            stored = self.dv_dict.items[HashableTracker(key)]
+            stored = self.dv_dict.items[key_ht]
             return VariableTracker.build(tx, val.is_python_equal(stored))
 
         return iter_contains(self.view_items_vt, item, tx)

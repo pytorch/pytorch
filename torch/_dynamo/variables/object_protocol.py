@@ -30,7 +30,6 @@ from ..exc import (
 from ..utils import istype
 from .base import NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 
 
 if TYPE_CHECKING:
@@ -728,6 +727,6 @@ def generic_contains(
     else:
         # iter fallback handles both __iter__ and __getitem__ sequence protocol cases
         it = generic_getiter(tx, obj)
-        return UserFunctionVariable(polyfills.impl_CONTAINS_OP_fallback).call_function(
-            tx, [item, it], {}
-        )
+        return VariableTracker.build(
+            tx, polyfills.impl_CONTAINS_OP_fallback
+        ).call_function(tx, [item, it], {})
