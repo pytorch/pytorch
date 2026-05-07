@@ -158,3 +158,12 @@ matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
+
+[[sub-config]]
+matches = "torch/distributed/_experimental/torchmux/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+unannotated-attribute = true
+unannotated-parameter = true
+unannotated-return = true
