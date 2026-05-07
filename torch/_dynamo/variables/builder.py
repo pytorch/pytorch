@@ -237,6 +237,7 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     ConstantLikeVariable,
+    ConstantMethodWrapperVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
@@ -244,7 +245,6 @@ from .misc import (
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
-    MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
     ObjectVariable,
@@ -1515,7 +1515,7 @@ class VariableBuilder:
             # return the same object on attribute lookup. Therefore, we cannot
             # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
-            return MethodWrapperVariable(value)
+            return ConstantMethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -4423,7 +4423,7 @@ class SourcelessBuilder:
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(value)
+            return ConstantMethodWrapperVariable(value)
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
