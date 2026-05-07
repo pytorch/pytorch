@@ -98,6 +98,7 @@ Tensor _mps_fused_cross_entropy_backward(
   int64_t B = logits.size(0);
   int64_t V = logits.size(1);
 
+  Tensor grad_out_c = grad_output.contiguous();
   auto grad_input = at::empty_like(logits);
   Tensor target_i64 = target.to(kLong);
 
@@ -117,7 +118,7 @@ Tensor _mps_fused_cross_entropy_backward(
       auto pso = ce_lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(
-          computeEncoder, grad_output, logits, target_i64, lse, grad_input,
+          computeEncoder, grad_out_c, logits, target_i64, lse, grad_input,
           params);
 
       uint32_t tg_size = 1024;
