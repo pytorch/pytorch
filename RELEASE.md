@@ -81,7 +81,7 @@ For Release 2.12 PyTorch Supports following CUDA Architectures:
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
 | 13.0.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
-| 13.1.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
+| 13.2.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
 
