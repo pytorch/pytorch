@@ -1344,6 +1344,84 @@ class TestFlexAttentionEstimation(TestCase):
         est_ms = estimate_roofline_runtime_ms(fwd)
         self.assertGreater(est_ms, 0.0)
 
+    def test_sparsity_hint_annotate_propagates(self):
+        """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+
+        class M(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.9}):
+                    return flex_attention(q, k, v)
+
+        with FakeTensorMode():
+            q = torch.randn(1, 8, 64, 64, device="cuda", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                ep = torch.export.export(M(), (q, q, q), strict=False)
+
+        flex_node = next(
+            (
+                n
+                for n in ep.graph.nodes
+                if n.op == "call_function" and "flex_attention" in str(n.target)
+            ),
+            None,
+        )
+        self.assertIsNotNone(flex_node)
+        custom = flex_node.meta.get("custom", {})
+        self.assertIn("sparsity_hint", custom)
+        self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
+
+    def test_sparsity_hint_affects_flex_attention_estimate(self):
+        """sparsity_hint via annotate reduces flex_attention roofline estimate."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.traceback import annotate, preserve_node_meta
+        from torch.nn.attention.flex_attention import flex_attention
+
+        class Dense(torch.nn.Module):
+            def forward(self, q, k, v):
+                return flex_attention(q, k, v)
+
+        class Sparse(torch.nn.Module):
+            def forward(self, q, k, v):
+                with annotate({"sparsity_hint": 0.9}):
+                    return flex_attention(q, k, v)
+
+        # Shapes must be large enough that the roofline estimate is compute-bound
+        # (not memory-bound), so sparsity_hint actually reduces the estimate.
+        with FakeTensorMode():
+            q = torch.randn(1, 32, 2048, 128, device="cuda", dtype=torch.bfloat16)
+            with preserve_node_meta():
+                dense_ep = torch.export.export(Dense(), (q, q, q), strict=False)
+                sparse_ep = torch.export.export(Sparse(), (q, q, q), strict=False)
+
+        def find_flex(graph):
+            return next(
+                (
+                    n
+                    for n in graph.nodes
+                    if n.op == "call_function" and "flex_attention" in str(n.target)
+                ),
+                None,
+            )
+
+        dense_node = find_flex(dense_ep.graph)
+        sparse_node = find_flex(sparse_ep.graph)
+        self.assertIsNotNone(dense_node)
+        self.assertIsNotNone(sparse_node)
+
+        dense_ms = estimate_roofline_runtime_ms(dense_node)
+        sparse_ms = estimate_roofline_runtime_ms(sparse_node)
+        self.assertGreater(dense_ms, 0.0)
+        # Sparse estimate must be strictly less. The ratio won't be exactly
+        # 0.1 because the roofline is max(compute, transfer) -- once compute
+        # drops 10x the estimate becomes partially memory-bound.
+        self.assertLess(sparse_ms / dense_ms, 0.7)
+
 
 if __name__ == "__main__":
     run_tests()
