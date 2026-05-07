@@ -88,7 +88,6 @@ from ..utils import (
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
-    is_wrapper_or_member_descriptor,
     istype,
     list_methods,
     namedtuple_fields,
@@ -622,12 +621,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
-        # TODO - There is an ordering issue - if we move this code to after the
-        # wrapper and method descriptor logic, the test fails
-        # PYTORCH_TEST_WITH_DYNAMO=1 pytest -vs test/dynamo/cpython/3_13/test_collections.py::TestUserObjects::test_list_copy
-        # Revisit this once we implement tp_richcompare slot
-
-        # Comparison dunders inherited from object — defer to runtime.
+        # Comparison dunders must be checked before WrapperDescriptor/
+        # MethodDescriptor to avoid VT type mismatches in identity checks
+        # like `type(a).__eq__ is type.__eq__` in the cmp_eq polyfill.
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
@@ -668,10 +664,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # TODO - Claude tells me this is related to instancemethod. Investigate
-        # if we need a separate VT.
-        # Build directly when the attribute lives in the class's own __dict__
-        # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
+        # C-level descriptors not matched above (e.g. instancemethod, or
+        # wrapper/method descriptors on torch classes that need trace_rules).
         # OrderedDict's C-level methods are handled at runtime.
         if inspect.ismethoddescriptor(cls_attr):
             if (
@@ -2833,8 +2827,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
-        # TODO - Investigate if we need these now - its unclear why __get__ is
-        # not called for these.
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
         if can_use_mro_source:

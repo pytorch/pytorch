@@ -21,7 +21,6 @@ The variable trackers here work together with the rest of Dynamo to enable
 accurate graph capture while handling Python's various function-related behaviors.
 """
 
-import _collections  # type: ignore[import-not-found]
 import builtins
 import functools
 import importlib.metadata
@@ -3834,6 +3833,10 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        # Dispatch through the owner (UDCV for the defining class) rather
+        # than obj.call_method, which would do MRO resolution from type(obj)
+        # and find Python overrides on subclasses. Routing through the class
+        # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         return self.owner.call_method(
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
@@ -3980,6 +3983,9 @@ class MethodDescriptorVariable(VariableTracker):
                 )
         except NotImplementedError:
             pass
+        # Dispatch through the owner (UDCV for the defining class) rather
+        # than obj.call_method, which would do MRO resolution from type(obj)
+        # and find Python overrides on subclasses.
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
@@ -4276,18 +4282,26 @@ class MemberDescriptorVariable(VariableTracker):
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
+        # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        attr_name = self.descriptor.__name__
+        obj_value = getattr(obj, "value", None)
+        if obj_value is None:
+            try:
+                obj_value = obj.as_python_constant()
+            except NotImplementedError:
+                return obj.var_getattr(tx, attr_name)
         try:
-            resolved = self.descriptor.__get__(obj.value)  # type: ignore[attr-defined]
+            resolved = self.descriptor.__get__(obj_value)
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
                 tx,
                 args=[
-                    f"'{type(obj.value).__name__}' object has no attribute '{self.descriptor.__name__}'"  # type: ignore[attr-defined]
+                    f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, self.descriptor.__name__)
+        result_source = obj.source and AttrSource(obj.source, attr_name)
         return VariableTracker.build(tx, resolved, result_source)
 
 
@@ -4304,24 +4318,29 @@ class GetSetDescriptorVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
     """
 
-    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.desc = desc
+        self.descriptor = descriptor
 
     def __repr__(self) -> str:
-        cls_name = self.desc.__objclass__.__name__
-        return f"GetSetDescriptorVariable({cls_name}.{self.desc.__name__})"
+        cls_name = self.descriptor.__objclass__.__name__
+        return f"GetSetDescriptorVariable({cls_name}.{self.descriptor.__name__})"
 
     def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
-        return self.desc
+        return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__get__" and self.source:
             source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.desc.__get__, source)
+            return VariableTracker.build(tx, self.descriptor.__get__, source)
         elif name in ("__objclass__", "__name__"):
             source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, getattr(self.desc, name), source)
+            return VariableTracker.build(tx, getattr(self.descriptor, name), source)
         else:
             return super().var_getattr(tx, name)
 
@@ -4329,7 +4348,7 @@ class GetSetDescriptorVariable(VariableTracker):
         return True
 
     def as_python_constant(self) -> types.GetSetDescriptorType:
-        return self.desc
+        return self.descriptor
 
     def tp_descr_get_impl(
         self,
@@ -4339,7 +4358,7 @@ class GetSetDescriptorVariable(VariableTracker):
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
-        attr_name = self.desc.__name__
+        attr_name = self.descriptor.__name__
         # Try to eagerly call the C getter when we can obtain the
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to var_getattr for
@@ -4351,7 +4370,7 @@ class GetSetDescriptorVariable(VariableTracker):
             except NotImplementedError:
                 return obj.var_getattr(tx, attr_name)
         try:
-            resolved = self.desc.__get__(obj_value)
+            resolved = self.descriptor.__get__(obj_value)
         except AttributeError:
             raise_observed_exception(
                 AttributeError,
