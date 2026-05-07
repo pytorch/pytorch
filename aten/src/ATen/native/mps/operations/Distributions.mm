@@ -205,22 +205,28 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   if (iter.numel() == 0) {
     return;
   }
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      distribution_kernel_mps_impl(sub_iter, params, kernel_name, randoms_per_thread, gen, elements_per_thread);
-    }
-    return;
-  }
 
   using namespace mps;
 
   // Non-contiguous outputs can't go through the linear-index kernel: write
-  // into a contiguous temp first, then scatter back through the iter.
+  // into a contiguous temp first, then scatter back through the iter. Handle
+  // this *before* `with_32bit_indexing` decomposition - sub-iters of a
+  // non-contiguous iter still report the parent's full `iter.tensor(0)`, so
+  // taking the temp's shape from a sub-iter would over-allocate and re-fill
+  // the whole output once per sub-iter. At the top level of the recursion
+  // `iter.tensor(0)` is unambiguously the user's output tensor.
   if (!iter.is_contiguous()) {
     Tensor tmp = at::empty(iter.tensor(0).sizes(), iter.tensor(0).options());
     auto tmp_iter = at::TensorIterator::borrowing_nullary_op(tmp);
     distribution_kernel_mps_impl(tmp_iter, params, kernel_name, randoms_per_thread, gen, elements_per_thread);
     iter.tensor(0).copy_(tmp);
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      distribution_kernel_mps_impl(sub_iter, params, kernel_name, randoms_per_thread, gen, elements_per_thread);
+    }
     return;
   }
 
@@ -321,7 +327,7 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
-        auto numel = static_cast<uint32_t>(output.numel());
+        const auto numel = c10::checked_convert<uint32_t>(output.numel(), "uint32_t");
         mtl_setArgs(computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset}, numel);
         mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div(numel, 4u));
       }

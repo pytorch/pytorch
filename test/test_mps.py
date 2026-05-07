@@ -10086,7 +10086,13 @@ class TestLinalgMPS(TestCaseMPS):
 
 class TestSDPA(TestCaseMPS):
     def _compare_tensors(self, y, ref, tol=0.01):
-        denom = torch.maximum(ref.abs(), torch.tensor([1e-6], device=ref.device, dtype=ref.dtype))
+        # Floor the denominator at 1e-3: below that, |ref| is at the level of
+        # bfloat16/float16 ULP noise of zero, and dividing a 1-ULP absolute
+        # diff by a near-zero reference produces a huge relative ratio that
+        # dominates the mean and makes the metric meaningless. 1e-6 (the prior
+        # floor) was tight enough that a single near-zero output cell could
+        # blow up `err` past `tol` even with sub-ULP absolute error.
+        denom = torch.maximum(ref.abs(), torch.tensor([1e-3], device=ref.device, dtype=ref.dtype))
         err = ((y - ref).abs() / denom).mean().item()
         self.assertLess(err, tol)
 
