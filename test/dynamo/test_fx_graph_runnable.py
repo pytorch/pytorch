@@ -203,6 +203,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_user_defined_triton_kernel_autotune(self):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
@@ -548,6 +549,44 @@ class FxGraphRunnableTest(TestCase):
 
         torch.compile(f)(view, weights)
         self._exec_and_verify_payload()
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_repeat_interleave_with_output_size(self):
+        def f(data, repeats, output_size):
+            indices = torch.repeat_interleave(repeats, output_size=output_size.item())
+            return data[indices]
+
+        num_segments = 128
+        data = torch.randn(1000, 16)
+        repeats = torch.randint(5, 15, (num_segments,), dtype=torch.int64)
+        output_size = repeats.sum()
+
+        torch.compile(f, dynamic=True)(data, repeats, output_size)
+
+        self._exec_and_verify_payload()
+
+        # Verify the payload contains the repeat_interleave fixup
+        payload = self.buffer.getvalue().strip()
+        self.assertIn("def forward", payload)
+        self.assertIn("repeat_interleave", payload)
+        # Verify the fixup code is present
+        self.assertIn("# Fixup: ensure sum(repeats) == output_size", payload)
+        self.assertIn("_repeats.fill_", payload)
+
+    def test_repeat_interleave_with_constant_output_size(self):
+        def f(data, repeats):
+            # output_size is a constant, not a dynamic input
+            indices = torch.repeat_interleave(repeats, output_size=1280)
+            return data[indices]
+
+        num_segments = 128
+        data = torch.randn(1000, 16)
+        repeats = torch.full((num_segments,), 10, dtype=torch.int64)
+
+        torch.compile(f)(data, repeats)
+        self._exec_and_verify_payload()
+        payload = self.buffer.getvalue().strip()
+        self.assertNotIn("# Fixup: ensure sum(repeats) == output_size", payload)
 
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")

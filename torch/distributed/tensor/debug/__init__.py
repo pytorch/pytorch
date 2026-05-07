@@ -26,7 +26,6 @@ def _get_fast_path_sharding_prop_cache_stats():
     Get a tuple (hits, misses) for the fast path sharding propagation cache, used for debugging
     only.
     """
-    # pyrefly: ignore [missing-attribute]
     return torch._C._get_DTensor_sharding_propagator_cache_stats()
 
 
@@ -45,7 +44,6 @@ def _clear_fast_path_sharding_prop_cache():
     """
     Clears the cache for the fast path sharding propagation cache, used for debugging purpose only.
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._clear_DTensor_sharding_propagator_cache()
 
 
@@ -56,6 +54,15 @@ def _clear_sharding_prop_cache():
     """
     _clear_python_sharding_prop_cache()
     _clear_fast_path_sharding_prop_cache()
+
+
+def _reinit_dispatch_logger():
+    """
+    Resets the cached DTensor dispatch logger state so that the next DTensor
+    dispatch re-checks whether debug logging is enabled. Call this after
+    changing the log level on the ``torch.distributed.tensor._dispatch`` logger.
+    """
+    torch._C._reinit_DTensor_dispatch_logger()
 
 
 # Set namespace for exposed private names

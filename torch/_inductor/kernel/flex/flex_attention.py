@@ -8,13 +8,14 @@ import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
@@ -101,6 +102,7 @@ flex_attention_template = TritonTemplate(
     source=load_flex_template("flex_attention")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 
@@ -317,10 +319,16 @@ def flex_attention(
 
     B = Bq
 
-    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
-        kernel_options.setdefault("IS_DIVISIBLE", False)
-    else:
+    seq_q_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_q, 128), 0)
+    )
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_kv, 128), 0)
+    )
+    if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
 
     # NB it is okay that the v_head_dim is different
     # We are using these to match fill order of the output.
@@ -352,7 +360,7 @@ def flex_attention(
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = FloorDiv(Hq, Hkv)
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
@@ -484,7 +492,7 @@ def flex_attention(
         8: create_indices_fake,
     }
 
-    out = autotune_select_algorithm(
+    out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
         # Need to filter out symbols since there is an invariant
@@ -530,6 +538,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
+    always_freeze_layout=True,
 )
 
 
@@ -563,7 +572,7 @@ class JointOutputResult:
 
     grad_input: ComputedBuffer
     captured_grads_compute: list[ComputedBuffer]
-    captured_grads: list[Optional[TensorBox]]
+    captured_grads: list[TensorBox | None]
     mutated_grads: list[TensorBox]
 
 
@@ -702,8 +711,16 @@ def flex_attention_backward(*args, **kwargs):
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    seq_q_divisible = V.graph.sizevars.statically_known_true(seq_len_q % 128 == 0)
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(seq_len_kv % 128 == 0)
+    kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    kernel_options.setdefault("WRITE_DQ", True)
+    seq_q_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_q, 128), 0)
+    )
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_kv, 128), 0)
+    )
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -863,7 +880,7 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA factor
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = FloorDiv(Hq, Hkv)
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
@@ -1010,7 +1027,7 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    broadcasted_grad_key = autotune_select_algorithm(
+    broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
@@ -1054,7 +1071,7 @@ def get_bwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults,
     mask_graph_buffer: SubgraphResults,
     joint_outputs: JointOutputResult,
-) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+) -> list[ComputedBuffer | TensorBox | None]:
     subgraph_buffer = (
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )

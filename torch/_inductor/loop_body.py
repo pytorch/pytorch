@@ -6,13 +6,14 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 
 import sympy
 
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -22,6 +23,7 @@ from .utils import (
     cache_on_self,
     reduction_num_outputs,
     sympy_index_symbol_with_prefix,
+    sympy_product,
     sympy_subs,
 )
 from .virtualized import ops, V
@@ -73,8 +75,8 @@ class LightTracer(TracerBase):
 
 class MemoryEntry(NamedTuple):
     index_name: str  # LoopBody.indexing_exprs[index_name]
-    buffer_name: Optional[str]
-    mode: Optional[str]  # V.ops.store(..., mode=mode)
+    buffer_name: str | None
+    mode: str | None  # V.ops.store(..., mode=mode)
 
 
 class MemoryUsageType(Enum):
@@ -161,8 +163,10 @@ class LoopBody:
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
-        self.has_partial_accumulate = self.root_block.graph.find_nodes(
-            op="call_method", target="partial_accumulate"
+        self.has_partial_accumulate = bool(
+            self.root_block.graph.find_nodes(
+                op="call_method", target="partial_accumulate"
+            )
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
@@ -268,7 +272,7 @@ class LoopBody:
             reduce_idx = index[len(iter_size) :]
 
             new_iter_idx = list(iter_idx)
-            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+            new_iter_idx[dimension] = Mod(iter_idx[dimension], original_range)
 
             return old_body(new_iter_idx, reduce_idx)
 
@@ -285,6 +289,58 @@ class LoopBody:
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
         )
         return new_body
+
+    def reindex_iter_loops(self, new_iter_sizes: Sequence[sympy.Expr]) -> LoopBody:
+        """
+        Reindex iteration loops into a different factorization of the same
+        total numel. For example, [1024, 8192] -> [65536, 128].
+
+        The old iteration vars are expressed as functions of the new vars via
+        FloorDiv and ModularIndexing on the flat index.
+        """
+        from torch.utils._sympy.functions import ModularIndexing
+
+        old_body = self
+        old_iter_sizes = self.sizes[0]
+        reduce_sizes = self.sizes[1]
+
+        new_sizes = (list(new_iter_sizes), list(reduce_sizes))
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
+        )
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = [*itertools.chain.from_iterable(indices)]
+            new_iter_idx = index[: len(new_iter_sizes)]
+            reduce_idx = index[len(new_iter_sizes) :]
+            # Build flat index from new iter vars
+            flat = sympy.S.Zero
+            for v, s in zip(new_iter_idx, new_iter_sizes):
+                flat = flat * s + v
+            # Express old iter vars from flat index
+            old_iter_idx: list[sympy.Expr] = []
+            for i, old_size in enumerate(old_iter_sizes):
+                tail = sympy_product(old_iter_sizes[i + 1 :])
+                old_iter_idx.append(ModularIndexing(flat, tail, old_size))
+            return old_body(old_iter_idx, list(reduce_idx))
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        return LoopBody(
+            loop_body,
+            (iter_vars2, reduce_vars2),
+            var_ranges2,
+            iter_vars2,
+            reduce_vars2,
+        )
 
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
@@ -427,8 +483,8 @@ class LoopBody:
         self,
         expr: sympy.Expr,
         mtype: MemoryUsageType,
-        buffer_name: Optional[str] = None,
-        mode: Optional[str] = None,
+        buffer_name: str | None = None,
+        mode: str | None = None,
     ):
         name = self.indexing_exprs_name.get(expr)
         if not name:
@@ -532,7 +588,12 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
 
         handler: Any = CountOps(
-            CaptureIndexing(proxy_ops, body, tracer),
+            CaptureIndexing(
+                # pyrefly: ignore[bad-argument-type]
+                proxy_ops,
+                body,
+                tracer,
+            ),
             body.op_counts,
         )
         if config.constant_and_index_propagation:
@@ -689,8 +750,8 @@ class CaptureIndexing(WrapperHandler):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         """
         See [Note: Inductor bucketize op]

@@ -151,13 +151,8 @@ class TestPatternMatcherBase(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=torch.float32,
-        check_quantization=False,
-        is_qat=False,
         dtype=None,
-        is_dynamic=False,
-        quantizer=None,
         compile_options={},  # noqa: B006
-        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -184,36 +179,22 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.amp.autocast(device_type=device, dtype=torch.float16)
             atol, rtol = 5e-2, 5e-2
         else:
-            assert check_autocast == torch.float32
-            maybe_autocast = contextlib.nullcontext()
-        if check_quantization:
-            raise NotImplementedError("not supported, please migrate to torchao")
-            """
-            if quantization_with_autocast:
-                with maybe_autocast:
-                    convert_model = _generate_qdq_quantized_model(
-                        mod, inputs, is_qat, is_dynamic, quantizer
-                    )
-            else:
-                convert_model = _generate_qdq_quantized_model(
-                    mod, inputs, is_qat, is_dynamic, quantizer
+            if check_autocast != torch.float32:
+                raise AssertionError(
+                    f"Expected check_autocast to be torch.float32, got {check_autocast}"
                 )
-            with torch.no_grad(), maybe_autocast:
-                _ = torch.compile(convert_model)(*inputs)
-                matcher_check_fn()
-            """
-        else:
-            with torch.no_grad(), maybe_autocast:
-                clone_inputs = self._clone_inputs(inputs)
-                expected = mod(*inputs)
-                actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                if self.precision != 0:
-                    torch.testing.assert_close(
-                        actual, expected, atol=self.precision, rtol=self.precision
-                    )
-                else:
-                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-                matcher_check_fn()
+            maybe_autocast = contextlib.nullcontext()
+        with torch.no_grad(), maybe_autocast:
+            clone_inputs = self._clone_inputs(inputs)
+            expected = mod(*inputs)
+            actual = torch.compile(mod, **compile_options)(*clone_inputs)
+            if self.precision != 0:
+                torch.testing.assert_close(
+                    actual, expected, atol=self.precision, rtol=self.precision
+                )
+            else:
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            matcher_check_fn()
 
     def _test_code_common(
         self,
@@ -223,18 +204,11 @@ class TestPatternMatcherBase(TestCase):
         exclude_ops,
         atol=1e-5,
         rtol=1.3e-6,
-        check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
-        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
-            if check_quantization:
-                raise NotImplementedError("not supported, please migrate to torchao")
-                """
-                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
-                """
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -251,7 +225,10 @@ class TestPatternMatcherBase(TestCase):
             for op in include_ops:
                 self.assertIn(op, source_code)
             if num_include_ops is not None:
-                assert len(include_ops) == len(num_include_ops)
+                if len(include_ops) != len(num_include_ops):
+                    raise AssertionError(
+                        f"len(include_ops)={len(include_ops)} != len(num_include_ops)={len(num_include_ops)}"
+                    )
                 for i in range(len(include_ops)):
                     self.assertEqual(
                         source_code.count(include_ops[i]), num_include_ops[i]
@@ -260,14 +237,13 @@ class TestPatternMatcherBase(TestCase):
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
                 _check_has_dynamic_shape(self, source_code)
-            if not check_quantization:
-                # Skip due to reduce range setting for Quantization on preCI system.
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def _test_conv_unary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -360,7 +336,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_unary_base(dim=5)
 
     def _test_conv_transpose_unary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -453,7 +430,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_transpose_unary_base(dim=5)
 
     def _test_conv_binary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -554,7 +532,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_binary_base(dim=5)
 
     def _test_conv_binary_broadcast_shapes_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
         torch.manual_seed(12345)
 
         class M(torch.nn.Module):
@@ -740,13 +719,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 mod,
                 (x, w, s),
                 matcher_check_fn,
-                check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
             )
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
+    # See issue #168635 and its sub-issues.
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
@@ -1554,7 +1534,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @xfailIfACL
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):

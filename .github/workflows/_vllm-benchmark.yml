@@ -14,7 +14,7 @@ on:
       build_environment:
         required: true
         type: string
-        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
+        description: The build environment name, e.g. linux-jammy-cuda13.0-py3.12-gcc11
       pytorch_branch:
         required: false
         type: string
@@ -28,6 +28,16 @@ on:
         type: string
         description: The list of models to benchmark. Default to all models.
         default: ''
+      compilation_config:
+        required: false
+        type: string
+        description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
+        default: ''
+      is_nightly:
+        required: false
+        type: boolean
+        description: Whether this is a nightly scheduled run. When true, TRANSFORMERS_OFFLINE is disabled.
+        default: false
 
 jobs:
   benchmark:
@@ -106,7 +116,7 @@ jobs:
             dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
             dist/deepgemm/deep_gemm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu129 \
+            --extra-index-url https://download.pytorch.org/whl/cu130 \
             --index-strategy unsafe-best-match
 
       - name: Print some debug information
@@ -163,6 +173,7 @@ jobs:
       - name: Setup benchmark tests
         env:
           MODELS: ${{ inputs.models }}
+          COMPILATION_CONFIG: ${{ inputs.compilation_config }}
         shell: bash
         run: |
           set -eux
@@ -178,7 +189,9 @@ jobs:
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
             --device "${DEVICE_NAME}" \
-            --include-eager-mode
+            --include-eager-mode \
+            --include-inductor-graph-partition \
+            --compilation-config "${COMPILATION_CONFIG}"
           popd
 
           pushd vllm-project/vllm
@@ -189,9 +202,11 @@ jobs:
       - name: Run vLLM benchmark
         working-directory: vllm-project/vllm
         env:
+          FLASHINFER_WORKSPACE_BASE: /mnt/hf_cache
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_HOME: /mnt/hf_cache
-          TRANSFORMERS_OFFLINE: 1
+          # Nightly runs download from HF to periodically refresh the local cache
+          TRANSFORMERS_OFFLINE: ${{ inputs.is_nightly && '0' || '1' }}
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
@@ -208,7 +223,8 @@ jobs:
 
           # Fail when there is no result or if the metrics are all zero
           python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
-            --benchmark-results "${BENCHMARK_RESULTS}"
+            --benchmark-results "${BENCHMARK_RESULTS}" \
+            --strict
 
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0

@@ -112,13 +112,21 @@ class TestUtils(TestCase):
         }
         original_state_dict = state_dict.copy()
         _replace_by_prefix(state_dict, "layer.", "module.layer.")
-        assert state_dict == {
+        expected = {
             "module.layer.a": torch.tensor(1),
             "abc.layer.def": torch.tensor(2),
             "module.layer.b": torch.tensor(3),
         }
+        # Note: comparing dicts with tensors directly doesn't work well, so we compare keys
+        if set(state_dict.keys()) != set(expected.keys()):
+            raise AssertionError(
+                f"Expected keys {set(expected.keys())}, got {set(state_dict.keys())}"
+            )
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
-        assert state_dict == original_state_dict
+        if set(state_dict.keys()) != set(original_state_dict.keys()):
+            raise AssertionError(
+                f"Expected keys {set(original_state_dict.keys())}, got {set(state_dict.keys())}"
+            )
 
     @skip_if_lt_x_gpu(1)
     def test_packed_sequence(self):

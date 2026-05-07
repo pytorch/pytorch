@@ -1,7 +1,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -15,6 +15,7 @@ from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -169,10 +170,12 @@ def _get_shard_size_and_offsets(
     if shard_size == 0:
         return shard_size, torch.arange(zero_global_offset, zero_global_offset + 1)
     if isinstance(placement, Shard) and not isinstance(placement, _StridedShard):
-        assert isinstance(shard_offsets, int)
+        if not isinstance(shard_offsets, int):
+            raise AssertionError
         index = torch.arange(shard_offsets, shard_offsets + shard_size)
     else:
-        assert isinstance(shard_offsets, list)
+        if not isinstance(shard_offsets, list):
+            raise AssertionError
         index = torch.tensor(shard_offsets)
     if previous_offsets is None:
         return shard_size, index
@@ -231,7 +234,8 @@ def _compute_local_shape_and_global_offset(
         def coordinate_lookup(dim: int) -> RankType:
             return _coord[dim]
     else:
-        assert my_coordinate is not None
+        if my_coordinate is None:
+            raise AssertionError
         coordinate_lookup = my_coordinate
 
     local_shape = list(global_shape)
@@ -253,9 +257,10 @@ def _compute_local_shape_and_global_offset(
             continue
         shard_dim = placement.dim
         zero_global_offset = global_shape[shard_dim]
-        assert shard_dim < len(local_shape), (
-            f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-        )
+        if shard_dim >= len(local_shape):
+            raise AssertionError(
+                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+            )
         previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
         shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
@@ -310,23 +315,24 @@ def compute_local_tensor_info(
 
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
-        if placement.is_shard():
-            shard_placement = cast(Shard, placement)
-            if shard_placement.dim < 0:
+        if _is_shard_like(placement):
+            if placement.dim < 0:
                 raise AssertionError(
                     "Shard placements should have negative dims normalized in "
-                    f"the user-facing APIs: {shard_placement}"
+                    f"the user-facing APIs: {placement}"
                 )
-            shard_dim = shard_placement.dim
-            assert shard_dim < len(local_shape), (
-                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
-                f"for placement number {idx}."
-            )
+            shard_dim = placement.dim
+            if shard_dim >= len(local_shape):
+                raise AssertionError(
+                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
+                    f"for placement number {idx}."
+                )
 
             global_dim_size = local_shape[shard_dim]
-            assert global_dim_size % mesh_dim_size == 0, (
-                f"Global dim {global_dim_size} not divisible by mesh size {mesh_dim_size}"
-            )
+            if global_dim_size % mesh_dim_size != 0:
+                raise AssertionError(
+                    f"Global dim {global_dim_size} not divisible by mesh size {mesh_dim_size}"
+                )
             local_shape[shard_dim] = global_dim_size // mesh_dim_size
 
             # shrink strides that were scaled up globally
@@ -379,6 +385,7 @@ def compute_global_tensor_shape(
 
     if isinstance(placements[0], Replicate):
         return shape
+    # NOTE: isinstance(_, Shard) does not match _StridedShard; see _is_shard_like().
     elif isinstance(placements[0], Shard):
 
         @maybe_run_for_local_tensor
@@ -440,25 +447,26 @@ def try_find_mesh_from_args(
 
 
 def compute_local_stride(
-    global_stride: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+    global_stride: ShapeType, local_shape: ShapeType
 ) -> tuple[int, ...]:
     """
-    Compute the stride of a local tensor shard, given the global stride of the DTensor.
-    NOTE: Currently this function is assuming the DTensor is evenly shardable.
+    Compute the stride of a local tensor shard, given the global stride and local shape.
+
+    Derives strides by preserving the memory layout (dimension ordering) implied
+    by the global strides, then computing contiguous strides for the local shape
+    in that order.  Assumes the global tensor is non-overlapping and dense.
     """
-    stride_divisors = [1] * len(global_stride)
-    for mesh_idx, p in enumerate(placements):
-        if p.is_shard():
-            i = cast(Shard, p).dim
-            # tensor dimension i is sharded on mesh dimension mesh_idx,
-            # so we need to divide all the strides larger than stride[i]
-            # (by the submesh size)
-            for j in range(len(global_stride)):
-                if global_stride[j] > global_stride[i]:
-                    stride_divisors[j] *= mesh.size(mesh_idx)
-    return tuple(
-        global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
-    )
+    ndim = len(global_stride)
+    # Sort dims by global stride descending to recover memory layout order.
+    # Stable sort preserves original dim order for ties, which only occur
+    # on size-1 dims where the stride value is semantically irrelevant.
+    perm = sorted(range(ndim), key=lambda d: global_stride[d], reverse=True)
+    local_strides = [0] * ndim
+    s = 1
+    for d in reversed(perm):
+        local_strides[d] = s
+        s *= local_shape[d]
+    return tuple(local_strides)
 
 
 def normalize_to_torch_size(size) -> torch.Size:  # type: ignore[no-untyped-def]

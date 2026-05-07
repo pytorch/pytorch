@@ -2,7 +2,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
@@ -408,6 +408,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   // API that uses internal signal mechanism and accepts handle
   m.impl("nccl_put_signal",
       torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
+  m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input

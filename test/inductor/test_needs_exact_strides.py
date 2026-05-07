@@ -13,13 +13,15 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 
 
 class TestNeedsExactStrides(InductorTestCase):
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
-        device = "cuda"  # float8_e8m0fnu errors on "cpu"
+        device = (
+            torch.accelerator.current_accelerator()
+        )  # float8_e8m0fnu errors on "cpu"
         x = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
         other = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
 
@@ -71,8 +73,10 @@ class TestNeedsExactStrides(InductorTestCase):
             )
 
             def impl(x, y):
-                assert x.transpose(2, 3).is_contiguous()
-                assert y.is_contiguous()
+                if not x.transpose(2, 3).is_contiguous():
+                    raise AssertionError
+                if not y.is_contiguous():
+                    raise AssertionError
                 return x.float() + y.float()
 
             def meta(x, y):
@@ -92,11 +96,12 @@ class TestNeedsExactStrides(InductorTestCase):
                     f_compile(x, other)
                 except TestPassed:
                     pass
-                assert called
+                if not called:
+                    raise AssertionError
 
 
 instantiate_parametrized_tests(TestNeedsExactStrides)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

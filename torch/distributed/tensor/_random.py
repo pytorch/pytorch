@@ -11,6 +11,7 @@ from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.types import IntLikeType
 
 
 logger = getLogger(__name__)
@@ -130,7 +131,8 @@ class _PhiloxState:
 
     @offset.setter
     def offset(self, offset: torch.Tensor) -> None:
-        assert offset.numel() == 1
+        if offset.numel() != 1:
+            raise AssertionError
         self._state[8:] = offset.view(torch.uint8)
 
     @property
@@ -139,7 +141,8 @@ class _PhiloxState:
 
     @seed.setter
     def seed(self, seed: torch.Tensor) -> None:
-        assert seed.numel() == 1
+        if seed.numel() != 1:
+            raise AssertionError
         self._state[:8] = seed.view(torch.uint8)
 
 
@@ -153,7 +156,6 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
@@ -195,7 +197,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         run_state_sync: bool = True,
     ):
         super().__init__(_resolve_device(device_mesh=device_mesh))
-        assert self._device_handle is not None
+        if self._device_handle is None:
+            raise AssertionError
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
         if self._device.type == "cpu":
             raise RuntimeError(
@@ -203,8 +206,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
             )
 
-        rng_state = self._get_device_state()
         if run_state_sync:
+            rng_state = self._get_device_state()
             # synchronize RNG state using rank 0's current one
             torch.distributed.broadcast(rng_state, 0)
             my_rng_state = self._get_device_state()
@@ -266,7 +269,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
-                assert self._device_handle is not None
+                if self._device_handle is None:
+                    raise AssertionError
                 self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
@@ -334,34 +338,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             The last value to calculate before obtaining the starting offset is the shard linear index.
             The starting offset for each rank will be its shard_linear_index * local_tensor_numel.
         """
-        mesh = spec.mesh
-        mesh_coordinate = mesh.get_coordinate()
-        assert mesh_coordinate is not None
-
-        # Compute shard index and total number of shards on each tensor dim
-        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
-            mesh_coordinate, spec
-        )
-
-        # compute shard linear index
-        shard_linear_idx = self._calc_shard_linear_idx(
-            shard_idx_by_dim, total_num_shards_by_dim
-        )
-
-        # compute starting offset using the first shard's size
-        local_size_on_rank_0 = _calc_first_shard_size(spec)
-
-        from torch.distributed.tensor._ops.utils import prod
-
-        local_size = prod(local_size_on_rank_0)
-
-        # get current RNG offset
-        current_offset = state.offset
-
-        # pytorch: offset must be multiple of 4
-        # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
-        offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        state.offset = current_offset + offset_incr
+        start_offset_incr, _ = self._compute_rng_offsets(spec)
+        state.offset = state.offset + start_offset_incr
 
     def _set_post_op_offset(
         self, state: _PhiloxState, spec: DTensorSpec, old_offset: torch.Tensor
@@ -379,19 +357,41 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         Returns:
             None
         """
-        dtensor_shape = spec.shape
+        _, end_offset_incr = self._compute_rng_offsets(spec)
+        state.offset = old_offset + end_offset_incr
 
+    def _compute_rng_offsets(self, spec: DTensorSpec) -> tuple[int, int]:
+        """Compute the RNG offset increments for a distributed random op.
+
+        These values are derived from mesh topology, placements, and tensor shape,
+        and are static for a given compiled graph. They can be burned into the graph
+        as integer constants rather than keeping the DTensorSpec around at runtime.
+
+        Returns:
+            (start_offset_incr, end_offset_incr) — both aligned to multiples of 4.
+        """
         from torch.distributed.tensor._ops.utils import prod
 
-        numel = prod(dtensor_shape)
+        mesh = spec.mesh
+        mesh_coordinate = [mesh._sym_get_coordinate(i) for i in range(mesh.ndim)]
+
+        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+            mesh_coordinate, spec
+        )
+        shard_linear_idx = self._calc_shard_linear_idx(
+            shard_idx_by_dim, total_num_shards_by_dim
+        )
+        local_size = prod(_calc_first_shard_size(spec))
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
-        numel = (numel + 3) // 4 * 4
-        state.offset = old_offset + numel
+        start_offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
+        end_offset_incr = (prod(spec.shape) + 3) // 4 * 4
+
+        return start_offset_incr, end_offset_incr
 
     def _calc_shard_linear_idx(
-        self, shard_coord: list[int], shard_size: list[int]
-    ) -> int:
+        self, shard_coord: Sequence[IntLikeType], shard_size: Sequence[IntLikeType]
+    ) -> IntLikeType:
         return _calc_shard_linear_idx(shard_coord, shard_size)
 
 
@@ -410,8 +410,8 @@ def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
 
 
 def _calc_shard_info(
-    mesh_coordinate: Sequence[int], spec: DTensorSpec
-) -> tuple[list[int], list[int]]:
+    mesh_coordinate: Sequence[IntLikeType], spec: DTensorSpec
+) -> tuple[list[IntLikeType], list[IntLikeType]]:
     mesh = spec.mesh
     # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
     # case. Replace the custom logic with dim_map once we support it.
@@ -423,20 +423,22 @@ def _calc_shard_info(
                 dim_map[shard_dim] = [i]
             else:
                 mesh_dim_list = dim_map[shard_dim]
-                assert isinstance(mesh_dim_list, list)
+                if not isinstance(mesh_dim_list, list):
+                    raise AssertionError
                 mesh_dim_list.append(i)
 
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    assert mesh_coordinate is not None
     mesh_size = mesh.shape
     shard_idx_by_dim = []
-    total_num_shards_by_dim = []  # total number of shards on each tensor dim
+    total_num_shards_by_dim: list[
+        IntLikeType
+    ] = []  # total number of shards on each tensor dim
     for mesh_dim in dim_map:
-        shard_idx = 0
-        total_num_shards = 1
+        shard_idx: IntLikeType = 0
+        total_num_shards: IntLikeType = 1
         # the tensor dim is sharded on more than 1 mesh dim
         if isinstance(mesh_dim, list):
             rank_coord = [mesh_coordinate[d] for d in mesh_dim]
@@ -451,10 +453,12 @@ def _calc_shard_info(
     return shard_idx_by_dim, total_num_shards_by_dim
 
 
-def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int:
+def _calc_shard_linear_idx(
+    shard_coord: Sequence[IntLikeType], shard_size: Sequence[IntLikeType]
+) -> IntLikeType:
     # compute shard linear index
-    shard_linear_idx = 0
-    shard_coord_stride = 1
+    shard_linear_idx: IntLikeType = 0
+    shard_coord_stride: IntLikeType = 1
     for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
         shard_linear_idx += idx * shard_coord_stride
         shard_coord_stride *= size
@@ -465,7 +469,8 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_type = device_mesh.device_type
     device_handle = _get_device_handle(device_type)
-    assert device_handle is not None
+    if device_handle is None:
+        raise AssertionError
     device_idx = device_mesh.get_rank() % device_handle.device_count()
 
     @maybe_run_for_local_tensor

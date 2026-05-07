@@ -14,12 +14,12 @@ const at::cuda::NVRTC& get_nvrtc() {
 }
 } // namespace
 
-#define CU_LOG_ERROR(fn, result, ...)                   \
-  {                                                     \
-    LOG(ERROR) << #fn << " returned error: " << result; \
-    const char* errMsg = nullptr;                       \
-    get_nvrtc().cuGetErrorString(result, &errMsg);      \
-    LOG(ERROR) << "cuGetErrorString: " << errMsg;       \
+#define CU_LOG_ERROR(fn, result, ...)                    \
+  {                                                      \
+    LOG(ERROR) << #fn << " returned error: " << result;  \
+    const char* errMsg = nullptr;                        \
+    (void)get_nvrtc().cuGetErrorString(result, &errMsg); \
+    LOG(ERROR) << "cuGetErrorString: " << errMsg;        \
   }
 
 namespace torch::nativert {

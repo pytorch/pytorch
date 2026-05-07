@@ -153,7 +153,7 @@ class JitScalarType(enum.IntEnum):
         """
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
-        # pyrefly: ignore [bad-index, index-error]
+        # pyrefly: ignore [bad-index]
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
     @classmethod
@@ -173,6 +173,7 @@ class JitScalarType(enum.IntEnum):
         """
         if onnx_type not in _ONNX_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown onnx_type: {onnx_type}")
+        # pyrefly: ignore [redundant-cast]
         return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
 
     @classmethod

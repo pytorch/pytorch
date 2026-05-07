@@ -48,6 +48,7 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
+constexpr auto kETIsAsynchronizedOp = "is_asynchronized_op";
 #endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
@@ -485,7 +486,10 @@ convertIValue(
         itemsize,
         device_str);
     return std::make_tuple(
-        tensor_shape, tensor_stride, tensor_type, tensor_value);
+        std::move(tensor_shape),
+        std::move(tensor_stride),
+        std::move(tensor_type),
+        std::move(tensor_value));
   } else if (val.isTuple()) {
     const auto& val_tuple = val.toTupleRef().elements();
     size_t tuple_size = val_tuple.size();
@@ -493,6 +497,10 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    shape_array.reserve(tuple_size);
+    stride_array.reserve(tuple_size);
+    type_array.reserve(tuple_size);
+    value_array.reserve(tuple_size);
     for (const auto j : c10::irange(tuple_size)) {
       auto tuple = convertIValue(
           ob,
@@ -504,17 +512,17 @@ convertIValue(
           val_tuple[j],
           false,
           maxArrayLen);
-      shape_array.push_back(std::get<0>(tuple));
-      stride_array.push_back(std::get<1>(tuple));
-      type_array.push_back(std::get<2>(tuple));
-      value_array.push_back(std::get<3>(tuple));
+      shape_array.push_back(std::move(std::get<0>(tuple)));
+      stride_array.push_back(std::move(std::get<1>(tuple)));
+      type_array.push_back(std::move(std::get<2>(tuple)));
+      value_array.push_back(std::move(std::get<3>(tuple)));
     }
     type = type + vectorToString(type_array);
     std::string tensor_type = baseType ? fmt::format("\"{}\"", type) : type;
     return std::make_tuple(
         vectorToString(shape_array),
         vectorToString(stride_array),
-        tensor_type,
+        std::move(tensor_type),
         vectorToString(value_array));
   } else if (val.isList()) {
     const auto& val_list = val.toList();
@@ -523,6 +531,11 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    const size_t effective_list_size = std::min(list_size, maxArrayLen + 1);
+    shape_array.reserve(effective_list_size);
+    stride_array.reserve(effective_list_size);
+    type_array.reserve(effective_list_size);
+    value_array.reserve(effective_list_size);
     for (const auto j : c10::irange(list_size)) {
       auto tuple = convertIValue(
           ob,
@@ -534,10 +547,10 @@ convertIValue(
           val_list.get(j),
           false,
           maxArrayLen);
-      shape_array.push_back(std::get<0>(tuple));
-      stride_array.push_back(std::get<1>(tuple));
-      type_array.push_back(std::get<2>(tuple));
-      value_array.push_back(std::get<3>(tuple));
+      shape_array.push_back(std::move(std::get<0>(tuple)));
+      stride_array.push_back(std::move(std::get<1>(tuple)));
+      type_array.push_back(std::move(std::get<2>(tuple)));
+      value_array.push_back(std::move(std::get<3>(tuple)));
       if (j >= maxArrayLen) {
         LOG(WARNING) << "list size=" << val_list.size()
                      << " exceeded maxArrayLen=" << maxArrayLen;
@@ -549,7 +562,7 @@ convertIValue(
     return std::make_tuple(
         vectorToString(shape_array),
         vectorToString(stride_array),
-        tensor_type,
+        std::move(tensor_type),
         vectorToString(value_array));
   } else {
     std::string tensor_shape = "[]";
@@ -558,7 +571,10 @@ convertIValue(
     std::string tensor_value = getScalarValue(val);
 
     return std::make_tuple(
-        tensor_shape, tensor_stride, tensor_type, tensor_value);
+        std::move(tensor_shape),
+        std::move(tensor_stride),
+        std::move(tensor_type),
+        std::move(tensor_value));
   }
 }
 
@@ -666,6 +682,8 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
+
+  addAttr(kIsAsynchronizedOp, kETIsAsynchronizedOp, "string");
 
 #endif // USE_DISTRIBUTED
 

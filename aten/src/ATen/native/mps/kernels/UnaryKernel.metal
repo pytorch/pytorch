@@ -91,7 +91,8 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(::precise::sqrt(dot(x, x)), 0);
+    const auto abs_2 = ::precise::abs(float2(x));
+    return T(c10::metal::hypot(abs_2.x, abs_2.y));
   }
 };
 
@@ -420,6 +421,66 @@ struct log2_functor {
   }
 };
 
+struct lgamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::log_gamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::log_gamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : INFINITY;
+  }
+};
+
+struct digamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::digamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::digamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return c10::metal::digamma(static_cast<float>(x));
+  }
+};
+
+struct trigamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(c10::metal::trigamma(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return c10::metal::trigamma(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return c10::metal::trigamma(static_cast<float>(x));
+  }
+};
+
+struct polygamma_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(
+      const T x,
+      const int order) {
+    return static_cast<T>(c10::metal::polygamma(order, static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(
+      const T x,
+      const int order) {
+    return c10::metal::polygamma(order, static_cast<float>(x));
+  }
+  inline float operator()(const bool x, const int order) {
+    return c10::metal::polygamma(order, static_cast<float>(x));
+  }
+};
+
 struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -614,6 +675,9 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log1p, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(lgamma, DTYPE1, DTYPE0);       \
+  REGISTER_UNARY_OP(digamma, DTYPE1, DTYPE0);      \
+  REGISTER_UNARY_OP(trigamma, DTYPE1, DTYPE0);     \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(reciprocal, DTYPE1, DTYPE0);   \
@@ -685,3 +749,13 @@ REGISTER_UNARY_ALPHA_OP(pow_scalar, char, int, char);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, short, int, short);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, int, int, int);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, long, int, long);
+
+REGISTER_UNARY_ALPHA_OP(polygamma, bfloat, int, bfloat);
+REGISTER_UNARY_ALPHA_OP(polygamma, half, int, half);
+REGISTER_UNARY_ALPHA_OP(polygamma, float, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, bool, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, uchar, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, char, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, short, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, int, int, float);
+REGISTER_UNARY_ALPHA_OP(polygamma, long, int, float);
