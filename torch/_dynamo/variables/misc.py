@@ -2020,6 +2020,9 @@ class NullVariable(VariableTracker):
             )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "None"
+
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
