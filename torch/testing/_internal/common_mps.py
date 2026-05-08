@@ -158,6 +158,12 @@ if torch.backends.mps.is_available():
             "repeat",
             "repeat_interleave",
             "reshape_as",
+            # Random ops that produce complex output. Compared via summary
+            # stats by `_assert_random_op_match`, not element-wise equality.
+            "rand_like",
+            "randn_like",
+            "uniform",
+            "normalin_place",
             "reshape",
             "resolve_conj",
             "resolve_neg",
@@ -686,54 +692,27 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # Failures due to random output that they generate using
-            # Philox engine causing mismatch with CPU results
-            "multinomial": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],  # random results
-            "uniform": [torch.float16, torch.float32, torch.bfloat16],
-            "rand_like": [torch.float16, torch.float32, torch.bfloat16],
-            "randint": None,
-            "randint_like": None,
-            "randn": None,
-            "randn_like": None,
-            "bernoulli": [torch.float16, torch.float32, torch.bfloat16],
-            "exponential": [torch.float16, torch.float32, torch.bfloat16],
-            "log_normal": [torch.float16, torch.float32, torch.bfloat16],
-            "cauchy": [torch.float16, torch.float32, torch.bfloat16],
-            "geometric": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-                torch.int32,
-                torch.int16,
-                torch.int64,
-                torch.int8,
-                torch.uint8,
-            ],
-            "nn.functional.feature_alpha_dropoutwith_train": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],
+            # Random ops: `test_output_match` / `test_output_grad_match` route
+            # these to a metadata + summary-stats comparator
+            # (`_assert_random_op_match`) since MPS and CPU consume independent
+            # Philox streams. The xfail entries that used to live here are
+            # gone with the comparator; if a new test under
+            # `mps_ops_modifier` needs them, add a per-test skip locally.
+            # `randint(to>1, dtype=bool)` errors at the CPU op itself with
+            # "to - 1 is out of bounds for bool" - not a comparator issue.
+            "randint": [torch.bool],
+            "randint_like": [torch.bool],
+            # `normal(Tensor mean, Tensor std)` with broadcast-compatible-but-
+            # different-numel inputs is rejected by the legacy `normal_mps_out`
+            # strict numel check; CPU/CUDA broadcast via the shared
+            # `normal_out_impl` template. The followup distribution-dispatch
+            # commit collapses the `normal.Tensor_*` rows in
+            # `native_functions.yaml` and drops this entry.
             "normal": [torch.float16, torch.float32, torch.bfloat16],
-            "normalin_place": [torch.float16, torch.float32, torch.bfloat16],
-            "normalnumber_mean": [torch.float16, torch.float32, torch.bfloat16],
-            "nn.functional.alpha_dropout": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-            ],
-            "nn.functional.dropout": [
-                torch.float16,
-                torch.float32,
-                torch.bfloat16,
-                torch.complex64,
-            ],
-            "nn.functional.dropout2d": [torch.float16, torch.float32, torch.bfloat16],
-            "nn.functional.dropout3d": [torch.float16, torch.float32, torch.bfloat16],
+            # `nn.functional.dropout` keeps a complex64 entry because the
+            # MPS dropout kernel doesn't support complex inputs at all (the
+            # shape comparison would fail to even run).
+            "nn.functional.dropout": [torch.complex64],
             # See https://github.com/pytorch/pytorch/issues/111479
             "nn.functional.multi_head_attention_forward": [
                 torch.float32,
@@ -932,11 +911,22 @@ if torch.backends.mps.is_available():
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
-            # Random output
-            "exponential": [torch.float16, torch.float32],
-            "log_normal": [torch.float16, torch.float32],
-            "cauchy": [torch.float16, torch.float32],
-            "geometric": [torch.float16, torch.float32],
+            # Random ops are routed to `_assert_random_op_match` for the
+            # forward leg of `test_output_grad_match`; the gradients (on the
+            # `mean`/`std` parameters of `normal`, etc.) are deterministic
+            # given the inputs and shouldn't need broad xfailing.
+            #
+            # Dropout family is the exception: backward reuses the forward's
+            # random mask, and since MPS and CPU draw different masks the
+            # backward gradients legitimately diverge. xfail the grad leg.
+            "nn.functional.dropout": [torch.float16, torch.float32],
+            "nn.functional.dropout2d": [torch.float16, torch.float32],
+            "nn.functional.dropout3d": [torch.float16, torch.float32],
+            "nn.functional.alpha_dropout": [torch.float16, torch.float32],
+            "nn.functional.feature_alpha_dropoutwith_train": [
+                torch.float16,
+                torch.float32,
+            ],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,

@@ -13491,6 +13491,42 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.binary_cross_entropy_with_logits',
     }
 
+    # Operators whose output is a random draw, therefore MPS and CPU can
+    # expected to generate different results, as each backend is free to
+    # use different RNG algorithm and are operating on different RNG stats
+    # Ops in this list are validated against metadata only.
+    RANDOM_OP_NAMES = {
+        'bernoulli',
+        'cauchy',
+        'exponential',
+        'geometric',
+        'log_normal',
+        'multinomial',
+        'normal',
+        'rand_like',
+        'randint',
+        'randint_like',
+        'randn',
+        'randn_like',
+        'uniform',
+        'nn.functional.alpha_dropout',
+        'nn.functional.dropout',
+        'nn.functional.dropout2d',
+        'nn.functional.dropout3d',
+        'nn.functional.feature_alpha_dropout',
+    }
+
+    def _assert_random_op_match(self, mps_out, cpu_out):
+        # MPS and CPU consume independent RNG streams, so element-wise
+        # comparison is meaningless. Summary stats (min/max/mean) are also
+        # unreliable: dropout/multinomial outputs depend on which input
+        # elements happen to be selected, and a single large-magnitude
+        # outlier flipping in/out can swing the stats by orders of
+        # magnitude. Stick to strict metadata for now.
+        self.assertEqual(mps_out.shape, cpu_out.shape)
+        self.assertEqual(mps_out.dtype, cpu_out.dtype)
+        self.assertEqual(mps_out.layout, cpu_out.layout)
+
     def _compute_tolerances(self, op, dtype):
         if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
@@ -13605,6 +13641,10 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
                 continue
 
+            if op.name in self.RANDOM_OP_NAMES:
+                self._assert_random_op_match(mps_out, cpu_out)
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -13628,7 +13668,10 @@ class TestConsistency(TestCaseMPS):
                 atol = 7e-4
                 rtol = 1.5e-3
 
-            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+            if op.name in self.RANDOM_OP_NAMES:
+                self._assert_random_op_match(mps_out, cpu_out)
+            else:
+                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             #
             # Backward check
