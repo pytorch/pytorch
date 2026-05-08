@@ -165,6 +165,7 @@
     :toctree: generated
     :nosignatures:
 
+    caching_allocator_disabled
     caching_allocator_enable
 ```
 
@@ -174,6 +175,30 @@
 
 ```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profile
+    start
+    stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
 ```
 
 ## NVIDIA Tools Extension (NVTX)
@@ -187,6 +212,8 @@
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.range_end
+    nvtx.range_start
 ```
 
 ## Jiterator (beta)
@@ -307,7 +334,11 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.nvtx
+.. automodule:: torch.cuda.nvtx
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nvtx
 ```
 
 ```{eval-rst}

@@ -575,6 +575,57 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(torch.add, backend="eager")(a, b)
         self.assertEqual(eager, compiled)
 
+    def test_tensorify_under_disabled_torch_function(self):
+        # Fixes #180906
+        # The checks tensorify_python_scalars works under dispatch
+        # as it relies on MetaProxy's __torch_function__ to intercept calls
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
+
+        # Build a minimal graph containing _local_scalar_dense (i.e. .item())
+        # on a floating-point placeholder — just enough for tensorify to act.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(4)
+
+            scale_ph = graph.placeholder("scale")
+            scale_ph.meta["val"] = torch.tensor(1.0)
+
+            item_node = graph.call_function(
+                torch.ops.aten._local_scalar_dense.default, (scale_ph,)
+            )
+            # tensorify needs a backed SymFloat with a sympy expression
+            item_node.meta["val"] = shape_env.create_unbacked_symfloat()
+
+            mul_node = graph.call_function(torch.ops.aten.mul.Tensor, (x, item_node))
+            mul_node.meta["val"] = torch.randn(4)
+            graph.output(mul_node)
+
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+            # Run tensorify_python_scalars with __torch_function__
+            # disabled — without the _EnableTorchFunction fix, this raises:
+            #   RuntimeError: prims::convert_element_type() Expected
+            #   a value of type 'Tensor' ... found type 'MetaProxy'.
+            with torch._C.DisableTorchFunctionSubclass():
+                tensorify_python_scalars(gm, shape_env, fake_mode)
+
+            # The pass should have inserted a convert_element_type node
+            # that upcasts the scale placeholder to float64.
+            convert_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target is torch.ops.prims.convert_element_type.default
+            ]
+            self.assertTrue(len(convert_nodes) > 0)
+            # The first convert_element_type is the float64 upcast;
+            # verify it carries correct metadata.
+            self.assertEqual(convert_nodes[0].meta["val"].dtype, torch.float64)
+
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -728,7 +779,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ):
                 if kwargs is None:
                     kwargs = {}
-                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
+                if func not in HANDLED_FUNCTIONS or not all(
                     [  # noqa: C419
                         issubclass(t, (torch.Tensor, MyClass)) for t in types
                     ]
@@ -2469,7 +2520,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=1)
             primals_7,  # SavedForBackwardsAOTOutput(idx=2)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2495,7 +2546,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_clone_view(self):
@@ -2537,7 +2588,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
             primals_7,  # SavedForBackwardsAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2562,7 +2613,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_mul(self):
@@ -2611,7 +2662,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=2)
             primals_7,  # SavedForBackwardsAOTOutput(idx=3)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2644,7 +2695,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_view(self):
@@ -2686,7 +2737,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
             primals_7,  # SavedForBackwardsAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2711,7 +2762,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_view_mul(self):
@@ -2752,7 +2803,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
             primals_7,  # SavedForBackwardsAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2777,7 +2828,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_return_tensor_and_subclass(self):
@@ -2819,7 +2870,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
             primals_7,  # SavedForBackwardsAOTOutput(idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2844,7 +2895,7 @@ class GraphModule(torch.nn.Module):
             primals_7,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_7,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     @unittest.expectedFailure
@@ -2872,7 +2923,7 @@ class GraphModule(torch.nn.Module):
         view: "f32[12]" = torch.ops.aten.view.default(clone, [mul])
         view_1: "f32[12]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
         return [clone, view, view_1, mul, primals_5, primals_6]
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2883,7 +2934,7 @@ class GraphModule(torch.nn.Module):
         view_2: "f32[3, 4]" = torch.ops.aten.view.default(tangents_1, [primals_5, primals_6]);  tangents_1 = None
         view_3: "f32[3, 4]" = torch.ops.aten.view.default(tangents_2, [primals_5, primals_6]);  tangents_2 = primals_5 = primals_6 = None
         return [view_2, view_3, None, None]
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_automatic_dynamic_shapes(self):
@@ -2923,7 +2974,7 @@ class GraphModule(torch.nn.Module):
             view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
             clone_1,  # PlainAOTOutput(idx=2)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2952,7 +3003,7 @@ class GraphModule(torch.nn.Module):
             clone_1,  # PlainAOTOutput(idx=2)
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2970,7 +3021,7 @@ class GraphModule(torch.nn.Module):
             view_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a')
             view_3,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b')
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -2992,7 +3043,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), idx=1)
             primals_5,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_mark_dynamic_shapes(self):
@@ -3040,7 +3091,7 @@ class GraphModule(torch.nn.Module):
             clone_1,  # PlainAOTOutput(idx=2)
             primals_5,  # SavedForBackwardsAOTOutput(idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -3062,7 +3113,7 @@ class GraphModule(torch.nn.Module):
             primals_5,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), idx=1)
             primals_5,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=1)), idx=0)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_different_shape(self):
@@ -3094,7 +3145,7 @@ class GraphModule(torch.nn.Module):
             view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
             view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -3112,7 +3163,7 @@ class GraphModule(torch.nn.Module):
             view_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a')
             view_3,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b')
         )
-""",  # noqa: B950
+""",
         )
 
     def test_tensor_subclass_TwoTensor_return_shape(self):
@@ -3269,7 +3320,7 @@ class GraphModule(torch.nn.Module):
             primals_8,  # SavedForBackwardsAOTOutput(idx=1)
             primals_10,  # SavedForBackwardsAOTOutput(idx=2)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -3299,7 +3350,7 @@ class GraphModule(torch.nn.Module):
             primals_10,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=3)), idx=2)
             primals_10,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=3)), idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_njt_subclass_from_cat(self):
@@ -3346,7 +3397,7 @@ class GraphModule(torch.nn.Module):
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)
             add_2,  # SavedForBackwardsAOTOutput(idx=2)
         )
-""",  # noqa: B950
+""",
         )
 
         self.assertExpectedInline(
@@ -3378,7 +3429,7 @@ class GraphModule(torch.nn.Module):
             primals_10,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=3)), idx=2)
             primals_10,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=3)), idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_njt_subclass_from_buffer(self):
@@ -3446,7 +3497,7 @@ class <lambda>(torch.nn.Module):
             sym_size_int,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=2)
             sym_stride_int,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
         )
-""",  # noqa: B950
+""",
         )
 
     def test_deferred_init_subclass_init_not_traced(self):
@@ -3633,7 +3684,7 @@ class GraphModule(torch.nn.Module):
 
         add: "NestedTensor(f64[3, s71, 5])" = l_nt_ + 2;  l_nt_ = None
         return (add,)
-""",  # noqa: B950
+""",
         )
 
     # Note: [What kind of guards are involved in nested tensor compilation]

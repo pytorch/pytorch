@@ -112,6 +112,7 @@ case "$tag" in
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
+    INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
@@ -131,6 +132,9 @@ case "$tag" in
   pytorch-linux-jammy-py3.10-clang18)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
+    GCC_VERSION=11
+    KATEX=yes
+    DOCS=yes
     ONNX=yes
     ;;
   pytorch-linux-jammy-py3.11-clang18)
@@ -157,7 +161,6 @@ case "$tag" in
     fi
     GCC_VERSION=13
     ROCM_VERSION=7.2
-    NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -169,7 +172,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     ROCM_VERSION=nightly
-    NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx942"
@@ -179,7 +181,6 @@ case "$tag" in
     GCC_VERSION=11
     XPU_VERSION=2025.2
     XPU_DRIVER_TYPE=LTS
-    NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
@@ -191,7 +192,6 @@ case "$tag" in
     else
       XPU_DRIVER_TYPE=LTS
     fi
-    NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
@@ -201,7 +201,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
-    TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -210,14 +209,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     CLANG_VERSION=18
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3.10-gcc11)
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    DOCS=yes
-    UNINSTALL_DILL=yes
     ;;
   pytorch-linux-jammy-py3-clang18-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -258,27 +249,21 @@ case "$tag" in
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
+    CUDA_VERSION=13.0.2
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
@@ -293,6 +278,7 @@ case "$tag" in
       then
         ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
         PYTHON_FREETHREADED=1
+        TSAN=yes
       fi
     fi
     if [[ "$image" == *cuda* ]]; then
@@ -302,14 +288,10 @@ case "$tag" in
       if [[ -z "$ROCM_VERSION" ]]; then
         extract_version_from_image_name rocm ROCM_VERSION
       fi
-      NINJA_VERSION=1.9.0
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
       # and thus have LAPACK/MKL enabled
       fi
-    if [[ "$image" == *centos7* ]]; then
-      NINJA_VERSION=1.10.2
-    fi
     if [[ "$image" == *gcc* ]]; then
       extract_version_from_image_name gcc GCC_VERSION
     fi
@@ -350,7 +332,6 @@ docker buildx build \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
@@ -364,13 +345,12 @@ docker buildx build \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
        --build-arg "TPU=${TPU}" \
+       --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        --load \

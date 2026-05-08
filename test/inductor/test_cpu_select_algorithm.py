@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     TEST_MKL,
+    xfailIf,
 )
 
 
@@ -60,10 +61,13 @@ def patches(fn):
         timings = benchmark(choices)
         for choice, timing in timings.items():
             if isinstance(choice, select_algorithm.ExternKernelCaller):
-                # we intentionally make ATEN kernel slower to cover the cases
+                # We intentionally make ATEN kernel slower to cover the cases
                 # where template kernels are always chosen with fusions applied
-                # and correctness checks at runtime.
-                timings[choice] = timing * 1000
+                # and correctness checks at runtime. On k8s ARC runner pods,
+                # CPU contention from parallel tests can make cpp template
+                # benchmarks 2-3x slower than normal, so the multiplier needs
+                # to be large enough to still exceed those inflated times.
+                timings[choice] = timing * 1000000
         return timings
 
     for patcher in [
@@ -802,7 +806,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1525,7 +1530,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1764,7 +1770,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1848,9 +1855,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        if torch.cpu._is_amx_tile_supported():
-            # Only AMX ISA based micro-kernel is currently supported for da8w8
-            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        # Only AMX ISA based micro-kernel is currently supported for da8w8
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1893,7 +1899,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1964,7 +1971,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.use_small_dequant_buffer": True})
@@ -2007,9 +2015,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             _target_code_check = f"constexpr int64_t Kc_blocks = {group_size // kr};"
             torch._C.FileCheck().check(_target_code_check).run(code)
 
-    @unittest.expectedFailure  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
+    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2078,9 +2087,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @unittest.expectedFailure  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
+    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_concat_linear": True})
@@ -3073,7 +3083,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (u, v))
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
