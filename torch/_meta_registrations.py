@@ -6510,6 +6510,33 @@ def meta__scaled_dot_product_cudnn_backward(
 
 @register_meta(
     [
+        aten._scaled_dot_product_cudnn_attention_backward_quantized_per_tensor.default,
+    ]
+)
+def meta__scaled_dot_product_cudnn_attention_backward_quantized_per_tensor(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    fp8_o: Tensor,
+    softmax_stats: Tensor,
+    descale_q: Tensor,
+    descale_k: Tensor,
+    descale_v: Tensor,
+    descale_o: Tensor,
+    descale_s: Tensor,
+    scale_s: float,
+    is_causal: bool,
+    scale: float | None = None,
+):
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
+    return grad_q, grad_k, grad_v
+
+
+@register_meta(
+    [
         aten._flash_attention_forward.default,
     ]
 )
