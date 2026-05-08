@@ -225,21 +225,24 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_stack_state_mutation_default_device(self):
         m = BaseTorchFunctionMode()
         m1 = BaseTorchFunctionMode()
-        with m, m1:
+        try:
+            with m, m1:
 
-            @torch.compile(fullgraph=True)
-            def fn(x):
-                torch.set_default_device("cpu")
-                _pop_torch_function_stack()
+                @torch.compile(fullgraph=True)
+                def fn(x):
+                    torch.set_default_device("cpu")
+                    _pop_torch_function_stack()
 
-            fn(torch.ones(2, 2))
-            _push_on_torch_function_stack(m1)
+                fn(torch.ones(2, 2))
+                _push_on_torch_function_stack(m1)
 
-            stack = _get_current_function_mode_stack()
-            self.assertIsInstance(stack[0], DeviceContext)
-            self.assertEqual(stack[0].device, torch.device("cpu"))
-            self.assertIs(stack[1], m)
-            self.assertIs(stack[2], m1)
+                stack = _get_current_function_mode_stack()
+                self.assertIsInstance(stack[0], DeviceContext)
+                self.assertEqual(stack[0].device, torch.device("cpu"))
+                self.assertIs(stack[1], m)
+                self.assertIs(stack[2], m1)
+        finally:
+            torch.set_default_device(None)
 
     def test_stack_state_clear_default_device(self):
         @torch.compile(fullgraph=True)
@@ -752,19 +755,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device(device_type)
+        try:
+            torch.set_default_device(device_type)
 
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+            flex_attention = torch.compile(flex_attention, dynamic=False)
 
-        prefix_lengths = torch.arange(8)
+            prefix_lengths = torch.arange(8)
 
-        def prefix_lm(b, h, q, kv):
-            return prefix_lengths[b] >= kv
+            def prefix_lm(b, h, q, kv):
+                return prefix_lengths[b] >= kv
 
-        # This runs in fullgraph already
-        create_block_mask(
-            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
-        )
+            # This runs in fullgraph already
+            create_block_mask(
+                prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+            )
+        finally:
+            torch.set_default_device(None)
 
     def test_register_hook(self):
         import functools
@@ -846,40 +852,46 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             zeros_matched = torch.zeros_like(rnd)
             return x + rnd, rnd, zeros, zeros_matched
 
-        torch.set_default_device(device_type)
-        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+        try:
+            torch.set_default_device(device_type)
+            (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
 
-        # Verify tensors are on the current accelerator
-        self.assertEqual(rnd.device.type, device_type)
-        self.assertEqual(result.device.type, device_type)
-        self.assertEqual(zeros.device.type, "cpu")
-        self.assertEqual(zeros_matched.device.type, rnd.device.type)
+            # Verify tensors are on the current accelerator
+            self.assertEqual(rnd.device.type, device_type)
+            self.assertEqual(result.device.type, device_type)
+            self.assertEqual(zeros.device.type, "cpu")
+            self.assertEqual(zeros_matched.device.type, rnd.device.type)
 
-        torch.set_default_device("cpu")
-        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+            torch.set_default_device("cpu")
+            (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
 
-        # Verify tensors are on cpu
-        self.assertEqual(rnd.device.type, "cpu")
-        self.assertEqual(result.device.type, "cpu")
-        self.assertEqual(zeros.device.type, "cpu")
-        self.assertEqual(zeros_matched.device.type, rnd.device.type)
-
-        torch.set_default_device(None)
+            # Verify tensors are on cpu
+            self.assertEqual(rnd.device.type, "cpu")
+            self.assertEqual(result.device.type, "cpu")
+            self.assertEqual(zeros.device.type, "cpu")
+            self.assertEqual(zeros_matched.device.type, rnd.device.type)
+        finally:
+            torch.set_default_device(None)
 
     @requires_gpu
     def test_default_device_factory_functions_priority(self):
-        torch.set_default_device(device_type)
+        try:
+            torch.set_default_device(device_type)
 
-        @torch.compile(fullgraph=True)
-        def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            rnd = torch.randint(
-                0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
-            )
-            return x + rnd, rnd
+            @torch.compile(fullgraph=True)
+            def with_explicit_device(
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                rnd = torch.randint(
+                    0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
+                )
+                return x + rnd, rnd
 
-        (result, rnd) = with_explicit_device(torch.randn(()))
-        self.assertEqual(rnd.device.type, "cpu")
-        self.assertEqual(result.device.type, device_type)
+            (result, rnd) = with_explicit_device(torch.randn(()))
+            self.assertEqual(rnd.device.type, "cpu")
+            self.assertEqual(result.device.type, device_type)
+        finally:
+            torch.set_default_device(None)
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):

@@ -75,17 +75,19 @@ def get_current_stream(device: torch.device) -> int:
 
 def _get_stream_by_index(index: int) -> torch.Stream:
     stream = get_external_object_by_index(index)
-    assert isinstance(stream, torch.Stream), (
-        f"Fork/join stream expected a stream object at index {index}"
-    )
+    if not isinstance(stream, torch.Stream):
+        raise AssertionError(
+            f"Fork/join stream expected a stream object at index {index}"
+        )
     return stream
 
 
 def _get_event_by_index(index: int) -> torch.Event:
     event = get_external_object_by_index(index)
-    assert isinstance(event, torch.Event), (
-        f"Record/wait event expected an event object at index {index}"
-    )
+    if not isinstance(event, torch.Event):
+        raise AssertionError(
+            f"Record/wait event expected an event object at index {index}"
+        )
     return event
 
 
@@ -277,10 +279,11 @@ class SymbolicStreamState:
             # entry at runtime so cudagraph capture uses the capture stream
             # instead of this stale trace-time stream.
             index = register_user_object(stream, source)
-            assert index == CURRENT_STREAM_INDEX, (
-                f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
-                f"got {index}"
-            )
+            if index != CURRENT_STREAM_INDEX:
+                raise AssertionError(
+                    f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
+                    f"got {index}"
+                )
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
@@ -361,7 +364,8 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return True
 
     def get_stream(self) -> "StreamVariable":
-        assert self.stream, "Stream context should have a separate stream"
+        if not self.stream:
+            raise AssertionError("Stream context should have a separate stream")
         return self.stream
 
 
@@ -380,7 +384,10 @@ class StreamVariable(StreamContextVariable):
         # Index into the user object table
         # used to pass arbitrary objects to the graph
         if proxy is not None and "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == value
+            if proxy.node.meta["example_value"] != value:
+                raise AssertionError(
+                    f"proxy example_value {proxy.node.meta['example_value']} != {value}"
+                )
 
         self.proxy = proxy
         self.value = value
@@ -402,14 +409,16 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        assert hasattr(self.value, name), f"no stream method found named {name}"
+        if not hasattr(self.value, name):
+            raise AssertionError(f"no stream method found named {name}")
 
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name == "wait_event":
             event_arg = args[0]
-            assert isinstance(event_arg, EventVariable)
+            if not isinstance(event_arg, EventVariable):
+                raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.wait_event,
@@ -419,7 +428,10 @@ class StreamVariable(StreamContextVariable):
             return ConstantVariable.create(None)
         elif name == "wait_stream":
             other_stream = args[0]
-            assert isinstance(other_stream, StreamVariable)
+            if not isinstance(other_stream, StreamVariable):
+                raise AssertionError(
+                    f"Expected StreamVariable, got {type(other_stream)}"
+                )
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.wait_stream,
@@ -487,7 +499,10 @@ class StreamVariable(StreamContextVariable):
                 return VariableTracker.build(tx, NotImplemented)
 
             if other.source:
-                assert self.source is not None
+                if self.source is None:
+                    raise AssertionError(
+                        "Expected self.source to be set for stream comparison guard"
+                    )
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return VariableTracker.build(
                 tx,
@@ -508,7 +523,8 @@ class StreamVariable(StreamContextVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
-        assert not self.source
+        if self.source:
+            raise AssertionError("Stream should not have a source during reconstruct")
         if self.user_object_index is not None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
@@ -586,7 +602,10 @@ class EventVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == value
+            if proxy.node.meta["example_value"] != value:
+                raise AssertionError(
+                    f"proxy example_value {proxy.node.meta['example_value']} != {value}"
+                )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -717,7 +736,8 @@ class EventVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this event is fully subsumed by the graph - this means it is
         # not an input or global
-        assert not self.source
+        if self.source:
+            raise AssertionError("Event should not have a source during reconstruct")
         # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
         prefix = "_event"
         name = codegen.tx.output.install_global_by_id(prefix, self.value)
