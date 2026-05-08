@@ -2055,6 +2055,24 @@ class triton:
     # If set to false, will never generate PDL code.
     enable_pdl = os.environ.get("TORCHINDUCTOR_ENABLE_PDL", "0") == "1"
 
+    # Enable Meta's warp specialization (autoWS) passes in the Triton compiler.
+    # Required for the Blackwell WS persistent TMA matmul template.
+    # When True, propagated to TRITON_USE_META_WS env var before Triton compilation.
+    # Can also be set via TRITON_USE_META_WS=1 env var directly.
+    use_meta_ws: bool = os.environ.get("TRITON_USE_META_WS", "0") == "1"
+
+    # Enable Meta's partition scheduling pass in the Triton compiler.
+    # Used together with use_meta_ws for Blackwell autoWS.
+    # When True, propagated to TRITON_USE_META_PARTITION env var before Triton compilation.
+    # Can also be set via TRITON_USE_META_PARTITION=1 env var directly.
+    use_meta_partition: bool = os.environ.get("TRITON_USE_META_PARTITION", "0") == "1"
+
+    # Force FLATTEN=False for Blackwell WS persistent TMA matmul templates.
+    # Default is True (OAI's default for WS). Setting to True may improve
+    # performance by allowing the WS pass to produce a better schedule
+    # without the flattening constraint.
+    blackwell_force_no_flatten: bool = False
+
     mix_order_reduction = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
         == "1"

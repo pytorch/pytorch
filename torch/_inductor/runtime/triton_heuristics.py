@@ -484,6 +484,14 @@ class CachingAutotuner(KernelInterface):
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
+        # NOTE: Do NOT propagate TRITON_USE_META_WS / TRITON_USE_META_PARTITION
+        # as global env vars here. These env vars affect ALL Triton compilations
+        # in the process, including hand-written kernels (e.g. hammer's attention
+        # kernels) that are not designed for Meta's WS and deadlock when the WS
+        # scheduling/partitioning passes are applied to them.
+        # Instead, these env vars are scoped per-kernel in _precompile_config()
+        # so only inductor-generated kernels see them.
+
         self.size_hints = size_hints
         self.is_mix_order_reduction = self.inductor_meta.get("RSPLIT_SIZE") is not None
         self.coordesc_tuner = CoordescTuner(
@@ -1075,6 +1083,24 @@ class CachingAutotuner(KernelInterface):
             "options": options,
         }
 
+        # Scope TRITON_USE_META_WS / TRITON_USE_META_PARTITION env vars to
+        # only this inductor kernel compilation. The Triton knobs system
+        # re-reads env vars on every access, so setting/unsetting here
+        # ensures only inductor-generated kernels see these flags.
+        # Hand-written kernels (e.g. hammer's attention) compile through
+        # Triton's own @triton.autotune, not through triton_heuristics,
+        # so they never see these env vars and avoid WS-related deadlocks.
+        from torch._inductor import config as inductor_config
+
+        _ws_env_backup = {}
+        if inductor_config.triton.use_meta_ws:
+            _ws_env_backup["TRITON_USE_META_WS"] = os.environ.get("TRITON_USE_META_WS")
+            os.environ["TRITON_USE_META_WS"] = "1"
+        if inductor_config.triton.use_meta_partition:
+            _ws_env_backup["TRITON_USE_META_PARTITION"] = os.environ.get(
+                "TRITON_USE_META_PARTITION"
+            )
+            os.environ["TRITON_USE_META_PARTITION"] = "1"
         try:
             binary = triton.compile(*compile_args, **compile_kwargs)
         except Exception:
@@ -1085,6 +1111,30 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
+        finally:
+            # Restore env vars so non-inductor Triton compilations don't see them
+            for key, old_val in _ws_env_backup.items():
+                if old_val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = old_val
+            # Clear the Triton knobs cache for WS flags. The knobs.nvidia
+            # descriptor caches env var values in obj.__dict__ after first
+            # access. Restoring the env var alone is not enough -- the cached
+            # True value would leak to non-inductor Triton compilations
+            # (e.g. hammer's @triton.autotune kernels that compile lazily),
+            # causing Meta WS passes to be applied to kernels not designed
+            # for warp specialization (deadlocks / illegal memory access).
+            if _ws_env_backup:
+                try:
+                    from triton import knobs as _triton_knobs
+
+                    if "TRITON_USE_META_WS" in _ws_env_backup:
+                        _triton_knobs.nvidia.__dict__.pop("use_meta_ws", None)
+                    if "TRITON_USE_META_PARTITION" in _ws_env_backup:
+                        _triton_knobs.nvidia.__dict__.pop("use_meta_partition", None)
+                except (ImportError, AttributeError):
+                    pass
 
         # Simulate JIT Hook call
         if (

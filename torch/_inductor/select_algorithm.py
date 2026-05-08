@@ -4542,7 +4542,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
             if not use_pipelined_autotuning():
                 # pyrefly: ignore [missing-attribute]
-                executor.shutdown(wait=True)
+                # Use wait=False to avoid blocking forever if a compilation
+                # thread is hung (e.g. Meta WS scheduling pass infinite loop).
+                # The timed-out futures are already marked as failed above.
+                executor.shutdown(wait=False)
 
             # Build and return dict mapping choices to their precompilation times
             precompile_times: dict[ChoiceCaller, float] = {}

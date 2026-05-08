@@ -2277,6 +2277,8 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 and not constraints_violated
             )
             flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
+            if config.triton.blackwell_force_no_flatten:
+                flatten = False
             yield {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
