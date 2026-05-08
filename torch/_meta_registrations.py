@@ -2465,6 +2465,10 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
+    torch._check(
+        a.dtype == b.dtype,
+        lambda: f"expected scalar type {a.dtype} but found {b.dtype}",
+    )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
