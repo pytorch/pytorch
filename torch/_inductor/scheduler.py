@@ -3171,6 +3171,11 @@ class _LoopMutationTracker:
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
 
+    The first active tracker for a SchedulerNode leaf owns that leaf's
+    listener. Recursive can_fuse() calls reuse the outer listener instead of
+    installing nested listeners, so the captured state is the original state at
+    the outermost decision boundary.
+
     Usage: call finish(commit=True) to keep mutations, or finish(commit=False)
     to restore the original state. If no mutation occurred, finish() is a no-op.
     """
@@ -3195,6 +3200,7 @@ class _LoopMutationTracker:
     def watch(self, sn: SchedulerNode) -> None:
         """Install this scope as the mutation listener for a leaf node."""
         if sn._loop_mutation_listener is not None:
+            # A recursive can_fuse() is already covered by an outer scope.
             return
         self.watched_nodes.add(sn)
         sn._loop_mutation_listener = self.track
@@ -3203,6 +3209,7 @@ class _LoopMutationTracker:
         """Lazily snapshot candidate roots when the first mutation occurs."""
         assert sn in self.watched_nodes
         if self.state is not None:
+            # Keep the original pre-mutation snapshot for the whole scope.
             return
 
         # The listener tells us a child loop mutated. Snapshot the original
