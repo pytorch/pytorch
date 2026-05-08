@@ -269,10 +269,9 @@ class OperatorsTest(CPythonTestCase):
         self.assertEqual((1).__bool__(), 1)
         self.assertEqual((0).__bool__(), 0)
         # This returns 'NotImplemented' in Python 2.2
-        with torch._dynamo.error_on_graph_break(False):
-            class C(int):
-                def __add__(self, other):
-                    return NotImplemented
+        class C(int):
+            def __add__(self, other):
+                return NotImplemented
         self.assertEqual(C(5), 5)
         try:
             C() + ""
@@ -291,21 +290,20 @@ class OperatorsTest(CPythonTestCase):
                                                   'int', 'float',
                                                   'floordiv', 'divmod', 'mod'])
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Number(complex):
-                __slots__ = ['prec']
-                def __new__(cls, *args, **kwds):
-                    result = complex.__new__(cls, *args)
-                    result.prec = kwds.get('prec', 12)
-                    return result
-                def __repr__(self):
-                    prec = self.prec
-                    if self.imag == 0.0:
-                        return "%.*g" % (prec, self.real)
-                    if self.real == 0.0:
-                        return "%.*gj" % (prec, self.imag)
-                    return "(%.*g+%.*gj)" % (prec, self.real, prec, self.imag)
-                __str__ = __repr__
+        class Number(complex):
+            __slots__ = ['prec']
+            def __new__(cls, *args, **kwds):
+                result = complex.__new__(cls, *args)
+                result.prec = kwds.get('prec', 12)
+                return result
+            def __repr__(self):
+                prec = self.prec
+                if self.imag == 0.0:
+                    return "%.*g" % (prec, self.real)
+                if self.real == 0.0:
+                    return "%.*gj" % (prec, self.imag)
+                return "(%.*g+%.*gj)" % (prec, self.real, prec, self.imag)
+            __str__ = __repr__
 
         a = Number(3.14, prec=6)
         self.assertEqual(repr(a), "3.14")
@@ -357,10 +355,9 @@ class OperatorsTest(CPythonTestCase):
                          "__setitem__")
         self.setsliceop_test(spamlist([1,2,3,4]), 1, 3, spamlist([5,6]),
                              spamlist([1,5,6,4]), "a[b:c]=d", "__setitem__")
-        with torch._dynamo.error_on_graph_break(False):
-            # Test subclassing
-            class C(spam.spamlist):
-                def foo(self): return 1
+        # Test subclassing
+        class C(spam.spamlist):
+            def foo(self): return 1
         a = C()
         self.assertEqual(a, [])
         self.assertEqual(a.foo(), 1)
@@ -409,10 +406,9 @@ class OperatorsTest(CPythonTestCase):
         self.unop_test(spamd, repr(straightd), "repr(a)", "__repr__")
         self.set2op_test(spamdict({1:2,3:4}), 2, 3, spamdict({1:2,2:3,3:4}),
                    "a[b]=c", "__setitem__")
-        with torch._dynamo.error_on_graph_break(False):
-            # Test subclassing
-            class C(spam.spamdict):
-                def foo(self): return 1
+        # Test subclassing
+        class C(spam.spamdict):
+            def foo(self): return 1
         a = C()
         self.assertEqual(list(a.items()), [])
         self.assertEqual(a.foo(), 1)
@@ -436,25 +432,24 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(d, {})
         self.assertIs(d.__class__, dict)
         self.assertIsInstance(d, dict)
-        with torch._dynamo.error_on_graph_break(False):
-            class C(dict):
-                state = -1
-                def __init__(self_local, *a, **kw):
-                    if a:
-                        self.assertEqual(len(a), 1)
-                        self_local.state = a[0]
-                    if kw:
-                        for k, v in list(kw.items()):
-                            self_local[v] = k
-                def __getitem__(self, key):
-                    return self.get(key, 0)
-                def __setitem__(self_local, key, value):
-                    self.assertIsInstance(key, int)
-                    dict.__setitem__(self_local, key, value)
-                def setstate(self, state):
-                    self.state = state
-                def getstate(self):
-                    return self.state
+        class C(dict):
+            state = -1
+            def __init__(self_local, *a, **kw):
+                if a:
+                    self.assertEqual(len(a), 1)
+                    self_local.state = a[0]
+                if kw:
+                    for k, v in list(kw.items()):
+                        self_local[v] = k
+            def __getitem__(self, key):
+                return self.get(key, 0)
+            def __setitem__(self_local, key, value):
+                self.assertIsInstance(key, int)
+                dict.__setitem__(self_local, key, value)
+            def setstate(self, state):
+                self.state = state
+            def getstate(self):
+                return self.state
         self.assertTrue(issubclass(C, dict))
         a1 = C(12)
         self.assertEqual(a1.state, 12)
@@ -482,13 +477,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.assertEqual(a[i][j], i*j)
 
     def test_python_lists(self):
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing Python subclass of list...
-            class C(list):
-                def __getitem__(self, i):
-                    if isinstance(i, slice):
-                        return i.start, i.stop
-                    return list.__getitem__(self, i) + 100
+        # Testing Python subclass of list...
+        class C(list):
+            def __getitem__(self, i):
+                if isinstance(i, slice):
+                    return i.start, i.stop
+                return list.__getitem__(self, i) + 100
         a = C()
         a.extend([0,1,2])
         self.assertEqual(a[0], 100)
@@ -497,60 +491,56 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(a[100:200], (100,200))
 
     def test_metaclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing metaclasses...
-            class C(metaclass=type):
-                def __init__(self):
-                    self.__state = 0
-                def getstate(self):
-                    return self.__state
-                def setstate(self, state):
-                    self.__state = state
+        # Testing metaclasses...
+        class C(metaclass=type):
+            def __init__(self):
+                self.__state = 0
+            def getstate(self):
+                return self.__state
+            def setstate(self, state):
+                self.__state = state
         a = C()
         self.assertEqual(a.getstate(), 0)
         a.setstate(10)
         self.assertEqual(a.getstate(), 10)
-        with torch._dynamo.error_on_graph_break(False):
-            class _metaclass(type):
-                def myself(cls): return cls
-            class D(metaclass=_metaclass):
-                pass
+        class _metaclass(type):
+            def myself(cls): return cls
+        class D(metaclass=_metaclass):
+            pass
         self.assertEqual(D.myself(), D)
         d = D()
         self.assertEqual(d.__class__, D)
-        with torch._dynamo.error_on_graph_break(False):
-            class M1(type):
-                def __new__(cls, name, bases, dict):
-                    dict['__spam__'] = 1
-                    return type.__new__(cls, name, bases, dict)
-            class C(metaclass=M1):
-                pass
+        class M1(type):
+            def __new__(cls, name, bases, dict):
+                dict['__spam__'] = 1
+                return type.__new__(cls, name, bases, dict)
+        class C(metaclass=M1):
+            pass
         self.assertEqual(C.__spam__, 1)
         c = C()
         self.assertEqual(c.__spam__, 1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class _instance(object):
-                pass
-            class M2(object):
-                @staticmethod
-                def __new__(cls, name, bases, dict):
-                    self = object.__new__(cls)
-                    self.name = name
-                    self.bases = bases
-                    self.dict = dict
-                    return self
-                def __call__(self):
-                    it = _instance()
-                    # Early binding of methods
-                    for key in self.dict:
-                        if key.startswith("__"):
-                            continue
-                        setattr(it, key, self.dict[key].__get__(it, self))
-                    return it
-            class C(metaclass=M2):
-                def spam(self):
-                    return 42
+        class _instance(object):
+            pass
+        class M2(object):
+            @staticmethod
+            def __new__(cls, name, bases, dict):
+                self = object.__new__(cls)
+                self.name = name
+                self.bases = bases
+                self.dict = dict
+                return self
+            def __call__(self):
+                it = _instance()
+                # Early binding of methods
+                for key in self.dict:
+                    if key.startswith("__"):
+                        continue
+                    setattr(it, key, self.dict[key].__get__(it, self))
+                return it
+        class C(metaclass=M2):
+            def spam(self):
+                return 42
         self.assertEqual(C.name, 'C')
         self.assertEqual(C.bases, ())
         self.assertIn('spam', C.dict)
@@ -559,193 +549,179 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # More metaclass examples
 
-        with torch._dynamo.error_on_graph_break(False):
-            class autosuper(type):
-                # Automatically add __super to the class
-                # This trick only works for dynamic classes
-                def __new__(metaclass, name, bases, dict):
-                    cls = super(autosuper, metaclass).__new__(metaclass,
-                                                            name, bases, dict)
-                    # Name mangling for __super removes leading underscores
-                    while name[:1] == "_":
-                        name = name[1:]
-                    if name:
-                        name = "_%s__super" % name
-                    else:
-                        name = "__super"
-                    setattr(cls, name, super(cls))
-                    return cls
-            class A(metaclass=autosuper):
-                def meth(self):
-                    return "A"
-            class B(A):
-                def meth(self):
-                    return "B" + self.__super.meth()
-            class C(A):
-                def meth(self):
-                    return "C" + self.__super.meth()
-            class D(C, B):
-                def meth(self):
-                    return "D" + self.__super.meth()
+        class autosuper(type):
+            # Automatically add __super to the class
+            # This trick only works for dynamic classes
+            def __new__(metaclass, name, bases, dict):
+                cls = super(autosuper, metaclass).__new__(metaclass,
+                                                        name, bases, dict)
+                # Name mangling for __super removes leading underscores
+                while name[:1] == "_":
+                    name = name[1:]
+                if name:
+                    name = "_%s__super" % name
+                else:
+                    name = "__super"
+                setattr(cls, name, super(cls))
+                return cls
+        class A(metaclass=autosuper):
+            def meth(self):
+                return "A"
+        class B(A):
+            def meth(self):
+                return "B" + self.__super.meth()
+        class C(A):
+            def meth(self):
+                return "C" + self.__super.meth()
+        class D(C, B):
+            def meth(self):
+                return "D" + self.__super.meth()
         self.assertEqual(D().meth(), "DCBA")
-        with torch._dynamo.error_on_graph_break(False):
-            class E(B, C):
-                def meth(self):
-                    return "E" + self.__super.meth()
+        class E(B, C):
+            def meth(self):
+                return "E" + self.__super.meth()
         self.assertEqual(E().meth(), "EBCA")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class autoproperty(type):
-                # Automatically create property attributes when methods
-                # named _get_x and/or _set_x are found
-                def __new__(metaclass, name, bases, dict):
-                    hits = {}
-                    for key, val in dict.items():
-                        if key.startswith("_get_"):
-                            key = key[5:]
-                            get, set = hits.get(key, (None, None))
-                            get = val
-                            hits[key] = get, set
-                        elif key.startswith("_set_"):
-                            key = key[5:]
-                            get, set = hits.get(key, (None, None))
-                            set = val
-                            hits[key] = get, set
-                    for key, (get, set) in hits.items():
-                        dict[key] = property(get, set)
-                    return super(autoproperty, metaclass).__new__(metaclass,
-                                                                name, bases, dict)
-        with torch._dynamo.error_on_graph_break(False):
-            class A(metaclass=autoproperty):
-                def _get_x(self):
-                    return -self.__x
-                def _set_x(self, x):
-                    self.__x = -x
+        class autoproperty(type):
+            # Automatically create property attributes when methods
+            # named _get_x and/or _set_x are found
+            def __new__(metaclass, name, bases, dict):
+                hits = {}
+                for key, val in dict.items():
+                    if key.startswith("_get_"):
+                        key = key[5:]
+                        get, set = hits.get(key, (None, None))
+                        get = val
+                        hits[key] = get, set
+                    elif key.startswith("_set_"):
+                        key = key[5:]
+                        get, set = hits.get(key, (None, None))
+                        set = val
+                        hits[key] = get, set
+                for key, (get, set) in hits.items():
+                    dict[key] = property(get, set)
+                return super(autoproperty, metaclass).__new__(metaclass,
+                                                            name, bases, dict)
+        class A(metaclass=autoproperty):
+            def _get_x(self):
+                return -self.__x
+            def _set_x(self, x):
+                self.__x = -x
         a = A()
         self.assertNotHasAttr(a, "x")
         a.x = 12
         self.assertEqual(a.x, 12)
         self.assertEqual(a._A__x, -12)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class multimetaclass(autoproperty, autosuper):
-                # Merge of multiple cooperating metaclasses
-                pass
-            class A(metaclass=multimetaclass):
-                def _get_x(self):
-                    return "A"
-            class B(A):
-                def _get_x(self):
-                    return "B" + self.__super._get_x()
-            class C(A):
-                def _get_x(self):
-                    return "C" + self.__super._get_x()
-            class D(C, B):
-                def _get_x(self):
-                    return "D" + self.__super._get_x()
+        class multimetaclass(autoproperty, autosuper):
+            # Merge of multiple cooperating metaclasses
+            pass
+        class A(metaclass=multimetaclass):
+            def _get_x(self):
+                return "A"
+        class B(A):
+            def _get_x(self):
+                return "B" + self.__super._get_x()
+        class C(A):
+            def _get_x(self):
+                return "C" + self.__super._get_x()
+        class D(C, B):
+            def _get_x(self):
+                return "D" + self.__super._get_x()
         self.assertEqual(D().x, "DCBA")
 
-        with torch._dynamo.error_on_graph_break(False):
-            # Make sure type(x) doesn't call x.__class__.__init__
-            class T(type):
-                counter = 0
-                def __init__(self, *args):
-                    T.counter += 1
-            class C(metaclass=T):
-                pass
+        # Make sure type(x) doesn't call x.__class__.__init__
+        class T(type):
+            counter = 0
+            def __init__(self, *args):
+                T.counter += 1
+        class C(metaclass=T):
+            pass
         self.assertEqual(T.counter, 1)
         a = C()
         self.assertEqual(type(a), C)
         self.assertEqual(T.counter, 1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object): pass
+        class C(object): pass
         c = C()
         try: c()
         except TypeError: pass
         else: self.fail("calling object w/o call method should raise "
                         "TypeError")
 
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing code to find most derived baseclass
-            class A(type):
-                def __new__(*args, **kwargs):
-                    return type.__new__(*args, **kwargs)
+        # Testing code to find most derived baseclass
+        class A(type):
+            def __new__(*args, **kwargs):
+                return type.__new__(*args, **kwargs)
 
-            class B(object):
-                pass
+        class B(object):
+            pass
 
-            class C(object, metaclass=A):
-                pass
+        class C(object, metaclass=A):
+            pass
 
-            # The most derived metaclass of D is A rather than type.
-            class D(B, C):
-                pass
+        # The most derived metaclass of D is A rather than type.
+        class D(B, C):
+            pass
         self.assertIs(A, type(D))
 
         # issue1294232: correct metaclass calculation
         new_calls = []  # to check the order of __new__ calls
-        with torch._dynamo.error_on_graph_break(False):
-            class AMeta(type):
-                @staticmethod
-                def __new__(mcls, name, bases, ns):
-                    new_calls.append('AMeta')
-                    return super().__new__(mcls, name, bases, ns)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    return {}
+        class AMeta(type):
+            @staticmethod
+            def __new__(mcls, name, bases, ns):
+                new_calls.append('AMeta')
+                return super().__new__(mcls, name, bases, ns)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                return {}
 
-            class BMeta(AMeta):
-                @staticmethod
-                def __new__(mcls, name, bases, ns):
-                    new_calls.append('BMeta')
-                    return super().__new__(mcls, name, bases, ns)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    ns = super().__prepare__(name, bases)
-                    ns['BMeta_was_here'] = True
-                    return ns
+        class BMeta(AMeta):
+            @staticmethod
+            def __new__(mcls, name, bases, ns):
+                new_calls.append('BMeta')
+                return super().__new__(mcls, name, bases, ns)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                ns = super().__prepare__(name, bases)
+                ns['BMeta_was_here'] = True
+                return ns
 
-            class A(metaclass=AMeta):
-                pass
+        class A(metaclass=AMeta):
+            pass
         self.assertEqual(['AMeta'], new_calls)
         new_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B(metaclass=BMeta):
-                pass
+        class B(metaclass=BMeta):
+            pass
         # BMeta.__new__ calls AMeta.__new__ with super:
         self.assertEqual(['BMeta', 'AMeta'], new_calls)
         new_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(A, B):
-                pass
+        class C(A, B):
+            pass
         # The most derived metaclass is BMeta:
         self.assertEqual(['BMeta', 'AMeta'], new_calls)
         new_calls.clear()
         # BMeta.__prepare__ should've been called:
         self.assertIn('BMeta_was_here', C.__dict__)
 
-        with torch._dynamo.error_on_graph_break(False):
-            # The order of the bases shouldn't matter:
-            class C2(B, A):
-                pass
+        # The order of the bases shouldn't matter:
+        class C2(B, A):
+            pass
         self.assertEqual(['BMeta', 'AMeta'], new_calls)
         new_calls.clear()
         self.assertIn('BMeta_was_here', C2.__dict__)
 
-        with torch._dynamo.error_on_graph_break(False):
-            # Check correct metaclass calculation when a metaclass is declared:
-            class D(C, metaclass=type):
-                pass
+        # Check correct metaclass calculation when a metaclass is declared:
+        class D(C, metaclass=type):
+            pass
         self.assertEqual(['BMeta', 'AMeta'], new_calls)
         new_calls.clear()
         self.assertIn('BMeta_was_here', D.__dict__)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class E(C, metaclass=AMeta):
-                pass
+        class E(C, metaclass=AMeta):
+            pass
         self.assertEqual(['BMeta', 'AMeta'], new_calls)
         new_calls.clear()
         self.assertIn('BMeta_was_here', E.__dict__)
@@ -755,13 +731,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         marker = object()
         def func(*args, **kwargs):
             return marker
-        with torch._dynamo.error_on_graph_break(False):
-            class X(metaclass=func):
-                pass
-            class Y(object, metaclass=func):
-                pass
-            class Z(D, metaclass=func):
-                pass
+        class X(metaclass=func):
+            pass
+        class Y(object, metaclass=func):
+            pass
+        class Z(D, metaclass=func):
+            pass
         self.assertIs(marker, X)
         self.assertIs(marker, Y)
         self.assertIs(marker, Z)
@@ -769,53 +744,49 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # The given metaclass is a class,
         # but not a descendant of type.
         prepare_calls = []  # to track __prepare__ calls
-        with torch._dynamo.error_on_graph_break(False):
-            class ANotMeta:
-                def __new__(mcls, *args, **kwargs):
-                    new_calls.append('ANotMeta')
-                    return super().__new__(mcls)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    prepare_calls.append('ANotMeta')
-                    return {}
-            class BNotMeta(ANotMeta):
-                def __new__(mcls, *args, **kwargs):
-                    new_calls.append('BNotMeta')
-                    return super().__new__(mcls)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    prepare_calls.append('BNotMeta')
-                    return super().__prepare__(name, bases)
+        class ANotMeta:
+            def __new__(mcls, *args, **kwargs):
+                new_calls.append('ANotMeta')
+                return super().__new__(mcls)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                prepare_calls.append('ANotMeta')
+                return {}
+        class BNotMeta(ANotMeta):
+            def __new__(mcls, *args, **kwargs):
+                new_calls.append('BNotMeta')
+                return super().__new__(mcls)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                prepare_calls.append('BNotMeta')
+                return super().__prepare__(name, bases)
 
-            class A(metaclass=ANotMeta):
-                pass
+        class A(metaclass=ANotMeta):
+            pass
         self.assertIs(ANotMeta, type(A))
         self.assertEqual(['ANotMeta'], prepare_calls)
         prepare_calls.clear()
         self.assertEqual(['ANotMeta'], new_calls)
         new_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B(metaclass=BNotMeta):
-                pass
+        class B(metaclass=BNotMeta):
+            pass
         self.assertIs(BNotMeta, type(B))
         self.assertEqual(['BNotMeta', 'ANotMeta'], prepare_calls)
         prepare_calls.clear()
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(A, B):
-                pass
+        class C(A, B):
+            pass
         self.assertIs(BNotMeta, type(C))
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
         self.assertEqual(['BNotMeta', 'ANotMeta'], prepare_calls)
         prepare_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C2(B, A):
-                pass
+        class C2(B, A):
+            pass
         self.assertIs(BNotMeta, type(C2))
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
@@ -824,31 +795,28 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # This is a TypeError, because of a metaclass conflict:
         # BNotMeta is neither a subclass, nor a superclass of type
-        with torch._dynamo.error_on_graph_break(False):
-            with self.assertRaises(TypeError):
-                class D(C, metaclass=type):
-                    pass
-
-            class E(C, metaclass=ANotMeta):
+        with self.assertRaises(TypeError):
+            class D(C, metaclass=type):
                 pass
+
+        class E(C, metaclass=ANotMeta):
+            pass
         self.assertIs(BNotMeta, type(E))
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
         self.assertEqual(['BNotMeta', 'ANotMeta'], prepare_calls)
         prepare_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class F(object(), C):
-                pass
+        class F(object(), C):
+            pass
         self.assertIs(BNotMeta, type(F))
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
         self.assertEqual(['BNotMeta', 'ANotMeta'], prepare_calls)
         prepare_calls.clear()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class F2(C, object()):
-                pass
+        class F2(C, object()):
+            pass
         self.assertIs(BNotMeta, type(F2))
         self.assertEqual(['BNotMeta', 'ANotMeta'], new_calls)
         new_calls.clear()
@@ -857,31 +825,29 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # TypeError: BNotMeta is neither a
         # subclass, nor a superclass of int
-        with torch._dynamo.error_on_graph_break(False):
-            with self.assertRaises(TypeError):
-                class X(C, int()):
-                    pass
-            with self.assertRaises(TypeError):
-                class X(int(), C):
-                    pass
+        with self.assertRaises(TypeError):
+            class X(C, int()):
+                pass
+        with self.assertRaises(TypeError):
+            class X(int(), C):
+                pass
 
     def test_module_subclasses(self):
         # Testing Python subclass of module...
         log = []
         MT = type(sys)
-        with torch._dynamo.error_on_graph_break(False):
-            class MM(MT):
-                def __init__(self, name):
-                    MT.__init__(self, name)
-                def __getattribute__(self, name):
-                    log.append(("getattr", name))
-                    return MT.__getattribute__(self, name)
-                def __setattr__(self, name, value):
-                    log.append(("setattr", name, value))
-                    MT.__setattr__(self, name, value)
-                def __delattr__(self, name):
-                    log.append(("delattr", name))
-                    MT.__delattr__(self, name)
+        class MM(MT):
+            def __init__(self, name):
+                MT.__init__(self, name)
+            def __getattribute__(self, name):
+                log.append(("getattr", name))
+                return MT.__getattribute__(self, name)
+            def __setattr__(self, name, value):
+                log.append(("setattr", name, value))
+                MT.__setattr__(self, name, value)
+            def __delattr__(self, name):
+                log.append(("delattr", name))
+                MT.__delattr__(self, name)
         a = MM("a")
         a.foo = 12
         x = a.foo
@@ -892,9 +858,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # https://bugs.python.org/issue1174712
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class Module(types.ModuleType, str):
-                    pass
+            class Module(types.ModuleType, str):
+                pass
         except TypeError:
             pass
         else:
@@ -904,31 +869,28 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Issue 34805: Verify that definition order is retained
         def random_name():
             return ''.join(random.choices(string.ascii_letters, k=10))
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                pass
+        class A:
+            pass
         subclasses = [type(random_name(), (A,), {}) for i in range(100)]
         self.assertEqual(A.__subclasses__(), subclasses)
 
     def test_multiple_inheritance(self):
         # Testing multiple inheritance...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __init__(self):
-                    self.__state = 0
-                def getstate(self):
-                    return self.__state
-                def setstate(self, state):
-                    self.__state = state
+        class C(object):
+            def __init__(self):
+                self.__state = 0
+            def getstate(self):
+                return self.__state
+            def setstate(self, state):
+                self.__state = state
         a = C()
         self.assertEqual(a.getstate(), 0)
         a.setstate(10)
         self.assertEqual(a.getstate(), 10)
-        with torch._dynamo.error_on_graph_break(False):
-            class D(dict, C):
-                def __init__(self):
-                    dict.__init__(self)
-                    C.__init__(self)
+        class D(dict, C):
+            def __init__(self):
+                dict.__init__(self)
+                C.__init__(self)
         d = D()
         self.assertEqual(list(d.keys()), [])
         d["hello"] = "world"
@@ -940,15 +902,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(D.__mro__, (D, dict, C, object))
 
         # SF bug #442833
-        with torch._dynamo.error_on_graph_break(False):
-            class Node(object):
-                def __int__(self):
-                    return int(self.foo())
-                def foo(self):
-                    return "23"
-            class Frag(Node, list):
-                def foo(self):
-                    return "42"
+        class Node(object):
+            def __int__(self):
+                return int(self.foo())
+            def foo(self):
+                return "23"
+        class Frag(Node, list):
+            def foo(self):
+                return "42"
         self.assertEqual(Node().__int__(), 23)
         self.assertEqual(int(Node()), 23)
         self.assertEqual(Frag().__int__(), 42)
@@ -956,42 +917,35 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_diamond_inheritance(self):
         # Testing multiple inheritance special cases...
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def spam(self): return "A"
+        class A(object):
+            def spam(self): return "A"
         self.assertEqual(A().spam(), "A")
-        with torch._dynamo.error_on_graph_break(False):
-            class B(A):
-                def boo(self): return "B"
-                def spam(self): return "B"
+        class B(A):
+            def boo(self): return "B"
+            def spam(self): return "B"
         self.assertEqual(B().spam(), "B")
         self.assertEqual(B().boo(), "B")
-        with torch._dynamo.error_on_graph_break(False):
-            class C(A):
-                def boo(self): return "C"
+        class C(A):
+            def boo(self): return "C"
         self.assertEqual(C().spam(), "A")
         self.assertEqual(C().boo(), "C")
-        with torch._dynamo.error_on_graph_break(False):
-            class D(B, C): pass
+        class D(B, C): pass
         self.assertEqual(D().spam(), "B")
         self.assertEqual(D().boo(), "B")
         self.assertEqual(D.__mro__, (D, B, C, A, object))
-        with torch._dynamo.error_on_graph_break(False):
-            class E(C, B): pass
+        class E(C, B): pass
         self.assertEqual(E().spam(), "B")
         self.assertEqual(E().boo(), "C")
         self.assertEqual(E.__mro__, (E, C, B, A, object))
         # MRO order disagreement
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class F(D, E): pass
+            class F(D, E): pass
         except TypeError:
             pass
         else:
             self.fail("expected MRO order disagreement (F)")
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class G(E, D): pass
+            class G(E, D): pass
         except TypeError:
             pass
         else:
@@ -1000,28 +954,26 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     # see thread python-dev/2002-October/029035.html
     def test_ex5_from_c3_switch(self):
         # Testing ex5 from C3 switch discussion...
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object): pass
-            class B(object): pass
-            class C(object): pass
-            class X(A): pass
-            class Y(A): pass
-            class Z(X,B,Y,C): pass
+        class A(object): pass
+        class B(object): pass
+        class C(object): pass
+        class X(A): pass
+        class Y(A): pass
+        class Z(X,B,Y,C): pass
         self.assertEqual(Z.__mro__, (Z, X, B, Y, A, C, object))
 
     # see "A Monotonic Superclass Linearization for Dylan",
     # by Kim Barrett et al. (OOPSLA 1996)
     def test_monotonicity(self):
         # Testing MRO monotonicity...
-        with torch._dynamo.error_on_graph_break(False):
-            class Boat(object): pass
-            class DayBoat(Boat): pass
-            class WheelBoat(Boat): pass
-            class EngineLess(DayBoat): pass
-            class SmallMultihull(DayBoat): pass
-            class PedalWheelBoat(EngineLess,WheelBoat): pass
-            class SmallCatamaran(SmallMultihull): pass
-            class Pedalo(PedalWheelBoat,SmallCatamaran): pass
+        class Boat(object): pass
+        class DayBoat(Boat): pass
+        class WheelBoat(Boat): pass
+        class EngineLess(DayBoat): pass
+        class SmallMultihull(DayBoat): pass
+        class PedalWheelBoat(EngineLess,WheelBoat): pass
+        class SmallCatamaran(SmallMultihull): pass
+        class Pedalo(PedalWheelBoat,SmallCatamaran): pass
 
         self.assertEqual(PedalWheelBoat.__mro__,
               (PedalWheelBoat, EngineLess, DayBoat, WheelBoat, Boat, object))
@@ -1035,13 +987,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     # by Kim Barrett et al. (OOPSLA 1996)
     def test_consistency_with_epg(self):
         # Testing consistency with EPG...
-        with torch._dynamo.error_on_graph_break(False):
-            class Pane(object): pass
-            class ScrollingMixin(object): pass
-            class EditingMixin(object): pass
-            class ScrollablePane(Pane,ScrollingMixin): pass
-            class EditablePane(Pane,EditingMixin): pass
-            class EditableScrollablePane(ScrollablePane,EditablePane): pass
+        class Pane(object): pass
+        class ScrollingMixin(object): pass
+        class EditingMixin(object): pass
+        class ScrollablePane(Pane,ScrollingMixin): pass
+        class EditablePane(Pane,EditingMixin): pass
+        class EditableScrollablePane(ScrollablePane,EditablePane): pass
 
         self.assertEqual(EditableScrollablePane.__mro__,
               (EditableScrollablePane, ScrollablePane, EditablePane, Pane,
@@ -1064,10 +1015,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             else:
                 self.fail("Expected %s" % exc)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object): pass
-            class B(A): pass
-            class C(object): pass
+        class A(object): pass
+        class B(A): pass
+        class C(object): pass
 
         # Test some very simple errors
         raises(TypeError, "duplicate base class A",
@@ -1077,12 +1027,11 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         raises(TypeError, mro_err_msg,
                type, "X", (A, C, B), {})
         # Test a slightly more complex error
-        with torch._dynamo.error_on_graph_break(False):
-            class GridLayout(object): pass
-            class HorizontalGrid(GridLayout): pass
-            class VerticalGrid(GridLayout): pass
-            class HVGrid(HorizontalGrid, VerticalGrid): pass
-            class VHGrid(VerticalGrid, HorizontalGrid): pass
+        class GridLayout(object): pass
+        class HorizontalGrid(GridLayout): pass
+        class VerticalGrid(GridLayout): pass
+        class HVGrid(HorizontalGrid, VerticalGrid): pass
+        class VHGrid(VerticalGrid, HorizontalGrid): pass
         raises(TypeError, mro_err_msg,
                type, "ConfusedGrid", (HVGrid, VHGrid), {})
 
@@ -1102,9 +1051,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("object() should not allow setting a foo attribute")
         self.assertNotHasAttr(object(), "__dict__")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Cdict(object):
-                pass
+        class Cdict(object):
+            pass
         x = Cdict()
         self.assertEqual(x.__dict__, {})
         x.foo = 1
@@ -1112,9 +1060,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(x.__dict__, {'foo': 1})
 
     def test_object_class_assignment_between_heaptypes_and_nonheaptypes(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class SubType(types.ModuleType):
-                a = 1
+        class SubType(types.ModuleType):
+            a = 1
 
         m = types.ModuleType("m")
         self.assertTrue(m.__class__ is types.ModuleType)
@@ -1138,61 +1085,52 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # subclassable and thus don't need to be checked:
         #   NoneType, bool
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyInt(int):
-                __slots__ = ()
+        class MyInt(int):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             (1).__class__ = MyInt
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyFloat(float):
-                __slots__ = ()
+        class MyFloat(float):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             (1.0).__class__ = MyFloat
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyComplex(complex):
-                __slots__ = ()
+        class MyComplex(complex):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             (1 + 2j).__class__ = MyComplex
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyStr(str):
-                __slots__ = ()
+        class MyStr(str):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             "a".__class__ = MyStr
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyBytes(bytes):
-                __slots__ = ()
+        class MyBytes(bytes):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             b"a".__class__ = MyBytes
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyTuple(tuple):
-                __slots__ = ()
+        class MyTuple(tuple):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             ().__class__ = MyTuple
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyFrozenSet(frozenset):
-                __slots__ = ()
+        class MyFrozenSet(frozenset):
+            __slots__ = ()
         with self.assertRaises(TypeError):
             frozenset().__class__ = MyFrozenSet
 
     @unittest.expectedFailure
     def test_slots(self):
         # Testing __slots__...
-        with torch._dynamo.error_on_graph_break(False):
-            class C0(object):
-                __slots__ = []
+        class C0(object):
+            __slots__ = []
         x = C0()
         self.assertNotHasAttr(x, "__dict__")
         self.assertNotHasAttr(x, "foo")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C1(object):
-                __slots__ = ['a']
+        class C1(object):
+            __slots__ = ['a']
         x = C1()
         self.assertNotHasAttr(x, "__dict__")
         self.assertNotHasAttr(x, "a")
@@ -1203,10 +1141,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         del x.a
         self.assertNotHasAttr(x, "a")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C3(object):
-                __slots__ = ['a', 'b', 'c']
-            x = C3()
+        class C3(object):
+            __slots__ = ['a', 'b', 'c']
+        x = C3()
         self.assertNotHasAttr(x, "__dict__")
         self.assertNotHasAttr(x, 'a')
         self.assertNotHasAttr(x, 'b')
@@ -1218,15 +1155,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(x.b, 2)
         self.assertEqual(x.c, 3)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C4(object):
-                """Validate name mangling"""
-                __slots__ = ['__a']
-                def __init__(self, value):
-                    self.__a = value
-                def get(self):
-                    return self.__a
-            x = C4(5)
+        class C4(object):
+            """Validate name mangling"""
+            __slots__ = ['__a']
+            def __init__(self, value):
+                self.__a = value
+            def get(self):
+                return self.__a
+        x = C4(5)
         self.assertNotHasAttr(x, '__dict__')
         self.assertNotHasAttr(x, '__a')
         self.assertEqual(x.get(), 5)
@@ -1239,97 +1175,85 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # Make sure slot names are proper identifiers
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = [None]
+            class C(object):
+                __slots__ = [None]
         except TypeError:
             pass
         else:
             self.fail("[None] slots not caught")
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = ["foo bar"]
+            class C(object):
+                __slots__ = ["foo bar"]
         except TypeError:
             pass
         else:
             self.fail("['foo bar'] slots not caught")
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = ["foo\0bar"]
+            class C(object):
+                __slots__ = ["foo\0bar"]
         except TypeError:
             pass
         else:
             self.fail("['foo\\0bar'] slots not caught")
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = ["1"]
+            class C(object):
+                __slots__ = ["1"]
         except TypeError:
             pass
         else:
             self.fail("['1'] slots not caught")
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = [""]
+            class C(object):
+                __slots__ = [""]
         except TypeError:
             pass
         else:
             self.fail("[''] slots not caught")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class WithValidIdentifiers(object):
-                __slots__ = ["a", "a_b", "_a", "A0123456789Z"]
+        class WithValidIdentifiers(object):
+            __slots__ = ["a", "a_b", "_a", "A0123456789Z"]
 
         # Test a single string is not expanded as a sequence.
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                __slots__ = "abc"
+        class C(object):
+            __slots__ = "abc"
         c = C()
         c.abc = 5
         self.assertEqual(c.abc, 5)
 
         # Test unicode slot names
         # Test a single unicode string is not expanded as a sequence.
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                __slots__ = "abc"
+        class C(object):
+            __slots__ = "abc"
         c = C()
         c.abc = 5
         self.assertEqual(c.abc, 5)
 
         # _unicode_to_string used to modify slots in certain circumstances
         slots = ("foo", "bar")
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                __slots__ = slots
+        class C(object):
+            __slots__ = slots
         x = C()
         x.foo = 5
         self.assertEqual(x.foo, 5)
         self.assertIs(type(slots[0]), str)
         # this used to leak references
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = [chr(128)]
+            class C(object):
+                __slots__ = [chr(128)]
         except (TypeError, UnicodeEncodeError):
             pass
         else:
             self.fail("[chr(128)] slots not caught")
 
         # Test leaks
-        with torch._dynamo.error_on_graph_break(False):
-            class Counted(object):
-                counter = 0    # counts the number of instances alive
-                def __init__(self):
-                    Counted.counter += 1
-                def __del__(self):
-                    Counted.counter -= 1
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                __slots__ = ['a', 'b', 'c']
+        class Counted(object):
+            counter = 0    # counts the number of instances alive
+            def __init__(self):
+                Counted.counter += 1
+            def __del__(self):
+                Counted.counter -= 1
+        class C(object):
+            __slots__ = ['a', 'b', 'c']
         x = C()
         x.a = Counted()
         x.b = Counted()
@@ -1338,9 +1262,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         del x
         support.gc_collect()
         self.assertEqual(Counted.counter, 0)
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         x = D()
         x.a = Counted()
         x.z = Counted()
@@ -1348,9 +1271,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         del x
         support.gc_collect()
         self.assertEqual(Counted.counter, 0)
-        with torch._dynamo.error_on_graph_break(False):
-            class E(D):
-                __slots__ = ['e']
+        class E(D):
+            __slots__ = ['e']
         x = E()
         x.a = Counted()
         x.z = Counted()
@@ -1361,9 +1283,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(Counted.counter, 0)
 
         # Test cyclical leaks [SF bug 519621]
-        with torch._dynamo.error_on_graph_break(False):
-            class F(object):
-                __slots__ = ['a', 'b']
+        class F(object):
+            __slots__ = ['a', 'b']
         s = F()
         s.a = [Counted(), s]
         self.assertEqual(Counted.counter, 1)
@@ -1373,10 +1294,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # Test lookup leaks [SF bug 572567]
         if hasattr(gc, 'get_objects'):
-            with torch._dynamo.error_on_graph_break(False):
-                class G(object):
-                    def __eq__(self, other):
-                        return False
+            class G(object):
+                def __eq__(self, other):
+                    return False
             g = G()
             orig_objects = len(gc.get_objects())
             for i in range(10):
@@ -1384,58 +1304,51 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             new_objects = len(gc.get_objects())
             self.assertEqual(orig_objects, new_objects)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class H(object):
-                __slots__ = ['a', 'b']
-                def __init__(self):
-                    self.a = 1
-                    self.b = 2
-                def __del__(self_):
-                    self.assertEqual(self_.a, 1)
-                    self.assertEqual(self_.b, 2)
+        class H(object):
+            __slots__ = ['a', 'b']
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+            def __del__(self_):
+                self.assertEqual(self_.a, 1)
+                self.assertEqual(self_.b, 2)
         with support.captured_output('stderr') as s:
             h = H()
             del h
         self.assertEqual(s.getvalue(), '')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class X(object):
-                __slots__ = "a"
+        class X(object):
+            __slots__ = "a"
         with self.assertRaises(AttributeError):
             del X().a
 
         # Inherit from object on purpose to check some backwards compatibility paths
-        with torch._dynamo.error_on_graph_break(False):
-            class X(object):
-                __slots__ = "a"
+        class X(object):
+            __slots__ = "a"
         with self.assertRaisesRegex(AttributeError, "'test.test_descr.ClassPropertiesAndMethods.test_slots.<locals>.X' object has no attribute 'a'"):
             X().a
 
         # Test string subclass in `__slots__`, see gh-98783
-        with torch._dynamo.error_on_graph_break(False):
-            class SubStr(str):
-                pass
-        with torch._dynamo.error_on_graph_break(False):
-            class X(object):
-                __slots__ = (SubStr('x'),)
+        class SubStr(str):
+            pass
+        class X(object):
+            __slots__ = (SubStr('x'),)
         X().x = 1
         with self.assertRaisesRegex(AttributeError, "'X' object has no attribute 'a'"):
             X().a
 
     def test_slots_special(self):
         # Testing __dict__ and __weakref__ in __slots__...
-        with torch._dynamo.error_on_graph_break(False):
-            class D(object):
-                __slots__ = ["__dict__"]
+        class D(object):
+            __slots__ = ["__dict__"]
         a = D()
         self.assertHasAttr(a, "__dict__")
         self.assertNotHasAttr(a, "__weakref__")
         a.foo = 42
         self.assertEqual(a.__dict__, {"foo": 42})
 
-        with torch._dynamo.error_on_graph_break(False):
-            class W(object):
-                __slots__ = ["__weakref__"]
+        class W(object):
+            __slots__ = ["__weakref__"]
         a = W()
         self.assertHasAttr(a, "__weakref__")
         self.assertNotHasAttr(a, "__dict__")
@@ -1446,18 +1359,16 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         else:
             self.fail("shouldn't be allowed to set a.foo")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C1(W, D):
-                __slots__ = []
+        class C1(W, D):
+            __slots__ = []
         a = C1()
         self.assertHasAttr(a, "__dict__")
         self.assertHasAttr(a, "__weakref__")
         a.foo = 42
         self.assertEqual(a.__dict__, {"foo": 42})
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C2(D, W):
-                __slots__ = []
+        class C2(D, W):
+            __slots__ = []
         a = C2()
         self.assertHasAttr(a, "__dict__")
         self.assertHasAttr(a, "__weakref__")
@@ -1466,21 +1377,18 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_slots_special2(self):
         # Testing __qualname__ and __classcell__ in __slots__
-        with torch._dynamo.error_on_graph_break(False):
-            class Meta(type):
-                def __new__(cls, name, bases, namespace, attr):
-                    self.assertIn(attr, namespace)
-                    return super().__new__(cls, name, bases, namespace)
+        class Meta(type):
+            def __new__(cls, name, bases, namespace, attr):
+                self.assertIn(attr, namespace)
+                return super().__new__(cls, name, bases, namespace)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C1:
-                def __init__(self):
-                    self.b = 42
-        with torch._dynamo.error_on_graph_break(False):
-            class C2(C1, metaclass=Meta, attr="__classcell__"):
-                __slots__ = ["__classcell__"]
-                def __init__(self):
-                    super().__init__()
+        class C1:
+            def __init__(self):
+                self.b = 42
+        class C2(C1, metaclass=Meta, attr="__classcell__"):
+            __slots__ = ["__classcell__"]
+            def __init__(self):
+                super().__init__()
         self.assertIsInstance(C2.__dict__["__classcell__"],
                               types.MemberDescriptorType)
         c = C2()
@@ -1489,14 +1397,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         c.__classcell__ = 42
         self.assertEqual(c.__classcell__, 42)
         with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class C3:
-                    __classcell__ = 42
-                    __slots__ = ["__classcell__"]
+            class C3:
+                __classcell__ = 42
+                __slots__ = ["__classcell__"]
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Q1(metaclass=Meta, attr="__qualname__"):
-                __slots__ = ["__qualname__"]
+        class Q1(metaclass=Meta, attr="__qualname__"):
+            __slots__ = ["__qualname__"]
         self.assertEqual(Q1.__qualname__, C1.__qualname__[:-2] + "Q1")
         self.assertIsInstance(Q1.__dict__["__qualname__"],
                               types.MemberDescriptorType)
@@ -1505,22 +1411,19 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         q.__qualname__ = "q"
         self.assertEqual(q.__qualname__, "q")
         with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class Q2:
-                    __qualname__ = object()
-                    __slots__ = ["__qualname__"]
+            class Q2:
+                __qualname__ = object()
+                __slots__ = ["__qualname__"]
 
     def test_slots_descriptor(self):
         # Issue2115: slot descriptors did not correctly check
         # the type of the given object
         import abc
-        with torch._dynamo.error_on_graph_break(False):
-            class MyABC(metaclass=abc.ABCMeta):
-                __slots__ = "a"
+        class MyABC(metaclass=abc.ABCMeta):
+            __slots__ = "a"
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Unrelated(object):
-                pass
+        class Unrelated(object):
+            pass
         MyABC.register(Unrelated)
 
         u = Unrelated()
@@ -1531,22 +1434,20 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_dynamics(self):
         # Testing class attribute propagation...
-        with torch._dynamo.error_on_graph_break(False):
-            class D(object):
-                pass
-            class E(D):
-                pass
-            class F(D):
-                pass
+        class D(object):
+            pass
+        class E(D):
+            pass
+        class F(D):
+            pass
         D.foo = 1
         self.assertEqual(D.foo, 1)
         # Test that dynamic attributes are inherited
         self.assertEqual(E.foo, 1)
         self.assertEqual(F.foo, 1)
         # Test dynamic instances
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                pass
+        class C(object):
+            pass
         a = C()
         self.assertNotHasAttr(a, "foobar")
         C.foobar = 2
@@ -1576,17 +1477,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             a.spam = "not spam"
 
         self.assertEqual(a.spam, "spam")
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         d = D()
         d.foo = 1
         self.assertEqual(d.foo, 1)
 
         # Test handling of int*seq and seq*int
-        with torch._dynamo.error_on_graph_break(False):
-            class I(int):
-                pass
+        class I(int):
+            pass
         self.assertEqual("a"*I(2), "aa")
         self.assertEqual(I(2)*"a", "aa")
         self.assertEqual(2*I(3), 6)
@@ -1594,76 +1493,67 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(I(3)*I(2), 6)
 
         # Test comparison of classes with dynamic metaclasses
-        with torch._dynamo.error_on_graph_break(False):
-            class dynamicmetaclass(type):
-                pass
-            class someclass(metaclass=dynamicmetaclass):
-                pass
+        class dynamicmetaclass(type):
+            pass
+        class someclass(metaclass=dynamicmetaclass):
+            pass
         self.assertNotEqual(someclass, object)
 
     def test_errors(self):
         # Testing errors...
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(list, dict):
-                    pass
+            class C(list, dict):
+                pass
         except TypeError:
             pass
         else:
             self.fail("inheritance from both list and dict should be illegal")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object, None):
-                    pass
+            class C(object, None):
+                pass
         except TypeError:
             pass
         else:
             self.fail("inheritance from non-type should be illegal")
-        with torch._dynamo.error_on_graph_break(False):
-            class Classic:
-                pass
+        class Classic:
+            pass
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(type(len)):
-                    pass
+            class C(type(len)):
+                pass
         except TypeError:
             pass
         else:
             self.fail("inheritance from CFunction should be illegal")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = 1
+            class C(object):
+                __slots__ = 1
         except TypeError:
             pass
         else:
             self.fail("__slots__ = 1 should be illegal")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(object):
-                    __slots__ = [1]
+            class C(object):
+                __slots__ = [1]
         except TypeError:
             pass
         else:
             self.fail("__slots__ = [1] should be illegal")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class M1(type):
-                pass
-            class M2(type):
-                pass
-            class A1(object, metaclass=M1):
-                pass
-            class A2(object, metaclass=M2):
-                pass
+        class M1(type):
+            pass
+        class M2(type):
+            pass
+        class A1(object, metaclass=M1):
+            pass
+        class A2(object, metaclass=M2):
+            pass
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class B(A1, A2):
-                    pass
+            class B(A1, A2):
+                pass
         except TypeError:
             pass
         else:
@@ -1671,17 +1561,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_classmethods(self):
         # Testing class methods...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def foo(*a): return a
-                goo = classmethod(foo)
+        class C(object):
+            def foo(*a): return a
+            goo = classmethod(foo)
         c = C()
         self.assertEqual(C.goo(1), (C, 1))
         self.assertEqual(c.goo(1), (C, 1))
         self.assertEqual(c.foo(1), (c, 1))
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         d = D()
         self.assertEqual(D.goo(1), (D, 1))
         self.assertEqual(d.goo(1), (D, 1))
@@ -1762,8 +1650,7 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(x2, spam.spamlist)
         self.assertEqual(a2, a1)
         self.assertEqual(d2, d1)
-        with torch._dynamo.error_on_graph_break(False):
-            class SubSpam(spam.spamlist): pass
+        class SubSpam(spam.spamlist): pass
         x2, a2, d2 = spam_cm(SubSpam, *a, **d)
         self.assertEqual(x2, SubSpam)
         self.assertEqual(a2, a1)
@@ -1796,17 +1683,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_staticmethods(self):
         # Testing static methods...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def foo(*a): return a
-                goo = staticmethod(foo)
+        class C(object):
+            def foo(*a): return a
+            goo = staticmethod(foo)
         c = C()
         self.assertEqual(C.goo(1), (1,))
         self.assertEqual(c.goo(1), (1,))
         self.assertEqual(c.foo(1), (c, 1,))
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         d = D()
         self.assertEqual(D.goo(1), (1,))
         self.assertEqual(d.goo(1), (1,))
@@ -1847,54 +1732,50 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_classic(self):
         # Testing classic classes...
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                def foo(*a): return a
-                goo = classmethod(foo)
+        class C:
+            def foo(*a): return a
+            goo = classmethod(foo)
         c = C()
         self.assertEqual(C.goo(1), (C, 1))
         self.assertEqual(c.goo(1), (C, 1))
         self.assertEqual(c.foo(1), (c, 1))
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         d = D()
         self.assertEqual(D.goo(1), (D, 1))
         self.assertEqual(d.goo(1), (D, 1))
         self.assertEqual(d.foo(1), (d, 1))
         self.assertEqual(D.foo(d, 1), (d, 1))
-        with torch._dynamo.error_on_graph_break(False):
-            class E: # *not* subclassing from C
-                foo = C.foo
+        class E: # *not* subclassing from C
+            foo = C.foo
         self.assertEqual(E().foo.__func__, C.foo) # i.e., unbound
         self.assertTrue(repr(C.foo.__get__(C())).startswith("<bound method "))
 
     def test_compattr(self):
         # Testing computed attributes...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                class computed_attribute(object):
-                    def __init__(self, get, set=None, delete=None):
-                        self.__get = get
-                        self.__set = set
-                        self.__delete = delete
-                    def __get__(self, obj, type=None):
-                        return self.__get(obj)
-                    def __set__(self, obj, value):
-                        return self.__set(obj, value)
-                    def __delete__(self, obj):
-                        return self.__delete(obj)
-                def __init__(self):
-                    self.__x = 0
-                def __get_x(self):
-                    x = self.__x
-                    self.__x = x+1
-                    return x
-                def __set_x(self, x):
-                    self.__x = x
-                def __delete_x(self):
-                    del self.__x
-                x = computed_attribute(__get_x, __set_x, __delete_x)
+        class C(object):
+            class computed_attribute(object):
+                def __init__(self, get, set=None, delete=None):
+                    self.__get = get
+                    self.__set = set
+                    self.__delete = delete
+                def __get__(self, obj, type=None):
+                    return self.__get(obj)
+                def __set__(self, obj, value):
+                    return self.__set(obj, value)
+                def __delete__(self, obj):
+                    return self.__delete(obj)
+            def __init__(self):
+                self.__x = 0
+            def __get_x(self):
+                x = self.__x
+                self.__x = x+1
+                return x
+            def __set_x(self, x):
+                self.__x = x
+            def __delete_x(self):
+                del self.__x
+            x = computed_attribute(__get_x, __set_x, __delete_x)
         a = C()
         self.assertEqual(a.x, 0)
         self.assertEqual(a.x, 1)
@@ -1906,20 +1787,18 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_newslots(self):
         # Testing __new__ slot override...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(list):
-                def __new__(cls):
-                    self = list.__new__(cls)
-                    self.foo = 1
-                    return self
-                def __init__(self):
-                    self.foo = self.foo + 2
+        class C(list):
+            def __new__(cls):
+                self = list.__new__(cls)
+                self.foo = 1
+                return self
+            def __init__(self):
+                self.foo = self.foo + 2
         a = C()
         self.assertEqual(a.foo, 3)
         self.assertEqual(a.__class__, C)
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         b = D()
         self.assertEqual(b.foo, 3)
         self.assertEqual(b.__class__, D)
@@ -1938,38 +1817,34 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertRaises(TypeError, C)
 
     def test_object_new(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                pass
+        class A(object):
+            pass
         object.__new__(A)
         self.assertRaises(TypeError, object.__new__, A, 5)
         object.__init__(A())
         self.assertRaises(TypeError, object.__init__, A(), 5)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def __init__(self, foo):
-                    self.foo = foo
+        class A(object):
+            def __init__(self, foo):
+                self.foo = foo
         object.__new__(A)
         object.__new__(A, 5)
         object.__init__(A(3))
         self.assertRaises(TypeError, object.__init__, A(3), 5)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def __new__(cls, foo):
-                    return object.__new__(cls)
+        class A(object):
+            def __new__(cls, foo):
+                return object.__new__(cls)
         object.__new__(A)
         self.assertRaises(TypeError, object.__new__, A, 5)
         object.__init__(A(3))
         object.__init__(A(3), 5)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def __new__(cls, foo):
-                    return object.__new__(cls)
-                def __init__(self, foo):
-                    self.foo = foo
+        class A(object):
+            def __new__(cls, foo):
+                return object.__new__(cls)
+            def __init__(self, foo):
+                self.foo = foo
         object.__new__(A)
         self.assertRaises(TypeError, object.__new__, A, 5)
         object.__init__(A(3))
@@ -2001,15 +1876,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_altmro(self):
         # Testing mro() and overriding it...
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def f(self): return "A"
-            class B(A):
-                pass
-            class C(A):
-                def f(self): return "C"
-            class D(B, C):
-                pass
+        class A(object):
+            def f(self): return "A"
+        class B(A):
+            pass
+        class C(A):
+            def f(self): return "C"
+        class D(B, C):
+            pass
         self.assertEqual(A.mro(), [A, object])
         self.assertEqual(A.__mro__, (A, object))
         self.assertEqual(B.mro(), [B, A, object])
@@ -2020,24 +1894,22 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(D.__mro__, (D, B, C, A, object))
         self.assertEqual(D().f(), "C")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class PerverseMetaType(type):
-                def mro(cls):
-                    L = type.mro(cls)
-                    L.reverse()
-                    return L
-            class X(D,B,C,A, metaclass=PerverseMetaType):
-                pass
+        class PerverseMetaType(type):
+            def mro(cls):
+                L = type.mro(cls)
+                L.reverse()
+                return L
+        class X(D,B,C,A, metaclass=PerverseMetaType):
+            pass
         self.assertEqual(X.__mro__, (object, A, C, B, D, X))
         self.assertEqual(X().f(), "A")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class _metaclass(type):
-                    def mro(self):
-                        return [self, dict, object]
-                class X(object, metaclass=_metaclass):
-                    pass
+            class _metaclass(type):
+                def mro(self):
+                    return [self, dict, object]
+            class X(object, metaclass=_metaclass):
+                pass
             # In CPython, the class creation above already raises
             # TypeError, as a protection against the fact that
             # instances of X would segfault it.  In other Python
@@ -2052,24 +1924,22 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("devious mro() return not caught")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class _metaclass(type):
-                    def mro(self):
-                        return [1]
-                class X(object, metaclass=_metaclass):
-                    pass
+            class _metaclass(type):
+                def mro(self):
+                    return [1]
+            class X(object, metaclass=_metaclass):
+                pass
         except TypeError:
             pass
         else:
             self.fail("non-class mro() return not caught")
 
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class _metaclass(type):
-                    def mro(self):
-                        return 1
-                class X(object, metaclass=_metaclass):
-                    pass
+            class _metaclass(type):
+                def mro(self):
+                    return 1
+            class X(object, metaclass=_metaclass):
+                pass
         except TypeError:
             pass
         else:
@@ -2078,33 +1948,32 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_overloading(self):
         # Testing operator overloading...
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B(object):
-                "Intermediate class because object doesn't have a __setattr__"
+        class B(object):
+            "Intermediate class because object doesn't have a __setattr__"
 
-            class C(B):
-                def __getattr__(self, name):
-                    if name == "foo":
-                        return ("getattr", name)
-                    else:
-                        raise AttributeError
-                def __setattr__(self, name, value):
-                    if name == "foo":
-                        self.setattr = (name, value)
-                    else:
-                        return B.__setattr__(self, name, value)
-                def __delattr__(self, name):
-                    if name == "foo":
-                        self.delattr = name
-                    else:
-                        return B.__delattr__(self, name)
+        class C(B):
+            def __getattr__(self, name):
+                if name == "foo":
+                    return ("getattr", name)
+                else:
+                    raise AttributeError
+            def __setattr__(self, name, value):
+                if name == "foo":
+                    self.setattr = (name, value)
+                else:
+                    return B.__setattr__(self, name, value)
+            def __delattr__(self, name):
+                if name == "foo":
+                    self.delattr = name
+                else:
+                    return B.__delattr__(self, name)
 
-                def __getitem__(self, key):
-                    return ("getitem", key)
-                def __setitem__(self, key, value):
-                    self.setitem = (key, value)
-                def __delitem__(self, key):
-                    self.delitem = key
+            def __getitem__(self, key):
+                return ("getitem", key)
+            def __setitem__(self, key, value):
+                self.setitem = (key, value)
+            def __delitem__(self, key):
+                self.delitem = key
 
         a = C()
         self.assertEqual(a.foo, ("getattr", "foo"))
@@ -2127,10 +1996,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_load_attr_extended_arg(self):
         # https://github.com/python/cpython/issues/91625
-        with torch._dynamo.error_on_graph_break(False):
-            class Numbers:
-                def __getattr__(self, attr):
-                    return int(attr.lstrip("_"))
+        class Numbers:
+            def __getattr__(self, attr):
+                return int(attr.lstrip("_"))
         attrs = ", ".join(f"Z._{n:03d}" for n in range(280))
         code = f"def number_attrs(Z):\n    return [ {attrs} ]"
         ns = {}
@@ -2142,25 +2010,22 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_methods(self):
         # Testing methods...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __init__(self, x):
-                    self.x = x
-                def foo(self):
-                    return self.x
+        class C(object):
+            def __init__(self, x):
+                self.x = x
+            def foo(self):
+                return self.x
         c1 = C(1)
         self.assertEqual(c1.foo(), 1)
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                boo = C.foo
-                goo = c1.foo
+        class D(C):
+            boo = C.foo
+            goo = c1.foo
         d2 = D(2)
         self.assertEqual(d2.foo(), 2)
         self.assertEqual(d2.boo(), 2)
         self.assertEqual(d2.goo(), 1)
-        with torch._dynamo.error_on_graph_break(False):
-            class E(object):
-                foo = C.foo
+        class E(object):
+            foo = C.foo
         self.assertEqual(E().foo.__func__, C.foo) # i.e., unbound
         self.assertTrue(repr(C.foo.__get__(C(1))).startswith("<bound method "))
 
@@ -2213,9 +2078,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         def do_issubclass(obj):
             return issubclass(int, obj)
         def do_dict_missing(checker):
-            with torch._dynamo.error_on_graph_break(False):
-                class DictSub(checker.__class__, dict):
-                    pass
+            class DictSub(checker.__class__, dict):
+                pass
             self.assertEqual(DictSub()["hi"], 4)
         def some_number(self_, key):
             self.assertEqual(key, "hi")
@@ -2249,48 +2113,44 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             ("__round__", round, zero, set(), {}),
             ]
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Checker(object):
-                def __getattr__(self, attr, test=self):
-                    test.fail("__getattr__ called with {0}".format(attr))
-                def __getattribute__(self, attr, test=self):
-                    if attr not in ok:
-                        test.fail("__getattribute__ called with {0}".format(attr))
-                    return object.__getattribute__(self, attr)
-            class SpecialDescr(object):
-                def __init__(self, impl):
-                    self.impl = impl
-                def __get__(self, obj, owner):
-                    record.append(1)
-                    return self.impl.__get__(obj, owner)
-            class MyException(Exception):
-                pass
-            class ErrDescr(object):
-                def __get__(self, obj, owner):
-                    raise MyException
+        class Checker(object):
+            def __getattr__(self, attr, test=self):
+                test.fail("__getattr__ called with {0}".format(attr))
+            def __getattribute__(self, attr, test=self):
+                if attr not in ok:
+                    test.fail("__getattribute__ called with {0}".format(attr))
+                return object.__getattribute__(self, attr)
+        class SpecialDescr(object):
+            def __init__(self, impl):
+                self.impl = impl
+            def __get__(self, obj, owner):
+                record.append(1)
+                return self.impl.__get__(obj, owner)
+        class MyException(Exception):
+            pass
+        class ErrDescr(object):
+            def __get__(self, obj, owner):
+                raise MyException
 
         for name, runner, meth_impl, ok, env in specials:
-            with torch._dynamo.error_on_graph_break(False):
-                class X(Checker):
-                    pass
+            class X(Checker):
+                pass
             for attr, obj in env.items():
                 setattr(X, attr, obj)
             setattr(X, name, meth_impl)
             runner(X())
 
             record = []
-            with torch._dynamo.error_on_graph_break(False):
-                class X(Checker):
-                    pass
+            class X(Checker):
+                pass
             for attr, obj in env.items():
                 setattr(X, attr, obj)
             setattr(X, name, SpecialDescr(meth_impl))
             runner(X())
             self.assertEqual(record, [1], name)
 
-            with torch._dynamo.error_on_graph_break(False):
-                class X(Checker):
-                    pass
+            class X(Checker):
+                pass
             for attr, obj in env.items():
                 setattr(X, attr, obj)
             setattr(X, name, ErrDescr())
@@ -2301,11 +2161,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Test operators like __hash__ for which a built-in default exists
 
         # Test the default behavior for static classes
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __getitem__(self, i):
-                    if 0 <= i < 10: return i
-                    raise IndexError
+        class C(object):
+            def __getitem__(self, i):
+                if 0 <= i < 10: return i
+                raise IndexError
         c1 = C()
         c2 = C()
         self.assertFalse(not c1)
@@ -2325,11 +2184,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.assertIn(i, c1)
         self.assertNotIn(10, c1)
         # Test the default behavior for dynamic classes
-        with torch._dynamo.error_on_graph_break(False):
-            class D(object):
-                def __getitem__(self, i):
-                    if 0 <= i < 10: return i
-                    raise IndexError
+        class D(object):
+            def __getitem__(self, i):
+                if 0 <= i < 10: return i
+                raise IndexError
         d1 = D()
         d2 = D()
         self.assertFalse(not d1)
@@ -2349,32 +2207,31 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.assertIn(i, d1)
         self.assertNotIn(10, d1)
         # Test overridden behavior
-        with torch._dynamo.error_on_graph_break(False):
-            class Proxy(object):
-                def __init__(self, x):
-                    self.x = x
-                def __bool__(self):
-                    return not not self.x
-                def __hash__(self):
-                    return hash(self.x)
-                def __eq__(self, other):
-                    return self.x == other
-                def __ne__(self, other):
-                    return self.x != other
-                def __ge__(self, other):
-                    return self.x >= other
-                def __gt__(self, other):
-                    return self.x > other
-                def __le__(self, other):
-                    return self.x <= other
-                def __lt__(self, other):
-                    return self.x < other
-                def __str__(self):
-                    return "Proxy:%s" % self.x
-                def __repr__(self):
-                    return "Proxy(%r)" % self.x
-                def __contains__(self, value):
-                    return value in self.x
+        class Proxy(object):
+            def __init__(self, x):
+                self.x = x
+            def __bool__(self):
+                return not not self.x
+            def __hash__(self):
+                return hash(self.x)
+            def __eq__(self, other):
+                return self.x == other
+            def __ne__(self, other):
+                return self.x != other
+            def __ge__(self, other):
+                return self.x >= other
+            def __gt__(self, other):
+                return self.x > other
+            def __le__(self, other):
+                return self.x <= other
+            def __lt__(self, other):
+                return self.x < other
+            def __str__(self):
+                return "Proxy:%s" % self.x
+            def __repr__(self):
+                return "Proxy(%r)" % self.x
+            def __contains__(self, value):
+                return value in self.x
         p0 = Proxy(0)
         p1 = Proxy(1)
         p_1 = Proxy(-1)
@@ -2400,9 +2257,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_weakrefs(self):
         # Testing weak references...
         import weakref
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                pass
+        class C(object):
+            pass
         c = C()
         r = weakref.ref(c)
         self.assertEqual(r(), c)
@@ -2410,9 +2266,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         support.gc_collect()
         self.assertEqual(r(), None)
         del r
-        with torch._dynamo.error_on_graph_break(False):
-            class NoWeak(object):
-                __slots__ = ['foo']
+        class NoWeak(object):
+            __slots__ = ['foo']
         no = NoWeak()
         try:
             weakref.ref(no)
@@ -2420,9 +2275,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.assertIn("weak reference", str(msg))
         else:
             self.fail("weakref.ref(no) should be illegal")
-        with torch._dynamo.error_on_graph_break(False):
-            class Weak(object):
-                __slots__ = ['foo', '__weakref__']
+        class Weak(object):
+            __slots__ = ['foo', '__weakref__']
         yes = Weak()
         r = weakref.ref(yes)
         self.assertEqual(r(), yes)
@@ -2433,15 +2287,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_properties(self):
         # Testing property...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def getx(self):
-                    return self.__x
-                def setx(self, value):
-                    self.__x = value
-                def delx(self):
-                    del self.__x
-                x = property(getx, setx, delx, doc="I'm the x property.")
+        class C(object):
+            def getx(self):
+                return self.__x
+            def setx(self, value):
+                self.__x = value
+            def delx(self):
+                del self.__x
+            x = property(getx, setx, delx, doc="I'm the x property.")
         a = C()
         self.assertNotHasAttr(a, "x")
         a.x = 42
@@ -2483,9 +2336,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         raw.__doc__ = 42
         self.assertEqual(raw.__doc__, 42)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class D(object):
-                __getitem__ = property(lambda s: 1/0)
+        class D(object):
+            __getitem__ = property(lambda s: 1/0)
 
         d = D()
         try:
@@ -2499,18 +2351,17 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     @unittest.skipIf(sys.flags.optimize >= 2,
                      "Docstrings are omitted with -O2 and above")
     def test_properties_doc_attrib(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class E(object):
-                def getter(self):
-                    "getter method"
-                    return 0
-                def setter(self_, value):
-                    "setter method"
-                    pass
-                prop = property(getter)
-                self.assertEqual(prop.__doc__, "getter method")
-                prop2 = property(fset=setter)
-                self.assertEqual(prop2.__doc__, None)
+        class E(object):
+            def getter(self):
+                "getter method"
+                return 0
+            def setter(self_, value):
+                "setter method"
+                pass
+            prop = property(getter)
+            self.assertEqual(prop.__doc__, "getter method")
+            prop2 = property(fset=setter)
+            self.assertEqual(prop2.__doc__, None)
 
     @support.cpython_only
     def test_testcapi_no_segfault(self):
@@ -2520,23 +2371,21 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         except ImportError:
             pass
         else:
-            with torch._dynamo.error_on_graph_break(False):
-                class X(object):
-                    p = property(_testcapi.test_with_docstring)
+            class X(object):
+                p = property(_testcapi.test_with_docstring)
 
     def test_properties_plus(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                foo = property(doc="hello")
-                @foo.getter
-                def foo(self):
-                    return self._foo
-                @foo.setter
-                def foo(self, value):
-                    self._foo = abs(value)
-                @foo.deleter
-                def foo(self):
-                    del self._foo
+        class C(object):
+            foo = property(doc="hello")
+            @foo.getter
+            def foo(self):
+                return self._foo
+            @foo.setter
+            def foo(self, value):
+                self._foo = abs(value)
+            @foo.deleter
+            def foo(self):
+                del self._foo
         c = C()
         self.assertEqual(C.foo.__doc__, "hello")
         self.assertNotHasAttr(c, "foo")
@@ -2548,48 +2397,45 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertNotHasAttr(c, '_foo')
         self.assertNotHasAttr(c, "foo")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                @C.foo.deleter
-                def foo(self):
-                    try:
-                        del self._foo
-                    except AttributeError:
-                        pass
+        class D(C):
+            @C.foo.deleter
+            def foo(self):
+                try:
+                    del self._foo
+                except AttributeError:
+                    pass
         d = D()
         d.foo = 24
         self.assertEqual(d.foo, 24)
         del d.foo
         del d.foo
 
-        with torch._dynamo.error_on_graph_break(False):
-            class E(object):
-                @property
-                def foo(self):
-                    return self._foo
-                @foo.setter
-                def foo(self, value):
-                    raise RuntimeError
-                @foo.setter
-                def foo(self, value):
-                    self._foo = abs(value)
-                @foo.deleter
-                def foo(self, value=None):
-                    del self._foo
+        class E(object):
+            @property
+            def foo(self):
+                return self._foo
+            @foo.setter
+            def foo(self, value):
+                raise RuntimeError
+            @foo.setter
+            def foo(self, value):
+                self._foo = abs(value)
+            @foo.deleter
+            def foo(self, value=None):
+                del self._foo
 
         e = E()
         e.foo = -42
         self.assertEqual(e.foo, 42)
         del e.foo
 
-        with torch._dynamo.error_on_graph_break(False):
-            class F(E):
-                @E.foo.deleter
-                def foo(self):
-                    del self._foo
-                @foo.setter
-                def foo(self, value):
-                    self._foo = max(0, value)
+        class F(E):
+            @E.foo.deleter
+            def foo(self):
+                del self._foo
+            @foo.setter
+            def foo(self, value):
+                self._foo = max(0, value)
         f = F()
         f.foo = -10
         self.assertEqual(f.foo, 0)
@@ -2632,10 +2478,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         with self.assertRaises(TypeError):
             dict({}, {})
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Mapping:
-                # Lacks a .keys() method; will be added later.
-                dict = {1:2, 3:4, 'a':1j}
+        class Mapping:
+            # Lacks a .keys() method; will be added later.
+            dict = {1:2, 3:4, 'a':1j}
 
         try:
             dict(Mapping())
@@ -2650,13 +2495,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(d, Mapping.dict)
 
         # Init from sequence of iterable objects, each producing a 2-sequence.
-        with torch._dynamo.error_on_graph_break(False):
-            class AddressBookEntry:
-                def __init__(self, first, last):
-                    self.first = first
-                    self.last = last
-                def __iter__(self):
-                    return iter([self.first, self.last])
+        class AddressBookEntry:
+            def __init__(self, first, last):
+                self.first = first
+                self.last = last
+            def __iter__(self):
+                return iter([self.first, self.last])
 
         d = dict([AddressBookEntry('Tim', 'Warsaw'),
                   AddressBookEntry('Barry', 'Peters'),
@@ -2691,10 +2535,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         def interesting(strings):
             return [s for s in strings if not s.startswith('_')]
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                Cdata = 1
-                def Cmethod(self): pass
+        class C(object):
+            Cdata = 1
+            def Cmethod(self): pass
 
         cstuff = ['Cdata', 'Cmethod']
         self.assertEqual(interesting(dir(C)), cstuff)
@@ -2708,10 +2551,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(interesting(dir(c)), cstuff + ['cdata', 'cmethod'])
         ## self.assertIn('__self__', dir(c.Cmethod))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(C):
-                Adata = 1
-                def Amethod(self): pass
+        class A(C):
+            Adata = 1
+            def Amethod(self): pass
 
         astuff = ['Adata', 'Amethod'] + cstuff
         self.assertEqual(interesting(dir(A)), astuff)
@@ -2724,9 +2566,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         ## self.assertIn('__self__', dir(a.Amethod))
 
         # Try a module subclass.
-        with torch._dynamo.error_on_graph_break(False):
-            class M(type(sys)):
-                pass
+        class M(type(sys)):
+            pass
         minstance = M("m")
         minstance.b = 2
         minstance.a = 1
@@ -2735,11 +2576,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         names = [x for x in dir(minstance) if x not in default_attributes]
         self.assertEqual(names, ['a', 'b'])
 
-        with torch._dynamo.error_on_graph_break(False):
-            class M2(M):
-                def getdict(self):
-                    return "Not a dict!"
-                __dict__ = property(getdict)
+        class M2(M):
+            def getdict(self):
+                return "Not a dict!"
+            __dict__ = property(getdict)
 
         m2instance = M2("m2")
         m2instance.b = 2
@@ -2753,78 +2593,71 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(dir(object()), dir(Ellipsis))
 
         # Nasty test case for proxied objects
-        with torch._dynamo.error_on_graph_break(False):
-            class Wrapper(object):
-                def __init__(self, obj):
-                    self.__obj = obj
-                def __repr__(self):
-                    return "Wrapper(%s)" % repr(self.__obj)
-                def __getitem__(self, key):
-                    return Wrapper(self.__obj[key])
-                def __len__(self):
-                    return len(self.__obj)
-                def __getattr__(self, name):
-                    return Wrapper(getattr(self.__obj, name))
+        class Wrapper(object):
+            def __init__(self, obj):
+                self.__obj = obj
+            def __repr__(self):
+                return "Wrapper(%s)" % repr(self.__obj)
+            def __getitem__(self, key):
+                return Wrapper(self.__obj[key])
+            def __len__(self):
+                return len(self.__obj)
+            def __getattr__(self, name):
+                return Wrapper(getattr(self.__obj, name))
 
-            class C(object):
-                def __getclass(self):
-                    return Wrapper(type(self))
-                __class__ = property(__getclass)
+        class C(object):
+            def __getclass(self):
+                return Wrapper(type(self))
+            __class__ = property(__getclass)
 
         dir(C()) # This used to segfault
 
     def test_supers(self):
         # Testing super...
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                def meth(self, a):
-                    return "A(%r)" % a
+        class A(object):
+            def meth(self, a):
+                return "A(%r)" % a
 
         self.assertEqual(A().meth(1), "A(1)")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B(A):
-                def __init__(self):
-                    self.__super = super(B, self)
-                def meth(self, a):
-                    return "B(%r)" % a + self.__super.meth(a)
+        class B(A):
+            def __init__(self):
+                self.__super = super(B, self)
+            def meth(self, a):
+                return "B(%r)" % a + self.__super.meth(a)
 
         self.assertEqual(B().meth(2), "B(2)A(2)")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(A):
-                def meth(self, a):
-                    return "C(%r)" % a + self.__super.meth(a)
+        class C(A):
+            def meth(self, a):
+                return "C(%r)" % a + self.__super.meth(a)
         C._C__super = super(C)
 
         self.assertEqual(C().meth(3), "C(3)A(3)")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C, B):
-                def meth(self, a):
-                    return "D(%r)" % a + super(D, self).meth(a)
+        class D(C, B):
+            def meth(self, a):
+                return "D(%r)" % a + super(D, self).meth(a)
 
         self.assertEqual(D().meth(4), "D(4)C(4)B(4)A(4)")
 
         # Test for subclassing super
 
-        with torch._dynamo.error_on_graph_break(False):
-            class mysuper(super):
-                def __init__(self, *args):
-                    return super(mysuper, self).__init__(*args)
+        class mysuper(super):
+            def __init__(self, *args):
+                return super(mysuper, self).__init__(*args)
 
-            class E(D):
-                def meth(self, a):
-                    return "E(%r)" % a + mysuper(E, self).meth(a)
+        class E(D):
+            def meth(self, a):
+                return "E(%r)" % a + mysuper(E, self).meth(a)
 
         self.assertEqual(E().meth(5), "E(5)D(5)C(5)B(5)A(5)")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class F(E):
-                def meth(self, a):
-                    s = self.__super # == mysuper(F, self)
-                    return "F(%r)[%s]" % (a, s.__class__.__name__) + s.meth(a)
+        class F(E):
+            def meth(self, a):
+                s = self.__super # == mysuper(F, self)
+                return "F(%r)[%s]" % (a, s.__class__.__name__) + s.meth(a)
         F._F__super = mysuper(F)
 
         self.assertEqual(F().meth(6), "F(6)[mysuper]E(6)D(6)C(6)B(6)A(6)")
@@ -2862,14 +2695,13 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Make sure data descriptors can be overridden and accessed via super
         # (new feature in Python 2.3)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class DDbase(object):
-                def getx(self): return 42
-                x = property(getx)
+        class DDbase(object):
+            def getx(self): return 42
+            x = property(getx)
 
-            class DDsub(DDbase):
-                def getx(self): return "hello"
-                x = property(getx)
+        class DDsub(DDbase):
+            def getx(self): return "hello"
+            x = property(getx)
 
         dd = DDsub()
         self.assertEqual(dd.x, "hello")
@@ -2878,14 +2710,13 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Ensure that super() lookup of descriptor from classmethod
         # works (SF ID# 743627)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Base(object):
-                aProp = property(lambda self: "foo")
+        class Base(object):
+            aProp = property(lambda self: "foo")
 
-            class Sub(Base):
-                @classmethod
-                def test(klass):
-                    return super(Sub,klass).aProp
+        class Sub(Base):
+            @classmethod
+            def test(klass):
+                return super(Sub,klass).aProp
 
         self.assertEqual(Sub.test(), Base.aProp)
 
@@ -2896,14 +2727,13 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_basic_inheritance(self):
         # Testing inheritance from basic types...
 
-        with torch._dynamo.error_on_graph_break(False):
-            class hexint(int):
-                def __repr__(self):
-                    return hex(self)
-                def __add__(self, other):
-                    return hexint(int.__add__(self, other))
-                # (Note that overriding __radd__ doesn't work,
-                # because the int type gets first dibs.)
+        class hexint(int):
+            def __repr__(self):
+                return hex(self)
+            def __add__(self, other):
+                return hexint(int.__add__(self, other))
+            # (Note that overriding __radd__ doesn't work,
+            # because the int type gets first dibs.)
         self.assertEqual(repr(hexint(7) + 9), "0x10")
         self.assertEqual(repr(hexint(1000) + 7), "0x3ef")
         a = hexint(12345)
@@ -2917,14 +2747,13 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIs((hexint(0) << 12).__class__, int)
         self.assertIs((hexint(0) >> 12).__class__, int)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class octlong(int):
-                __slots__ = []
-                def __str__(self):
-                    return oct(self)
-                def __add__(self, other):
-                    return self.__class__(super(octlong, self).__add__(other))
-                __radd__ = __add__
+        class octlong(int):
+            __slots__ = []
+            def __str__(self):
+                return oct(self)
+            def __add__(self, other):
+                return self.__class__(super(octlong, self).__add__(other))
+            __radd__ = __add__
         self.assertEqual(str(octlong(3) + 5), "0o10")
         # (Note that overriding __radd__ here only seems to work
         # because the example uses a short int left argument.)
@@ -2953,9 +2782,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # Because octlong overrides __add__, we can't check the absence of +0
         # optimizations using octlong.
-        with torch._dynamo.error_on_graph_break(False):
-            class longclone(int):
-                pass
+        class longclone(int):
+            pass
         a = longclone(1)
         self.assertIs((a + 0).__class__, int)
         self.assertIs((0 + a).__class__, int)
@@ -2965,13 +2793,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(a.__dict__, {})
         self.assertEqual(int(a), -1)  # self.assertTrue PyNumber_Long() copies the sign bit
 
-        with torch._dynamo.error_on_graph_break(False):
-            class precfloat(float):
-                __slots__ = ['prec']
-                def __init__(self, value=0.0, prec=12):
-                    self.prec = int(prec)
-                def __repr__(self):
-                    return "%.*g" % (self.prec, self)
+        class precfloat(float):
+            __slots__ = ['prec']
+            def __init__(self, value=0.0, prec=12):
+                self.prec = int(prec)
+            def __repr__(self):
+                return "%.*g" % (self.prec, self)
         self.assertEqual(repr(precfloat(1.1)), "1.1")
         a = precfloat(12345)
         self.assertEqual(a, 12345.0)
@@ -2980,10 +2807,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(hash(a), hash(12345.0))
         self.assertIs((+a).__class__, float)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class madcomplex(complex):
-                def __repr__(self):
-                    return "%.17gj%+.17g" % (self.imag, self.real)
+        class madcomplex(complex):
+            def __repr__(self):
+                return "%.17gj%+.17g" % (self.imag, self.real)
         a = madcomplex(-3, 4)
         self.assertEqual(repr(a), "4j-3")
         base = complex(-3, 4)
@@ -3007,16 +2833,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual((a / 1).__class__, complex)
         self.assertEqual(a / 1, base)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class madtuple(tuple):
-                _rev = None
-                def rev(self):
-                    if self._rev is not None:
-                        return self._rev
-                    L = list(self)
-                    L.reverse()
-                    self._rev = self.__class__(L)
+        class madtuple(tuple):
+            _rev = None
+            def rev(self):
+                if self._rev is not None:
                     return self._rev
+                L = list(self)
+                L.reverse()
+                self._rev = self.__class__(L)
+                return self._rev
         a = madtuple((1,2,3,4,5,6,7,8,9,0))
         self.assertEqual(a, (1,2,3,4,5,6,7,8,9,0))
         self.assertEqual(a.rev(), madtuple((0,9,8,7,6,5,4,3,2,1)))
@@ -3043,16 +2868,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIs((a * 2).__class__, tuple)
         self.assertIs(a[:].__class__, tuple)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class madstring(str):
-                _rev = None
-                def rev(self):
-                    if self._rev is not None:
-                        return self._rev
-                    L = list(self)
-                    L.reverse()
-                    self._rev = self.__class__("".join(L))
+        class madstring(str):
+            _rev = None
+            def rev(self):
+                if self._rev is not None:
                     return self._rev
+                L = list(self)
+                L.reverse()
+                self._rev = self.__class__("".join(L))
+                return self._rev
         s = madstring("abcdefghijklmnopqrstuvwxyz")
         self.assertEqual(s, "abcdefghijklmnopqrstuvwxyz")
         self.assertEqual(s.rev(), madstring("zyxwvutsrqponmlkjihgfedcba"))
@@ -3108,16 +2932,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIs(s.lower().__class__, str)
         self.assertEqual(s.lower(), base)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class madunicode(str):
-                _rev = None
-                def rev(self):
-                    if self._rev is not None:
-                        return self._rev
-                    L = list(self)
-                    L.reverse()
-                    self._rev = self.__class__("".join(L))
+        class madunicode(str):
+            _rev = None
+            def rev(self):
+                if self._rev is not None:
                     return self._rev
+                L = list(self)
+                L.reverse()
+                self._rev = self.__class__("".join(L))
+                return self._rev
         u = madunicode("ABCDEF")
         self.assertEqual(u, "ABCDEF")
         self.assertEqual(u.rev(), madunicode("FEDCBA"))
@@ -3168,9 +2991,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIs(u[0:0].__class__, str)
         self.assertEqual(u[0:0], "")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class sublist(list):
-                pass
+        class sublist(list):
+            pass
         a = sublist(range(5))
         self.assertEqual(a, list(range(5)))
         a.append("hello")
@@ -3264,24 +3086,23 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_str_subclass_as_dict_key(self):
         # Testing a str subclass used as dict key ..
 
-        with torch._dynamo.error_on_graph_break(False):
-            class cistr(str):
-                """Subclass of str that computes __eq__ case-insensitively.
+        class cistr(str):
+            """Subclass of str that computes __eq__ case-insensitively.
 
-                Also computes a hash code of the string in canonical form.
-                """
+            Also computes a hash code of the string in canonical form.
+            """
 
-                def __init__(self, value):
-                    self.canonical = value.lower()
-                    self.hashcode = hash(self.canonical)
+            def __init__(self, value):
+                self.canonical = value.lower()
+                self.hashcode = hash(self.canonical)
 
-                def __eq__(self, other):
-                    if not isinstance(other, cistr):
-                        other = cistr(other)
-                    return self.canonical == other.canonical
+            def __eq__(self, other):
+                if not isinstance(other, cistr):
+                    other = cistr(other)
+                return self.canonical == other.canonical
 
-                def __hash__(self):
-                    return self.hashcode
+            def __hash__(self):
+                return self.hashcode
 
         self.assertEqual(cistr('ABC'), 'abc')
         self.assertEqual('aBc', cistr('ABC'))
@@ -3296,51 +3117,49 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_classic_comparisons(self):
         # Testing classic comparisons...
-        with torch._dynamo.error_on_graph_break(False):
-            class classic:
-                pass
+        class classic:
+            pass
 
         for base in (classic, int, object):
-            with torch._dynamo.error_on_graph_break(False):
-                class C(base):
-                    def __init__(self, value):
-                        self.value = int(value)
-                    def __eq__(self, other):
-                        if isinstance(other, C):
-                            return self.value == other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value == other
-                        return NotImplemented
-                    def __ne__(self, other):
-                        if isinstance(other, C):
-                            return self.value != other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value != other
-                        return NotImplemented
-                    def __lt__(self, other):
-                        if isinstance(other, C):
-                            return self.value < other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value < other
-                        return NotImplemented
-                    def __le__(self, other):
-                        if isinstance(other, C):
-                            return self.value <= other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value <= other
-                        return NotImplemented
-                    def __gt__(self, other):
-                        if isinstance(other, C):
-                            return self.value > other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value > other
-                        return NotImplemented
-                    def __ge__(self, other):
-                        if isinstance(other, C):
-                            return self.value >= other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value >= other
-                        return NotImplemented
+            class C(base):
+                def __init__(self, value):
+                    self.value = int(value)
+                def __eq__(self, other):
+                    if isinstance(other, C):
+                        return self.value == other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value == other
+                    return NotImplemented
+                def __ne__(self, other):
+                    if isinstance(other, C):
+                        return self.value != other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value != other
+                    return NotImplemented
+                def __lt__(self, other):
+                    if isinstance(other, C):
+                        return self.value < other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value < other
+                    return NotImplemented
+                def __le__(self, other):
+                    if isinstance(other, C):
+                        return self.value <= other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value <= other
+                    return NotImplemented
+                def __gt__(self, other):
+                    if isinstance(other, C):
+                        return self.value > other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value > other
+                    return NotImplemented
+                def __ge__(self, other):
+                    if isinstance(other, C):
+                        return self.value >= other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value >= other
+                    return NotImplemented
 
             c1 = C(1)
             c2 = C(2)
@@ -3362,69 +3181,65 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_rich_comparisons(self):
         # Testing rich comparisons...
-        with torch._dynamo.error_on_graph_break(False):
-            class Z(complex):
-                pass
+        class Z(complex):
+            pass
         z = Z(1)
         self.assertEqual(z, 1+0j)
         self.assertEqual(1+0j, z)
-        with torch._dynamo.error_on_graph_break(False):
-            class ZZ(complex):
-                def __eq__(self, other):
-                    try:
-                        return abs(self - other) <= 1e-6
-                    except:
-                        return NotImplemented
+        class ZZ(complex):
+            def __eq__(self, other):
+                try:
+                    return abs(self - other) <= 1e-6
+                except:
+                    return NotImplemented
         zz = ZZ(1.0000003)
         self.assertEqual(zz, 1+0j)
         self.assertEqual(1+0j, zz)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class classic:
-                pass
+        class classic:
+            pass
         for base in (classic, int, object, list):
-            with torch._dynamo.error_on_graph_break(False):
-                class C(base):
-                    def __init__(self, value):
-                        self.value = int(value)
-                    def __cmp__(self_, other):
-                        self.fail("shouldn't call __cmp__")
-                    def __eq__(self, other):
-                        if isinstance(other, C):
-                            return self.value == other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value == other
-                        return NotImplemented
-                    def __ne__(self, other):
-                        if isinstance(other, C):
-                            return self.value != other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value != other
-                        return NotImplemented
-                    def __lt__(self, other):
-                        if isinstance(other, C):
-                            return self.value < other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value < other
-                        return NotImplemented
-                    def __le__(self, other):
-                        if isinstance(other, C):
-                            return self.value <= other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value <= other
-                        return NotImplemented
-                    def __gt__(self, other):
-                        if isinstance(other, C):
-                            return self.value > other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value > other
-                        return NotImplemented
-                    def __ge__(self, other):
-                        if isinstance(other, C):
-                            return self.value >= other.value
-                        if isinstance(other, int) or isinstance(other, int):
-                            return self.value >= other
-                        return NotImplemented
+            class C(base):
+                def __init__(self, value):
+                    self.value = int(value)
+                def __cmp__(self_, other):
+                    self.fail("shouldn't call __cmp__")
+                def __eq__(self, other):
+                    if isinstance(other, C):
+                        return self.value == other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value == other
+                    return NotImplemented
+                def __ne__(self, other):
+                    if isinstance(other, C):
+                        return self.value != other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value != other
+                    return NotImplemented
+                def __lt__(self, other):
+                    if isinstance(other, C):
+                        return self.value < other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value < other
+                    return NotImplemented
+                def __le__(self, other):
+                    if isinstance(other, C):
+                        return self.value <= other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value <= other
+                    return NotImplemented
+                def __gt__(self, other):
+                    if isinstance(other, C):
+                        return self.value > other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value > other
+                    return NotImplemented
+                def __ge__(self, other):
+                    if isinstance(other, C):
+                        return self.value >= other.value
+                    if isinstance(other, int) or isinstance(other, int):
+                        return self.value >= other
+                    return NotImplemented
             c1 = C(1)
             c2 = C(2)
             c3 = C(3)
@@ -3454,26 +3269,24 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_doc_descriptor(self):
         # Testing __doc__ descriptor...
         # SF bug 542984
-        with torch._dynamo.error_on_graph_break(False):
-            class DocDescr(object):
-                def __get__(self, object, otype):
-                    if object:
-                        object = object.__class__.__name__ + ' instance'
-                    if otype:
-                        otype = otype.__name__
-                    return 'object=%s; type=%s' % (object, otype)
-            class NewClass:
-                __doc__ = DocDescr()
+        class DocDescr(object):
+            def __get__(self, object, otype):
+                if object:
+                    object = object.__class__.__name__ + ' instance'
+                if otype:
+                    otype = otype.__name__
+                return 'object=%s; type=%s' % (object, otype)
+        class NewClass:
+            __doc__ = DocDescr()
         self.assertEqual(NewClass.__doc__, 'object=None; type=NewClass')
         self.assertEqual(NewClass().__doc__, 'object=NewClass instance; type=NewClass')
 
     def test_set_class(self):
         # Testing __class__ assignment...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object): pass
-            class D(object): pass
-            class E(object): pass
-            class F(D, E): pass
+        class C(object): pass
+        class D(object): pass
+        class E(object): pass
+        class F(D, E): pass
         for cls in C, D, E, F:
             for cls2 in C, D, E, F:
                 x = cls()
@@ -3500,37 +3313,35 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         cant(C(), object)
         cant(object(), list)
         cant(list(), object)
-        with torch._dynamo.error_on_graph_break(False):
-            class Int(int): __slots__ = []
+        class Int(int): __slots__ = []
         cant(True, int)
         cant(2, bool)
         o = object()
         cant(o, int)
         cant(o, type(None))
         del o
-        with torch._dynamo.error_on_graph_break(False):
-            class G(object):
-                __slots__ = ["a", "b"]
-            class H(object):
-                __slots__ = ["b", "a"]
-            class I(object):
-                __slots__ = ["a", "b"]
-            class J(object):
-                __slots__ = ["c", "b"]
-            class K(object):
-                __slots__ = ["a", "b", "d"]
-            class L(H):
-                __slots__ = ["e"]
-            class M(I):
-                __slots__ = ["e"]
-            class N(J):
-                __slots__ = ["__weakref__"]
-            class P(J):
-                __slots__ = ["__dict__"]
-            class Q(J):
-                pass
-            class R(J):
-                __slots__ = ["__dict__", "__weakref__"]
+        class G(object):
+            __slots__ = ["a", "b"]
+        class H(object):
+            __slots__ = ["b", "a"]
+        class I(object):
+            __slots__ = ["a", "b"]
+        class J(object):
+            __slots__ = ["c", "b"]
+        class K(object):
+            __slots__ = ["a", "b", "d"]
+        class L(H):
+            __slots__ = ["e"]
+        class M(I):
+            __slots__ = ["e"]
+        class N(J):
+            __slots__ = ["__weakref__"]
+        class P(J):
+            __slots__ = ["__dict__"]
+        class Q(J):
+            pass
+        class R(J):
+            __slots__ = ["__dict__", "__weakref__"]
 
         for cls, cls2 in ((G, H), (G, I), (I, H), (Q, R), (R, Q)):
             x = cls()
@@ -3551,19 +3362,17 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         # Issue5283: when __class__ changes in __del__, the wrong
         # type gets DECREF'd.
-        with torch._dynamo.error_on_graph_break(False):
-            class O(object):
-                pass
-            class A(object):
-                def __del__(self):
-                    self.__class__ = O
+        class O(object):
+            pass
+        class A(object):
+            def __del__(self):
+                self.__class__ = O
         l = [A() for x in range(100)]
         del l
 
     def test_set_dict(self):
         # Testing __dict__ assignment...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object): pass
+        class C(object): pass
         a = C()
         a.__dict__ = {'b': 1}
         self.assertEqual(a.b, 1)
@@ -3579,9 +3388,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         cant(a, 1)
         del a.__dict__ # Deleting __dict__ is allowed
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Base(object):
-                pass
+        class Base(object):
+            pass
         def verify_dict_readonly(x):
             """
             x has to be an instance of a class inheriting from Base.
@@ -3602,15 +3410,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.fail("dict_descr allowed access to %r's dict" % x)
 
         # Classes don't allow __dict__ assignment and have readonly dicts
-        with torch._dynamo.error_on_graph_break(False):
-            class Meta1(type, Base):
-                pass
-            class Meta2(Base, type):
-                pass
-            class D(object, metaclass=Meta1):
-                pass
-            class E(object, metaclass=Meta2):
-                pass
+        class Meta1(type, Base):
+            pass
+        class Meta2(Base, type):
+            pass
+        class D(object, metaclass=Meta1):
+            pass
+        class E(object, metaclass=Meta2):
+            pass
         for cls in C, D, E:
             verify_dict_readonly(cls)
             class_dict = cls.__dict__
@@ -3622,11 +3429,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 self.fail("%r's __dict__ can be modified" % cls)
 
         # Modules also disallow __dict__ assignment
-        with torch._dynamo.error_on_graph_break(False):
-            class Module1(types.ModuleType, Base):
-                pass
-            class Module2(Base, types.ModuleType):
-                pass
+        class Module1(types.ModuleType, Base):
+            pass
+        class Module2(Base, types.ModuleType):
+            pass
         for ModuleType in Module1, Module2:
             mod = ModuleType("spam")
             verify_dict_readonly(mod)
@@ -3643,11 +3449,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                 return False
             else:
                 return True
-        with torch._dynamo.error_on_graph_break(False):
-            class Exception1(Exception, Base):
-                pass
-            class Exception2(Base, Exception):
-                pass
+        class Exception1(Exception, Base):
+            pass
+        class Exception2(Base, Exception):
+            pass
         for ExceptionType in Exception, Exception1, Exception2:
             e = ExceptionType()
             e.__dict__ = {"a": 1}
@@ -3656,23 +3461,22 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_binary_operator_override(self):
         # Testing overrides of binary operations...
-        with torch._dynamo.error_on_graph_break(False):
-            class I(int):
-                def __repr__(self):
-                    return "I(%r)" % int(self)
-                def __add__(self, other):
-                    return I(int(self) + int(other))
-                __radd__ = __add__
-                def __pow__(self, other, mod=None):
-                    if mod is None:
-                        return I(pow(int(self), int(other)))
-                    else:
-                        return I(pow(int(self), int(other), int(mod)))
-                def __rpow__(self, other, mod=None):
-                    if mod is None:
-                        return I(pow(int(other), int(self), mod))
-                    else:
-                        return I(pow(int(other), int(self), int(mod)))
+        class I(int):
+            def __repr__(self):
+                return "I(%r)" % int(self)
+            def __add__(self, other):
+                return I(int(self) + int(other))
+            __radd__ = __add__
+            def __pow__(self, other, mod=None):
+                if mod is None:
+                    return I(pow(int(self), int(other)))
+                else:
+                    return I(pow(int(self), int(other), int(mod)))
+            def __rpow__(self, other, mod=None):
+                if mod is None:
+                    return I(pow(int(other), int(self), mod))
+                else:
+                    return I(pow(int(other), int(self), int(mod)))
 
         self.assertEqual(repr(I(1) + I(2)), "I(3)")
         self.assertEqual(repr(I(1) + 2), "I(3)")
@@ -3681,22 +3485,20 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(repr(2 ** I(3)), "I(8)")
         self.assertEqual(repr(I(2) ** 3), "I(8)")
         self.assertEqual(repr(pow(I(2), I(3), I(5))), "I(3)")
-        with torch._dynamo.error_on_graph_break(False):
-            class S(str):
-                def __eq__(self, other):
-                    return self.lower() == other.lower()
+        class S(str):
+            def __eq__(self, other):
+                return self.lower() == other.lower()
 
     def test_subclass_propagation(self):
         # Testing propagation of slot functions to subclasses...
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                pass
-            class B(A):
-                pass
-            class C(A):
-                pass
-            class D(B, C):
-                pass
+        class A(object):
+            pass
+        class B(A):
+            pass
+        class C(A):
+            pass
+        class D(B, C):
+            pass
         d = D()
         orig_hash = hash(d) # related to id(d) in platform-dependent ways
         A.__hash__ = lambda self: 42
@@ -3756,11 +3558,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("d.foo should be undefined now")
 
         # Test a nasty bug in recurse_down_subclasses()
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                pass
-            class B(A):
-                pass
+        class A(object):
+            pass
+        class B(A):
+            pass
         del B
         support.gc_collect()
         A.__setitem__ = lambda *a: None # crash
@@ -3771,18 +3572,16 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         import binascii
         # SF bug [#470040] ParseTuple t# vs subclasses.
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyBytes(bytes):
-                pass
+        class MyBytes(bytes):
+            pass
         base = b'abc'
         m = MyBytes(base)
         # b2a_hex uses the buffer interface to get its argument's value, via
         # PyArg_ParseTuple 't#' code.
         self.assertEqual(binascii.b2a_hex(m), binascii.b2a_hex(base))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyInt(int):
-                pass
+        class MyInt(int):
+            pass
         m = MyInt(42)
         try:
             binascii.b2a_hex(m)
@@ -3794,12 +3593,11 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Testing __str__ defined in subclass of str ...
         import binascii
 
-        with torch._dynamo.error_on_graph_break(False):
-            class octetstring(str):
-                def __str__(self):
-                    return binascii.b2a_hex(self.encode('ascii')).decode("ascii")
-                def __repr__(self):
-                    return self + " repr"
+        class octetstring(str):
+            def __str__(self):
+                return binascii.b2a_hex(self.encode('ascii')).decode("ascii")
+            def __repr__(self):
+                return self + " repr"
 
         o = octetstring('A')
         self.assertEqual(type(o), octetstring)
@@ -3813,11 +3611,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_repr_with_module_str_subclass(self):
         # gh-98783
-        with torch._dynamo.error_on_graph_break(False):
-            class StrSub(str):
-                pass
-            class Some:
-                pass
+        class StrSub(str):
+            pass
+        class Some:
+            pass
         Some.__module__ = StrSub('example')
         self.assertIsInstance(repr(Some), str)  # should not crash
         self.assertIsInstance(repr(Some()), str)  # should not crash
@@ -3833,9 +3630,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_recursive_call(self):
         # Testing recursive __call__() by setting to instance of class...
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                pass
+        class A(object):
+            pass
 
         A.__call__ = A()
         with self.assertRaises(RecursionError):
@@ -3844,18 +3640,16 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_delete_hook(self):
         # Testing __del__ hook...
         log = []
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __del__(self):
-                    log.append(1)
+        class C(object):
+            def __del__(self):
+                log.append(1)
         c = C()
         self.assertEqual(log, [])
         del c
         support.gc_collect()
         self.assertEqual(log, [1])
 
-        with torch._dynamo.error_on_graph_break(False):
-            class D(object): pass
+        class D(object): pass
         d = D()
         try: del d[0]
         except TypeError: pass
@@ -3864,9 +3658,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_hash_inheritance(self):
         # Testing hash of mutable subclasses...
 
-        with torch._dynamo.error_on_graph_break(False):
-            class mydict(dict):
-                pass
+        class mydict(dict):
+            pass
         d = mydict()
         try:
             hash(d)
@@ -3875,9 +3668,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         else:
             self.fail("hash() of dict subclass should fail")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class mylist(list):
-                pass
+        class mylist(list):
+            pass
         d = mylist()
         try:
             hash(d)
@@ -3934,9 +3726,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_deepcopy_recursive(self):
         # Testing deepcopy of recursive objects...
-        with torch._dynamo.error_on_graph_break(False):
-            class Node:
-                pass
+        class Node:
+            pass
         a = Node()
         b = Node()
         a.b = b
@@ -3957,15 +3748,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_funny_new(self):
         # Testing __new__ returning something unexpected...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __new__(cls, arg):
-                    if isinstance(arg, str): return [1, 2, 3]
-                    elif isinstance(arg, int): return object.__new__(D)
-                    else: return object.__new__(cls)
-            class D(C):
-                def __init__(self, arg):
-                    self.foo = arg
+        class C(object):
+            def __new__(cls, arg):
+                if isinstance(arg, str): return [1, 2, 3]
+                elif isinstance(arg, int): return object.__new__(D)
+                else: return object.__new__(cls)
+        class D(C):
+            def __init__(self, arg):
+                self.foo = arg
         self.assertEqual(C("1"), [1, 2, 3])
         self.assertEqual(D("1"), [1, 2, 3])
         d = D(None)
@@ -3977,35 +3767,30 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertIsInstance(d, D)
         self.assertEqual(d.foo, 1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                @staticmethod
-                def __new__(*args):
-                    return args
+        class C(object):
+            @staticmethod
+            def __new__(*args):
+                return args
         self.assertEqual(C(1, 2), (C, 1, 2))
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         self.assertEqual(D(1, 2), (D, 1, 2))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                @classmethod
-                def __new__(*args):
-                    return args
+        class C(object):
+            @classmethod
+            def __new__(*args):
+                return args
         self.assertEqual(C(1, 2), (C, C, 1, 2))
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
+        class D(C):
+            pass
         self.assertEqual(D(1, 2), (D, D, 1, 2))
 
     def test_imul_bug(self):
         # Testing for __imul__ problems...
         # SF bug 544647
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __imul__(self, other):
-                    return (self, other)
+        class C(object):
+            def __imul__(self, other):
+                return (self, other)
         x = C()
         y = x
         y *= 1.0
@@ -4029,20 +3814,19 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_copy_setstate(self):
         # Testing that copy.*copy() correctly uses __setstate__...
         import copy
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __init__(self, foo=None):
-                    self.foo = foo
-                    self.__foo = foo
-                def setfoo(self, foo=None):
-                    self.foo = foo
-                def getfoo(self):
-                    return self.__foo
-                def __getstate__(self):
-                    return [self.foo]
-                def __setstate__(self_, lst):
-                    self.assertEqual(len(lst), 1)
-                    self_.__foo = self_.foo = lst[0]
+        class C(object):
+            def __init__(self, foo=None):
+                self.foo = foo
+                self.__foo = foo
+            def setfoo(self, foo=None):
+                self.foo = foo
+            def getfoo(self):
+                return self.__foo
+            def __getstate__(self):
+                return [self.foo]
+            def __setstate__(self_, lst):
+                self.assertEqual(len(lst), 1)
+                self_.__foo = self_.foo = lst[0]
         a = C(42)
         a.setfoo(24)
         self.assertEqual(a.foo, 24)
@@ -4061,10 +3845,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual("hello"[:4], "hell")
         self.assertEqual("hello"[slice(4)], "hell")
         self.assertEqual(str.__getitem__("hello", slice(4)), "hell")
-        with torch._dynamo.error_on_graph_break(False):
-            class S(str):
-                def __getitem__(self, x):
-                    return str.__getitem__(self, x)
+        class S(str):
+            def __getitem__(self, x):
+                return str.__getitem__(self, x)
         self.assertEqual(S("hello")[:4], "hell")
         self.assertEqual(S("hello")[slice(4)], "hell")
         self.assertEqual(S("hello").__getitem__(slice(4)), "hell")
@@ -4072,10 +3855,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual((1,2,3)[:2], (1,2))
         self.assertEqual((1,2,3)[slice(2)], (1,2))
         self.assertEqual(tuple.__getitem__((1,2,3), slice(2)), (1,2))
-        with torch._dynamo.error_on_graph_break(False):
-            class T(tuple):
-                def __getitem__(self, x):
-                    return tuple.__getitem__(self, x)
+        class T(tuple):
+            def __getitem__(self, x):
+                return tuple.__getitem__(self, x)
         self.assertEqual(T((1,2,3))[:2], (1,2))
         self.assertEqual(T((1,2,3))[slice(2)], (1,2))
         self.assertEqual(T((1,2,3)).__getitem__(slice(2)), (1,2))
@@ -4083,10 +3865,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual([1,2,3][:2], [1,2])
         self.assertEqual([1,2,3][slice(2)], [1,2])
         self.assertEqual(list.__getitem__([1,2,3], slice(2)), [1,2])
-        with torch._dynamo.error_on_graph_break(False):
-            class L(list):
-                def __getitem__(self, x):
-                    return list.__getitem__(self, x)
+        class L(list):
+            def __getitem__(self, x):
+                return list.__getitem__(self, x)
         self.assertEqual(L([1,2,3])[:2], [1,2])
         self.assertEqual(L([1,2,3])[slice(2)], [1,2])
         self.assertEqual(L([1,2,3]).__getitem__(slice(2)), [1,2])
@@ -4104,15 +3885,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_subtype_resurrection(self):
         # Testing resurrection of new-style instance...
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                container = []
+        class C(object):
+            container = []
 
-                def __del__(self):
-                    # resurrect the instance
-                    C.container.append(self)
+            def __del__(self):
+                # resurrect the instance
+                C.container.append(self)
 
-            c = C()
+        c = C()
         c.attr = 42
 
         # The most interesting thing here is whether this blows up, due to
@@ -4141,13 +3921,12 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_slots_multiple_inheritance(self):
         # SF bug 575229, multiple inheritance w/ slots dumps core
-        with torch._dynamo.error_on_graph_break(False):
-            class A(object):
-                __slots__=()
-            class B(object):
-                pass
-            class C(A,B) :
-                __slots__=()
+        class A(object):
+            __slots__=()
+        class B(object):
+            pass
+        class C(A,B) :
+            __slots__=()
         if support.check_impl_detail():
             self.assertEqual(C.__basicsize__, B.__basicsize__)
         self.assertHasAttr(C, '__dict__')
@@ -4157,12 +3936,11 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_rmul(self):
         # Testing correct invocation of __rmul__...
         # SF patch 592646
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __mul__(self, other):
-                    return "mul"
-                def __rmul__(self, other):
-                    return "rmul"
+        class C(object):
+            def __mul__(self, other):
+                return "mul"
+            def __rmul__(self, other):
+                return "rmul"
         a = C()
         self.assertEqual(a*2, "mul")
         self.assertEqual(a*2.2, "mul")
@@ -4172,26 +3950,24 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_ipow(self):
         # Testing correct invocation of __ipow__...
         # [SF bug 620179]
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __ipow__(self, other):
-                    pass
+        class C(object):
+            def __ipow__(self, other):
+                pass
         a = C()
         a **= 2
 
     def test_ipow_returns_not_implemented(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __ipow__(self, other):
-                    return NotImplemented
+        class A:
+            def __ipow__(self, other):
+                return NotImplemented
 
-            class B(A):
-                def __rpow__(self, other):
-                    return 1
+        class B(A):
+            def __rpow__(self, other):
+                return 1
 
-            class C(A):
-                def __pow__(self, other):
-                    return 2
+        class C(A):
+            def __pow__(self, other):
+                return 2
         a = A()
         b = B()
         c = C()
@@ -4203,10 +3979,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(c, 2)
 
     def test_no_ipow(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                def __rpow__(self, other):
-                    return 1
+        class B:
+            def __rpow__(self, other):
+                return 1
 
         a = object()
         b = B()
@@ -4227,21 +4002,20 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # Testing mutable bases...
 
         # stuff that should work:
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                pass
-            class C2(object):
-                def __getattribute__(self, attr):
-                    if attr == 'a':
-                        return 2
-                    else:
-                        return super(C2, self).__getattribute__(attr)
-                def meth(self):
-                    return 1
-            class D(C):
-                pass
-            class E(D):
-                pass
+        class C(object):
+            pass
+        class C2(object):
+            def __getattribute__(self, attr):
+                if attr == 'a':
+                    return 2
+                else:
+                    return super(C2, self).__getattribute__(attr)
+            def meth(self):
+                return 1
+        class D(C):
+            pass
+        class E(D):
+            pass
         d = D()
         e = E()
         D.__bases__ = (C,)
@@ -4303,15 +4077,14 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
                     num_bases = 1
                 self.assertEqual(len(tp.__bases__), num_bases, tp)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class L(list):
-                pass
+        class L(list):
+            pass
 
-            class C(object):
-                pass
+        class C(object):
+            pass
 
-            class D(C):
-                pass
+        class D(C):
+            pass
 
         try:
             L.__bases__ = (dict,)
@@ -4336,32 +4109,25 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_unsubclassable_types(self):
         with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class X(type(None)):
-                    pass
-        with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class X(object, type(None)):
-                    pass
-        with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class X(type(None), object):
-                    pass
-        with torch._dynamo.error_on_graph_break(False):
-            class O(object):
+            class X(type(None)):
                 pass
         with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class X(O, type(None)):
-                    pass
+            class X(object, type(None)):
+                pass
         with self.assertRaises(TypeError):
-            with torch._dynamo.error_on_graph_break(False):
-                class X(type(None), O):
-                    pass
+            class X(type(None), object):
+                pass
+        class O(object):
+            pass
+        with self.assertRaises(TypeError):
+            class X(O, type(None)):
+                pass
+        with self.assertRaises(TypeError):
+            class X(type(None), O):
+                pass
 
-        with torch._dynamo.error_on_graph_break(False):
-            class X(object):
-                pass
+        class X(object):
+            pass
         with self.assertRaises(TypeError):
             X.__bases__ = type(None),
         with self.assertRaises(TypeError):
@@ -4374,44 +4140,43 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             X.__bases__ = type(None), O
 
     def test_mutable_bases_with_failing_mro(self):
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing mutable bases with failing mro...
-            class WorkOnce(type):
-                def __new__(self, name, bases, ns):
-                    self.flag = 0
-                    return super(WorkOnce, self).__new__(WorkOnce, name, bases, ns)
-                def mro(self):
-                    if self.flag > 0:
-                        raise RuntimeError("bozo")
-                    else:
-                        self.flag += 1
-                        return type.mro(self)
-
-            class WorkAlways(type):
-                def mro(self):
-                    # this is here to make sure that .mro()s aren't called
-                    # with an exception set (which was possible at one point).
-                    # An error message will be printed in a debug build.
-                    # What's a good way to test for this?
+        # Testing mutable bases with failing mro...
+        class WorkOnce(type):
+            def __new__(self, name, bases, ns):
+                self.flag = 0
+                return super(WorkOnce, self).__new__(WorkOnce, name, bases, ns)
+            def mro(self):
+                if self.flag > 0:
+                    raise RuntimeError("bozo")
+                else:
+                    self.flag += 1
                     return type.mro(self)
 
-            class C(object):
-                pass
+        class WorkAlways(type):
+            def mro(self):
+                # this is here to make sure that .mro()s aren't called
+                # with an exception set (which was possible at one point).
+                # An error message will be printed in a debug build.
+                # What's a good way to test for this?
+                return type.mro(self)
 
-            class C2(object):
-                pass
+        class C(object):
+            pass
 
-            class D(C):
-                pass
+        class C2(object):
+            pass
 
-            class E(D):
-                pass
+        class D(C):
+            pass
 
-            class F(D, metaclass=WorkOnce):
-                pass
+        class E(D):
+            pass
 
-            class G(D, metaclass=WorkAlways):
-                pass
+        class F(D, metaclass=WorkOnce):
+            pass
+
+        class G(D, metaclass=WorkAlways):
+            pass
 
         # Immediate subclasses have their mro's adjusted in alphabetical
         # order, so E's will get adjusted before adjusting F's fails.  We
@@ -4429,22 +4194,21 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("exception not propagated")
 
     def test_mutable_bases_catch_mro_conflict(self):
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing mutable bases catch mro conflict...
-            class A(object):
-                pass
+        # Testing mutable bases catch mro conflict...
+        class A(object):
+            pass
 
-            class B(object):
-                pass
+        class B(object):
+            pass
 
-            class C(A, B):
-                pass
+        class C(A, B):
+            pass
 
-            class D(A, B):
-                pass
+        class D(A, B):
+            pass
 
-            class E(C, D):
-                pass
+        class E(C, D):
+            pass
 
         try:
             C.__bases__ = (B, A)
@@ -4455,9 +4219,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_mutable_names(self):
         # Testing mutable names...
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                pass
+        class C(object):
+            pass
 
         # C.__module__ could be 'test_descr' or '__main__'
         mod = C.__module__
@@ -4578,70 +4341,65 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("shouldn't have allowed descr.__get__(None, int)")
 
     def test_isinst_isclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            # Testing proxy isinstance() and isclass()...
-            class Proxy(object):
-                def __init__(self, obj):
-                    self.__obj = obj
-                def __getattribute__(self, name):
-                    if name.startswith("_Proxy__"):
-                        return object.__getattribute__(self, name)
-                    else:
-                        return getattr(self.__obj, name)
-            # Test with a classic class
-            class C:
-                pass
-            a = C()
-            pa = Proxy(a)
+        # Testing proxy isinstance() and isclass()...
+        class Proxy(object):
+            def __init__(self, obj):
+                self.__obj = obj
+            def __getattribute__(self, name):
+                if name.startswith("_Proxy__"):
+                    return object.__getattribute__(self, name)
+                else:
+                    return getattr(self.__obj, name)
+        # Test with a classic class
+        class C:
+            pass
+        a = C()
+        pa = Proxy(a)
         self.assertIsInstance(a, C)  # Baseline
         self.assertIsInstance(pa, C) # Test
-        with torch._dynamo.error_on_graph_break(False):
-            # Test with a classic subclass
-            class D(C):
-                pass
-            a = D()
-            pa = Proxy(a)
+        # Test with a classic subclass
+        class D(C):
+            pass
+        a = D()
+        pa = Proxy(a)
         self.assertIsInstance(a, C)  # Baseline
         self.assertIsInstance(pa, C) # Test
-        with torch._dynamo.error_on_graph_break(False):
-            # Test with a new-style class
-            class C(object):
-                pass
-            a = C()
-            pa = Proxy(a)
+        # Test with a new-style class
+        class C(object):
+            pass
+        a = C()
+        pa = Proxy(a)
         self.assertIsInstance(a, C)  # Baseline
         self.assertIsInstance(pa, C) # Test
         # Test with a new-style subclass
-        with torch._dynamo.error_on_graph_break(False):
-            class D(C):
-                pass
-            a = D()
-            pa = Proxy(a)
+        class D(C):
+            pass
+        a = D()
+        pa = Proxy(a)
         self.assertIsInstance(a, C)  # Baseline
         self.assertIsInstance(pa, C) # Test
 
     def test_proxy_super(self):
         # Testing super() for a proxy object...
-        with torch._dynamo.error_on_graph_break(False):
-            class Proxy(object):
-                def __init__(self, obj):
-                    self.__obj = obj
-                def __getattribute__(self, name):
-                    if name.startswith("_Proxy__"):
-                        return object.__getattribute__(self, name)
-                    else:
-                        return getattr(self.__obj, name)
+        class Proxy(object):
+            def __init__(self, obj):
+                self.__obj = obj
+            def __getattribute__(self, name):
+                if name.startswith("_Proxy__"):
+                    return object.__getattribute__(self, name)
+                else:
+                    return getattr(self.__obj, name)
 
-            class B(object):
-                def f(self):
-                    return "B.f"
+        class B(object):
+            def f(self):
+                return "B.f"
 
-            class C(B):
-                def f(self):
-                    return super(C, self).f() + "->C.f"
+        class C(B):
+            def f(self):
+                return super(C, self).f() + "->C.f"
 
-            obj = C()
-            p = Proxy(obj)
+        obj = C()
+        p = Proxy(obj)
         self.assertEqual(C.__dict__["f"](p), "B.f->C.f")
 
     def test_carloverre(self):
@@ -4660,36 +4418,34 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.fail("Carlo Verre __delattr__ succeeded!")
 
     def test_carloverre_multi_inherit_valid(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A(type):
-                def __setattr__(cls, key, value):
-                    type.__setattr__(cls, key, value)
+        class A(type):
+            def __setattr__(cls, key, value):
+                type.__setattr__(cls, key, value)
 
-            class B:
-                pass
+        class B:
+            pass
 
-            class C(B, A):
-                pass
+        class C(B, A):
+            pass
 
-            obj = C('D', (object,), {})
+        obj = C('D', (object,), {})
         try:
             obj.test = True
         except TypeError:
             self.fail("setattr through direct base types should be legal")
 
     def test_carloverre_multi_inherit_invalid(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A(type):
-                def __setattr__(cls, key, value):
-                    object.__setattr__(cls, key, value)  # this should fail!
+        class A(type):
+            def __setattr__(cls, key, value):
+                object.__setattr__(cls, key, value)  # this should fail!
 
-            class B:
-                pass
+        class B:
+            pass
 
-            class C(B, A):
-                pass
+        class C(B, A):
+            pass
 
-            obj = C('D', (object,), {})
+        obj = C('D', (object,), {})
         try:
             obj.test = True
         except TypeError:
@@ -4912,42 +4668,39 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # tp->tp_as_sequence->sq_slice instead of
         # tp->tp_as_sequence->sq_ass_slice
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                def __setitem__(self, idx, value):
-                    self.value = value
+        class C(object):
+            def __setitem__(self, idx, value):
+                self.value = value
 
-            c = C()
+        c = C()
         c[1:2] = 3
         self.assertEqual(c.value, 3)
 
     def test_set_and_no_get(self):
         # See
         # http://mail.python.org/pipermail/python-dev/2010-January/095637.html
-        with torch._dynamo.error_on_graph_break(False):
-            class Descr(object):
+        class Descr(object):
 
-                def __init__(self, name):
-                    self.name = name
+            def __init__(self, name):
+                self.name = name
 
-                def __set__(self, obj, value):
-                    obj.__dict__[self.name] = value
-            descr = Descr("a")
+            def __set__(self, obj, value):
+                obj.__dict__[self.name] = value
+        descr = Descr("a")
 
-            class X(object):
-                a = descr
+        class X(object):
+            a = descr
 
         x = X()
         self.assertIs(x.a, descr)
         x.a = 42
         self.assertEqual(x.a, 42)
-        with torch._dynamo.error_on_graph_break(False):
 
-            # Also check type_getattro for correctness.
-            class Meta(type):
-                pass
-            class X(metaclass=Meta):
-                pass
+        # Also check type_getattro for correctness.
+        class Meta(type):
+            pass
+        class X(metaclass=Meta):
+            pass
         X.a = 42
         Meta.a = Descr("a")
         self.assertEqual(X.a, 42)
@@ -4955,23 +4708,22 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_getattr_hooks(self):
         # issue 4230
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Descriptor(object):
-                counter = 0
-                def __get__(self, obj, objtype=None):
-                    def getter(name):
-                        self.counter += 1
-                        raise AttributeError(name)
-                    return getter
+        class Descriptor(object):
+            counter = 0
+            def __get__(self, obj, objtype=None):
+                def getter(name):
+                    self.counter += 1
+                    raise AttributeError(name)
+                return getter
 
-            descr = Descriptor()
-            class A(object):
-                __getattribute__ = descr
-            class B(object):
-                __getattr__ = descr
-            class C(object):
-                __getattribute__ = descr
-                __getattr__ = descr
+        descr = Descriptor()
+        class A(object):
+            __getattribute__ = descr
+        class B(object):
+            __getattr__ = descr
+        class C(object):
+            __getattribute__ = descr
+            __getattr__ = descr
 
         self.assertRaises(AttributeError, getattr, A(), "attr")
         self.assertEqual(descr.counter, 1)
@@ -4980,16 +4732,15 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertRaises(AttributeError, getattr, C(), "attr")
         self.assertEqual(descr.counter, 4)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class EvilGetattribute(object):
-                # This used to segfault
-                def __getattr__(self, name):
-                    raise AttributeError(name)
-                def __getattribute__(self, name):
-                    del EvilGetattribute.__getattr__
-                    for i in range(5):
-                        gc.collect()
-                    raise AttributeError(name)
+        class EvilGetattribute(object):
+            # This used to segfault
+            def __getattr__(self, name):
+                raise AttributeError(name)
+            def __getattribute__(self, name):
+                del EvilGetattribute.__getattr__
+                for i in range(5):
+                    gc.collect()
+                raise AttributeError(name)
 
         self.assertRaises(AttributeError, getattr, EvilGetattribute(), "attr")
 
@@ -4999,13 +4750,11 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_abstractmethods(self):
         # type pretends not to have __abstractmethods__.
         self.assertRaises(AttributeError, getattr, type, "__abstractmethods__")
-        with torch._dynamo.error_on_graph_break(False):
-            class meta(type):
-                pass
+        class meta(type):
+            pass
         self.assertRaises(AttributeError, getattr, meta, "__abstractmethods__")
-        with torch._dynamo.error_on_graph_break(False):
-            class X(object):
-                pass
+        class X(object):
+            pass
         with self.assertRaises(AttributeError):
             del X.__abstractmethods__
 
@@ -5024,9 +4773,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             MyClass = meta('MyClass', (), {})
 
     def test_proxy_call(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class FakeStr:
-                __class__ = str
+        class FakeStr:
+            __class__ = str
 
         fake_str = FakeStr()
         # isinstance() reads __class__
@@ -5078,11 +4826,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertRaises(RecursionError, repr, foo)
 
     def test_mixing_slot_wrappers(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class X(dict):
-                __setattr__ = dict.__setitem__
-                __neg__ = dict.copy
-            x = X()
+        class X(dict):
+            __setattr__ = dict.__setitem__
+            __neg__ = dict.copy
+        x = X()
         x.y = 42
         self.assertEqual(x["y"], 42)
         self.assertEqual(x, -x)
@@ -5090,11 +4837,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
     def test_wrong_class_slot_wrapper(self):
         # Check bpo-37619: a wrapper descriptor taken from the wrong class
         # should raise an exception instead of silently being ignored
-        with torch._dynamo.error_on_graph_break(False):
-            class A(int):
-                __eq__ = str.__eq__
-                __add__ = str.__add__
-            a = A()
+        class A(int):
+            __eq__ = str.__eq__
+            __add__ = str.__add__
+        a = A()
         with self.assertRaises(TypeError):
             a == a
         with self.assertRaises(TypeError):
@@ -5109,9 +4855,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual("'foo' in __slots__ conflicts with class variable", m)
 
     def test_set_doc(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class X:
-                "elephant"
+        class X:
+            "elephant"
         X.__doc__ = "banana"
         self.assertEqual(X.__doc__, "banana")
 
@@ -5141,9 +4886,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         self.assertEqual(float.real.__qualname__, 'float.real')
         self.assertEqual(int.__add__.__qualname__, 'int.__add__')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class X:
-                pass
+        class X:
+            pass
         with self.assertRaises(TypeError):
             del X.__qualname__
 
@@ -5152,10 +4896,9 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         global Y
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Y:
-                class Inside:
-                    pass
+        class Y:
+            class Inside:
+                pass
         self.assertEqual(Y.__qualname__, 'Y')
         self.assertEqual(Y.Inside.__qualname__, 'Y.Inside')
 
@@ -5186,22 +4929,20 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
     def test_object_new_and_init_with_parameters(self):
         # See issue #1683368
-        with torch._dynamo.error_on_graph_break(False):
-            class OverrideNeither:
-                pass
+        class OverrideNeither:
+            pass
 
         self.assertRaises(TypeError, OverrideNeither, 1)
         self.assertRaises(TypeError, OverrideNeither, kw=1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class OverrideNew:
-                def __new__(cls, foo, kw=0, *args, **kwds):
-                    return object.__new__(cls, *args, **kwds)
-            class OverrideInit:
-                def __init__(self, foo, kw=0, *args, **kwargs):
-                    return object.__init__(self, *args, **kwargs)
-            class OverrideBoth(OverrideNew, OverrideInit):
-                pass
+        class OverrideNew:
+            def __new__(cls, foo, kw=0, *args, **kwds):
+                return object.__new__(cls, *args, **kwds)
+        class OverrideInit:
+            def __init__(self, foo, kw=0, *args, **kwargs):
+                return object.__init__(self, *args, **kwargs)
+        class OverrideBoth(OverrideNew, OverrideInit):
+            pass
 
         for case in OverrideNew, OverrideInit, OverrideBoth:
             case(1)
@@ -5210,11 +4951,10 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
             self.assertRaises(TypeError, case, 1, 2, foo=3)
 
     def test_subclassing_does_not_duplicate_dict_descriptors(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Base:
-                pass
-            class Sub(Base):
-                pass
+        class Base:
+            pass
+        class Sub(Base):
+            pass
         self.assertIn("__dict__", Base.__dict__)
         self.assertNotIn("__dict__", Sub.__dict__)
 
@@ -5394,14 +5134,13 @@ class DictProxyTests(CPythonTestCase):
 
     def test_dict_type_with_metaclass(self):
         # Testing type of __dict__ when metaclass set...
-        with torch._dynamo.error_on_graph_break(False):
-            class B(object):
-                pass
-            class M(type):
-                pass
-            class C(metaclass=M):
-                # In 2.3a1, C.__dict__ was a real dict rather than a dict proxy
-                pass
+        class B(object):
+            pass
+        class M(type):
+            pass
+        class C(metaclass=M):
+            # In 2.3a1, C.__dict__ was a real dict rather than a dict proxy
+            pass
         self.assertEqual(type(C.__dict__), type(B.__dict__))
 
     def test_repr(self):
