@@ -1,0 +1,106 @@
+{
+  "description": "Labels the distributed triage sub-skill is allowed to apply. Subset of the main labels.json.",
+  "repo": "pytorch/pytorch",
+  "labels": [
+    {
+      "name": "oncall: distributed parallelisms",
+      "description": "Distributed parallelisms oncall (FSDP, DDP, DTensor, DeviceMesh, tensor parallel, context parallel, pipeline parallel, symmetric memory)"
+    },
+    {
+      "name": "oncall: distributed infra",
+      "description": "Distributed infrastructure oncall (c10d, process groups, NCCL/Gloo/MPI backends, elastic, torchrun, stores)"
+    },
+    {
+      "name": "oncall: distributed checkpointing",
+      "description": "Oncall label should be attached to any issues related to distributed checkpointing."
+    },
+    {
+      "name": "module: fsdp",
+      "description": "FullyShardedDataParallel (FSDP1 and FSDP2)"
+    },
+    {
+      "name": "module: ddp",
+      "description": "DistributedDataParallel"
+    },
+    {
+      "name": "module: dtensor",
+      "description": "Distributed Tensor"
+    },
+    {
+      "name": "module: c10d",
+      "description": "Process groups, collectives, stores, and communication backends"
+    },
+    {
+      "name": "module: DeviceMesh",
+      "description": "Device mesh abstraction"
+    },
+    {
+      "name": "module: pipelining",
+      "description": "Pipeline parallelism"
+    },
+    {
+      "name": "module: rpc",
+      "description": "RPC, distributed autograd, RRef"
+    },
+    {
+      "name": "module: nccl",
+      "description": "NCCL backend issues"
+    },
+    {
+      "name": "module: elastic",
+      "description": "TorchElastic / torchelastic"
+    },
+    {
+      "name": "module: data parallel",
+      "description": "Legacy DataParallel (NOT DistributedDataParallel)"
+    },
+    {
+      "name": "module: symm_mem",
+      "description": "Symmetric memory"
+    },
+    {
+      "name": "module: context parallel",
+      "description": "Context parallelism"
+    },
+    {
+      "name": "module: activation checkpointing",
+      "description": "Activation checkpointing (when used with distributed)"
+    },
+    {
+      "name": "module: mpi",
+      "description": "MPI backend"
+    },
+    {
+      "name": "module: threaded pg",
+      "description": "Multi-threaded process group"
+    },
+    {
+      "name": "module: distributed_tool",
+      "description": "Tools to help distributed training"
+    },
+    {
+      "name": "ptd-bot-triaged",
+      "description": "Issue has been triaged by the distributed triage bot"
+    },
+    {
+      "name": "feature",
+      "description": "Wholly new functionality that does not exist today"
+    },
+    {
+      "name": "enhancement",
+      "description": "Improvement to something that already works"
+    },
+    {
+      "name": "module: performance",
+      "description": "Issues related to performance"
+    },
+    {
+      "name": "triage review",
+      "description": "Needs human review"
+    },
+    {
+      "name": "needs reproduction",
+      "description": "Needs a minimal reproduction script"
+    }
+  ]
+}
