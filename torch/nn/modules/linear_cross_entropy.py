@@ -524,6 +524,19 @@ def _linear_cross_entropy_batch_chunked(
     input_grad_uses_logits_lw = (
         is_cuda and compute_input_grad and logits_buf_dtype != grad_input_dtype
     )
+    # Per-iter `logits.to(linear_weight.dtype)` is needed by:
+    # - The input-grad addmm (input_grad_uses_logits_lw).
+    # - The lowmemory weight-grad mm Part 1 when logits is in a
+    #   wider dtype than grad_linear_weight (cuBLAS rejects fp32
+    #   inputs with bf16 out_dtype).
+    # In every config where both fire, the target dtype is the same
+    # (linear_weight.dtype == grad_linear_weight.dtype in memory-like
+    # layouts), so a single cast is shared.
+    need_logits_cast_per_iter = input_grad_uses_logits_lw or (
+        compute_linear_weight_grad
+        and not keep_weight_grad_chunk
+        and logits_buf_dtype != grad_linear_weight_dtype
+    )
 
     # chunking along batches dimension:
     for bchunk_start, bchunk_size in _chunk_iter(num_batches, batch_chunk_size):
@@ -573,6 +586,14 @@ def _linear_cross_entropy_batch_chunked(
 
         output.sub_(weight_chunk.dot(softmax_denom.log_()))
 
+        # Pre-cast logits to linear_weight.dtype if any of the
+        # downstream addmms (lowmemory weight-grad mm, or input-grad
+        # storage-trick replacement) needs it. Doing this once and
+        # sharing avoids two separate per-iteration casts.
+        logits_cast = (
+            logits.to(linear_weight.dtype) if need_logits_cast_per_iter else logits
+        )
+
         # ----- Weight-grad mm (Part 1): consumes logits in logits_buf.dtype -----
         # Split from the accumulation step so the input-grad branch
         # below can reuse logits_buf's storage as a bf16 view.
@@ -597,21 +618,15 @@ def _linear_cross_entropy_batch_chunked(
                     torch.mm(
                         logits_acc_chunk.T, input_chunk_acc, out=weight_grad_chunk
                     )
-            elif logits.dtype == grad_linear_weight.dtype:
-                # Same dtype throughout (non-acc_dtype, or fp16+memory
-                # CUDA when invoked under "lowmemory"): simple in-place
-                # addmm_. cuBLAS Tensor Cores still use fp32 internally.
-                grad_linear_weight.addmm_(logits.T, input_chunk, alpha=-1)
             else:
-                # CUDA mixed-dtype lowmemory: cuBLAS keeps fp32
-                # internally; quantize once to grad_lw.dtype on store.
-                torch.addmm(
-                    grad_linear_weight,
-                    logits.T,
-                    input_chunk_acc,
-                    alpha=-1,
-                    out_dtype=grad_linear_weight.dtype,
-                    out=grad_linear_weight,
+                # Direct in-place addmm into grad_linear_weight.
+                # cuBLAS Tensor Cores use an fp32 internal accumulator
+                # regardless of operand dtype, giving the same
+                # precision as the keep_weight_grad_chunk path's
+                # fp32 mm + cast. logits_cast already matches
+                # grad_linear_weight.dtype when a cast is needed.
+                grad_linear_weight.addmm_(
+                    logits_cast.T, input_chunk, alpha=-1
                 )
 
         # ----- Input-grad: lw_cast[target]*w - logits @ lw_cast -----
@@ -629,15 +644,13 @@ def _linear_cross_entropy_batch_chunked(
             )
 
             # Second term: subtract logits @ linear_weight_cast.
-            # On CUDA mixed-dtype (bf16+memory): cast logits to
-            # linear_weight.dtype so all addmm operands match (cuBLAS
-            # is dtype-strict). The .to() allocates a fresh bf16/fp16
-            # tensor; the CUDA caching allocator reuses the same slot
-            # across iterations, so peak memory does not grow with
-            # the loop. (An earlier in-place storage view of
-            # logits_buf hits PyTorch's copy_ aliasing check.)
+            # On CUDA mixed-dtype, logits_cast is the pre-cast bf16
+            # view of logits (shared with Part 1 above). cuBLAS is
+            # dtype-strict, so the cast is required; the caching
+            # allocator reuses the same slot across iterations, so
+            # peak memory does not grow with the loop.
             if input_grad_uses_logits_lw:
-                mat1, mat2 = logits.to(linear_weight.dtype), linear_weight
+                mat1, mat2 = logits_cast, linear_weight
             else:
                 mat1, mat2 = logits, linear_weight_cast
             torch.addmm(grad_input_chunk, mat1, mat2, alpha=-1, out=grad_input_chunk)
