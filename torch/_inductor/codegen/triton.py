@@ -291,23 +291,13 @@ class TritonSymbols:
             ):
                 var_shape = ()
             else:
-                symbol_matches = [
-                    symt for symt in cls.block_types if symbol_is_type(var, symt)
-                ]
-                assert len(symbol_matches) == 1, f"Ambiguous type: {var.name}"
-
-                sym = symbol_matches[0]
+                node = V.kernel.range_tree_nodes.get(var)
+                assert node is not None, f"Unregistered range symbol: {var.name}"
+                tree = node.root
                 ndim = V.kernel.triton_tensor_ndim()
                 shape = ["1"] * ndim
-
-                tree_match = [
-                    tree
-                    for tree in V.kernel.active_range_trees()
-                    if prefix_str[sym] == tree.prefix
-                ]
-                assert len(tree_match) == 1, "# of Match expected to 1"
-
-                shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
+                assert tree.tensor_dim is not None
+                shape[tree.tensor_dim] = str(cls.get_block_size(tree))
                 var_shape = tuple(shape)
 
             # Union current variable shape
