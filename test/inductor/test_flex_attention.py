@@ -4134,6 +4134,63 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @common_utils.parametrize("case", ["offset", "stride"])
+    def test_cutedsl_captured_alias_views_keep_distinct_layouts(self, device, case):
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        match case:
+            case "offset":
+                base = torch.randn((1, 2, 128, 256), device=device, dtype=torch.float32)
+                expected_reinterpret_tensors = [
+                    "(65536, 32768, 256, 1), 0)",
+                    "(65536, 32768, 256, 1), 128)",
+                ]
+            case "stride":
+                base = torch.randn((1, 2, 256, 128), device=device, dtype=torch.float32)
+                expected_reinterpret_tensors = [
+                    "(65536, 32768, 128, 1), 0)",
+                    "(65536, 32768, 256, 1), 0)",
+                ]
+            case _:
+                raise AssertionError(case)
+
+        def fn(q, k, v, base):
+            match case:
+                case "offset":
+                    left = base[:, :, :, :128]
+                    right = base[:, :, :, 128:]
+                case "stride":
+                    left = base[:, :, :128, :]
+                    right = base[:, :, ::2, :]
+                case _:
+                    raise AssertionError(case)
+
+            def score_mod(score, b, h, m, n):
+                return score + left[b, h, m, n] + right[b, h, m, n]
+
+            return flex_attention(
+                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v, base)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), q, k, v, base
+        )
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+        src = "\n".join(code)
+        for expected_reinterpret_tensor in expected_reinterpret_tensors:
+            self.assertIn(expected_reinterpret_tensor, src)
+
+    @supported_platform
+    @skip_on_cpu
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
