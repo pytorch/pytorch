@@ -552,6 +552,7 @@ coverage_ignore_functions = [
     "get_remote_module_template",
     # torch.distributed.optim.utils
     "as_functional_optim",
+    "register_functional_optim",
     # torch.distributed.rendezvous
     "rendezvous",
     # torch.distributed.rpc.api
