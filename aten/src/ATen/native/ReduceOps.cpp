@@ -1475,6 +1475,21 @@ Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tens
   return at::mean_out(result, self, IntArrayRef{}, false, dtype);
 }
 
+static void check_nanmean_dtype(
+    const Tensor& self,
+    const std::optional<ScalarType>& opt_dtype) {
+  TORCH_CHECK(
+      self.is_floating_point() || self.is_complex(),
+      "nanmean(): expected input to have floating point or complex dtype but got ",
+      self.scalar_type());
+  if (opt_dtype.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(*opt_dtype) || at::isComplexType(*opt_dtype),
+        "nanmean(): could not infer output dtype. Optional dtype must be either a floating point or complex dtype. Got: ",
+        *opt_dtype);
+  }
+}
+
 // TODO(@heitorschueroff) implement custom kernels for nanmean
 Tensor& nanmean_out(
     const Tensor& self,
@@ -1482,21 +1497,7 @@ Tensor& nanmean_out(
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
-  // Check if input dtype is an integral type or Bool and raise an error
-  TORCH_CHECK(
-    !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
-    "nanmean(): integral types and 'Bool' are not supported for nanmean, even for empty tensors.");
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
-  // Check if opt_dtype (output dtype) is valid - must be floating point or complex
-  if (opt_dtype.has_value()) {
-    TORCH_CHECK(
-        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
-        "nanmean(): could not infer output dtype. Optional dtype must be either a floating point or complex dtype. Got: ",
-        opt_dtype.value());
-  }
+  check_nanmean_dtype(self, opt_dtype);
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
   at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
@@ -1507,17 +1508,7 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
-  // Check if opt_dtype (output dtype) is valid - must be floating point or complex
-  if (opt_dtype.has_value()) {
-    TORCH_CHECK(
-        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
-        "nanmean(): could not infer output dtype. Optional dtype must be either a floating point or complex dtype. Got: ",
-        opt_dtype.value());
-  }
+  check_nanmean_dtype(self, opt_dtype);
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);

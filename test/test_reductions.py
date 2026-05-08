@@ -2355,6 +2355,21 @@ class TestReductions(TestCase):
             ):
                 torch.nanmean(t)
 
+    @onlyCPU
+    @dtypes(*integral_types_and(torch.bool))
+    def test_nanmean_opt_dtype_integral(self, device, dtype):
+        # Regression test for #131043: nanmean(empty_tensor, dtype=int) used to
+        # silently return nan while the non-empty case errored cryptically. Both
+        # paths should raise the same dtype-validation error, matching mean().
+        for shape in [(0,), (0, 3), (3,), (2, 3)]:
+            t = make_tensor(shape, dtype=torch.float32, device=device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"nanmean\(\): could not infer output dtype\. Optional dtype must be "
+                r"either a floating point or complex dtype\. Got: \w+"
+            ):
+                torch.nanmean(t, dtype=dtype)
+
     @skipIfMPS
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
