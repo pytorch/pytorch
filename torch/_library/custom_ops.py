@@ -633,10 +633,16 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
-        lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
-        if utils.has_kwarg_only_tensors(cpp_schema):
+        self._validate_schema(cpp_schema, schema_str)
+        self._define_dispatcher_op(schema_str, tags)
+        self._register_fake_dispatcher_impl()
+        self._register_autograd_dispatcher_impl()
+        self._register_adinplaceorview_dispatcher_impl()
+
+    def _validate_schema(self, schema: _C.FunctionSchema, schema_str: str) -> None:
+        if utils.has_kwarg_only_tensors(schema):
             # If you want to support this, the progression is:
             # - supporting kwarg-only Tensors that are non-differentiable
             # - supporting kwarg-only Tensors (regardless of differentiability)
@@ -645,12 +651,14 @@ class CustomOpDef:
                 f"tensors not kwarg-only. Got: {schema_str}"
             )
 
-        lib.define(
+    def _define_dispatcher_op(self, schema_str: str, tags: Sequence[_C.Tag]) -> None:
+        self._lib.define(
             schema_str,
             tags=[_C.Tag.pt2_compliant_tag, *tags],
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
+    def _register_fake_dispatcher_impl(self) -> None:
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
@@ -665,45 +673,52 @@ class CustomOpDef:
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        lib._register_fake(self._name, fake_impl, _stacklevel=4)
+        self._lib._register_fake(self._name, fake_impl, _stacklevel=5)
 
+    def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
-        lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
-        schema = self._opoverload._schema
+        self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
-        if schema._is_view_op() or schema.is_mutable:
-            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
+    def _register_adinplaceorview_dispatcher_impl(self) -> None:
+        schema = self._opoverload._schema
+        if not (schema._is_view_op() or schema.is_mutable):
+            return
+
+        self._lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
 
         if schema.is_mutable:
-            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
+            self._register_mutation_version_bump(schema)
 
-            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
-                f"{lib.ns}::{self._name}", "ADInplaceOrView"
+    def _register_mutation_version_bump(self, schema: _C.FunctionSchema) -> None:
+        mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
+
+        original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+            f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
+        )
+
+        def adinplaceorview_impl(keyset, *args, **kwargs):
+            # Handle the mutated idx the user gave us explicitly
+            all_args, all_kwargs = utils.fill_defaults(schema, args, kwargs)
+
+            for idx in mutated_idxs:
+                increment_version(all_args[idx])
+            for key in mutated_keys:
+                increment_version(all_kwargs[key])
+            # Handle view + mutation that are in the schema
+            return original_kernel.call_boxed(keyset, *args, **kwargs)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Warning only once for all operators",
+                category=UserWarning,
             )
-
-            def adinplaceorview_impl(keyset, *args, **kwargs):
-                # Handle the mutated idx the user gave us explicitly
-                all_args, all_kwargs = utils.fill_defaults(schema, args, kwargs)
-
-                for idx in mutated_idxs:
-                    increment_version(all_args[idx])
-                for key in mutated_keys:
-                    increment_version(all_kwargs[key])
-                # Handle view + mutation that are in the schema
-                return original_kernel.call_boxed(keyset, *args, **kwargs)
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Warning only once for all operators",
-                    category=UserWarning,
-                )
-                lib.impl(
-                    self._name,
-                    adinplaceorview_impl,
-                    "ADInplaceOrView",
-                    with_keyset=True,
-                )
+            self._lib.impl(
+                self._name,
+                adinplaceorview_impl,
+                "ADInplaceOrView",
+                with_keyset=True,
+            )
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
