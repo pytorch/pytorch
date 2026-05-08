@@ -181,6 +181,43 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+def _get_available_memory_fraction() -> float | None:
+    """Return fraction of total memory that is available (0.0-1.0), or None."""
+    try:
+        total = available = None
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if parts[0] == "MemTotal:":
+                    total = int(parts[1])
+                elif parts[0] == "MemAvailable:":
+                    available = int(parts[1])
+                if total is not None and available is not None:
+                    return available / total
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _get_compile_threads_for_memory(desired: int) -> int:
+    """Scale down compile threads if available CPU memory is low."""
+    threshold = config.compile_worker_memory_threshold
+    if threshold <= 0:
+        return desired
+
+    available_frac = _get_available_memory_fraction()
+    if available_frac is None or available_frac >= threshold:
+        return desired
+
+    min_threads = max(1, config.compile_threads_min)
+    half_threshold = threshold / 2
+    if available_frac <= half_threshold:
+        return min_threads
+
+    scale = (available_frac - half_threshold) / (threshold - half_threshold)
+    return max(min_threads, int(desired * scale))
+
+
 @clear_on_fresh_cache
 class CompiledTritonKernels:
     """
@@ -262,18 +299,18 @@ class AsyncCompile:
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
         AsyncCompile._ready_future = None
+        nprocs = _get_compile_threads_for_memory(get_compile_threads())
         log.info(
-            "Creating '%s' pool with %d workers",
+            "Creating '%s' pool with %d workers (requested %d)",
             config.worker_start_method,
+            nprocs,
             get_compile_threads(),
         )
 
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(
-                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
-            )
+            pool = SubprocPool(nprocs, quiesce=config.quiesce_async_compile_pool)
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
@@ -281,7 +318,7 @@ class AsyncCompile:
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = TrackedProcessPoolExecutor(
-                get_compile_threads(),
+                nprocs,
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
@@ -339,13 +376,15 @@ class AsyncCompile:
     def wakeup(cls) -> None:
         """
         If using a SubprocPool, signal the sidecar process to start up its
-        ProcessPoolExecutor.
+        ProcessPoolExecutor. The worker count is capped based on available
+        CPU memory to avoid OOM during compilation.
         """
         if not cls.use_process_pool():
             return
         pool = cls.process_pool()
         if isinstance(pool, SubprocPool):
-            pool.wakeup()
+            nprocs = _get_compile_threads_for_memory(get_compile_threads())
+            pool.wakeup(nprocs=nprocs)
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
@@ -723,6 +762,7 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+            self._eager_quiesce()
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
@@ -731,6 +771,21 @@ class AsyncCompile:
             self._metal_sources.clear()
 
         _compile_end()
+
+    @staticmethod
+    def _eager_quiesce() -> None:
+        if not config.eager_compile_pool_quiesce:
+            return
+        try:
+            pool = AsyncCompile.process_pool()
+        except Exception:
+            return
+        if not isinstance(pool, SubprocPool):
+            return
+        pool.quiesce()
+        min_threads = config.compile_threads_min
+        if min_threads > 0:
+            pool.wakeup(nprocs=min_threads)
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {

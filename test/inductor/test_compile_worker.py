@@ -3,8 +3,13 @@ import operator
 import os
 import tempfile
 from threading import Event
+from unittest.mock import mock_open, patch
 
 import torch._inductor.config as config
+from torch._inductor.async_compile import (
+    _get_available_memory_fraction,
+    _get_compile_threads_for_memory,
+)
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
@@ -161,6 +166,110 @@ class TestTimer(TestCase):
             t.record_call()
         self.assertTrue(done.wait(4))
         t.quit()
+
+
+class TestDynamicWakeup(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_wakeup_with_fewer_workers(self):
+        pool = SubprocPool(4)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            self.assertEqual(a.result(), 101)
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_wakeup_scale_up(self):
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=2)
+            a = pool.submit(operator.add, 10, 5)
+            self.assertEqual(a.result(), 15)
+            pool.wakeup(nprocs=4)
+            b = pool.submit(operator.mul, 10, 5)
+            self.assertEqual(b.result(), 50)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_eager_quiesce_cycle(self):
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=4)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+
+            b = pool.submit(operator.add, 3, 4)
+            self.assertEqual(b.result(), 7)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=4)
+
+            c = pool.submit(operator.add, 5, 6)
+            self.assertEqual(c.result(), 11)
+        finally:
+            pool.shutdown()
+
+
+class TestMemoryAwareThreads(TestCase):
+    MEMINFO_TEMPLATE = (
+        "MemTotal:       {total} kB\n"
+        "MemFree:        {free} kB\n"
+        "MemAvailable:   {available} kB\n"
+    )
+
+    def _mock_meminfo(self, total_kb, available_kb):
+        content = self.MEMINFO_TEMPLATE.format(
+            total=total_kb, available=available_kb, free=available_kb
+        )
+        return patch(
+            "torch._inductor.async_compile.open",
+            mock_open(read_data=content),
+        )
+
+    def test_available_memory_fraction(self):
+        with self._mock_meminfo(100000, 50000):
+            frac = _get_available_memory_fraction()
+            self.assertAlmostEqual(frac, 0.5, places=2)
+
+    def test_available_memory_fraction_unavailable(self):
+        with patch(
+            "torch._inductor.async_compile.open",
+            side_effect=OSError("no /proc/meminfo"),
+        ):
+            self.assertIsNone(_get_available_memory_fraction())
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_no_scaling_when_memory_ok(self):
+        with self._mock_meminfo(100000, 90000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 32)
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_scaled_down_when_memory_low(self):
+        with self._mock_meminfo(100000, 50000):
+            result = _get_compile_threads_for_memory(32)
+            self.assertGreater(result, 2)
+            self.assertLess(result, 32)
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_min_when_memory_very_low(self):
+        with self._mock_meminfo(100000, 10000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 2)
+
+    @config.patch("compile_worker_memory_threshold", 0.0)
+    def test_threshold_zero_disables_scaling(self):
+        with self._mock_meminfo(100000, 1000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 32)
 
 
 class TestSetTritonLibdevicePath(TestCase):

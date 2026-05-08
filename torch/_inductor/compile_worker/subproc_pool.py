@@ -325,8 +325,12 @@ class SubprocPool:
             ).guard()
             self.quiesce_waitcounter.__enter__()
 
-    def wakeup(self) -> None:
-        self._send(MsgHeader.WAKEUP)
+    def wakeup(self, nprocs: int | None = None) -> None:
+        if nprocs is not None:
+            data = struct.pack("n", nprocs)
+        else:
+            data = b""
+        self._send(MsgHeader.WAKEUP, data=data)
 
     def shutdown(self) -> None:
         try:
@@ -369,6 +373,7 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
+        self._current_nprocs = 0
         self.pool: ProcessPoolExecutor | None = None
         self.running = True
 
@@ -378,7 +383,8 @@ class SubprocMain:
             if msg_header == MsgHeader.JOB:
                 self.submit(job_id, data)
             elif msg_header == MsgHeader.WAKEUP:
-                self._start_pool()
+                nprocs = struct.unpack("n", data)[0] if data else None
+                self._start_pool(nprocs)
             elif msg_header == MsgHeader.QUIESCE:
                 self._quiesce()
             else:
@@ -434,19 +440,23 @@ class SubprocMain:
         )
         future.add_done_callback(callback)
 
-    def _start_pool(self) -> None:
+    def _start_pool(self, nprocs: int | None = None) -> None:
+        nprocs = nprocs or self.nprocs
         if self.pool is not None:
-            return
+            if nprocs <= self._current_nprocs:
+                return
+            self._quiesce()
 
+        self._current_nprocs = nprocs
         self.pool = TrackedProcessPoolExecutor(
-            self.nprocs,
+            nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(
             None, self.pool.shutdown, exitpriority=sys.maxsize
         )
-        _warm_process_pool(self.pool, self.nprocs)
+        _warm_process_pool(self.pool, nprocs)
 
     @staticmethod
     def do_job(pickler: SubprocPickler, data: bytes) -> bytes:

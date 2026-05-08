@@ -1365,6 +1365,31 @@ quiesce_async_compile_time: int = Config(
     default=60,
 )
 
+# Quiesce the subprocess pool immediately after each compile finishes (in
+# AsyncCompile.wait) instead of relying solely on the idle timer.  This keeps
+# workers alive only during active compilation, greatly reducing memory pressure
+# between compiles.
+eager_compile_pool_quiesce: bool = Config(
+    env_name_force="TORCHINDUCTOR_EAGER_COMPILE_POOL_QUIESCE",
+    default=True,
+)
+
+# Minimum number of compile workers to keep alive between compiles. After an
+# eager quiesce the pool is immediately restarted with this many workers so the
+# next compile gets a warm start. 0 means fully quiesce.
+compile_threads_min: int = Config(
+    env_name_force="TORCHINDUCTOR_COMPILE_THREADS_MIN",
+    default=0,
+)
+
+# Available-memory fraction below which we start reducing compile workers.
+# Workers are scaled linearly between compile_threads and compile_threads_min
+# as available memory drops from this threshold toward half of it.
+compile_worker_memory_threshold: float = Config(
+    env_name_force="TORCHINDUCTOR_COMPILE_WORKER_MEMORY_THRESHOLD",
+    default=0.85,
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
