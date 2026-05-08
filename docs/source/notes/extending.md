@@ -1,113 +1,108 @@
-Extending PyTorch
-=================
+# Extending PyTorch
 
-In this note we'll cover ways of extending :mod:`torch.nn`,
-:mod:`torch.autograd`, :mod:`torch`, and writing custom C++ extensions.
+In this note we'll cover ways of extending {mod}`torch.nn`,
+{mod}`torch.autograd`, {mod}`torch`, and writing custom C++ extensions.
 
-Adding new operators
---------------------
+## Adding new operators
 
-PyTorch offers a large library of operators that work on Tensors (e.g. :func:`torch.add`,
-:func:`torch.sum`, etc). However, you may wish to bring a new custom operation to PyTorch
+PyTorch offers a large library of operators that work on Tensors (e.g. {func}`torch.add`,
+{func}`torch.sum`, etc). However, you may wish to bring a new custom operation to PyTorch
 and have it behave like PyTorch's built-in operators. In order to do so, you must
-register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
+register the custom operation with PyTorch via the Python {ref}`torch-library-docs` or C++ TORCH_LIBRARY
 APIs.
 
-Please see `PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_ for more details.
+Please see [PyTorch Custom Operators Landing Page](https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html) for more details.
 
-.. _extending-autograd:
+(extending-autograd)=
 
-Extending :mod:`torch.autograd`
--------------------------------
+## Extending {mod}`torch.autograd`
 
-.. currentmodule:: torch.autograd
+```{currentmodule} torch.autograd
+```
 
-Adding operations to :mod:`~torch.autograd` requires implementing a new
-:class:`Function` subclass for each operation. Recall that Functions
-are what :mod:`~torch.autograd` uses to encode the operation history and compute
+Adding operations to {mod}`~torch.autograd` requires implementing a new
+{class}`Function` subclass for each operation. Recall that Functions
+are what {mod}`~torch.autograd` uses to encode the operation history and compute
 gradients.
 
 The first part of this doc is focused on backward mode AD as it is the most widely used
 feature. A section at the end discusses the extensions for forward mode AD.
 
-When to use
-^^^^^^^^^^^
+### When to use
 In general, implement a custom function if you want to perform computations in your model
 that are not differentiable or rely on non-PyTorch libraries (e.g., NumPy), but
 still wish for your operation to chain with other ops and work with the autograd engine.
 
 In some situations, custom functions can also be used to improve performance and
 memory usage: If you implemented your forward and backward passes using a
-`C++ extension <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_,
-you can wrap them in :class:`~Function` to interface with the autograd
+[C++ extension](https://pytorch.org/tutorials/advanced/cpp_extension.html),
+you can wrap them in {class}`~Function` to interface with the autograd
 engine. If you'd like to reduce the number of buffers saved for the backward pass,
 custom functions can be used to combine ops together.
 
-When not to use
-^^^^^^^^^^^^^^^
+### When not to use
 If you can already write your function in terms of PyTorch's built-in ops, its
 backward graph is (most likely) already able to be recorded by autograd. In this case, you do
 not need to implement the backward function yourself. Consider using a plain
 old Python function.
 
 If you need to maintain state, i.e., trainable parameters, you should (also) use a
-custom module. See the section below for more information on extending :mod:`torch.nn`.
+custom module. See the section below for more information on extending {mod}`torch.nn`.
 
 If you'd like to alter the gradients during the backward pass or perform a side
 effect, consider registering a
-`tensor <https://pytorch.org/docs/stable/generated/torch.Tensor.register_hook.html#torch.Tensor.register_hook>`_ or
-`Module <https://pytorch.org/docs/stable/notes/modules.html#module-hooks>`_ hook.
+[tensor](https://pytorch.org/docs/stable/generated/torch.Tensor.register_hook.html#torch.Tensor.register_hook) or
+[Module](https://pytorch.org/docs/stable/notes/modules.html#module-hooks) hook.
 
-How to use
-^^^^^^^^^^
+### How to use
 Take the following steps:
-1. Subclass :class:`~Function` and implement the :meth:`~Function.forward`,
-(optional) :meth:`~Function.setup_context` and
-:meth:`~Function.backward` methods.
+1. Subclass {class}`~Function` and implement the {meth}`~Function.forward`,
+(optional) {meth}`~Function.setup_context` and
+{meth}`~Function.backward` methods.
 2. Call the proper methods on the `ctx` argument.
 3. Declare whether your function supports
-`double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
+[double backward](https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html).
 4. Validate whether your gradients are correct using gradcheck.
 
-**Step 1:** After subclassing :class:`Function`, you'll need to define 3 methods:
+**Step 1:** After subclassing {class}`Function`, you'll need to define 3 methods:
 
-- :meth:`~Function.forward` is the code that performs the operation. It can take
+- {meth}`~Function.forward` is the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
   specify the default values. All kinds of Python objects are accepted here.
-  :class:`Tensor` arguments that track history (i.e., with
+  {class}`Tensor` arguments that track history (i.e., with
   ``requires_grad=True``) will be converted to ones that don't track history
   before the call, and their use will be registered in the graph. Note that this
   logic won't traverse lists/dicts/any other data structures and will only
   consider tensors that are direct arguments to the call. You can
-  return either a single :class:`Tensor` output, or a :class:`tuple` of
+  return either a single {class}`Tensor` output, or a {class}`tuple` of
   tensors if there are multiple outputs. Also, please refer to the
-  docs of :class:`Function` to find descriptions of useful methods that can be
-  called only from :meth:`~Function.forward`.
-- :meth:`~Function.setup_context` (optional). One can either write a "combined" :meth:`~Function.forward` that
-  accepts a ``ctx`` object or (as of PyTorch 2.0) a separate :meth:`~Function.forward` that does
-  not accept ``ctx`` and a :meth:`~Function.setup_context` method where the ``ctx`` modification happens.
-  The :meth:`~Function.forward` should have the compute and :meth:`~Function.setup_context` should
+  docs of {class}`Function` to find descriptions of useful methods that can be
+  called only from {meth}`~Function.forward`.
+- {meth}`~Function.setup_context` (optional). One can either write a "combined" {meth}`~Function.forward` that
+  accepts a ``ctx`` object or (as of PyTorch 2.0) a separate {meth}`~Function.forward` that does
+  not accept ``ctx`` and a {meth}`~Function.setup_context` method where the ``ctx`` modification happens.
+  The {meth}`~Function.forward` should have the compute and {meth}`~Function.setup_context` should
   only be responsible for the ``ctx`` modification (and not have any compute).
-  In general the separate :meth:`~Function.forward` and :meth:`~Function.setup_context` is closer to how
+  In general the separate {meth}`~Function.forward` and {meth}`~Function.setup_context` is closer to how
   PyTorch native operations work and therefore more composable with various PyTorch subsystems.
-  See :ref:`combining-forward-context` for more details.
-- :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
-  It will be given as many :class:`Tensor` arguments as there were outputs, with each
+  See {ref}`combining-forward-context` for more details.
+- {meth}`~Function.backward` (or {meth}`~Function.vjp`) defines the gradient formula.
+  It will be given as many {class}`Tensor` arguments as there were outputs, with each
   of them representing gradient w.r.t. that output. It is important NEVER to modify
   these in-place. It should return as many tensors as there
   were inputs, with each of them containing the gradient w.r.t. its
   corresponding input. If your inputs didn't require gradient
-  (:attr:`~ctx.needs_input_grad` is a tuple of booleans indicating
-  whether each input needs gradient computation), or were non-:class:`Tensor`
-  objects, you can return :class:`python:None`. Also, if you have optional
-  arguments to :meth:`~Function.forward` you can return more gradients than there
-  were inputs, as long as they're all :any:`python:None`.
+  ({attr}`~ctx.needs_input_grad` is a tuple of booleans indicating
+  whether each input needs gradient computation), or were non-{class}`Tensor`
+  objects, you can return {class}`python:None`. Also, if you have optional
+  arguments to {meth}`~Function.forward` you can return more gradients than there
+  were inputs, as long as they're all {any}`python:None`.
 
 **Step 2:** It is your responsibility to use the functions in ``ctx``
-properly in order to ensure that the new :class:`Function` works properly with
+properly in order to ensure that the new {class}`Function` works properly with
 the autograd engine.
 
-- :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` should be
+- {meth}`~torch.autograd.function.FunctionCtx.save_for_backward` should be
   used to save any tensors needed for the backward pass (as opposed to
   directly on ``ctx``). You cannot use ``save_for_backward`` for non-tensors;
   you should store those directly on ``ctx``.
@@ -122,18 +117,18 @@ the autograd engine.
   output of the ``autograd.Function`` itself keeps a reference to the ctx).
   3. Is important for compatibility with
   features like activation checkpointing and offloading that rely on
-  :class:`torch.autograd.graph.saved_tensors_hooks`.
+  {class}`torch.autograd.graph.saved_tensors_hooks`.
 
   If tensors that are neither inputs nor outputs are saved for backward your
-  :class:`~Function` may not support double backward (see step 3).
-- :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
+  {class}`~Function` may not support double backward (see step 3).
+- {meth}`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
   mark any input that is modified inplace by the forward function.
-- :meth:`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must
+- {meth}`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must
   be used to tell the engine if an output is not differentiable. By
   default all output tensors that are of differentiable type will be set
   to require gradient. Tensors of non-differentiable type (i.e., integral types)
   are never marked as requiring gradients.
-- :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads` can be
+- {meth}`~torch.autograd.function.FunctionCtx.set_materialize_grads` can be
   used to tell the autograd engine to optimize gradient computations in the cases where
   the output does not depend on the input by not materializing grad tensors given to backward
   function. That is, if set to False, None object in Python or "undefined tensor" (tensor x for
@@ -141,11 +136,11 @@ the autograd engine.
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
 
-In addition to ``ctx`` methods, the :class:`~Function` class supports the following
+In addition to ``ctx`` methods, the {class}`~Function` class supports the following
 class attributes:
 
-- :attr:`~Function.clear_saved_tensors_on_access`: When set to ``True`` on the
-  :class:`~Function` subclass, accessing ``ctx.saved_tensors`` in the backward pass
+- {attr}`~Function.clear_saved_tensors_on_access`: When set to ``True`` on the
+  {class}`~Function` subclass, accessing ``ctx.saved_tensors`` in the backward pass
   will clear the internal references to those tensors. This allows the tensors to be
   freed as soon as the local variables returned by ``saved_tensors`` go out of scope,
   rather than waiting for the buffers to be cleared at the end of the Node's execution.
@@ -153,8 +148,8 @@ class attributes:
   needed once. The default is ``False``. Note that ``saved_tensors`` can only be
   accessed once when this is enabled; a second access will raise an error.
 
-- :attr:`~Function.boxed_grads_call`: When set to ``True`` on the
-  :class:`~Function` subclass, backward receives grads as a single mutable list
+- {attr}`~Function.boxed_grads_call`: When set to ``True`` on the
+  {class}`~Function` subclass, backward receives grads as a single mutable list
   argument instead of individual args in an immutable tuple. This allows backward
   to free individual grads mid-execution by removing them from the list, reducing
   peak memory. When enabled, the backward calling convention changes from
@@ -168,7 +163,10 @@ pass projects an input into three separate tensors (Q, K, V), so backward receiv
 three gradients. Without ``boxed_grads_call``, all three grad tensors are held alive
 for the entire backward call because they are unpacked from an immutable tuple.
 With ``boxed_grads_call``, each grad can be freed as soon as it is consumed, so peak
-memory is reduced by up to 2/3 of the total grad memory::
+memory is reduced by up to 2/3 of the total grad memory:
+
+```{code-block} python
+:dedent: 4
 
     class QKVProjection(Function):
         """Projects input x into Q, K, V: q = x @ w_q, k = x @ w_k, v = x @ w_v."""
@@ -197,23 +195,26 @@ memory is reduced by up to 2/3 of the total grad memory::
 
             return grad_x, *grad_weights
 
-**Step 3:** If your :class:`~Function` does not support double backward
+```
+**Step 3:** If your {class}`~Function` does not support double backward
 you should explicitly declare this by decorating backward with the
-:func:`~function.once_differentiable`. With this decorator, attempts to
+{func}`~function.once_differentiable`. With this decorator, attempts to
 perform double backward through your function will produce an error.
 See our double backward tutorial for more information on double backward.
 
-**Step 4:** It is recommended that you use :func:`torch.autograd.gradcheck`
+**Step 4:** It is recommended that you use {func}`torch.autograd.gradcheck`
 to check whether your backward function correctly computes gradients of the
 forward by computing the Jacobian matrix using your backward function and
 comparing the value element-wise with the Jacobian computed numerically using
 finite-differencing.
 
-Example
-^^^^^^^
+### Example
 
 Below you can find code for a ``Linear`` function, with
-additional comments::
+additional comments:
+
+```{code-block} python
+:dedent: 4
 
     # Inherit from Function
     class LinearFunction(Function):
@@ -257,9 +258,13 @@ additional comments::
 
             return grad_input, grad_weight, grad_bias
 
+```
 Now, to make it easier to use these custom ops, we recommend either aliasing
 them or wrapping them in a function. Wrapping in a function lets us support
-default arguments and keyword arguments::
+default arguments and keyword arguments:
+
+```{code-block} python
+:dedent: 4
 
     # Option 1: alias
     linear = LinearFunction.apply
@@ -268,8 +273,12 @@ default arguments and keyword arguments::
     def linear(input, weight, bias=None):
         return LinearFunction.apply(input, weight, bias)
 
+```
 Here, we give an additional example of a function that is parametrized by
-non-Tensor arguments::
+non-Tensor arguments:
+
+```{code-block} python
+:dedent: 4
 
     class MulConstant(Function):
         @staticmethod
@@ -289,7 +298,11 @@ non-Tensor arguments::
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
-And here, we optimize the above example by calling set_materialize_grads(False)::
+```
+And here, we optimize the above example by calling set_materialize_grads(False):
+
+```{code-block} python
+:dedent: 4
 
     class MulConstant(Function):
         @staticmethod
@@ -313,10 +326,14 @@ And here, we optimize the above example by calling set_materialize_grads(False):
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
+```
 Here is an example using ``clear_saved_tensors_on_access`` to reduce peak memory during
 the backward pass. This function computes two matrix multiplications, and in backward
 we free the intermediate tensor after computing its gradient but before computing
-the remaining gradients::
+the remaining gradients:
+
+```{code-block} python
+:dedent: 4
 
     class TwoMatmuls(Function):
         clear_saved_tensors_on_access = True
@@ -344,13 +361,17 @@ the remaining gradients::
 
             return grad_x, grad_weight1, grad_weight2
 
-If you need any "intermediate" Tensors computed in :meth:`~Function.forward` to be saved,
-either they must be returned as outputs, or combine ``forward`` and :meth:`~Function.setup_context`
-(see :ref:`combining-forward-context`).
+```
+If you need any "intermediate" Tensors computed in {meth}`~Function.forward` to be saved,
+either they must be returned as outputs, or combine ``forward`` and {meth}`~Function.setup_context`
+(see {ref}`combining-forward-context`).
 Note that this means if you want gradients to flow through those intermediate values, you
 need to define the gradient formula for them (see also
-`the double backward tutorial <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_
-)::
+[the double backward tutorial](https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html)
+):
+
+```{code-block} python
+:dedent: 4
 
     class MyCube(torch.autograd.Function):
         @staticmethod
@@ -381,20 +402,25 @@ need to define the gradient formula for them (see also
         result, dx = MyCube.apply(x)
         return result
 
-.. note::
-    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be tensors that
-    track history. So if ``backward`` is implemented with differentiable
-    operations, (e.g., invocation of another custom
-    :class:`~torch.autograd.Function`), higher order derivatives will work.
-    In this case, the tensors saved with ``save_for_backward`` can also be used
-    in the backward and have gradients flowing back but tensors saved in the ``ctx``
-    won't have gradients flowing back for them.
-    If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
-    make it an output of the custom ``Function`` and save it with ``save_for_backward``.
+```
+:::{note}
+Inputs to ``backward``, i.e., {attr}`grad_output`, can also be tensors that
+track history. So if ``backward`` is implemented with differentiable
+operations, (e.g., invocation of another custom
+{class}`~torch.autograd.Function`), higher order derivatives will work.
+In this case, the tensors saved with ``save_for_backward`` can also be used
+in the backward and have gradients flowing back but tensors saved in the ``ctx``
+won't have gradients flowing back for them.
+If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
+make it an output of the custom ``Function`` and save it with ``save_for_backward``.
 
+:::
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
-numerical approximations using small finite differences::
+numerical approximations using small finite differences:
+
+```{code-block} python
+:dedent: 4
 
     from torch.autograd import gradcheck
 
@@ -405,31 +431,34 @@ numerical approximations using small finite differences::
     test = gradcheck(linear, input, eps=1e-6, atol=1e-4)
     print(test)
 
-See :ref:`grad-check` for more details on finite-difference gradient comparisons.
+```
+See {ref}`grad-check` for more details on finite-difference gradient comparisons.
 If your function is used in higher order derivatives (differentiating the backward pass) you
 can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
 
-.. _combining-forward-context:
+(combining-forward-context)=
 
-Combined or separate :meth:`~Function.forward` and :meth:`~Function.setup_context`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Combined or separate {meth}`~Function.forward` and {meth}`~Function.setup_context`
 
-There are two main ways to define :class:`~Function`. Either:
+There are two main ways to define {class}`~Function`. Either:
 
-- define a :meth:`~Function.forward` that combines the forward compute logic with :meth:`~Function.setup_context`
-- (as of PyTorch 2.0) define a separate :meth:`~Function.forward` and :meth:`~Function.setup_context`
+- define a {meth}`~Function.forward` that combines the forward compute logic with {meth}`~Function.setup_context`
+- (as of PyTorch 2.0) define a separate {meth}`~Function.forward` and {meth}`~Function.setup_context`
 
-We recommend the second option (separate :meth:`~Function.forward` and :meth:`~Function.setup_context`)
+We recommend the second option (separate {meth}`~Function.forward` and {meth}`~Function.setup_context`)
 because that is closer to how PyTorch native operations are implemented and it composes
-with :mod:`torch.func` transforms. However, we plan to support both approaches going forward;
-combining :meth:`~Function.forward` with :meth:`~Function.setup_context`: leads to more flexibility since
+with {mod}`torch.func` transforms. However, we plan to support both approaches going forward;
+combining {meth}`~Function.forward` with {meth}`~Function.setup_context`: leads to more flexibility since
 you are able to save intermediates without returning them as output.
 
-Please see the previous section for how to define :class:`~Function` with separate
-:meth:`~Function.forward` and :meth:`~Function.setup_context`.
+Please see the previous section for how to define {class}`~Function` with separate
+{meth}`~Function.forward` and {meth}`~Function.setup_context`.
 
-Here is an example of how to define a :class:`Function` with combined :meth:`~Function.forward` and
-:meth:`~Function.setup_context`::
+Here is an example of how to define a {class}`Function` with combined {meth}`~Function.forward` and
+{meth}`~Function.setup_context`:
+
+```{code-block} python
+:dedent: 4
 
     class LinearFunction(Function):
         @staticmethod
@@ -456,48 +485,47 @@ Here is an example of how to define a :class:`Function` with combined :meth:`~Fu
 
             return grad_input, grad_weight, grad_bias
 
-.. _forward-ad-autograd-function:
+```
+(forward-ad-autograd-function)=
 
-Forward mode AD
-^^^^^^^^^^^^^^^
+### Forward mode AD
 
 Overriding the forward mode AD formula has a very similar API with some different subtleties.
-You can implement the :meth:`~Function.jvp` function.
+You can implement the {meth}`~Function.jvp` function.
 
-It will be given as many :class:`Tensor` arguments as there were inputs, with each
+It will be given as many {class}`Tensor` arguments as there were inputs, with each
 of them representing gradient w.r.t. that input. It should return as many tensors as there
 were outputs, with each of them containing the gradient w.r.t. its corresponding output.
-The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward`
-method, before the :meth:`~Function.apply` returns.
+The {meth}`~Function.jvp` will be called just after the {meth}`~Function.forward`
+method, before the {meth}`~Function.apply` returns.
 
-:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function:
+{meth}`~Function.jvp` has a few subtle differences with the {meth}`~Function.backward` function:
 
-- You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the :meth:`~Function.jvp` function.
-  If that state will not be needed for the :meth:`~Function.backward`,
-  you can explicitly free it by doing ``del ctx.foo`` at the end of the :meth:`~Function.jvp` function.
-- The implementation of :meth:`~Function.jvp` must be backward differentiable or explicitly check that
+- You can use the `ctx` to pass any data from the {meth}`~Function.forward` to the {meth}`~Function.jvp` function.
+  If that state will not be needed for the {meth}`~Function.backward`,
+  you can explicitly free it by doing ``del ctx.foo`` at the end of the {meth}`~Function.jvp` function.
+- The implementation of {meth}`~Function.jvp` must be backward differentiable or explicitly check that
   none of the given forward mode gradient has ``requires_grad`` set.
-- The :meth:`~Function.jvp` function must match the view/inplace behavior of :meth:`~Function.forward`.
+- The {meth}`~Function.jvp` function must match the view/inplace behavior of {meth}`~Function.forward`.
   For example, if the ``i`` th input is modified inplace, then the ``i`` th gradient must be updated inplace.
   Similarly, if the ``j`` th output is a view of the ``k`` th input. Then the returned ``j`` th output gradient must be
   a view of the given ``k`` th input gradient.
-- Because the user cannot specify which gradient needs to be computed, the :meth:`~Function.jvp` function should
+- Because the user cannot specify which gradient needs to be computed, the {meth}`~Function.jvp` function should
   always compute gradients for all the outputs.
-- The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
+- The forward mode gradients do respect the flag set by {meth}`~torch.autograd.function.FunctionCtx.set_materialize_grads`
   and you can get `None` input gradients when this is disabled.
 
-:mod:`torch.func` transforms and/or :func:`torch.vmap`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### {mod}`torch.func` transforms and/or {func}`torch.vmap`
 
-Please see :ref:`func-autograd-function` for details.
+Please see {ref}`func-autograd-function` for details.
 
 
-Extending :mod:`torch.nn`
--------------------------
+## Extending {mod}`torch.nn`
 
-.. currentmodule:: torch.nn
+```{currentmodule} torch.nn
+```
 
-:mod:`~torch.nn` exports two kinds of interfaces - modules and their functional
+{mod}`~torch.nn` exports two kinds of interfaces - modules and their functional
 versions. You can extend it in both ways, but we recommend using modules for
 all kinds of layers, that hold any parameters or buffers, and recommend using
 a functional form parameter-less operations like activation functions, pooling,
@@ -506,11 +534,10 @@ etc.
 Adding a functional version of an operation is already fully covered in the
 section above.
 
-Adding a :class:`Module`
-^^^^^^^^^^^^^^^^^^^^^^^^
+### Adding a {class}`Module`
 
-Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
-:class:`Module` requires implementing a :class:`~torch.autograd.Function`
+Since {mod}`~torch.nn` heavily utilizes {mod}`~torch.autograd`, adding a new
+{class}`Module` requires implementing a {class}`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
 implemented as in the listing above. There's very little code required to
@@ -518,11 +545,14 @@ add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers
   of features, etc. and initializes parameters and buffers.
-- :meth:`~Module.forward` - instantiates a :class:`~torch.autograd.Function` and
+- {meth}`~Module.forward` - instantiates a {class}`~torch.autograd.Function` and
   uses it to perform the operation. It's very similar to a functional wrapper
   shown above.
 
-This is how a ``Linear`` module can be implemented::
+This is how a ``Linear`` module can be implemented:
+
+```{code-block} python
+:dedent: 4
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
@@ -561,40 +591,42 @@ This is how a ``Linear`` module can be implemented::
                 self.input_features, self.output_features, self.bias is not None
             )
 
-.. _extending-torch-python:
+```
+(extending-torch-python)=
 
-Extending :mod:`torch` Python API
----------------------------------
+## Extending {mod}`torch` Python API
 
-You can create custom types that emulate :class:`Tensor` by defining a custom
-class with methods that match :class:`Tensor`. But what if you want to be able
-to pass these types to functions like :func:`torch.add` in the top-level
-:mod:`torch` namespace that accept :class:`Tensor` operands?
+You can create custom types that emulate {class}`Tensor` by defining a custom
+class with methods that match {class}`Tensor`. But what if you want to be able
+to pass these types to functions like {func}`torch.add` in the top-level
+{mod}`torch` namespace that accept {class}`Tensor` operands?
 
 If your custom Python type defines a method named ``__torch_function__``, PyTorch
 will invoke your ``__torch_function__`` implementation when an instance of your
-custom class is passed to a function in the :mod:`torch` namespace. This makes
+custom class is passed to a function in the {mod}`torch` namespace. This makes
 it possible to define custom implementations for any of the functions in the
-:mod:`torch` namespace which your ``__torch_function__`` implementation can call,
+{mod}`torch` namespace which your ``__torch_function__`` implementation can call,
 allowing your users to make use of your custom type with existing PyTorch
-workflows that they have already written for :class:`Tensor`. This works with
-"duck" types that are unrelated to :class:`Tensor` as well as user-defined
-subclasses of :class:`Tensor`.
+workflows that they have already written for {class}`Tensor`. This works with
+"duck" types that are unrelated to {class}`Tensor` as well as user-defined
+subclasses of {class}`Tensor`.
 
-Extending :mod:`torch` with a :class:`Tensor`-like type
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Extending {mod}`torch` with a {class}`Tensor`-like type
 
-.. note:: This functionality is inspired by the NumPy ``__array_function__``
-          protocol. See `the NumPy documentation
-          <https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch>`_
-          and `NEP-0018
-          <https://numpy.org/neps/nep-0018-array-function-protocol.html>`_ for
-          more details.
+:::{note}
+This functionality is inspired by the NumPy ``__array_function__``
+protocol. See [the NumPy documentation](https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch)
+and [NEP-0018](https://numpy.org/neps/nep-0018-array-function-protocol.html) for
+more details.
 
+:::
 To make this concrete, let's begin with a simple example that illustrates the
 API dispatch mechanism. We'll create a custom type that represents a 2D scalar
 tensor, parametrized by the order ``N`` and value along the diagonal entries,
-``value``::
+``value``:
+
+```{code-block} python
+:dedent: 5
 
      class ScalarTensor(object):
         def __init__(self, N, value):
@@ -607,9 +639,13 @@ tensor, parametrized by the order ``N`` and value along the diagonal entries,
         def tensor(self):
             return self._value * torch.eye(self._N)
 
+```
 This first iteration of the design isn't very useful. The main functionality of
 ``ScalarTensor`` is to provide a more compact string representation of a scalar
-tensor than in the base tensor class::
+tensor than in the base tensor class:
+
+```{code-block} python
+:dedent: 2
 
   >>> d = ScalarTensor(5, 2)
   >>> d
@@ -621,16 +657,24 @@ tensor than in the base tensor class::
           [0., 0., 0., 2., 0.],
           [0., 0., 0., 0., 2.]])
 
-If we try to use this object with the :mod:`torch` API, we will run
-into issues::
+```
+If we try to use this object with the {mod}`torch` API, we will run
+into issues:
+
+```{code-block} python
+:dedent: 2
 
   >>> import torch
   >>> torch.mean(d)
   TypeError: mean(): argument 'input' (position 1) must be Tensor, not ScalarTensor
 
+```
 Adding a ``__torch_function__`` implementation to ``ScalarTensor`` makes it
 possible for the above operation to succeed. Let's re-do our implementation,
-this time adding a ``__torch_function__`` implementation::
+this time adding a ``__torch_function__`` implementation:
+
+```{code-block} python
+:dedent: 2
 
   HANDLED_FUNCTIONS = {}
   class ScalarTensor(object):
@@ -655,6 +699,7 @@ this time adding a ``__torch_function__`` implementation::
               return NotImplemented
           return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
+```
 The ``__torch_function__`` method takes four arguments: ``func``, a reference
 to the torch API function that is being overridden, ``types``, the list of
 types of Tensor-likes that implement ``__torch_function__``, ``args``, the
@@ -664,15 +709,20 @@ arguments passed to the function. It uses a global dispatch table named
 dictionary are functions in the ``torch`` namespace and the values are
 implementations for ``ScalarTensor``.
 
-.. note:: Using a global dispatch table is not a mandated part of the
-          ``__torch_function__`` API, it is just a useful design pattern for
-          structuring your override implementations.
+:::{note}
+Using a global dispatch table is not a mandated part of the
+``__torch_function__`` API, it is just a useful design pattern for
+structuring your override implementations.
 
+:::
 This class definition isn't quite enough to make ``torch.mean`` do the right
 thing when we pass it a ``ScalarTensor`` -- we also need to define an
 implementation for ``torch.mean`` for ``ScalarTensor`` operands and add the
 implementation to the ``HANDLED_FUNCTIONS`` dispatch table dictionary. One way
-of doing this is to define a decorator::
+of doing this is to define a decorator:
+
+```{code-block} python
+:dedent: 2
 
   import functools
   def implements(torch_function):
@@ -683,23 +733,35 @@ of doing this is to define a decorator::
           return func
       return decorator
 
-which can be applied to the implementation of our override::
+```
+which can be applied to the implementation of our override:
+
+```{code-block} python
+:dedent: 2
 
   @implements(torch.mean)
   def mean(input):
       return float(input._value) / input._N
 
-With this change we can now use ``torch.mean`` with ``ScalarTensor``::
+```
+With this change we can now use ``torch.mean`` with ``ScalarTensor``:
+
+```{code-block} python
+:dedent: 2
 
   >>> d = ScalarTensor(5, 2)
   >>> torch.mean(d)
   0.4
 
+```
 Of course ``torch.mean`` is an example of the simplest kind of function to
 override since it only takes one operand. We can use the same machinery to
 override a function that takes more than one operand, any one of which might be
 a tensor or tensor-like that defines ``__torch_function__``, for example for
-:func:`torch.add`::
+{func}`torch.add`:
+
+```{code-block} python
+:dedent: 2
 
   def ensure_tensor(data):
       if isinstance(data, ScalarTensor):
@@ -716,11 +778,15 @@ a tensor or tensor-like that defines ``__torch_function__``, for example for
      except AttributeError:
          return torch.add(ensure_tensor(input), ensure_tensor(other))
 
+```
 This version has a fast path for when both operands are ``ScalarTensor``
 instances and also a slower path which degrades to converting the data to
 tensors when either operand is not a ``ScalarTensor``. That makes the override
 function correctly when either operand is a ``ScalarTensor`` or a regular
-:class:`Tensor`::
+{class}`Tensor`:
+
+```{code-block} python
+:dedent: 2
 
   >>> s = ScalarTensor(2, 2)
   >>> torch.add(s, s)
@@ -730,40 +796,52 @@ function correctly when either operand is a ``ScalarTensor`` or a regular
   tensor([[3., 1.],
           [1., 3.]])
 
+```
 Note that our implementation of ``add`` does not take ``alpha`` or ``out`` as
-keyword arguments like :func:`torch.add` does::
+keyword arguments like {func}`torch.add` does:
+
+```{code-block} python
+:dedent: 2
 
   >>> torch.add(s, s, alpha=2)
   TypeError: add() got an unexpected keyword argument 'alpha'
 
+```
 For speed and flexibility the ``__torch_function__`` dispatch mechanism does not
 check that the signature of an override function matches the signature of the
-function being overridden in the :mod:`torch` API. For some applications ignoring
+function being overridden in the {mod}`torch` API. For some applications ignoring
 optional arguments would be fine but to ensure full compatibility with
-:class:`Tensor`, user implementations of torch API functions should take care to
+{class}`Tensor`, user implementations of torch API functions should take care to
 exactly emulate the API of the function that is being overridden.
 
-Functions in the :mod:`torch` API that do not have explicit overrides will
+Functions in the {mod}`torch` API that do not have explicit overrides will
 return ``NotImplemented`` from ``__torch_function__``. If all operands with
 ``__torch_function__`` defined on them return ``NotImplemented``, PyTorch will
 raise a ``TypeError``. This means that most of the time operations that do not
 have explicit overrides for a type will raise a ``TypeError`` when an instance
-of such a type is passed::
+of such a type is passed:
+
+```{code-block} python
+:dedent: 2
 
   >>> torch.mul(s, 3)
   TypeError: no implementation found for 'torch.mul' on types that
   implement __torch_function__: [ScalarTensor]
 
+```
 In practice this means that if you would like to implement your overrides using
 a ``__torch_function__`` implementation along these lines, you will need to
-explicitly implement the full :mod:`torch` API or the entire subset of the API
+explicitly implement the full {mod}`torch` API or the entire subset of the API
 that you care about for your use case. This may be a tall order as the full
-:mod:`torch` API is quite extensive.
+{mod}`torch` API is quite extensive.
 
 Another option is to not return ``NotImplemented`` for operations that are not
-handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
+handled but to instead pass a {class}`Tensor` to the original {mod}`torch`
 function when no override is available. For example, if we change our
-implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
+implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below:
+
+```{code-block} python
+:dedent: 2
 
   @classmethod
   def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -777,18 +855,23 @@ implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
           return func(*args, **kwargs)
       return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
-Then :func:`torch.mul` will work correctly, although the return type will always
-be a :class:`Tensor` rather than a :class:`ScalarTensor`, even if both operands
-are :class:`ScalarTensor` instances::
+```
+Then {func}`torch.mul` will work correctly, although the return type will always
+be a {class}`Tensor` rather than a {class}`ScalarTensor`, even if both operands
+are {class}`ScalarTensor` instances:
+
+```{code-block} python
+:dedent: 2
 
   >>> s = ScalarTensor(2, 2)
   >>> torch.mul(s, s)
   tensor([[4., 0.],
           [0., 4.]])
 
+```
 Also see the ``MetadataTensor`` example below for another variation on this
 pattern but instead always returns a ``MetadataTensor`` to propagate metadata
-through operations in the :mod:`torch` API.
+through operations in the {mod}`torch` API.
 
 The ``__torch_function__`` protocol is designed for full coverage of the API,
 partial coverage may lead to undesirable results, in particular, certain
@@ -800,11 +883,13 @@ of a function from ``torch.Tensor`` subclasses, they must use
 ``super().__torch_function__`` inside their implementation.
 
 
-Subclassing ``torch.Tensor``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Subclassing ``torch.Tensor``
 As of version 1.7.0, methods on ``torch.Tensor`` and functions in public
 ``torch.*`` namespaces applied on ``torch.Tensor`` subclasses
-will return subclass instances instead of ``torch.Tensor`` instances::
+will return subclass instances instead of ``torch.Tensor`` instances:
+
+```{code-block} python
+:dedent: 2
 
   >>> class SubTensor(torch.Tensor):
   ...     pass
@@ -813,9 +898,13 @@ will return subclass instances instead of ``torch.Tensor`` instances::
   >>> type(torch.add(SubTensor([0]), torch.tensor([1]))).__name__
   'SubTensor'
 
+```
 If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
 default. If there is no unique way to determine such a case, then a
-``TypeError`` is raised::
+``TypeError`` is raised:
+
+```{code-block} python
+:dedent: 2
 
   >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
   'SubTensor2'
@@ -826,9 +915,13 @@ default. If there is no unique way to determine such a case, then a
     File "<stdin>", line 1, in <module>
   TypeError: no implementation found for 'torch.add' on types that implement __torch_function__: [SubTensor, OtherSubTensor]
 
+```
 If one wishes to have a global override for all tensor methods, one can use
 ``__torch_function__``. Here is an example that logs all function/method
-calls::
+calls:
+
+```{code-block} python
+:dedent: 2
 
   class LoggingTensor(torch.Tensor):
       @classmethod
@@ -840,6 +933,7 @@ calls::
               kwargs = {}
           return super().__torch_function__(func, types, args, kwargs)
 
+```
 However, if one instead wishes to override a method on the Tensor subclass,
 there one can do so either by directly overriding the method (by defining
 it for a subclass), or by using ``__torch_function__`` and matching with
@@ -851,16 +945,18 @@ as was the case before version 1.7.0. Failing to do this may cause ``func``
 to recurse back into ``__torch_function__`` and therefore cause infinite
 recursion.
 
-Extending :mod:`torch` with a :class:`Tensor` wrapper type
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Extending {mod}`torch` with a {class}`Tensor` wrapper type
 
-Another useful case is a type that wraps a :class:`Tensor`, either as an
+Another useful case is a type that wraps a {class}`Tensor`, either as an
 attribute or via subclassing. Below we implement a special case of this sort of
 type, a ``MetadataTensor`` that attaches a dictionary of metadata to a
-:class:`Tensor` that is propagated through :mod:`torch` operations. Since this
-is a generic sort of wrapping for the full :mod:`torch` API, we do not need to
+{class}`Tensor` that is propagated through {mod}`torch` operations. Since this
+is a generic sort of wrapping for the full {mod}`torch` API, we do not need to
 individually implement each override so we can make the ``__torch_function__``
-implementation more permissive about what operations are allowed::
+implementation more permissive about what operations are allowed:
+
+```{code-block} python
+:dedent: 2
 
   class MetadataTensor(object):
       def __init__(self, data, metadata=None, **kwargs):
@@ -880,8 +976,12 @@ implementation more permissive about what operations are allowed::
           ret = func(*args, **kwargs)
           return MetadataTensor(ret, metadata=metadatas[0])
 
+```
 This simple implementation won't necessarily work with every function in the
-:mod:`torch` API but it is good enough to capture most common operations::
+{mod}`torch` API but it is good enough to capture most common operations:
+
+```{code-block} python
+:dedent: 2
 
   >>> metadata = {'owner': 'Ministry of Silly Walks'}
   >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
@@ -901,8 +1001,8 @@ This simple implementation won't necessarily work with every function in the
   tensor([[1, 4],
           [3, 8]])
 
-Operations on multiple types that define ``__torch_function__``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+### Operations on multiple types that define ``__torch_function__``
 
 It is possible to use the torch API with multiple distinct types that each have
 a ``__torch_function__`` implementation, but special care must be taken. In such
@@ -917,8 +1017,7 @@ a case the rules are:
 * If all of the ``__torch_function__`` implementations return
   ``NotImplemented``, PyTorch raises a ``TypeError``.
 
-Testing Coverage of Overrides for the PyTorch API
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Testing Coverage of Overrides for the PyTorch API
 
 One troublesome aspect of implementing ``__torch_function__`` is that if some
 operations do and others do not have overrides, users will at best see an
@@ -933,7 +1032,10 @@ First, to get a listing of all overridable functions, use
 keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
 functions in that namespace that can be overridden. For example, let's print the
 names of the first 5 functions in ``torch.nn.functional`` that can be
-overridden::
+overridden:
+
+```{code-block} python
+:dedent: 2
 
   >>> from torch.overrides import get_overridable_functions
   >>> func_dict = get_overridable_functions()
@@ -942,6 +1044,7 @@ overridden::
   ['adaptive_avg_pool1d', 'adaptive_avg_pool2d', 'adaptive_avg_pool3d',
    'adaptive_max_pool1d', 'adaptive_max_pool1d_with_indices']
 
+```
 This listing of functions makes it possible to iterate over all overridable
 functions, however in practice this is not enough to write tests for all of
 these functions without laboriously and manually copying the signature of each
@@ -950,7 +1053,10 @@ function for each test. To ease this process, the
 overridable functions in the ``PyTorch`` API to dummy lambda functions that have
 the same signature as the original function but unconditionally return -1. These
 functions are most useful to use with ``inspect`` to analyze the function
-signature of the original ``PyTorch`` function::
+signature of the original ``PyTorch`` function:
+
+```{code-block} python
+:dedent: 2
 
   >>> import inspect
   >>> from torch.overrides import get_testing_overrides
@@ -959,26 +1065,26 @@ signature of the original ``PyTorch`` function::
   >>> inspect.signature(dummy_add)
   <Signature (input, other, out=None)>
 
+```
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
 that explicitly cannot be overridden by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overridden.
 
 
-.. _extending-torch-c++:
+(extending-torch-c++)=
 
-Extending :mod:`torch` native API
----------------------------------
+## Extending {mod}`torch` native API
 
 While ``__torch_function__`` allows one to effectively extend PyTorch's pure Python
 components' behavior, it does not allow one to extend the parts of
-PyTorch implemented in C++. To that end, a :class:`Tensor` subclass can also
+PyTorch implemented in C++. To that end, a {class}`Tensor` subclass can also
 define ``__torch_dispatch__`` which will be able to override the behavior at the
 C++ level.
 
 To effectively use this feature, it is important to know how the native part of
 PyTorch is implemented. The most important component there is what we call the
-"dispatcher" (the best description can be found in this `blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_ even though it is slightly outdated). As
+"dispatcher" (the best description can be found in this [blog post](http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) even though it is slightly outdated). As
 hinted by its name, it is responsible for calling the right backend
 function for a specific call of a function. For example, when calling
 ``torch.add(a, b)``, the dispatcher will inspect both arguments, figure out which
@@ -1010,21 +1116,22 @@ In a similar way where ``__torch_function__`` is able to interpose on all of tor
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
 Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
 
-It is also possible to add `new` native functions using :mod:`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
+It is also possible to add `new` native functions using {mod}`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
 
-You can find many examples of ``__torch_dispatch__``-based subclasses in the `subclass zoo <https://github.com/albanD/subclass_zoo>`_ repo.
+You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
 
-.. _torch-dispatch-calling-convention:
+(torch-dispatch-calling-convention)=
 
-``__torch_dispatch__`` calling convention
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### ``__torch_dispatch__`` calling convention
 
-.. code-block:: python
+```{code-block} python
+:dedent: 4
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         pass
 
+```
 When a user calls an operator with inputs that have ``__torch_dispatch__``, that call
 may be forwarded to the ``__torch_dispatch__``. args and kwargs get normalized before
 the call to ``__torch_dispatch__``, that is:
@@ -1037,19 +1144,21 @@ the call to ``__torch_dispatch__``, that is:
   it is the right-most positional arg or all the args to the right of it
   are not passed, it will not be passed.
 
-Extending all :mod:`torch` API with Modes
------------------------------------------
+## Extending all {mod}`torch` API with Modes
 
 Unfortunately, there are functions that do not take Tensor inputs. This means that the subclass approach described above cannot be used to override the behavior of all of PyTorch's functions. Also, if the use case requires to intercept every function call, changing every Tensor to be a subclass can be overly intrusive.
 
-To address this use case, we introduced the concept of "Mode". These exist for ``__torch_function__`` and ``__torch_dispatch__`` overrides, are created by subclassing respectively :class:`torch.overrides.TorchFunctionMode` and :class:`torch.utils._python_dispatch.TorchDispatchMode`, and are used as a context manager.
+To address this use case, we introduced the concept of "Mode". These exist for ``__torch_function__`` and ``__torch_dispatch__`` overrides, are created by subclassing respectively {class}`torch.overrides.TorchFunctionMode` and {class}`torch.utils._python_dispatch.TorchDispatchMode`, and are used as a context manager.
 
 To simplify the description of how it interacts with subclasses and other modes, whenever the context manager for a mode is entered, every function behaves as if there was an extra Tensor argument at the beginning of the argument list with the mode as a subclass.
 This means in particular that all modes handlers will be called before any subclass handler and that modes corresponding to the inner context manager will always run first.
 
 It is also important to note that within a given mode handler, this specific mode is disabled and can be re-enabled manually by doing ``with self:``.
 
-Here is an example that shows logging modes of each type::
+Here is an example that shows logging modes of each type:
+
+```{code-block} python
+:dedent: 2
 
   import torch
   from torch.overrides import TorchFunctionMode, resolve_name
@@ -1078,7 +1187,11 @@ Here is an example that shows logging modes of each type::
   with DispatchLog():
       f()
 
-Which prints the following, with extra comments::
+```
+Which prints the following, with extra comments:
+
+```{code-block} python
+:dedent: 2
 
   TorchFunctionMode logging:
   Function Log: torch.rand(*(10,), **{'requires_grad': True})
@@ -1103,3 +1216,4 @@ Which prints the following, with extra comments::
   Dispatch Log: aten.mul.Tensor(*(tensor([1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]), 2), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
   Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
+```
