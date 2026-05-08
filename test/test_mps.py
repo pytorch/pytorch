@@ -2021,38 +2021,64 @@ class TestMPS(TestCaseMPS):
         for shape, mem_fmt, bn_cls in cases:
             for training in (True, False):
                 for affine in (True, False):
-                    x_cpu = torch.randn(*shape, requires_grad=True)
-                    x_mps = (x_cpu.detach().clone()
-                             .to('mps')
-                             .contiguous(memory_format=mem_fmt)
-                             .requires_grad_())
-                    self.assertTrue(x_mps.is_contiguous(memory_format=mem_fmt))
+                    with self.subTest(bn=bn_cls.__name__, training=training, affine=affine):
+                        torch.manual_seed(0)
+                        x_cpu = torch.randn(*shape, requires_grad=True)
+                        x_mps = (x_cpu.detach().clone()
+                                 .to('mps')
+                                 .contiguous(memory_format=mem_fmt)
+                                 .requires_grad_())
+                        self.assertTrue(x_mps.is_contiguous(memory_format=mem_fmt))
 
-                    bn_cpu = bn_cls(shape[1], affine=affine).cpu()
-                    bn_mps = bn_cls(shape[1], affine=affine).to('mps')
-                    bn_mps.load_state_dict(bn_cpu.state_dict())
-                    if not training:
-                        bn_cpu.eval()
-                        bn_mps.eval()
+                        bn_cpu = bn_cls(shape[1], affine=affine).cpu()
+                        bn_mps = bn_cls(shape[1], affine=affine).to('mps')
+                        bn_mps.load_state_dict(bn_cpu.state_dict())
+                        if not training:
+                            bn_cpu.eval()
+                            bn_mps.eval()
 
-                    out_cpu = bn_cpu(x_cpu)
-                    out_mps = bn_mps(x_mps)
-                    self.assertEqual(out_cpu, out_mps)
-                    self.assertTrue(
-                        out_mps.is_contiguous(memory_format=mem_fmt),
-                        f"{bn_cls.__name__} output should preserve {mem_fmt} "
-                        f"(training={training}, affine={affine})",
-                    )
+                        out_cpu = bn_cpu(x_cpu)
+                        out_mps = bn_mps(x_mps)
+                        self.assertEqual(out_cpu, out_mps)
+                        self.assertTrue(
+                            out_mps.is_contiguous(memory_format=mem_fmt),
+                            f"{bn_cls.__name__} output should preserve {mem_fmt}",
+                        )
 
-                    grad_out_cpu = torch.randn_like(out_cpu)
-                    grad_out_mps = grad_out_cpu.to('mps').contiguous(memory_format=mem_fmt)
-                    out_cpu.backward(grad_out_cpu)
-                    out_mps.backward(grad_out_mps)
+                        grad_out_cpu = torch.randn_like(out_cpu)
+                        grad_out_mps = grad_out_cpu.to('mps').contiguous(memory_format=mem_fmt)
+                        out_cpu.backward(grad_out_cpu)
+                        out_mps.backward(grad_out_mps)
 
-                    self.assertEqual(x_cpu.grad, x_mps.grad)
-                    if affine:
-                        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad)
-                        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad)
+                        self.assertEqual(x_cpu.grad, x_mps.grad)
+                        if affine:
+                            self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad)
+                            self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad)
+
+    def test_batch_norm_channels_last_backward_no_input_grad(self):
+        # Regression for grad_input_mask=[False, True, True] on a channels_last
+        # input: gradInputTensor stays nil and the NHWC->NCHW transpose dance
+        # in the graph must be skipped. Without the gating guard the dance would
+        # reshape a nil tensor and crash.
+        torch.manual_seed(0)
+        shape = (2, 4, 6, 7)
+        x_cpu = torch.randn(*shape)  # requires_grad=False
+        x_mps = x_cpu.detach().to('mps').contiguous(memory_format=torch.channels_last)
+
+        bn_cpu = nn.BatchNorm2d(shape[1], affine=True).cpu()
+        bn_mps = nn.BatchNorm2d(shape[1], affine=True).to('mps')
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        out_cpu = bn_cpu(x_cpu)
+        out_mps = bn_mps(x_mps)
+
+        grad_out_cpu = torch.randn_like(out_cpu)
+        grad_out_mps = grad_out_cpu.to('mps').contiguous(memory_format=torch.channels_last)
+
+        gw_cpu, gb_cpu = torch.autograd.grad(out_cpu, [bn_cpu.weight, bn_cpu.bias], grad_outputs=grad_out_cpu)
+        gw_mps, gb_mps = torch.autograd.grad(out_mps, [bn_mps.weight, bn_mps.bias], grad_outputs=grad_out_mps)
+        self.assertEqual(gw_cpu, gw_mps)
+        self.assertEqual(gb_cpu, gb_mps)
 
     def test_batch_norm_backward_weight_bias_gradients(self):
         # See issue: https://github.com/pytorch/pytorch/issues/156555
