@@ -3284,7 +3284,7 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
     _fn = isinstance
 
     def __init__(self, value: Any = _fn, **kwargs: Any) -> None:
-        if value is not _fn:
+        if value is not isinstance:
             raise AssertionError(
                 f"IsInstanceBuiltinVariable value must be isinstance, got {value}"
             )
