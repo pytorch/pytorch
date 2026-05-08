@@ -3941,9 +3941,11 @@ def _get_fake_value_impl(
         ):
             log.debug("get_fake_value: using C++ fake tensor mode for %s", node.target)
             fake_mode_ctx = contextlib.nullcontext()
+            python_dispatcher_ctx = contextlib.nullcontext()
         else:
             fake_mode_ctx = fake_mode
-        with fake_mode_ctx, enable_python_dispatcher():
+            python_dispatcher_ctx = enable_python_dispatcher()
+        with fake_mode_ctx, python_dispatcher_ctx:
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4119,8 +4121,14 @@ def run_node(
     with set_current_node(node):
 
         def make_error_message(e: Any) -> str:
+            try:
+                args_str = repr(args)
+                kwargs_str = repr(kwargs)
+            except Exception:
+                args_str = f"<{len(args)} args>"
+                kwargs_str = f"<{len(kwargs)} kwargs>"
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args_str}, **{kwargs_str}): got "
                 + repr(e)
             )
 

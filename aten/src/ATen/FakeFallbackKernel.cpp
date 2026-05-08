@@ -180,22 +180,6 @@ static bool is_our_fake(const at::Tensor& t, const std::shared_ptr<c10::FakeTens
           t.unsafeGetTensorImpl()->fake_tensor_mode() == mode;
 }
 
-// static void wrap(
-//   const at::Tensor& t,
-//   c10::Device fake_device,
-//   const std::shared_ptr<c10::FakeTensorMode>& mode) {
-//     if (is_our_fake(t)) {
-//       // check t's fake device = common device?
-//       // not calling converter.from_meta_and_device
-//       // (at least for now) because
-//       // that makes another FakeTensor
-//       // and we wanna change this in place
-//       transmute_to_fake(t, fake_device, mode);
-//     }
-//     // else if converter is not None:
-//       // do things
-// }
-
 static void transmute_to_fake(
     const at::Tensor& t,
     c10::Device fake_device,
@@ -243,6 +227,15 @@ static bool can_run_unsafe_fallback(const c10::FunctionSchema& schema) {
       name.rfind("quantized::", 0) == 0;
 }
 
+static constexpr int64_t CONSTANT_NUMEL_LIMIT = 1;
+
+static bool may_turn_const(const at::Tensor& t) {
+  return t.numel() <= CONSTANT_NUMEL_LIMIT &&
+      !t.is_sparse() &&
+      !t.is_fake() &&
+      t.device().type() != c10::DeviceType::Meta;
+}
+
 // Creates a zero-filled real tensor on the fake tensor's original device.
 // Temporarily exits FakeTensorMode TLS so the created tensor is genuinely
 // real (not stamped with the Fake dispatch key).
@@ -257,31 +250,35 @@ static at::Tensor to_real_tensor(const at::Tensor& t) {
   return real;
 }
 
-static void validate_and_convert_non_fake_tensors(
+static std::vector<at::Tensor> validate_and_convert_non_fake_tensors(
     torch::jit::Stack* stack,
     size_t arguments_begin,
     size_t num_arguments,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
 
-  auto validate = [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-    if (t.defined() && !is_our_fake(t, mode)) {
-      // TODO: check if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags
-      // TODO: allow non fake inputs
-      // TODO: if not allow non fake inputs checks
+  std::vector<at::Tensor> flat_arg_fake_tensors;
 
-      // TODO: change to call converter
-      // return converter.from_real_tensor(t);
-      return real_tensor_to_fake(t, mode);
-    } else if (is_our_fake(t, mode)) {
-      return std::nullopt; // already fake, leave as is
-    }
-    return std::nullopt;
-  };
   for_each_tensor(
       stack, arguments_begin, num_arguments,
       [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-        return validate(t);
+        if (t.defined() && !is_our_fake(t, mode)) {
+          // TODO: check if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags
+          // TODO: allow non fake inputs
+          // TODO: if not allow non fake inputs checks
+
+          // TODO: change to call converter
+          // return converter.from_real_tensor(t);
+          auto out = real_tensor_to_fake(t, mode);
+          flat_arg_fake_tensors.push_back(out);
+          return out;
+        }
+        if (is_our_fake(t, mode)) {
+          flat_arg_fake_tensors.push_back(t);
+        }
+        return std::nullopt;
       });
+
+  return flat_arg_fake_tensors;
 }
 
 static bool is_lift_func(const c10::OperatorHandle& op) {
@@ -386,9 +383,14 @@ void fakeFallback(
     for_each_tensor(
         stack, returns_begin, num_returns,
         [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-          if (t.defined() && !t.is_fake())
-            return real_tensor_to_fake(t, mode);
-          return std::nullopt;
+          if (!t.defined() || t.is_fake())
+            return std::nullopt;
+          auto fake = real_tensor_to_fake(t, mode);
+          if (may_turn_const(t)) {
+            fake.unsafeGetTensorImpl()->set_fake_constant(
+                std::make_shared<at::Tensor>(t.clone()));
+          }
+          return fake;
         });
     return;
   }
@@ -410,9 +412,97 @@ void fakeFallback(
   // TODO: constant propagation for should_allow_numbers_as_tensors
   // (requires access to torch::should_allow_numbers_as_tensors from Python layer)
 
-  validate_and_convert_non_fake_tensors(stack, arguments_begin, num_arguments, mode);
+  flat_arg_fake_tensors =
+      validate_and_convert_non_fake_tensors(stack, arguments_begin, num_arguments, mode);
 
-  // TODO: CONSTANT PROP LOGIC
+  // Constant propagation: if every fake-tensor argument carries a backing
+  // constant, run the real op on those constants.  Matches Python
+  // FakeTensorMode at fake_tensor.py:2578-2620.
+  {
+    bool all_constant = !flat_arg_fake_tensors.empty() &&
+        std::all_of(
+            flat_arg_fake_tensors.begin(),
+            flat_arg_fake_tensors.end(),
+            [](const at::Tensor& t) {
+              return t.unsafeGetTensorImpl()->fake_constant() != nullptr;
+            });
+
+    // isinstance(func, torch._ops.OpOverload) — always true in C++ fallback
+    if (!op.hasTag(at::Tag::nondeterministic_seeded) &&
+        (!op.hasTag(at::Tag::inplace_view) ||
+          schema.name() == "aten::detach_") &&
+        all_constant &&
+        !flat_arg_fake_tensors.empty() &&
+        !has_symints &&
+        // TODO: avoiding_device_init
+        schema.name() != "aten::_nested_tensor_from_tensor_list") {
+      // Save the original arguments so we can restore the stack if the
+      // outputs are too large to keep as constants.
+      auto orig_arguments = torch::jit::last(*stack, num_arguments).vec();
+
+      // Substitute fake tensors with their constants on the stack.
+      // Matches Python: a.constant if self.is_our_fake(a) else a
+      for_each_tensor(
+          stack, arguments_begin, num_arguments,
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (is_our_fake(t, mode)) {
+              auto constant = t.unsafeGetTensorImpl()->fake_constant();
+              if (constant)
+                return *constant;
+            }
+            return std::nullopt;
+          });
+
+      // Run the real op.
+      {
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            c10::DispatchKeySet(c10::DispatchKey::Fake) |
+            c10::DispatchKeySet(c10::DispatchKey::Python) |
+            c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+        op.callBoxed(stack);
+      }
+
+      // Check if all output tensors can be turned into constants.
+      const auto num_returns = schema.returns().size();
+      const auto returns_begin = stack->size() - num_returns;
+      bool all_outputs_const = true;
+      for_each_tensor(
+          stack, returns_begin, num_returns,
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (!may_turn_const(t))
+              all_outputs_const = false;
+            return std::nullopt;
+          });
+
+      if (all_outputs_const) {
+        // Convert output tensors to fakes with constants attached.
+        for_each_tensor(
+            stack, returns_begin, num_returns,
+            [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+              if (may_turn_const(t)) {
+                auto constant = std::make_shared<at::Tensor>(t.clone());
+                auto fake = real_tensor_to_fake(t, mode);
+                fake.unsafeGetTensorImpl()->set_fake_constant(
+                    std::move(constant));
+                return fake;
+              }
+              return std::nullopt;
+            });
+        // Non-tensor outputs (e.g. Scalar from .item()) are already on
+        // the stack and need no conversion.
+        return;
+      }
+
+      // Outputs too large to keep as constants — discard the results and
+      // restore the original fake arguments so the normal meta-kernel path
+      // below can re-run the op.
+      // TODO: invalidate_constant_aliases for output tensors
+      stack->resize(arguments_begin);
+      for (auto& arg : orig_arguments) {
+        stack->push_back(std::move(arg));
+      }
+    }
+  }
 
   // HOPs
   // this is already taken care of by adding @py_impl(DispatchKey.Fake) to all HOPs
@@ -566,8 +656,40 @@ void fakeFallback(
   // TODO: user registered
   // structured kernels?
 
-  // special handling for funcs registered through `register_op_impl`
+  // special handling for funcs registered through `register_op_impl`.
+  // Skip aten tensor constructors (no tensor inputs, single tensor output)
+  // because the C++ path below (rewrite_device_args_to_meta + Meta kernel)
+  // already handles them correctly, and the Python constructors handler
+  // creates Python FakeTensors that don't convert cleanly back to C++ fakes.
+  auto is_aten_tensor_constructor = [&]() {
+    auto ns = schema.operator_name().getNamespace();
+    if (!ns.has_value() || *ns != "aten")
+      return false;
+    if (schema.returns().size() != 1 ||
+        !schema.returns()[0].type()->isSubtypeOf(*c10::TensorType::get()))
+      return false;
+    for (const auto& arg : schema.arguments()) {
+      if (arg.type()->isSubtypeOf(*c10::TensorType::get()) ||
+          arg.type()->isSubtypeOf(*c10::ListType::ofTensors()) ||
+          arg.type()->isSubtypeOf(
+              *c10::OptionalType::create(c10::TensorType::get()))) {
+        return false;
+      }
+    }
+    return true;
+  };
 
+  if (mode && mode->op_impl_fn_ && !is_aten_tensor_constructor()) {
+    bool found = false;
+    try {
+      found = mode->op_impl_fn_(&op, stack);
+    } catch (...) {
+      throw;
+    }
+    if (found) {
+      return;
+    }
+  }
 
   auto device_from_args = rewrite_device_args_to_meta(
       stack, arguments_begin, num_arguments, schema);
@@ -599,6 +721,11 @@ void fakeFallback(
         c10::DispatchKeySet(c10::DispatchKey::Fake) |
         c10::DispatchKeySet(c10::DispatchKey::Python) |
         c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+        // c10::autograd_dispatch_keyset |
+        // c10::DispatchKeySet(
+        //     c10::DispatchKey::CompositeExplicitAutograd) |
+        // c10::DispatchKeySet(
+        //     c10::DispatchKey::CompositeExplicitAutogradNonFunctional));
     c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
     op.callBoxed(stack);
     wrap_meta_outputs_with_default_device_logic();

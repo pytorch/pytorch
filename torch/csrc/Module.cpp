@@ -3125,6 +3125,120 @@ Call this whenever a new thread is created in order to propagate values from
     return true;
   };
 
+  static auto tryPythonOpImpl = [](const void* op_ptr, void* stack_ptr) -> bool {
+    const auto& op =
+        *static_cast<const c10::OperatorHandle*>(op_ptr);
+    auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
+
+    py::gil_scoped_acquire gil;
+
+    py::handle py_op = torch::detail::getTorchApiFunction(op);
+
+    static py::object op_impl_dict =
+        py::module::import("torch._subclasses.fake_impls")
+            .attr("op_implementations_dict");
+    static py::object op_impl_checks =
+        py::module::import("torch._subclasses.fake_impls")
+            .attr("op_implementations_checks");
+
+    py::object handler = py::none();
+
+    // Check direct dict lookup first
+    if (op_impl_dict.contains(py_op)) {
+      handler = op_impl_dict[py_op];
+    } else {
+      // Check predicate-based handlers
+      for (auto& item : op_impl_checks) {
+        auto check = item.cast<py::tuple>()[0];
+        auto impl = item.cast<py::tuple>()[1];
+        if (check(py_op).cast<bool>()) {
+          handler = impl;
+          break;
+        }
+      }
+    }
+
+    if (handler.is_none()) {
+      return false;
+    }
+
+    // Get the Python FakeTensorMode from the C++ mode's shape_env
+    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+    auto fake_mode_obj = py::module::import("torch._guards")
+        .attr("TracingContext").attr("try_get")();
+    py::object py_fake_mode;
+    if (!fake_mode_obj.is_none()) {
+      py_fake_mode = fake_mode_obj.attr("fake_mode");
+    } else {
+      // Fallback: construct a minimal fake mode object
+      return false;
+    }
+
+    const auto& schema = op.schema();
+    auto arguments =
+        torch::jit::pop(*stack, schema.arguments().size());
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+    // Exclude the Fake dispatch key so the handler's sub-ops don't re-enter
+    // fakeFallback.  Must use ExcludeDispatchKeyGuard (not tls_set_dispatch_key
+    // _included) because C++ fake tensors carry Fake in their tensor-local
+    // keyset; only the TLS exclude set can override that.
+    py::object result;
+    {
+      c10::impl::ExcludeDispatchKeyGuard guard(
+          c10::DispatchKeySet(c10::DispatchKey::Fake) |
+          c10::DispatchKeySet(c10::DispatchKey::Python) |
+          c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+      result = handler(
+          py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
+    }
+    if (result.is(py::handle(Py_NotImplemented))) {
+      // Handler returned NotImplemented, push args back and let C++ handle it
+      for (auto& arg : arguments) {
+        stack->push_back(std::move(arg));
+      }
+      return false;
+    }
+
+    // Convert Python FakeTensors to C++ fake tensors.
+    // We must create NEW plain tensors because the Python FakeTensor subclass
+    // has __torch_dispatch__ which would intercept all subsequent ops.
+    static py::object FakeTensorClass =
+        py::module::import("torch._subclasses.fake_tensor").attr("FakeTensor");
+    auto convert_fake = [&](py::object obj) -> py::object {
+      if (py::isinstance(obj, FakeTensorClass)) {
+        auto fake_device = obj.attr("fake_device").cast<c10::Device>();
+        at::Tensor py_fake = py::cast<at::Tensor>(obj);
+        at::Tensor meta;
+        {
+          c10::impl::ExcludeDispatchKeyGuard guard(
+              c10::DispatchKeySet(c10::DispatchKey::Fake));
+          meta = at::empty_strided(
+              py_fake.sizes(),
+              py_fake.strides(),
+              py_fake.options().device(c10::DeviceType::Meta));
+        }
+        meta.unsafeGetTensorImpl()->set_and_normalize_fake_device(fake_device);
+        meta.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+        return py::cast(meta);
+      }
+      return obj;
+    };
+
+    if (py::isinstance<py::tuple>(result)) {
+      py::tuple tup = result.cast<py::tuple>();
+      py::tuple converted(tup.size());
+      for (size_t i = 0; i < tup.size(); i++) {
+        converted[i] = convert_fake(py::reinterpret_borrow<py::object>(tup[i]));
+      }
+      result = std::move(converted);
+    } else {
+      result = convert_fake(std::move(result));
+    }
+
+    pushPyOutToStack(op, stack, std::move(result), "op_impl");
+    return true;
+  };
+
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
   });
@@ -3178,6 +3292,7 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
         mode->decomp_fn_ = tryPythonDecomp;
+        mode->op_impl_fn_ = tryPythonOpImpl;
         c10::impl::FakeTensorModeTLS::set_state(std::move(mode));
       },
       py::arg("converter"),
@@ -3193,6 +3308,7 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
         mode->decomp_fn_ = tryPythonDecomp;
+        mode->op_impl_fn_ = tryPythonOpImpl;
         c10::impl::FakeTensorModeTLS::create_state(std::move(mode));
       },
       py::arg("converter"),

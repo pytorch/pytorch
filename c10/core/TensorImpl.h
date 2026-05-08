@@ -239,8 +239,20 @@ struct C10_API FakeTensorMode {
   // Returns true if a decomposition was found and executed.
   std::function<bool(const void* op, void* stack)> decomp_fn_;
 
-  FakeTensorMode(std::shared_ptr<c10::SafePyObject> shape_env, std::shared_ptr<c10::SafePyObject> converter)
-      : shape_env_(std::move(shape_env)), fake_tensor_converter_(std::move(converter)) {}
+  // Callback to run a Python register_op_impl handler for an op.
+  // Same type-erased signature as decomp_fn_.
+  // Returns true if a handler was found and executed.
+  std::function<bool(const void* op, void* stack)> op_impl_fn_;
+
+  // this is only used rn to guard re-entry for decomps
+  // idk if this is right should i rename it
+  bool in_kernel_invocation_ = false;
+
+  FakeTensorMode(
+      std::shared_ptr<c10::SafePyObject> shape_env,
+      std::shared_ptr<c10::SafePyObject> converter)
+      : shape_env_(std::move(shape_env)),
+        fake_tensor_converter_(std::move(converter)) {}
 };
 
 struct C10_API ExtraMeta {
@@ -251,6 +263,10 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // Backing real tensor for constant propagation in C++ FakeTensorMode.
+  // Matches Python FakeTensor.constant.
+  // shared_ptr because at::Tensor is incomplete here.
+  std::shared_ptr<at::Tensor> fake_constant_ = nullptr;
 
   ExtraMeta() = default;
   ~ExtraMeta() = default;
@@ -272,6 +288,7 @@ struct C10_API ExtraMeta {
     }
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    fake_constant_ = other.fake_constant_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1426,6 +1443,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  void set_fake_constant(std::shared_ptr<at::Tensor> constant) {
+    get_extra_meta().fake_constant_ = std::move(constant);
+  }
+
+  std::shared_ptr<at::Tensor> fake_constant() const {
+    if (!extra_meta_)
+      return nullptr;
+    return extra_meta_->fake_constant_;
   }
 
   /**
