@@ -96,13 +96,6 @@ _FUSED_OP_SCALAR_IDX = 5
 # when partial_extra_rules is not None, to avoid double-registration from tag discovery.
 _specially_registered_ops: set[OpOverload] = set()
 
-# ``aten.clone.default`` is tagged ``pointwise`` but is fundamentally an
-# identity op: it must preserve any input placement (including Partial),
-# not redistribute. Skip auto-registration here so the
-# ``propagate_single_input_strategy`` registration in ``_tensor_ops.py``
-# (which is a 1:1 placement passthrough) takes effect.
-_pointwise_skip_ops: set[OpOverload] = {aten.clone.default}
-
 
 def _register_single_dim_pointwise(
     op: OpOverload,
@@ -579,7 +572,7 @@ def _get_pointwise_ops_from_tag() -> list[OpOverload]:
 pointwise_ops = [
     op
     for op in _get_pointwise_ops_from_tag() + _extra_pointwise_ops
-    if op not in _specially_registered_ops and op not in _pointwise_skip_ops
+    if op not in _specially_registered_ops
 ]
 
 
