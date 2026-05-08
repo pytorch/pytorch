@@ -4467,3 +4467,56 @@ class TupleGetterVariable(VariableTracker):
         return obj.call_method(
             tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
         )
+
+
+class InstanceMethodVariable(VariableTracker):
+    """C-level instance method descriptor (PyInstanceMethod_Type).
+
+    An instance method wraps a PyCFunction and implements tp_descr_get
+    to bind it to instances, replacing the older PyMethod_New(func, NULL, cls)
+    pattern.  Used by pybind11 and other C extensions.
+    https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L143-L168
+
+    instancemethod_descr_get returns __func__ when obj is NULL/None (class
+    access), or PyMethod_New(__func__, obj) when binding to an instance.
+    """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: Any,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        return f"InstanceMethodVariable({self.descriptor.__name__})"
+
+    def as_python_constant(self) -> object:
+        return self.descriptor
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__func__":
+            return VariableTracker.build(tx, self.descriptor.__func__)
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().var_getattr(tx, name)
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L168
+        if obj is None:
+            func_source = AttrSource(self.source, "__func__") if self.source else None
+            return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+        return BoundBuiltinMethodVariable(
+            self.descriptor.__func__, obj, source=self.source
+        )
