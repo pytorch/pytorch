@@ -2786,6 +2786,21 @@ class TMACompatibilityChecker:
             )
             return False
 
+        # CUtensorMapDataType has no entry for `bool` / Triton `tl.int1`
+        # (Triton reports `sizeof(int1) == 0`). PyTorch's `bool.itemsize == 1`
+        # so the per-load `block_shape × element_size ≥ 16` check below would
+        # incorrectly pass; refuse early using the same dtype registry the
+        # matmul-side TMA helper consults (`_TMA_SUPPORTED_DTYPES`).
+        from ..utils import _TMA_SUPPORTED_DTYPES
+
+        if self.dtype not in _TMA_SUPPORTED_DTYPES:
+            log.debug(
+                "%s dtype %s has no CUtensorMapDataType mapping.",
+                self.failed_debug_prefix,
+                self.dtype,
+            )
+            return False
+
         return True
 
     def are_block_parameters_compatible(
