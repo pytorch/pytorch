@@ -994,6 +994,26 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         self.assertEqual(frozenset({1, 2}) - frozenset(), frozenset({1, 2}))
         self.assertEqual(frozenset() - frozenset({1, 2}), frozenset())
 
+    # --- Dict view difference ---
+
+    @make_dynamo_test
+    def test_dict_keys_difference(self):
+        self.assertEqual({"a": 1, "b": 2}.keys() - {"b"}, {"a"})
+
+    @make_dynamo_test
+    def test_dict_items_difference(self):
+        left = {"a": 1, "b": 2}.items()
+        right = {("b", 2)}
+        self.assertEqual(left - right, {("a", 1)})
+
+    def test_dict_values_difference_unsupported(self):
+        def fn():
+            {"a": 1}.values() - {"b": 2}.values()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn()
+
     # --- OrderedSet difference ---
 
     @make_dynamo_test
@@ -1064,6 +1084,14 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         f = frozenset({1, 2, 3})
         f -= frozenset()
         self.assertEqual(f, frozenset({1, 2, 3}))
+
+    @make_dynamo_test
+    def test_inplace_sub_orderedset_mutates_alias(self):
+        s = OrderedSet([1, 2, 3])
+        alias = s
+        s -= OrderedSet([2])
+        self.assertEqual(s, OrderedSet([1, 3]))
+        self.assertEqual(alias, OrderedSet([1, 3]))
 
     # --- Reversed sub (__rsub__) ---
 
