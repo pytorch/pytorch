@@ -88,7 +88,6 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
 
 register_op_strategy(
     [
-        aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
         aten.detach_.default,
@@ -99,6 +98,77 @@ register_op_strategy(
         prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
+
+
+def _is_user_facing_placement(p: Placement) -> bool:
+    """A placement is user-facing if it's the base ``Replicate``, ``Shard``
+    (including the FSDP-composition subclass ``_StridedShard``), or plain
+    ``Partial`` (with one of the standard reduce ops). Partial subclasses
+    like ``_NormPartial`` and ``_MaskPartial`` are internal and downstream
+    ops generally lack strategies for them, so identity-like ops should
+    redistribute them away rather than leak them through.
+    """
+    if isinstance(p, Replicate):
+        return True
+    if isinstance(p, Shard):
+        # Includes ``_StridedShard`` (used for FSDP+TP composition).
+        return True
+    # ``type(p) is Partial`` deliberately excludes ``_NormPartial`` /
+    # ``_MaskPartial`` and any future Partial subclass.
+    if type(p) is Partial:
+        return True
+    return False
+
+
+@register_op_strategy(aten.clone.default)
+def clone_strategy(op_schema: OpSchema) -> StrategyType:
+    """Identity-like passthrough for clone, but with internal Partial
+    subclasses (e.g. ``_NormPartial``, ``_MaskPartial``) demoted to
+    ``Replicate``. Plain ``Partial`` / ``Shard`` / ``_StridedShard`` /
+    ``Replicate`` are preserved. This sits between the original behavior
+    (auto-registered as pointwise -> no Partial preserved) and full
+    passthrough (which leaked ``_NormPartial`` to downstream ops without
+    strategy support, e.g. ``aten.clamp_min_.Tensor`` in
+    ``nn.functional.cosine_similarity``).
+    """
+    if len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) != 1:
+        raise AssertionError(
+            "clone_strategy only works for single-tensor-input ops"
+        )
+    first_input_strategy = op_schema.args_schema[0]
+    if not isinstance(first_input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(first_input_strategy)}")
+
+    new_strategies = []
+    for strategy in first_input_strategy.strategies:
+        in_placements = strategy.output_spec.placements
+        out_placements = tuple(
+            p if _is_user_facing_placement(p) else Replicate() for p in in_placements
+        )
+        out_spec = DTensorSpec(
+            mesh=first_input_strategy.mesh,
+            placements=out_placements,
+            tensor_meta=strategy.output_spec.tensor_meta,
+        )
+        # Cost reflects the redistribute from the input's actual placement
+        # (``in_placements``) to the chosen ``out_placements``: 0 when no
+        # demote happened, > 0 when an internal subclass needed
+        # redistribution.
+        in_spec = DTensorSpec(
+            mesh=first_input_strategy.mesh,
+            placements=out_placements,
+            tensor_meta=strategy.output_spec.tensor_meta,
+        )
+        new_strategies.append(
+            OpSpec(
+                output_specs=out_spec,
+                input_specs=[in_spec],
+                redistribute_cost=[
+                    generate_redistribute_costs(first_input_strategy, out_spec)
+                ],
+            )
+        )
+    return OpStrategy(new_strategies)
 
 
 def _partial_needs_reduce_for_dtype_cast(

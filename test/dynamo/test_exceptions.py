@@ -152,6 +152,22 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_user_class_as_tensor_method_arg(self):
+        class MyClass:
+            pass
+
+        def fn(x):
+            try:
+                y = x.new_full(MyClass, 3.14)
+            except TypeError:
+                y = x + 1.0
+            return y
+
+        x = torch.ones(4)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(ref, res)
+
     def test_autocast_with_exception(self):
         class Optimizer(torch.autograd.Function):
             @staticmethod
