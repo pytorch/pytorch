@@ -6404,6 +6404,23 @@ class CommonTemplate:
 
         self.common(foo, (inp, weight), check_lowp=False)
 
+    def test_layer_norm_numerics_under_autocast(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        norm = torch.nn.LayerNorm(128, eps=1e-5, device=self.device)
+        linear = torch.nn.Linear(128, 128, bias=False, device=self.device)
+
+        def f(x):
+            return linear(norm(x))
+
+        compiled_f = torch.compile(f, fullgraph=True)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            torch.manual_seed(42)
+            x = torch.randn(4, 32, 32, 128, device=self.device)
+            out_eager = f(x)
+            out_compiled = compiled_f(x)
+            torch.testing.assert_close(out_eager, out_compiled)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
