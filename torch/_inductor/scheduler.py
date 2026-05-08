@@ -4230,20 +4230,18 @@ class Scheduler:
         for inp in multi_node.inputs:
             # pyrefly: ignore [missing-attribute]
             inp_name = inp.get_name()
-            # View has its own fixed layout that is not constrained
-            if (
-                not getattr(inp, "layout", None)
-                or inp_name not in constraints
-                or isinstance(inp, ir.ReinterpretView)
-            ):
+
+            if not torch._inductor.select_algorithm.should_use_layout_constraints(inp):
                 continue
 
+            # pyrefly: ignore [missing-attribute]
             layout = inp.layout
             expected_layout = constraints[inp_name]
             if isinstance(layout, ir.FlexibleLayout):
                 # Freeze to the expected layout to avoid conflicts
                 # pyrefly: ignore [missing-attribute]
                 inp.freeze_layout_with_exact_strides(expected_layout.stride)
+                # pyrefly: ignore [missing-attribute]
                 layout = inp.layout
 
             if isinstance(layout, ir.FixedLayout) and expected_layout != layout:
