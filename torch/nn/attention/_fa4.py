@@ -1,9 +1,13 @@
-"""UBER PROTOTYPE!!!"""
+"""
+For fp8: only supports forward pass right now.
+For fp16/bf16: supports forward and backward pass.
+"""
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
 
 import importlib
+import warnings
 from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
@@ -66,18 +70,32 @@ def _fa4_import_module(module_path: str) -> ModuleType:
 
 def _fa4_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")
-    lib.impl("_flash_attention_forward", _fa4_flash_attention_forward_impl, "CUDA")
     lib.impl(
         "_flash_attention_forward_no_dropout_inplace",
         _fa4_flash_attention_forward_no_dropout_inplace_impl,
         "CUDA",
     )
-    lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
     lib.impl(
-        "_scaled_dot_product_flash_attention",
+        "_flash_attention_forward.quantized",
+        _fa4_flash_attention_forward_impl,
+        "CUDA",
+    )
+    lib.impl(
+        "_scaled_dot_product_flash_attention.quantized",
         _fa4_scaled_dot_product_flash_attention_forward_impl,
         "CUDA",
     )
+    lib.impl(
+        "_flash_attention_forward",
+        _fa4_flash_attention_forward_impl_default,
+        "CUDA",
+    )
+    lib.impl(
+        "_scaled_dot_product_flash_attention",
+        _fa4_scaled_dot_product_flash_attention_forward_impl_default,
+        "CUDA",
+    )
+    lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
     lib.impl(
         "_scaled_dot_product_flash_attention_backward",
         _fa4_scaled_dot_product_flash_attention_backward_impl,
@@ -90,14 +108,25 @@ def _fa4_common_support_error(
     query: torch.Tensor,
     tensors: tuple[torch.Tensor, ...],
     cum_seq_q: torch.Tensor | None,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
     require_fp32: tuple[tuple[str, torch.Tensor], ...] = (),
 ) -> str | None:
     if not all(t.is_cuda for t in tensors):
         return "inputs must be CUDA tensors"
     if len({t.device for t in tensors}) != 1:
         return "inputs must share device"
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        return "query dtype must be float16 or bfloat16"
+    if query.dtype == torch.float8_e4m3fn and (
+        q_descale is None or k_descale is None or v_descale is None
+    ):
+        warnings.warn(
+            "When using SDPA with fp8, descale tensor should always be used"
+            " for accurate dequantization. Please use "
+            "_scaled_dot_product_attention_quantized and "
+            "provide the descale tensors.",
+            UserWarning,
+        )
     for name, tensor in require_fp32:
         if tensor.dtype != torch.float32:
             return f"{name} dtype must be float32"
@@ -121,6 +150,9 @@ def _fa4_forward_support_error(
     alibi_slopes: torch.Tensor | None,
     seqused_k: torch.Tensor | None,
     cum_seq_q: torch.Tensor | None,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
 ) -> str | None:
@@ -135,7 +167,20 @@ def _fa4_forward_support_error(
             return "seqused_k must be int32"
         if not seqused_k.is_cuda:
             return "seqused_k must be CUDA"
+    supported_dtypes = (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float16,
+        torch.bfloat16,
+    )
+    if not all(t.dtype in supported_dtypes for t in {query, key, value}):
+        return f"inputs must be one of {supported_dtypes}"
+    if len({t.dtype for t in {query, key, value}}) != 1:
+        return "all inputs must have the same dtype"
     major = _get_device_major(query.device)
+    if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        if major != 10:
+            return "FP8 requires compute capability 10.0 (SM100)"
     if block_table is not None and major != 10:
         return f"paged KV (block_table) not supported on SM {major}0"
     if num_splits is not None and num_splits > 1 and major != 10:
@@ -144,6 +189,9 @@ def _fa4_forward_support_error(
         query,
         (query, key, value),
         cum_seq_q,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if error is not None:
         if error == "inputs must share device":
@@ -162,12 +210,24 @@ def _fa4_backward_support_error(
     dropout_p: float,
     cum_seq_q: torch.Tensor | None,
 ) -> str | None:
+    if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        return (
+            "FA4 backward does not support fp8 - use inference only (torch.no_grad())"
+        )
     if dropout_p != 0.0:
         return "dropout_p must be 0"
+    supported_dtypes = (torch.float16, torch.bfloat16)
+    if not all(t.dtype in supported_dtypes for t in (grad_out, query, key, value, out)):
+        return f"inputs must be one of {supported_dtypes}"
+    if len({t.dtype for t in (grad_out, query, key, value, out)}) != 1:
+        return "all inputs must have the same dtype"
     error = _fa4_common_support_error(
         query,
         (grad_out, query, key, value, out, logsumexp),
         cum_seq_q,
+        None,
+        None,
+        None,
         require_fp32=(("logsumexp", logsumexp),),
     )
     if error is not None:
@@ -203,6 +263,9 @@ def _fa4_run_forward(
     out: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
@@ -223,6 +286,12 @@ def _fa4_run_forward(
         "num_splits": num_splits or 1,
         "out": out,
     }
+    if q_descale is not None:
+        kwargs["q_descale"] = q_descale
+    if k_descale is not None:
+        kwargs["k_descale"] = k_descale
+    if v_descale is not None:
+        kwargs["v_descale"] = v_descale
     out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
@@ -274,6 +343,9 @@ def _fa4_flash_attention_forward_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int | None = None,
@@ -294,6 +366,9 @@ def _fa4_flash_attention_forward_impl(
         alibi_slopes,
         seqused_k,
         cum_seq_q,
+        q_descale,
+        k_descale,
+        v_descale,
         block_table,
         num_splits,
     )
@@ -315,6 +390,9 @@ def _fa4_flash_attention_forward_impl(
         out,
         block_table,
         num_splits,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if compute_auxiliary:
         rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
@@ -372,6 +450,52 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
     return lse
 
 
+def _fa4_flash_attention_forward_impl_default(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cum_seq_q: torch.Tensor | None,
+    cum_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    *,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: torch.Tensor | None = None,
+    alibi_slopes: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
+):
+    return _fa4_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        None,
+        None,
+        None,
+        scale=scale,
+        window_size_left=window_size_left,
+        window_size_right=window_size_right,
+        seqused_k=seqused_k,
+        alibi_slopes=alibi_slopes,
+        out=out,
+        block_table=block_table,
+        num_splits=num_splits,
+    )
+
+
 def _fa4_flash_attention_backward_impl(
     grad_out: torch.Tensor,
     query: torch.Tensor,
@@ -427,6 +551,9 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -442,6 +569,9 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
         None,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if error is not None:
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
@@ -450,7 +580,12 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     # Pre-allocate output with query's strides (BHSD layout), then create
     # a BSHD view for the kernel. This ensures the returned output has
     # the same memory layout as the input query.
-    out_bhsd = torch.empty_like(query)
+    out_dtype = (
+        torch.bfloat16
+        if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        else query.dtype
+    )
+    out_bhsd = torch.empty_like(query, dtype=out_dtype)
     out_bshd = out_bhsd.transpose(1, 2)
 
     max_q_flash = q.size(1)
@@ -466,6 +601,9 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         dropout_p,
         is_causal,
         return_debug_mask,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
         scale=scale,
         out=out_bshd,
     )
@@ -481,6 +619,30 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         rng_state,
         philox_offset,
         debug_mask,
+    )
+
+
+def _fa4_scaled_dot_product_flash_attention_forward_impl_default(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: float | None = None,
+):
+    return _fa4_scaled_dot_product_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        None,
+        None,
+        None,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale=scale,
     )
 
 
