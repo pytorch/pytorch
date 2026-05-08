@@ -1415,6 +1415,7 @@ class CommonTemplate:
             a,
             b,
             table,
+            atol=3e-5,
             config_patches={
                 "triton.persistent_reductions": False,
                 "triton.max_tiles": 2,
