@@ -1833,6 +1833,67 @@ def addmm(match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
+def register_var_std_reduction_dedup_pattern():
+    """
+    Merge var and std reductions that have the same dimensions and correction.
+    """
+    _var_std_inp = KeywordArg("inp")
+    _var_std_dims = KeywordArg("dims")
+    var_reduc = CallFunction(
+        aten.var.correction,
+        _var_std_inp,
+        _var_std_dims,
+        correction=KeywordArg("var_correction"),
+        keepdim=KeywordArg("keepdim"),
+    )
+    std_reduc = CallFunction(
+        aten.var.correction,
+        CallFunction(
+            prims.convert_element_type.default, _var_std_inp, KeywordArg("cvt_dtype")
+        ),
+        _var_std_dims,
+        correction=KeywordArg("cvt_correction"),
+        keepdim=KeywordArg("cvt_keepdim"),
+    )
+
+    @register_graph_pattern(
+        MultiOutputPattern([var_reduc, std_reduc]),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=pass_patterns[2],
+    )
+    def merge_std_var(
+        match,
+        inp,
+        dims,
+        var_correction,
+        cvt_correction,
+        cvt_dtype,
+        keepdim,
+        cvt_keepdim,
+    ):
+        if float(var_correction) != float(cvt_correction):
+            return
+        if keepdim != cvt_keepdim:
+            return
+
+        var_node, std_node = match.output_nodes()
+        var_dtype = var_node.meta["val"].dtype
+
+        def replacement(inp):
+            cvt_inp = prims.convert_element_type.default(inp, cvt_dtype)
+            var_result = aten.var.correction(
+                cvt_inp, dims, correction=cvt_correction, keepdim=keepdim
+            )
+            var_casted = prims.convert_element_type.default(var_result, var_dtype)
+            return (var_casted, var_result)
+
+        counters["inductor"]["var_std_reduction_dedup"] += 1
+        match.replace_by_example(replacement, [inp])
+
+
+register_var_std_reduction_dedup_pattern()
+
+
 def register_partial_reduction_pattern():
     "Reuse partial reductions in complete reductions"
 

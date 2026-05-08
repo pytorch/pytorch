@@ -568,6 +568,58 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
 
+    def test_var_std_reduction_dedup(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1) + torch.std(x, dim=-1)
+
+        x = torch.randn(64, 32768, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
+
+    def test_var_std_reduction_dedup_no_match(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1) + torch.var(x, dim=-1, correction=0)
+
+        x = torch.randn(64, 128, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
+    def test_var_std_reduction_dedup_keepdim(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1, keepdim=True) + torch.std(
+                x, dim=-1, keepdim=True
+            )
+
+        x = torch.randn(64, 32768, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
+
+    def test_var_std_reduction_dedup_different_dim(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1), torch.std(x, dim=0)
+
+        x = torch.randn(64, 128, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
+    def test_var_std_reduction_dedup_float32(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1) + torch.std(x, dim=-1)
+
+        x = torch.randn(64, 128, dtype=torch.float32)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
