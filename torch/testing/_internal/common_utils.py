@@ -2397,6 +2397,15 @@ def setBlasBackendsToDefaultFinally(fn):
                 torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
+def setSdpaBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_rocm_fa_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(_preferred_backend)
+    return _fn
 
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
