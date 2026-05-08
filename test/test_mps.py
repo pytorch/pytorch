@@ -5108,6 +5108,13 @@ class TestMPS(TestCaseMPS):
 
     # TODO: fold into OpInfo-based consistency tests once there's a hook to
     # exercise the two-pass reduction path for scalar outputs.
+    def test_sum_full_reduction_non_contiguous(self):
+        x = torch.randn((2, 4, 256, 64), device="mps")
+        for s in (x[:, :, 128:, :], x.transpose(-1, -2), x[::2]):
+            self.assertEqual(s.sum().cpu(), s.cpu().sum())
+            self.assertEqual(s.mean().cpu(), s.cpu().mean())
+            self.assertEqual(s.count_nonzero().cpu(), s.cpu().count_nonzero())
+
     def test_sum_full_reduction_repeated(self):
         """Regression test for the two-pass full reduction: when
         reduction_size doesn't divide evenly into num_groups, the last TG
@@ -8863,6 +8870,28 @@ class TestLargeTensors(TestCaseMPS):
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def test_bitwise_unaligned_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/182822
+        # Metal `setBuffer:offset:` requires the offset to be 4-byte aligned;
+        # the old custom bitwise kernels passed `storage_offset * element_size`
+        # directly, which dropped sub-4-byte offsets to 0 and read the wrong
+        # element. The TensorIterator-based path uses `device T*` array indexing
+        # which is offset-tolerant.
+        torch.manual_seed(0)
+        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            # Sliced tensor with a non-aligned start (offset 22 bytes for int8/bool, etc.)
+            high = 2 if dtype == torch.bool else 100
+            a_full = torch.randint(0, high, (123,), dtype=dtype, device='mps')
+            b_full = torch.randint(0, high, (101,), dtype=dtype, device='mps')
+            a = a_full[22:101]      # 79 elements, storage_offset=22
+            b = b_full[:79]         # 79 elements, contiguous from offset 0
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, b).cpu(), op(a.cpu(), b.cpu()))
+            # 0-d view (storage_offset=1) - the original bug repro
+            scalar_view = b_full[1]
+            for op in (torch.bitwise_and, torch.bitwise_or, torch.bitwise_xor):
+                self.assertEqual(op(a, scalar_view).cpu(), op(a.cpu(), scalar_view.cpu()))
 
     def test_logical_not(self):
         def helper(x):
@@ -13462,6 +13491,42 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.binary_cross_entropy_with_logits',
     }
 
+    # Operators whose output is a random draw, therefore MPS and CPU can
+    # expected to generate different results, as each backend is free to
+    # use different RNG algorithm and are operating on different RNG stats
+    # Ops in this list are validated against metadata only.
+    RANDOM_OP_NAMES = {
+        'bernoulli',
+        'cauchy',
+        'exponential',
+        'geometric',
+        'log_normal',
+        'multinomial',
+        'normal',
+        'rand_like',
+        'randint',
+        'randint_like',
+        'randn',
+        'randn_like',
+        'uniform',
+        'nn.functional.alpha_dropout',
+        'nn.functional.dropout',
+        'nn.functional.dropout2d',
+        'nn.functional.dropout3d',
+        'nn.functional.feature_alpha_dropout',
+    }
+
+    def _assert_random_op_match(self, mps_out, cpu_out):
+        # MPS and CPU consume independent RNG streams, so element-wise
+        # comparison is meaningless. Summary stats (min/max/mean) are also
+        # unreliable: dropout/multinomial outputs depend on which input
+        # elements happen to be selected, and a single large-magnitude
+        # outlier flipping in/out can swing the stats by orders of
+        # magnitude. Stick to strict metadata for now.
+        self.assertEqual(mps_out.shape, cpu_out.shape)
+        self.assertEqual(mps_out.dtype, cpu_out.dtype)
+        self.assertEqual(mps_out.layout, cpu_out.layout)
+
     def _compute_tolerances(self, op, dtype):
         if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
@@ -13576,6 +13641,10 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
                 continue
 
+            if op.name in self.RANDOM_OP_NAMES:
+                self._assert_random_op_match(mps_out, cpu_out)
+                continue
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -13599,7 +13668,10 @@ class TestConsistency(TestCaseMPS):
                 atol = 7e-4
                 rtol = 1.5e-3
 
-            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+            if op.name in self.RANDOM_OP_NAMES:
+                self._assert_random_op_match(mps_out, cpu_out)
+            else:
+                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             #
             # Backward check

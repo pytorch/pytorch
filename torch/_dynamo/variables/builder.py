@@ -35,6 +35,7 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
@@ -236,6 +237,7 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     ConstantLikeVariable,
+    ConstantMethodWrapperVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
@@ -243,7 +245,6 @@ from .misc import (
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
-    MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
     ObjectVariable,
@@ -409,6 +410,13 @@ class GraphArg:
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.source)
+
+    def reconstruct_pycode(self, codegen) -> str:
+        if self.source is None:
+            raise AssertionError(
+                "Expecting GraphArg to have source during python codegen."
+            )
+        return self.source.reconstruct_pycode(codegen)
 
     def erase(self) -> None:
         self._example = None
@@ -1514,7 +1522,7 @@ class VariableBuilder:
             # return the same object on attribute lookup. Therefore, we cannot
             # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
-            return MethodWrapperVariable(value)
+            return ConstantMethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -4422,7 +4430,7 @@ class SourcelessBuilder:
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(value)
+            return ConstantMethodWrapperVariable(value)
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
@@ -4469,7 +4477,17 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, (types.GenericAlias, types.UnionType)):
+        elif isinstance(
+            value,
+            (
+                types.GenericAlias,
+                types.UnionType,
+                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
+                # `typing._UnionGenericAlias` on Python <= 3.10, not a
+                # `types.UnionType`
+                typing._UnionGenericAlias,  # type: ignore[attr-defined]
+            ),
+        ):
             return TypingVariable(value)
         elif is_namedtuple(value):
             output = [
