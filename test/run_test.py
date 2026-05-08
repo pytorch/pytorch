@@ -1940,7 +1940,13 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
 def load_test_file_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
 ) -> dict[str, float]:
-    return cast(dict[str, float], load_test_times_from_file(file))
+    times = cast(dict[str, float], load_test_times_from_file(file))
+    times["inductor/test_torchinductor_opinfo_properties"] = 10.0
+    print_to_stderr(
+        "::warning:: Forcing inductor/test_torchinductor_opinfo_properties "
+        "test time to 10.0s to keep pytest sharding to one shard."
+    )
+    return times
 
 
 def load_test_class_times(
