@@ -16,6 +16,13 @@ from torch._inductor.fx_passes.bucketing import (
     merge_all_reduce_bucket,
     merge_reduce_scatter,
 )
+from torch._inductor.pattern_matcher import (
+    CallFunction,
+    KeywordArg,
+    Match,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -83,6 +90,100 @@ def is_fsdp_reduce_scatter_wait(wait: torch.fx.Node) -> bool:
                 return False
             queue.append(user)
     return True
+
+
+_LINEAR_REDUCE_OPS = OrderedSet(["sum", "avg"])
+
+_dedup_rs_pass: PatternMatcherPass | None = None
+
+
+def _get_dedup_rs_pass() -> PatternMatcherPass:
+    global _dedup_rs_pass
+
+    if _dedup_rs_pass is not None:
+        return _dedup_rs_pass
+
+    c10d = torch.ops._c10d_functional
+    aten = torch.ops.aten
+    dedup_rs_pass = PatternMatcherPass(pass_name="dedup_reduce_scatter")
+
+    def wait_rs(name: str) -> CallFunction:
+        return CallFunction(
+            c10d.wait_tensor.default,
+            CallFunction(
+                c10d.reduce_scatter_tensor.default,
+                KeywordArg(name),
+                KeywordArg("reduce_op"),
+                KeywordArg("group_size"),
+                KeywordArg("group_name"),
+            ),
+        )
+
+    def dedup_rs_extra_check(match: Match) -> bool:
+        if match.kwargs["reduce_op"] not in _LINEAR_REDUCE_OPS:
+            return False
+        for node in match.nodes:
+            if node.target is aten.add.Tensor:
+                continue
+            if node.target not in (
+                c10d.wait_tensor.default,
+                c10d.reduce_scatter_tensor.default,
+            ):
+                return False
+            if len(node.users) != 1:
+                return False
+        input_a = match.kwargs["input_a"]
+        input_b = match.kwargs["input_b"]
+        if input_a.meta["val"].dtype != input_b.meta["val"].dtype:
+            return False
+        return True
+
+    @register_graph_pattern(
+        CallFunction(
+            aten.add.Tensor,
+            wait_rs("input_a"),
+            wait_rs("input_b"),
+        ),
+        extra_check=dedup_rs_extra_check,
+        # pyrefly: ignore[bad-argument-type]
+        pass_dict=dedup_rs_pass,
+    )
+    def _(match: Match, input_a, input_b, reduce_op, group_size, group_name):
+        def repl(input_a, input_b):
+            combined = aten.add.Tensor(input_a, input_b)
+            rs = c10d.reduce_scatter_tensor.default(
+                combined, reduce_op, group_size, group_name
+            )
+            return c10d.wait_tensor.default(rs)
+
+        # pyrefly: ignore[bad-argument-type]
+        match.replace_by_example(repl, [input_a, input_b])
+
+    _dedup_rs_pass = dedup_rs_pass
+    return dedup_rs_pass
+
+
+def dedup_fsdp_reduce_scatter(gm: torch.fx.GraphModule) -> None:
+    """
+    Fuse duplicate reduce_scatter ops whose waited results are summed.
+
+    RS is linear, so RS(a) + RS(b) = RS(a + b). This pass rewrites
+        rs_a = reduce_scatter(input_a, ...); wait_a = wait(rs_a)
+        rs_b = reduce_scatter(input_b, ...); wait_b = wait(rs_b)
+        result = add(wait_a, wait_b)
+    into
+        combined = add(input_a, input_b)
+        rs = reduce_scatter(combined, ...)
+        result = wait(rs)
+
+    For N-way add trees (N > 2), the pattern is applied repeatedly
+    until fixpoint — each iteration fuses one leaf pair.
+    """
+    dedup_rs_pass = _get_dedup_rs_pass()
+    while dedup_rs_pass.apply(gm):
+        pass
+    gm.graph.lint()
+    gm.recompile()
 
 
 def bucket_fsdp_all_gather(
