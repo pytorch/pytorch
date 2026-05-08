@@ -2787,7 +2787,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_contains(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return a.call_method(tx, "__contains__", [b], {})
+        from .object_protocol import generic_contains
+
+        return generic_contains(tx, a, b)
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
@@ -3283,8 +3285,8 @@ class IsInstanceBuiltinVariable(BaseBuiltinVariable):
 
     _fn = isinstance
 
-    def __init__(self, value: Any = _fn, **kwargs: Any) -> None:
-        if value is not isinstance:
+    def __init__(self, value: Callable[..., Any] = _fn, **kwargs: Any) -> None:
+        if value is not type(self)._fn:
             raise AssertionError(
                 f"IsInstanceBuiltinVariable value must be isinstance, got {value}"
             )
