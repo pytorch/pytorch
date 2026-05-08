@@ -49,8 +49,7 @@ struct GridSamplerParams {
           c10::checked_convert<idx_t>(input.size(dim), "int32_t");
       input_strides[dim] =
           c10::checked_convert<idx_t>(input.stride(dim), "int32_t");
-      grid_sizes[dim] =
-          c10::checked_convert<idx_t>(grid.size(dim), "int32_t");
+      grid_sizes[dim] = c10::checked_convert<idx_t>(grid.size(dim), "int32_t");
       grid_strides[dim] =
           c10::checked_convert<idx_t>(grid.stride(dim), "int32_t");
     }
