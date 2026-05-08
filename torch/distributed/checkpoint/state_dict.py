@@ -37,6 +37,9 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.fsdp._init_utils import (
+    HYBRID_SHARDING_STRATEGIES
+)
 from torch.distributed.tensor import DTensor
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -456,12 +459,16 @@ def _get_fsdp_process_group(
     model: nn.Module, info: _StateDictInfo
 ) -> dist.ProcessGroup | None:
     if isinstance(model, FSDP):
-        process_group = model.process_group
+        fsdp_module = model
     elif info.fsdp_modules:
-        process_group = cast(FSDP, info.fsdp_modules[0]).process_group
+        fsdp_module = cast(FSDP, info.fsdp_modules[0])
     else:
         return None
 
+    if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+        return None
+
+    process_group = fsdp_module.process_group
     if isinstance(process_group, tuple):
         return None
     return process_group
