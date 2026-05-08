@@ -1594,6 +1594,7 @@ class SchedulerNode(BaseSchedulerNode):
         node: ir.ComputedBuffer | ir.TemplateBuffer,
     ) -> None:
         super().__init__(scheduler)
+        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._init_from_node(node)
         self._compute_attrs()
 
@@ -1703,7 +1704,12 @@ class SchedulerNode(BaseSchedulerNode):
         self.pointwise_read_writes.clear_cache(self)
         SIMDScheduling.candidate_tilings.cache_clear()
 
+    def _before_loop_state_mutation(self) -> None:
+        if self._loop_mutation_listener is not None:
+            self._loop_mutation_listener(self)
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
+        self._before_loop_state_mutation()
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
@@ -1714,6 +1720,7 @@ class SchedulerNode(BaseSchedulerNode):
     def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
 
+        self._before_loop_state_mutation()
         self._body = self._body.reindex_iter_loops(new_iter_sizes)
         self._sizes = self._body.sizes
 
@@ -3160,6 +3167,122 @@ def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
 
 def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return node2 if is_epilogue_fusion(node1, node2) else node1
+
+
+@dataclasses.dataclass
+class _LoopStateSnapshot:
+    """Captured loop state for a set of scheduler nodes, restorable on rollback.
+
+    Stores both SchedulerNode loop state (body, sizes, deps) and
+    FusedSchedulerNode group assignments, since the latter is reassigned
+    directly after child reindexing and has no mutation listener.
+    """
+
+    scheduler_node_states: dict[SchedulerNode, tuple[Any, ...]] = dataclasses.field(
+        default_factory=dict
+    )
+    fused_node_groups: dict[FusedSchedulerNode, Any] = dataclasses.field(
+        default_factory=dict
+    )
+
+    @classmethod
+    def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopStateSnapshot:
+        """Capture scheduler-node boundaries and their mutable leaf loop state."""
+        snapshot = cls()
+        for node in nodes:
+            snapshot.snapshot_node(node)
+        return snapshot
+
+    def _snapshot_scheduler_node(self, sn: SchedulerNode) -> None:
+        """Capture one leaf scheduler node before its first loop mutation."""
+        assert sn not in self.scheduler_node_states
+        self.scheduler_node_states[sn] = sn.snapshot_loop_state()
+
+    def _snapshot_fused_node(self, node: FusedSchedulerNode) -> None:
+        """Capture fused-node group metadata changed outside leaf listeners."""
+        assert node not in self.fused_node_groups
+        self.fused_node_groups[node] = node.group
+
+    def snapshot_node(self, node: BaseSchedulerNode) -> None:
+        """Capture a scheduler node boundary and all mutable leaf loop state."""
+        if isinstance(node, FusedSchedulerNode):
+            self._snapshot_fused_node(node)
+        for sn in node.get_nodes():
+            if isinstance(sn, SchedulerNode):
+                self._snapshot_scheduler_node(sn)
+
+    def restore(self) -> None:
+        """Restore all captured loop state and fused-node group metadata."""
+        for sn, state in self.scheduler_node_states.items():
+            sn.restore_loop_state(state)
+        for node, group in self.fused_node_groups.items():
+            node.group = group
+            refresh_group_node_dependencies(node)
+
+
+@dataclasses.dataclass
+class _LoopMutationTracker:
+    """Rollback scope for speculative loop mutations during can_fuse().
+
+    can_fuse() may speculatively reorder or reindex loops while evaluating
+    whether a fusion is legal. If the final decision rejects the fusion,
+    this tracker restores the original loop structure so later fusion
+    candidates do not inherit a speculative layout chosen for a fusion
+    that did not happen.
+
+    The first active tracker for a SchedulerNode leaf owns that leaf's
+    listener. Recursive can_fuse() calls reuse the outer listener instead of
+    installing nested listeners, so the captured state is the original state at
+    the outermost decision boundary.
+
+    Usage: call finish(commit=True) to keep mutations, or finish(commit=False)
+    to restore the original state. If no mutation occurred, finish() is a no-op.
+    """
+
+    nodes: tuple[BaseSchedulerNode, ...]
+    watched_nodes: OrderedSet[SchedulerNode] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+    state: _LoopStateSnapshot | None = None
+
+    @classmethod
+    def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopMutationTracker:
+        """Create a rollback scope and watch mutable leaf scheduler nodes."""
+        seen = OrderedSet(nodes)
+        tracker = cls(nodes=tuple(seen))
+        for node in seen:
+            for sn in node.get_nodes():
+                if isinstance(sn, SchedulerNode):
+                    tracker.watch(sn)
+        return tracker
+
+    def watch(self, sn: SchedulerNode) -> None:
+        """Install this scope as the mutation listener for a leaf node."""
+        if sn._loop_mutation_listener is not None:
+            # A recursive can_fuse() is already covered by an outer scope.
+            return
+        self.watched_nodes.add(sn)
+        sn._loop_mutation_listener = self.track
+
+    def track(self, sn: SchedulerNode) -> None:
+        """Lazily snapshot candidate roots when the first mutation occurs."""
+        assert sn in self.watched_nodes
+        if self.state is not None:
+            # Keep the original pre-mutation snapshot for the whole scope.
+            return
+
+        # The listener tells us a child loop mutated. Snapshot the original
+        # candidate roots here so we also capture fused-node group state,
+        # which is reassigned directly and has no listener of its own.
+        self.state = _LoopStateSnapshot.create(self.nodes)
+
+    def finish(self, *, rollback: bool) -> None:
+        """Detach listeners and restore captured state if rolling back."""
+        for sn in self.watched_nodes:
+            sn._loop_mutation_listener = None
+        if not rollback or self.state is None:
+            return
+        self.state.restore()
 
 
 class Scheduler:
@@ -6063,6 +6186,11 @@ class Scheduler:
         """
         from .codegen.simd import SIMDKernel
 
+        # Keep this consistent with shared_data_after_reordering_loop(): CPU
+        # reindexing is not validated yet.
+        if node1.is_cpu() or node2.is_cpu():
+            return False
+
         if node1.is_reduction() and not node2.is_reduction():
             reduction_node, pw_node = node1, node2
         elif node2.is_reduction() and not node1.is_reduction():
@@ -6095,12 +6223,16 @@ class Scheduler:
         ):
             return False
 
-        # Snapshot state before mutation so we can rollback if the
-        # reindexed deps don't actually improve the fusion score.
-        snapshots = [(sn, sn.snapshot_loop_state()) for sn in snodes]
-        old_pw_group = (
-            pw_node.group if isinstance(pw_node, FusedSchedulerNode) else None
-        )
+        # Nothing to reindex if the pointwise already uses the reduction split.
+        target_iter_sizes = (red_numel, red_rnumel)
+        if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
+            return False
+
+        # Local rollback is still needed even with _LoopMutationTracker: this
+        # helper is also used by shared_data_after_reordering_loop(), where a
+        # failed reindex attempt returns -1 and the caller may keep evaluating
+        # fusion within the same can_fuse() call.
+        rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
@@ -6120,12 +6252,7 @@ class Scheduler:
             for name in common_names
         )
         if not has_benefit:
-            for sn, state in snapshots:
-                sn.restore_loop_state(state)
-            if isinstance(pw_node, FusedSchedulerNode):
-                assert old_pw_group is not None
-                pw_node.group = old_pw_group
-                refresh_group_node_dependencies(pw_node)
+            rollback_snapshot.restore()
             return False
 
         # When loop ordering is disabled, re-extract deps with
@@ -6317,6 +6444,28 @@ class Scheduler:
             return None
 
     def can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+        allow_mix_order_reduction: bool = True,
+    ) -> bool:
+        """Determine if node1 and node2 can be combined into a single fused node.
+
+        Speculative loop mutations (reordering, reindexing) are automatically
+        rolled back if the fusion decision ultimately fails.
+        """
+        tracker = _LoopMutationTracker.create((node1, node2))
+        can_fuse = self._can_fuse_impl(
+            node1,
+            node2,
+            can_reorder=can_reorder,
+            allow_mix_order_reduction=allow_mix_order_reduction,
+        )
+        tracker.finish(rollback=not can_fuse)
+        return can_fuse
+
+    def _can_fuse_impl(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
