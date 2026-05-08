@@ -75,7 +75,12 @@ def _extract_subgraphs_and_args(
 
     If the second yielded value is None, this function was unable to determine what args
     to pass to the subgraph."""
-    if node.target is torch.ops.higher_order.cond:
+    if node.target is torch.ops.higher_order.associative_scan:
+        # Associative scan operates on slices of xs (see: scan), but multiple slices.
+        # Use the same slice twice to account for cases where only a single slice is
+        # input.
+        yield args[0], (*(a[0] for a in args[1]), *(a[0] for a in args[1]), *args[2])
+    elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
         yield args[2], subgraph_args
@@ -131,6 +136,10 @@ def _extract_subgraphs_and_args(
     elif node.target is torch.ops.higher_order.map_impl:
         # Map is applied over slices from the first dimension of each value in args[1].
         yield args[0], (*(a[0] for a in args[1]), *args[2])
+    elif node.target is torch.ops.higher_order.scan:
+        # Scans accept a dim keyword, but the dimensions will be reordered so that at
+        # this point we always scan over dim 0.
+        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
@@ -145,16 +154,9 @@ def _extract_subgraphs_and_args(
         )
         yield args[1], tuple(args[2:])
     else:
-        # Scan operators take a "dim" kwarg that is not captured on the node, making
-        # subgraph args fundamentally ambiguous.  Skip returning them deliberately, but
-        # warn for any other unhandled operators.
-        if node.target not in (
-            torch.ops.higher_order.associative_scan,
-            torch.ops.higher_order.scan,
-        ):
-            warnings.warn(
-                f"Please add support for subgraph args to function {node.target}!"
-            )
+        warnings.warn(
+            f"Please add support for subgraph args to function {node.target}!"
+        )
 
         # By default, just return the detected list of subgraphs so that we can run
         # updates on all of them.
@@ -233,7 +235,7 @@ class FakeTensorUpdater:
             node,
             node.target,
             get_hash_or_ids(node.args),
-            get_hash_or_ids(tuple(i) for i in node.kwargs.items()),
+            get_hash_or_ids(chain.from_iterable(node.kwargs.items())),
         )
 
     def incremental_update(self) -> int:
@@ -281,16 +283,19 @@ class FakeTensorUpdater:
             if new is None:
                 return old is None
 
-            if not isinstance(new, torch.Tensor):
-                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
-                    f"Unknown type {type(new)} in {self.gm.graph}"
-                )
+            if isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)):
                 return (
                     new.node.shape_env._maybe_evaluate_static(
                         sympy.Eq(new.node.expr, old.node.expr)
                     )
                     == sympy.true
                 )
+
+            if not isinstance(new, torch.Tensor):
+                # If this is not an iterable, torch.Sym*, or Tensor, then check for
+                # Python equality.  This should be fairly conservative, since an object
+                # with no implemented __eq__ method will compare IDs.
+                return new == old
 
             if new.layout != old.layout or not is_intlist_same(new.shape, old.shape):
                 return False
