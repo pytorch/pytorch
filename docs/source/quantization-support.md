@@ -132,6 +132,17 @@ Quantization to work with this as well.
 ```{eval-rst}
 .. currentmodule:: torch.ao.quantization.backend_config
 
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    BackendConfig
+    BackendPatternConfig
+    DTypeConfig
+    DTypeWithConstraints
+    ObservationType
+
 .. currentmodule:: torch.ao.quantization.backend_config.executorch
 .. autofunction:: get_executorch_backend_config
 
@@ -141,12 +152,6 @@ Quantization to work with this as well.
 .. currentmodule:: torch.ao.quantization.backend_config.onednn
 .. autofunction:: get_onednn_backend_config
 
-.. currentmodule:: torch.ao.quantization.backend_config
-.. autoclass:: BackendConfig
-.. autoclass:: BackendPatternConfig
-.. autoclass:: DTypeConfig
-.. autoclass:: DTypeWithConstraints
-.. autoclass:: ObservationType
 ```
 
 ## torch.ao.quantization.backend_config.utils
