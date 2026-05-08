@@ -26,6 +26,7 @@ from ..ir import (
 )
 from ..utils import (
     cache_on_self,
+    DeferredLineBase,
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
@@ -93,6 +94,18 @@ def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
     for i in range(ndim):
         result.append(f"&{var_name}.strides[{i}]")
     return result
+
+
+class _LazyTritonCompileKickoffLine(DeferredLineBase):
+    def __init__(self, lazy_kernel_names: list[str], line: str):
+        super().__init__(line)
+        self.lazy_kernel_names = lazy_kernel_names
+
+    def __call__(self) -> str | None:
+        return self.line if self.lazy_kernel_names else None
+
+    def _new_line(self, line: str) -> Self:
+        return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
 
 
 @dataclasses.dataclass
@@ -919,6 +932,13 @@ class CppWrapperGpu(CppWrapperCpu):
         with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             return super().generate(is_inference)
 
+    def _codegen_entry_impl_prologue(self):
+        self.prefix.writeline(
+            _LazyTritonCompileKickoffLine(
+                self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
+            )
+        )
+
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
@@ -931,28 +951,33 @@ class CppWrapperGpu(CppWrapperCpu):
             self.prefix.writeline("\n")
             kernel.generate(self)
 
-        # Generate parallel kernel compilation initialization function
         if self._lazy_kernel_names:
-            start_compile_calls = "\n    ".join(
-                f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
-                for name in self._lazy_kernel_names
+            start_compile_body = (
+                "loadLazyCompileFuncs();\n"
+                "    _module_pending_kernels = PyDict_New();\n"
+                '    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");\n'
+                "    "
+                + "\n    ".join(
+                    f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
+                    for name in self._lazy_kernel_names
+                )
             )
+            self.include_extra_header("mutex")
             self.prefix.splice(
                 f"""\
-// Start parallel compilation of all Triton kernels
+// Start parallel compilation of all Triton kernels.
 static inline void start_all_triton_kernel_compiles() {{
-    loadLazyCompileFuncs();
-    _module_pending_kernels = PyDict_New();
-    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");
-    {start_compile_calls}
+    {start_compile_body}
 }}
 
-// Static initializer to start kernel compilation on module load
-static struct TritonKernelCompileInit {{
-    TritonKernelCompileInit() {{
+// inductor_entry_impl calls this on every forward;
+// std::call_once makes the first call do the work.
+static std::once_flag _triton_kernel_compile_init_flag;
+static inline void ensure_triton_kernel_compiles_started() {{
+    std::call_once(_triton_kernel_compile_init_flag, [] {{
         start_all_triton_kernel_compiles();
-    }}
-}} __triton_kernel_compile_init;
+    }});
+}}
 """
             )
 
