@@ -297,10 +297,9 @@ if(USE_FLASH_ATTENTION)
 
     # Only build for MI3xx series architectures as building for all targets takes too long
     # We will selectively add supported architectures when/if needed
-    set(CK_SDPA_HIP_INCLUDE_ARCHS gfx942 gfx950)
     set(_ck_sdpa_hip_arches "")
-    foreach(ARCH ${PYTORCH_ROCM_ARCH})
-      if("${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_ARCHS)
+    foreach(ARCH gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND _ck_sdpa_hip_arches ${ARCH})
       endif()
     endforeach()
