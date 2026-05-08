@@ -92,6 +92,7 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
             with (
                 inductor_config.patch(inductor_options),
                 _disable_remat_for_regional_subcompile(),
+                torch.fx.traceback._set_regional_inductor_subgraph_name(node.target),
             ):
                 compiled_fn = torch._inductor.standalone_compile(
                     submod,

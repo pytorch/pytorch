@@ -1452,6 +1452,7 @@ def trace_structured(
         "timestamp",
         "pathname",
         "thread",
+        "subgraph_name",
     ]
     if name in reserved_names:
         raise AssertionError(f"name {name!r} is reserved and cannot be used")
@@ -1494,6 +1495,12 @@ def trace_structured(
                         record["frame_compile_id"] = cid.frame_compile_id
                 if trace_id:
                     record["attempt"] = trace_id.attempt
+
+            from torch.fx.traceback import _get_regional_inductor_subgraph_name
+
+            subgraph_name = _get_regional_inductor_subgraph_name()
+            if subgraph_name is not None:
+                record["subgraph_name"] = subgraph_name
 
         payload = payload_fn()
         if payload is not None:
@@ -1556,3 +1563,4 @@ def dtrace_structured(
 import torch._guards
 import torch._utils_internal
 import torch.distributed as dist
+import torch.fx.traceback
