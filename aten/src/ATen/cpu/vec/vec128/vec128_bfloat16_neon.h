@@ -138,18 +138,6 @@ struct BlendBFloat16Regs<index, false> {
 template <>
 struct is_vec_specialized_for<c10::BFloat16> : std::bool_constant<true> {};
 
-// GCC 13.X contains a bug where a bit-cast from a uint16_t constant to
-// bfloat16_t followed by a DUP intrinsic is incorrectly folded into a
-// single FP16 fmov. This function allows us to break the const-folding
-// chain to prevent this. It also happens to give us a good instruction
-// sequence when we aren't targeting native BF16 so it's used in all
-// cases.
-template <typename T>
-static inline T disable_const_folding(T x) {
-  __asm__ __volatile__("" : "+r"(x));
-  return x;
-}
-
 template <>
 class Vectorized<c10::BFloat16> : public Vectorized16<
                                       at_bfloat16x8_t,
@@ -260,8 +248,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
   Vectorized() = default;
 
   Vectorized(c10::BFloat16 val)
-      : Vectorized16(at_vdupq_n_bf16(
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val.x)))) {}
+      : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
@@ -273,14 +260,14 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
       value_type val6,
       value_type val7)
       : Vectorized16(at_bfloat16x8_t{
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val0.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val1.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val2.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val3.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val4.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val5.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val6.x)),
-            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val7.x))}) {}
+            c10::bit_cast<at_bfloat16_t>(val0.x),
+            c10::bit_cast<at_bfloat16_t>(val1.x),
+            c10::bit_cast<at_bfloat16_t>(val2.x),
+            c10::bit_cast<at_bfloat16_t>(val3.x),
+            c10::bit_cast<at_bfloat16_t>(val4.x),
+            c10::bit_cast<at_bfloat16_t>(val5.x),
+            c10::bit_cast<at_bfloat16_t>(val6.x),
+            c10::bit_cast<at_bfloat16_t>(val7.x)}) {}
 
   static Vectorized<c10::BFloat16> blendv(
       const Vectorized<c10::BFloat16>& a,

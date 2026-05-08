@@ -2216,15 +2216,20 @@ class TestMetaKernelRegistrations(TestCase):
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_reflection_pad2d_channels_last(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
         x_cpu = torch.randn(1, 3, 4, 4).to(memory_format=torch.channels_last)
         cpu_result = torch.nn.functional.pad(x_cpu, (1, 1, 1, 1), mode="reflect")
-        x_meta = torch.randn(1, 3, 4, 4, device="meta").to(
-            memory_format=torch.channels_last
-        )
-        meta_result = torch.nn.functional.pad(x_meta, (1, 1, 1, 1), mode="reflect")
-        self.assertEqual(cpu_result.shape, meta_result.shape)
-        self.assertEqual(cpu_result.stride(), meta_result.stride())
-        self.assertTrue(meta_result.is_contiguous(memory_format=torch.channels_last))
+        with FakeTensorMode():
+            x_fake = torch.randn(1, 3, 4, 4, device="cpu").to(
+                memory_format=torch.channels_last
+            )
+            fake_result = torch.nn.functional.pad(
+                x_fake, (1, 1, 1, 1), mode="reflect"
+            )
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.stride(), fake_result.stride())
+        self.assertTrue(fake_result.is_contiguous(memory_format=torch.channels_last))
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_reflection_pad2d_contiguous(self):
@@ -2238,17 +2243,20 @@ class TestMetaKernelRegistrations(TestCase):
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_replication_pad2d_channels_last(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
         x_cpu = torch.randn(1, 3, 4, 4).to(memory_format=torch.channels_last)
         cpu_result = torch.nn.functional.pad(x_cpu, (1, 1, 1, 1), mode="replicate")
-        x_meta = torch.randn(1, 3, 4, 4, device="meta").to(
-            memory_format=torch.channels_last
-        )
-        meta_result = torch.nn.functional.pad(
-            x_meta, (1, 1, 1, 1), mode="replicate"
-        )
-        self.assertEqual(cpu_result.shape, meta_result.shape)
-        self.assertEqual(cpu_result.stride(), meta_result.stride())
-        self.assertTrue(meta_result.is_contiguous(memory_format=torch.channels_last))
+        with FakeTensorMode():
+            x_fake = torch.randn(1, 3, 4, 4, device="cpu").to(
+                memory_format=torch.channels_last
+            )
+            fake_result = torch.nn.functional.pad(
+                x_fake, (1, 1, 1, 1), mode="replicate"
+            )
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.stride(), fake_result.stride())
+        self.assertTrue(fake_result.is_contiguous(memory_format=torch.channels_last))
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_replication_pad2d_contiguous(self):
