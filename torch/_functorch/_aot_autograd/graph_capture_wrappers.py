@@ -517,8 +517,7 @@ def create_functionalized_rng_ops_wrapper(
     # Detect device type from tensor arguments.
     # When trace_joint=True, args is (primals_list, tangents_list) — a nested tuple.
     # Flatten to get individual tensors before device inspection.
-
-    device_type = _detect_rng_device_type(*args)
+    device_type = _detect_rng_device_type(pytree.arg_tree_leaves(*args))
 
     fake_mode_det = detect_fake_mode()
     fake_mode: AbstractContextManager[Any] = nullcontext()
