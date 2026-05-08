@@ -1112,6 +1112,12 @@ class TORCH_API StaticRuntime {
   class IValueArray {
    public:
     IValueArray() = default;
+    IValueArray(const IValueArray&) = delete;
+    IValueArray& operator=(const IValueArray&) = delete;
+
+    IValueArray(IValueArray&&) noexcept = default;
+    IValueArray& operator=(IValueArray&&) noexcept = default;
+
     explicit IValueArray(size_t size) : array_(size) {}
 
     IValue* data() {
