@@ -1066,7 +1066,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                                        IntArrayRef padding,
                                                        IntArrayRef dilation,
                                                        bool ceil_mode) {
-
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
   mps::max_pool_with_indices_out_mps_template(output,

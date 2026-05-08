@@ -116,7 +116,6 @@ static void validateInputData(const TensorIteratorBase& iter,
 }
 
 static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, const Tensor& mask) {
-
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");

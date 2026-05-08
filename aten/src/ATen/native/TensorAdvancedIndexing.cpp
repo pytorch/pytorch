@@ -1894,7 +1894,6 @@ Tensor& index_fill_(
     int64_t dim,
     const Tensor& index,
     const Scalar& source) {
-
   TORCH_CHECK_INDEX(
       index.scalar_type() == ScalarType::Long,
       "index_fill_(): Expected dtype int64 for index.");
@@ -2507,7 +2506,6 @@ static Tensor& masked_select_out_impl_cpu(
     Tensor& result,
     const Tensor& self,
     const Tensor& mask) {
-
   TORCH_CHECK(
       mask.scalar_type() == ScalarType::Bool,
       "masked_select: expected BoolTensor for mask");

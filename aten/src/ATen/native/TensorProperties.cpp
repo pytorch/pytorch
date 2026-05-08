@@ -104,7 +104,6 @@ bool is_contiguous(const Tensor& self, at::MemoryFormat memory_format) {
   return self.is_contiguous(memory_format);
 }
 
-
 bool cudnn_is_acceptable(const TensorBase& self) {
   if (!globalContext().userEnabledCuDNN())
     return false;
