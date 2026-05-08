@@ -14273,18 +14273,17 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(correct, output)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
-    @xfailIf(MACOS_VERSION < 26.0)
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
-        mps_tensor = torch.rand(32, device="mps")
         capture_name = f"lib_full{''.join(random.choice('0123456789') for i in range(5))}"
         capture_dirname = f"0000-{capture_name}.gputrace"
         if os.path.exists(capture_dirname):
             shutil.rmtree(capture_dirname)
         with torch.mps.profiler.metal_capture(capture_name):
             self.assertTrue(torch.mps.profiler.is_capturing_metal())
+            mps_tensor = torch.rand(32, device="mps")
             lib.full(mps_tensor)
-        self.assertEqual(mps_tensor.sum().item(), 32.0)
+        self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
         self.assertTrue(os.path.exists(capture_dirname), f"Capture file {capture_dirname} has not been generated")
         capture_listdir = os.listdir(capture_dirname)
         shutil.rmtree(capture_dirname)
