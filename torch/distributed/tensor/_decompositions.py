@@ -236,9 +236,7 @@ class DecompShardingStrategy:
         n_outputs = len(output_placements)
         strategy_schema = self.sharding_prop._wrap_with_op_strategy(op_schema)
         # Import here to avoid circular import at module load time
-        from torch.distributed.tensor._ops.utils import (  # noqa: F811
-            expand_to_full_mesh_op_strategy,
-        )
+        from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
         return expand_to_full_mesh_op_strategy(
             mesh, strategy_schema, single_dim_strategies, input_index=n_outputs
@@ -326,5 +324,5 @@ class DecompShardingStrategy:
                         options |= {Shard(i) for i in range(spec.ndim)}
                 candidates.append(list(options))
 
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         return list(itertools.product(*candidates))
