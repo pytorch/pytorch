@@ -185,10 +185,10 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
       "_resize_with_addr_ expects an int size, "
       "but got ",
       THPUtils_typename(number_arg));
-  int64_t newsize = THPUtils_unpackLong(number_arg);
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCUDA) {
 #ifdef USE_CUDA
+    int64_t newsize = THPUtils_unpackLong(number_arg);
     PyObject* addr_arg = PyTuple_GET_ITEM(args, 1);
     TORCH_CHECK(
         THPUtils_checkLong(addr_arg),
