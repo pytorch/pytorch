@@ -277,12 +277,18 @@ class TestUtils(TestCase):
             node.meta["val"] = (
                 torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
                 torch.randn(
-                    q_shape[0], q_shape[1], q_shape[2],
-                    device="meta", dtype=torch.float32,
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
                 ),
                 torch.randn(
-                    q_shape[0], q_shape[1], q_shape[2],
-                    device="meta", dtype=torch.float32,
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
                 ),
             )
 

@@ -635,9 +635,7 @@ def count_flops_fx(node: torch.fx.Node) -> int | None:
                 flop_formula = flop_registry.get(node.target)
                 if flop_formula is None:
                     return None
-                return flop_formula(
-                    *args, **kwargs, out_val=node.meta.get("val")
-                )
+                return flop_formula(*args, **kwargs, out_val=node.meta.get("val"))
 
             with torch.utils.flop_counter.FlopCounterMode(
                 display=False
