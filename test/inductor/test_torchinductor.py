@@ -4076,6 +4076,11 @@ class CommonTemplate:
         if torch.device(self.device).type == GPU_TYPE:
             getattr(torch, GPU_TYPE).empty_cache()
 
+        # MPS routes eager eq/all through MPSGraph, which rejects tensor
+        # dims > INT_MAX
+        # TODO remove this once MPSGraph is gone from eq/all
+        if torch.device(self.device).type == "mps":
+            actual = actual.cpu()
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
@@ -7674,6 +7679,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
             ):
                 c_fn(x)
+
+    def test_convolution_errors_on_input_weight_dtype_mismatch(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only")
+
+        def fn(x):
+            return torch.nn.functional.conv2d(x, weight, bias=None)
+
+        weight = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float32)
+        x = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float16)
+        c_fn = torch.compile(fn)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Input type.*and weight type.*should be the same",
+        ):
+            c_fn(x)
 
     def test_log1p(self):
         def fn(x):
