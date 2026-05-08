@@ -924,11 +924,22 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        proxy = tx.output.create_proxy(
-            "call_method",
-            name,
-            *proxy_args_kwargs([self, *args], kwargs),
-        )
+        try:
+            proxy = tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self, *args], kwargs),
+            )
+        except NotImplementedError as e:
+            unimplemented(
+                gb_type="Unsupported argument type in tensor method call",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation=f"Dynamo could not create a proxy for an argument in the call "
+                f"to Tensor.{name}(). This usually means an unsupported type was passed "
+                f"as an argument to a tensor method.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                from_exc=e,
+            )
 
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the
