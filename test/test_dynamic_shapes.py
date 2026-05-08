@@ -1256,6 +1256,25 @@ def forward(self, x_1):
             )
         )
 
+    def test_min_simplify_with_upper_bound(self):
+        from torch.utils._sympy.functions import Min
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 <= 5)
+        torch._check(u0 >= 0)
+        sym = u0.node.expr
+        self.assertEqual(shape_env.simplify(Min(sym, 5)), sym)
+
+    def test_max_simplify_with_lower_bound(self):
+        from torch.utils._sympy.functions import Max
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 10)
+        sym = u0.node.expr
+        self.assertEqual(shape_env.simplify(Max(sym, 10)), sym)
+
     def test_numpy_sym_max(self):
         self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
         self.assertEqual(torch.sym_max(np.int64(12), 10), 12)
@@ -2208,6 +2227,20 @@ class TestDimConstraints(TestCase):
         # testing that this does not throw constraint violation error.
         self.assertEqual(func(x, 1), x * 400)
         self.assertEqual(func(x, 0), x * 400)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_min_max_simplify_e2e(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            x0, x1 = x.tolist()
+            torch._check(x0 <= 5)
+            torch._check(x0 >= 0)
+            if torch.sym_min(x0, 5) == x0:
+                return torch.tensor(True)
+            else:
+                return torch.tensor(False)
+
+        self.assertEqual(f(torch.tensor([3, 5])), torch.tensor(True))
 
     def test_dim_constraints_reduce_congruences_simple(self):
         from sympy import Symbol

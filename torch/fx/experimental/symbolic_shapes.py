@@ -86,6 +86,7 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -7151,21 +7152,17 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
-        # expression when creating contiguous strides.
         if not size_oblivious:
             min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
-            for atom in expr.atoms(Max):  # type: ignore[has-type]
-                if len(atom.args) > 2:
+            for atom in expr.atoms(Min, Max):
+                if len(atom.args) != 2:
                     continue
                 a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
-
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
-                    min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
-                    min_max_replacements[atom] = b
+                is_min = isinstance(atom, Min)
+                if self._maybe_evaluate_static(sympy.Le(a, b)) is sympy.true:
+                    min_max_replacements[atom] = a if is_min else b
+                elif self._maybe_evaluate_static(sympy.Le(b, a)) is sympy.true:
+                    min_max_replacements[atom] = b if is_min else a
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
