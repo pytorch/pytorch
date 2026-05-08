@@ -1426,6 +1426,56 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
+    def test_combo_autotune_parallel_precompile(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        def fn(a, b, c, d):
+            return (
+                torch.softmax(a, dim=-1),
+                torch.softmax(b, dim=-1),
+                torch.softmax(c, dim=-1),
+                torch.softmax(d, dim=-1),
+            )
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(64, 2048, device=GPU_TYPE),
+            torch.rand(128, 4096, device=GPU_TYPE),
+            torch.rand(256, 8192, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+
+        invocations: list[tuple[list[object], list[object]]] = []
+        orig_batch = CachingAutotuner._precompile_combo_trials
+
+        def wrap_batch(self, trial_configs):
+            launchers = orig_batch(self, trial_configs)
+            invocations.append((list(trial_configs), list(launchers)))
+            return launchers
+
+        with (
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=8,
+            ),
+            patch.object(CachingAutotuner, "_precompile_combo_trials", wrap_batch),
+        ):
+            out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+        self.assertGreater(
+            len(invocations), 0, "_precompile_combo_trials was never called"
+        )
+
+        for trial_configs, launchers in invocations:
+            self.assertEqual(
+                [launcher.config.kwargs for launcher in launchers],
+                [cfg.kwargs for cfg in trial_configs],
+                "_precompile_combo_trials returned launchers out of input order",
+            )
+
+    @requires_gpu_and_triton
     def test_combo_kernel_per_subkernel_reduction_hint(self):
         def fn(x, y):
             return x.sum(dim=-1), y.sum(dim=0)

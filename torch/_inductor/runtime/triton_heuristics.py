@@ -1487,11 +1487,15 @@ class CachingAutotuner(KernelInterface):
 
     def _combo_sequential_autotune(self, launcher, *args, **kwargs):
         """
-        Chain block-size decisions for combo kernels: tune one group at a time,
-        each step building on the previous winner.
+        Chain block-size decisions for combo kernels.
 
-        Phase 1: Tune block sizes with warps/stages fixed from the base config.
-        Phase 2: Re-tune warps/stages with finalized block sizes.
+        Phase 1: tune block sizes per sub-kernel group, warps/stages fixed.
+        Phase 2: re-tune warps/stages with finalized block sizes.
+
+        Trial configs within a phase are independent, so their Triton
+        compiles are dispatched in parallel via a small thread pool (Triton
+        releases the GIL during LLVM/PTX). Benching still runs serially on
+        the GPU in input order.
         """
         combo_tuning_groups = self.inductor_meta.get("combo_tuning_groups")
         if not combo_tuning_groups:
@@ -1500,10 +1504,9 @@ class CachingAutotuner(KernelInterface):
         self._ensure_kernel_loaded()
 
         signature_keys = OrderedSet(self.triton_meta["signature"])
-        best_config = launcher.config
-        current_kwargs = dict(best_config.kwargs)
-        base_num_warps = best_config.num_warps
-        base_num_stages = best_config.num_stages
+        current_kwargs = dict(launcher.config.kwargs)
+        base_num_warps = launcher.config.num_warps
+        base_num_stages = launcher.config.num_stages
 
         start_time = time.time_ns()
         best_time = self.bench(launcher, *args, **kwargs)
@@ -1519,108 +1522,71 @@ class CachingAutotuner(KernelInterface):
         # Phase 1: Tune block sizes per sub-kernel (largest first).
         # warps/stages stay fixed at base config values.
         for gi, group in enumerate(combo_tuning_groups):
-            member_indices = group["member_indices"]
             cfgs = group["configs"]
-            skip_rblock = group["skip_rblock"]
-
+            member_indices = group["member_indices"]
+            log.debug("  Phase 1 group %d SK%s: %d cfgs", gi, member_indices, len(cfgs))
             if len(cfgs) <= 1:
-                log.debug("  Phase 1 group %d SK%s: 1 config, skip", gi, member_indices)
                 continue
 
-            log.debug(
-                "  Phase 1 group %d SK%s: trying %d configs, current_kwargs=%s",
-                gi,
-                member_indices,
-                len(cfgs),
-                dict(current_kwargs),
-            )
-            for ci, cfg in enumerate(cfgs):
+            skip_rblock = group["skip_rblock"]
+            trial_configs: list[Config] = []
+            for cfg in cfgs:
                 trial_kwargs = dict(current_kwargs)
                 for idx in member_indices:
                     _update_combo_kernel_kwargs(
                         trial_kwargs, cfg.kwargs, idx, skip_rblock, signature_keys
                     )
+                if trial_kwargs != current_kwargs:
+                    trial_configs.append(
+                        triton.Config(
+                            trial_kwargs,
+                            num_warps=base_num_warps,
+                            num_stages=base_num_stages,
+                        )
+                    )
 
-                if trial_kwargs == current_kwargs:
-                    log.debug("    cfg[%d] skip (same as current)", ci)
-                    continue
-
-                trial_config = triton.Config(
-                    trial_kwargs,
-                    num_warps=base_num_warps,
-                    num_stages=base_num_stages,
-                )
-
-                with self.lock:
-                    trial_launcher = self._precompile_config(
-                        trial_config
-                    ).make_launcher()
+            for trial_config, trial_launcher in zip(
+                trial_configs, self._precompile_combo_trials(trial_configs)
+            ):
                 trial_time = self.bench(trial_launcher, *args, **kwargs)
                 counters["inductor"]["combo_autotune_bench"] += 1
                 self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
-
                 improved = trial_time < best_time
                 log.debug(
-                    "    cfg[%d] trial=%s time=%f%s",
-                    ci,
-                    dict(trial_kwargs),
+                    "    trial=%s time=%f%s",
+                    dict(trial_config.kwargs),
                     trial_time,
                     " (BETTER)" if improved else "",
                 )
                 if improved:
                     best_time = trial_time
                     launcher = trial_launcher
-                    current_kwargs = trial_kwargs
-
-            log.debug(
-                "  Phase 1 group %d winner: current_kwargs=%s",
-                gi,
-                dict(current_kwargs),
-            )
+                    current_kwargs = dict(trial_config.kwargs)
 
         # Phase 2: Re-tune num_warps/num_stages with finalized block sizes.
-        # Block sizes are now optimal — find the best warp/stage pair for them.
-        warp_stage_candidates = self.inductor_meta.get("combo_warp_stage_candidates")
-        log.debug(
-            "  Phase 2: blocks=%s, trying %d warp/stage pairs",
-            dict(current_kwargs),
-            len(warp_stage_candidates),
-        )
-        best_warps = launcher.config.num_warps
-        best_stages = launcher.config.num_stages
-        for num_warps, num_stages in warp_stage_candidates:
-            if num_warps == best_warps and num_stages == best_stages:
-                log.debug(
-                    "    warps=%d stages=%d skip (same as current)",
-                    num_warps,
-                    num_stages,
-                )
-                continue
-
-            trial_config = triton.Config(
-                dict(current_kwargs),
-                num_warps=num_warps,
-                num_stages=num_stages,
-            )
-            with self.lock:
-                trial_launcher = self._precompile_config(trial_config).make_launcher()
+        base_warp_stage = (launcher.config.num_warps, launcher.config.num_stages)
+        phase2_trials = [
+            triton.Config(dict(current_kwargs), num_warps=nw, num_stages=ns)
+            for nw, ns in self.inductor_meta["combo_warp_stage_candidates"]
+            if (nw, ns) != base_warp_stage
+        ]
+        for trial_config, trial_launcher in zip(
+            phase2_trials, self._precompile_combo_trials(phase2_trials)
+        ):
             trial_time = self.bench(trial_launcher, *args, **kwargs)
             counters["inductor"]["combo_autotune_bench"] += 1
             self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
-
             improved = trial_time < best_time
             log.debug(
                 "    warps=%d stages=%d time=%f%s",
-                num_warps,
-                num_stages,
+                trial_config.num_warps,
+                trial_config.num_stages,
                 trial_time,
                 " (BETTER)" if improved else "",
             )
             if improved:
                 best_time = trial_time
                 launcher = trial_launcher
-                best_warps = num_warps
-                best_stages = num_stages
 
         log.debug(
             "Combo sequential autotune for %s: best config %s, time %f",
@@ -1633,6 +1599,28 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
         return launcher
+
+    def _precompile_combo_trials(self, trial_configs: list[Config]) -> list[Any]:
+        """Precompile combo-autotune trial configs in parallel.
+
+        Worker count honors ``config.compile_threads`` (clamped to >=1 so
+        ``TORCHINDUCTOR_COMPILE_THREADS=0`` doesn't crash the executor).
+        Falls back to serial when ``compile_threads <= 1`` (the pool asserts
+        ``> 1``) or there's only one trial. Exceptions from
+        ``_precompile_config`` propagate unchanged.
+        """
+        if not trial_configs:
+            return []
+
+        from torch._inductor.async_compile import AsyncCompile, get_compile_threads
+
+        def compile_one(cfg: Config) -> Any:
+            return self._precompile_config(cfg).make_launcher()
+
+        with self.lock:
+            if get_compile_threads() <= 1 or len(trial_configs) == 1:
+                return [compile_one(cfg) for cfg in trial_configs]
+            return list(AsyncCompile.pool().map(compile_one, trial_configs))
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
