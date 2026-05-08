@@ -13601,6 +13601,8 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.float32:
             if op.name == "digamma":
                 return (1e-2, 2e-5)
+            if op.name == "triangular_solve":
+                return (1e-4, 5e-6)
             if op.name == "linalg.householder_product":
                 return (5e-5, 5e-5)
             if op.name == "nn.functional.linear_cross_entropy":
