@@ -44,7 +44,7 @@ import time
 import traceback
 import types
 import weakref
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import TypeIs
 
@@ -107,7 +107,6 @@ from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
 from .polyfills import (
-    impl_CONTAINS_OP_fallback,
     impl_IS_MAPPING,
     impl_MATCH_CLASS,
     impl_MATCH_KEYS,
@@ -179,7 +178,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool
+from .variables.object_protocol import generic_bool, generic_contains
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -1373,6 +1372,19 @@ class InstructionTranslatorBase(
     def freevars(self) -> list[str]:
         return self.code_options["co_freevars"]
 
+    def new_pycode_varname(self, prefix: str) -> str:
+        """Generate a fresh, unique pycode-local variable name for the given prefix."""
+        name = f"__{prefix}{next(self._pycode_varname_counter[prefix])}"
+        self._pycode_last_varname[prefix] = name
+        return name
+
+    def reset_pycode_varname_counter(self, prefix: str) -> None:
+        self._pycode_varname_counter[prefix] = itertools.count(0)
+
+    def get_pycode_last_varname(self, prefix: str) -> str:
+        """Return the most recently generated pycode varname for the given prefix."""
+        return self._pycode_last_varname[prefix]
+
     def cell_and_freevars(self) -> list[str]:
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = self.cellvars() + self.freevars()
@@ -1485,6 +1497,10 @@ class InstructionTranslatorBase(
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
+
+        tc = TracingContext.try_get()
+        if tc is not None:
+            tc.loc_in_frame_positions = inst.positions
 
         if (
             not self.stack
@@ -4091,28 +4107,7 @@ class InstructionTranslatorBase(
             )
         left, right = self.popn(2)
         op = inst.argval
-        try:
-            self.push(right.call_method(self, "__contains__", [left], {}))
-        except (
-            # right.__contains__ can raise TypeError
-            exc.ObservedTypeError,
-            # Ideally we should only capture TypeError here but some VTs don't
-            # implement hasattr(vt, "__contains__") entirely
-            Unsupported,
-        ) as excp:  # object doesn't support __contains__
-            # Use __iter__ as fallback
-            if isinstance(excp, Unsupported):
-                if excp.skip_frame:
-                    # do not absorb graph break with skip_frame set
-                    raise
-                excp.remove_from_stats()
-            self.push(
-                self.inline_user_function_return(
-                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
-                    [left, right],
-                    {},
-                )
-            )
+        self.push(generic_contains(self, right, left))  # type: ignore[bad-argument-type]
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -4777,11 +4772,18 @@ class InstructionTranslatorBase(
         )
 
     def frame_summary(self) -> traceback.FrameSummary:
+        positions = self.current_instruction.positions
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and positions is not None:
+            kwargs["colno"] = positions.col_offset
+            kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
             self.lineno,
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
+            **kwargs,
         )
 
     def is_co_filename_from_nn_modules(self) -> bool:
@@ -5055,6 +5057,12 @@ class InstructionTranslatorBase(
         self.latest_bytecode_queue = deque(maxlen=20)
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
+        # Per-prefix counters for generating fresh pycode-local variable names.
+        self._pycode_varname_counter: defaultdict[str, itertools.count[int]] = (
+            defaultdict(lambda: itertools.count(0))
+        )
+        # Per-prefix record of the most recently generated pycode varname.
+        self._pycode_last_varname: dict[str, str] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -5423,7 +5431,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                 "expected not all_stack_locals_metadata[0].stack_null_idxes to be true"
             )
         self.output.add_output_instructions(
-            self.codegen_return_with_pops(inst, all_stack_locals_metadata[0].num_stack)
+            self.codegen_return_with_pops(inst, all_stack_locals_metadata[0].num_stack),
+            [f"__ret = {self.get_pycode_last_varname('stack')}"]
+            if config.generate_pycode
+            else None,
         )
         raise ReturnValueOp
 
