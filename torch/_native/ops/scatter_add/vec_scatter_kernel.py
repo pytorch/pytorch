@@ -72,12 +72,13 @@ def _atomic_add_bf16x2(ptr, val_a: BFloat16, val_b: BFloat16, *, loc=None, ip=No
     _packed_atomic_add_bf16x2(gmem_ptr_i64, packed, loc=loc, ip=ip)
 
 
-def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
+def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
     """Build a dtype-specialized vectorized scatter-add kernel.
 
     Each warp handles one source row. 32 lanes chunk through N, each lane
-    loading vec_elems consecutive elements and atomic-adding them into
-    out[ind, :].
+    issuing a single vectorized LDG.128 (via ``cute.autovec_copy``) for
+    ``vec_elems`` consecutive elements and atomic-adding them into
+    ``out[ind, :]``.
 
     fp16/bf16 use paired x2 atomics (``red.global.add.noftz.{f16x2,bf16x2}``)
     to match the instruction count aten gets with ``atomicAdd(__half2*, ...)``.
@@ -92,61 +93,62 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
         mOut: cute.Tensor,
         num_entries: Int32,
         D: Int32,
+        src_row_stride: Int64,
+        out_row_stride: Int64,
     ):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         gdim, _, _ = cute.arch.grid_dim()
 
         warp_in_block = tidx // Int32(32)
-        lane = tidx - warp_in_block * Int32(32)
+        lane = tidx % Int32(32)
+
+        # Contiguous fast path: row stride is D at compile time.
+        if const_expr(contig):
+            src_row_stride = Int64(D)
+            out_row_stride = Int64(D)
 
         entries_per_block = Int32(_WARPS_PER_BLOCK)
         base = bidx * entries_per_block
         while base < num_entries:
             entry_id = base + warp_in_block
             if entry_id < num_entries:
-                idx_t = cute.make_tensor(
-                    mIndex.iterator + Int64(entry_id) * Int64(mIndex.stride[0]),
-                    cute.make_layout(1),
-                )
-                r = Int64(idx_t[0])
+                r = Int64(mIndex[entry_id])
 
                 lane_offset = lane * Int32(vec_elems)
                 stride_elems = Int32(32 * vec_elems)
 
                 off = lane_offset
                 while off < D:
-                    src_off = Int64(entry_id) * Int64(D) + Int64(off)
-                    dst_off = r * Int64(D) + Int64(off)
+                    src_off = Int64(entry_id) * src_row_stride + Int64(off)
+                    dst_off = r * out_row_stride + Int64(off)
+
+                    # Vectorized gmem -> register load. ``autovec_copy``
+                    # picks the widest safe instruction given the static
+                    # shape (vec_elems x elem_bytes == 16 bytes, so this
+                    # becomes a single LDG.128).
+                    gsrc = cute.make_tensor(
+                        mSrc.iterator + src_off,
+                        cute.make_layout(vec_elems),
+                    )
+                    rvals = cute.make_rmem_tensor(vec_elems, dtype)
+                    cute.autovec_copy(gsrc, rvals)
 
                     if const_expr(is_half):
                         # Paired atomics: one x2 atomic per 2 elements.
-                        # vec_elems is even for halves (8 for f16/bf16 at
-                        # 16 bytes), so vec_elems // 2 is exact.
+                        # vec_elems is even for halves (8 at 16 bytes),
+                        # so vec_elems // 2 is exact.
                         for p in cutlass.range_constexpr(vec_elems // 2):
                             v0 = 2 * p
-                            v1 = 2 * p + 1
-                            src_a = cute.make_tensor(
-                                mSrc.iterator + (src_off + Int64(v0)),
-                                cute.make_layout(1),
-                            )
-                            src_b = cute.make_tensor(
-                                mSrc.iterator + (src_off + Int64(v1)),
-                                cute.make_layout(1),
-                            )
                             dst_ptr = mOut.iterator + (dst_off + Int64(v0))
                             if const_expr(dtype is Float16):
-                                _atomic_add_f16x2(dst_ptr, src_a[0], src_b[0])
+                                _atomic_add_f16x2(dst_ptr, rvals[v0], rvals[v0 + 1])
                             else:
-                                _atomic_add_bf16x2(dst_ptr, src_a[0], src_b[0])
+                                _atomic_add_bf16x2(dst_ptr, rvals[v0], rvals[v0 + 1])
                     else:
                         for v in cutlass.range_constexpr(vec_elems):
-                            src_t = cute.make_tensor(
-                                mSrc.iterator + (src_off + Int64(v)),
-                                cute.make_layout(1),
-                            )
                             dst_ptr_v = mOut.iterator + (dst_off + Int64(v))
-                            cute.arch.atomic_add(dst_ptr_v, src_t[0])
+                            cute.arch.atomic_add(dst_ptr_v, rvals[v])
 
                     off = off + stride_elems
 
@@ -161,8 +163,18 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
         num_entries: Int32,
         D: Int32,
         grid_x: Int32,
+        src_row_stride: Int64,
+        out_row_stride: Int64,
     ):
-        _kernel(mSrc, mIndex, mOut, num_entries, D).launch(
+        _kernel(
+            mSrc,
+            mIndex,
+            mOut,
+            num_entries,
+            D,
+            src_row_stride,
+            out_row_stride,
+        ).launch(
             grid=[grid_x, 1, 1],
             block=[_THREADS_PER_BLOCK, 1, 1],
             stream=stream,
@@ -172,18 +184,18 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int):
 
 
 @jit_cache
-def _compile_vec_scatter(torch_dtype: torch.dtype, N: int):
+def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     vec_elems = _VEC_BYTES // elem_bytes
-    launcher = _make_kernel(dtype, elem_bytes, vec_elems)
+    launcher = _make_kernel(dtype, elem_bytes, vec_elems, contig)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
-    mIndex_fake = cute.runtime.make_fake_tensor(
-        Int64, (cute.sym_int(),), stride=(cute.sym_int64(),)
-    )
+    # Index is contiguous (see _flatten_for_expanded_1d); fix stride=1
+    # so `mIndex[i]` doesn't emit a runtime stride multiply.
+    mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
     mOut_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
     )
@@ -196,6 +208,8 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, N: int):
         Int32(0),
         Int32(0),
         Int32(0),
+        Int64(0),
+        Int64(0),
         options="--enable-tvm-ffi",
     )
 
@@ -212,12 +226,14 @@ def vec_scatter_add_into(
 ) -> None:
     """In-place: ``out[index_1d[i], :] += src[i, :]`` for every i.
 
-    Requires N divisible by ``vec_elems_for(src.dtype)`` (the cond enforces
-    this). When N < 32 * vec_elems the loop has fewer active lanes per
-    warp; lanes whose starting offset is >= N simply skip.
+    ``out`` / ``src`` are 2D with inner-dim stride 1; outer row stride
+    can differ from N. Requires N divisible by ``vec_elems_for(src.dtype)``
+    (the cond enforces this). When N < 32 * vec_elems the loop has fewer
+    active lanes per warp; lanes whose starting offset is >= N skip.
     """
     M, N = src.shape
-    compiled = _compile_vec_scatter(src.dtype, N)
+    contig = src.stride(0) == N and out.stride(0) == N
+    compiled = _compile_vec_scatter(src.dtype, N, contig)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
     grid = min((M + _WARPS_PER_BLOCK - 1) // _WARPS_PER_BLOCK, sm * 8)
-    compiled(src, index_1d, out, M, N, grid)
+    compiled(src, index_1d, out, M, N, grid, src.stride(0), out.stride(0))
