@@ -2100,11 +2100,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         dtype = kernel_inputs.dtype()
         # Get the appropriate config generator
         configs = self._get_config_generator()
-        # Generate and process configs.
-        # `origami is not None` implies the module-level gate passed:
-        # IS_ROCM and config.max_autotune and config.rocm.origami were all true at
-        # import time (see top of file). The only remaining per-call condition is
-        # the gemm search space — origami only operates with DEFAULT.
+        # `origami is not None` encodes the module-load gate (see top of file);
+        # only DEFAULT search space is supported here.
         if origami is not None and config.max_autotune_gemm_search_space == "DEFAULT":
             # Extract device and strides for origami GEMM
             device = kernel_inputs.device()
@@ -2174,17 +2171,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg,
                     grid,
                 )
-                # Compute num_warps based on device hardware, not hardcoded values.
-                # Previously, mfma_dim=16 and num_stages=2 were hardcoded, which only worked
-                # for older GPUs. Now we query architecture-specific values from selector._hardware
-                # to support MI300, MI350X, MI355, and other AMD GPUs with different matrix
-                # instruction dimensions and occupancy characteristics.
-                #
-                # num_warps heuristic: We compute the number of warps based on the tile area
-                # (block_m * block_n) and the mfma dimension of the GPU. The formula is:
-                #   num_warps = min(max_warps, max(1, tile_area / (mfma_dim * warp_size)))
-                # This ensures we schedule enough warps to cover the tile efficiently without
-                # exceeding the maximum warps available on the CU (2 per MI CU for typical GPUs).
+                # One MFMA per warp, capped at 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
                     warp_size = torch.cuda.get_device_properties(device).warp_size
@@ -2195,17 +2182,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     )
                     warp_size = 64
                 max_warps = 2 * selector._hardware.parallel_mi_cu
-                # Use mfma_dim from hardware object if available, else fallback to 16.
-                # mfma_dim varies by GPU: MI300X/MI325X uses 16, MI350X/MI355X may use different values.
-                # selector._hardware.mfma_m is set by origami based on the target GPU architecture.
+                # mfma_dim from origami hardware object; fall back to 16.
                 mfma_dim = getattr(selector._hardware, "mfma_m", 16)
                 num_warps = min(
                     max_warps,
                     max(1, tile_area // (mfma_dim * warp_size)),
                 )
-                # Use num_stages derived from config occupancy, not hardcoded.
-                # origami provides occupancy-aware staging decisions per architecture.
-                # Higher occupancy GPUs can support more pipeline stages for better throughput.
+                # num_stages from origami occupancy.
                 num_stages = max(
                     1,
                     min(4, (cfg.occupancy * 4) // 100)
@@ -2228,11 +2211,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     wgm_result.wgm,
                 )
 
-            # Filter the collected configs
-            # Note: _filter_configs validates configs (e.g., max block size, memory constraints)
-            # but does not reject origami's optimal selections. Tests validate that:
-            # - Compile work is reduced vs full max_autotune (test_origami_reduces_compile_work)
-            # - Runtime performance matches or exceeds max_autotune (test_origami_runtime_matches)
+            # Apply backend filters (max block size, memory constraints, etc.).
             filtered_configs = self._filter_configs(origami_configs)
 
             # If origami returned configs, use them; otherwise fall back to regular generator

@@ -25,6 +25,7 @@ from .template_heuristics.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
@@ -235,21 +236,7 @@ class InductorChoices:
         adjusted_choices: list[KernelTemplateChoice],
         op_name: str,
     ) -> bool:
-        """
-        Check if we need to fix the layout instead of keeping it flexible.
-
-        Some backends require fixed tensor layouts due to hardware-specific optimizations.
-        Origami performs device-aware GEMM kernel selection with exact dependencies on
-        tensor strides and memory layout. Flexible layouts (which transpose/reorder tensors
-        at runtime) break the pre-computed grid/workgroup mappings, causing correctness issues.
-
-        Args:
-            adjusted_choices: List of KernelTemplateChoice objects
-            op_name: Name of the operation (mm, addmm, bmm, etc)
-
-        Returns:
-            True if we must use fixed layouts, False if flexible layouts are safe
-        """
+        """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -260,8 +247,10 @@ class InductorChoices:
             ]:
                 return True
 
-        if _origami_enabled():
-            # Origami requires fixed layouts: device-specific grid/workgroup mappings depend on exact strides
+        # Origami requires fixed layouts (grid/workgroup mappings depend on exact
+        # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
+        # doesn't disable flexible layouts unnecessarily.
+        if _origami_enabled() and IS_ROCM:
             return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
