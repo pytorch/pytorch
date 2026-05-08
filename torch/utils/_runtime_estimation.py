@@ -86,9 +86,7 @@ def flops_to_ns(flops: float | int, dtype: "torch.dtype") -> float:
     return (macs / (0.75 * peak_gpu_flops)) * 1e9
 
 
-def get_compute_time(
-    func_packet, args, kwargs, out, out_dtypes, node_meta=None
-) -> float:  # type: ignore[no-untyped-def]
+def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # type: ignore[no-untyped-def]
     """
     Estimates the compute time of an aten operator.
 
@@ -98,9 +96,6 @@ def get_compute_time(
         kwargs: The keyword arguments to the operator.
         out: The output of the operator.
         out_dtypes: The output data types.
-        node_meta: Optional FX node meta dict. Passed through to the flop
-            formula as ``_node_meta`` kwarg so formulas can read annotations
-            like ``sparsity_hint``.
 
     Returns:
         float: The estimated compute time in nanoseconds.
@@ -112,10 +107,7 @@ def get_compute_time(
             )
         dtype = out_dtypes.pop()
         flop_count_func = flop_registry[func_packet]
-        extra_kwargs = {}
-        if node_meta is not None:
-            extra_kwargs["_node_meta"] = node_meta
-        flop_count = flop_count_func(*args, **kwargs, out_val=out, **extra_kwargs)
+        flop_count = flop_count_func(*args, **kwargs, out_val=out)
         return flops_to_ns(flop_count, dtype)
     return 0.0
 
