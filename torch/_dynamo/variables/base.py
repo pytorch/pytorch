@@ -30,7 +30,12 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import cmp_name_to_op_mapping, format_source_range, istype
+from ..utils import (
+    cmp_name_to_op_mapping,
+    format_source_range,
+    istype,
+    raise_args_mismatch,
+)
 
 
 if TYPE_CHECKING:
@@ -720,7 +725,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
-        # https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L168-L181
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
         # Key has already been converted to int via nb_index_impl by vt_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
@@ -738,6 +743,58 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def mp_ass_subscript_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="missing_mp_ass_subscript",
+            context=f"mp_ass_subscript_impl not defined for {self.python_type_name()}",
+            explanation=f"Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_ass_item_impl(
+        self,
+        tx: InstructionTranslator,
+        key: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="unsupported __setitem__ (sq_ass_item)",
+            context=f"sq_ass_item_impl {self} {key} {value}",
+            explanation=f"Dynamo does not know how to handle sq_ass_item on {self}",
+            hints=[],
+        )
+
+    def sq_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """Sequence concatenation via + operator (sq_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_concat",
+            context=f"sq_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: InstructionTranslator,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """In-place sequence concatenation via += operator (sq_inplace_concat slot)."""
+        unimplemented(
+            gb_type="missing sq_inplace_concat",
+            context=f"sq_inplace_concat not defined for {type(self).__name__}",
+            explanation=f"Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -750,12 +807,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 from .object_protocol import vt_getitem
 
                 return vt_getitem(tx, self, args[0])
-            from ..utils import raise_args_mismatch
-
             raise_args_mismatch(
                 tx,
                 name,
                 "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__setitem__":
+            if len(args) == 2 and not kwargs:
+                from .object_protocol import generic_setitem
+
+                return generic_setitem(tx, self, args[0], args[1])
+            raise_args_mismatch(
+                tx,
+                name,
+                "2 args and 0 kwargs",
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):
@@ -806,6 +872,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
+        elif name == "__add__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_add_impl(tx, args[0])
+        elif name == "__radd__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_add_impl(tx, args[0], reverse=True)
+        elif name == "__iadd__":
+            return self.nb_inplace_add_impl(tx, args[0])
+        elif name == "__sub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_subtract_impl(tx, args[0])
+        elif name == "__rsub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_subtract_impl(tx, args[0], reverse=True)
+        elif name == "__isub__":
+            return self.nb_inplace_subtract_impl(tx, args[0])
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1273,6 +1357,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement nb_positive_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def nb_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_add slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__radd__`` instead of ``__add__``).
+        """
+        # We need to return NotImplemented here because of sq_concat
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_add slot. Default: graph break."""
+        # We need to return NotImplemented here because of sq_inplace_concat
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_subtract slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rsub__`` instead of ``__sub__``).
+        """
+        return self._nb_slot_not_implemented("nb_subtract_impl", other, reverse=reverse)
+
+    def nb_inplace_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
+        return self._nb_slot_not_implemented("nb_inplace_subtract", other)
 
     def __init__(
         self,

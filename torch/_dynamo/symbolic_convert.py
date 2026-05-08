@@ -5672,7 +5672,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )
 
         if code.co_name in ("__setitem__", "__setattr__") and not (
-            args and isinstance(args[0], variables.UserDefinedObjectVariable)
+            args
+            and isinstance(
+                args[0],
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            )
         ):
             unimplemented(
                 gb_type="Unsupported __setitem__/__setattr__ inline attempt",
