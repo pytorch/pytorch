@@ -2900,8 +2900,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # TODO(tp_descr_get) - Investigate if we need a separate descriptor
-        # VT for instancemethod and cython functions.
+        # instancemethod (pybind11) and cython functions are C-level non-data
+        # descriptors. GetAttrVariable defers binding to runtime via
+        # obj.call_method, which is correct. A dedicated VT wouldn't change
+        # dispatch behavior, and these types don't map cleanly to existing
+        # descriptor VTs (no __objclass__, binding produces `method` not
+        # `builtin_function_or_method`).
         if (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
