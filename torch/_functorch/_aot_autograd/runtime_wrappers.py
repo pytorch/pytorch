@@ -3193,6 +3193,7 @@ def _codegen_compiled_backward(
         "    all_args = _prologue_(_saved, _ctx_.symints,"
         " _ctx_.opaque_objects, grad_args)"
     )
+    lines.append("    del _saved")
 
     if num_rng > 0:
         lines.append("    _rng_add_(_ctx_, all_args)")
