@@ -753,6 +753,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
     reinterpret_cast<torch::Library*>(self)->set_python_module(
         pymodule, context);
   });
+}
 
 AOTITorchError torch_new_stable_ivalue(StableIValue** ret_value) {
   // Check if ret_value can be dereferenced, if not it is a failure.
