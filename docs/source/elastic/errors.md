@@ -1,13 +1,14 @@
-.. _elastic_errors-api:
+(elastic_errors-api)=
 
-Error Propagation
-==================
+# Error Propagation
 
+```{eval-rst}
 .. automodule:: torch.distributed.elastic.multiprocessing.errors
+```
 
-Methods and Classes
----------------------
+## Methods and Classes
 
+```{eval-rst}
 .. currentmodule:: torch.distributed.elastic.multiprocessing.errors
 
 .. autofunction:: torch.distributed.elastic.multiprocessing.errors.record
@@ -17,3 +18,4 @@ Methods and Classes
 .. autoclass:: ErrorHandler
 
 .. autoclass:: ProcessFailure
+```
