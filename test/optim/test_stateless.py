@@ -70,8 +70,14 @@ class TestSwapInOptimizerParamsAndState(TestCase):
             name: torch.randn_like(param, requires_grad=param.requires_grad)
             for name, param in module.named_parameters()
         }
-        optimizer_state_dict = deepcopy(optimizer.state_dict())
-        return module, optimizer, parameters, optimizer_state_dict
+        # Build a swap-in state with distinguishing values so tests can tell
+        # the optimizer is reading the swap-in (not the live) state.
+        swapin_optim_state = deepcopy(optimizer.state_dict())
+        for per_param_state in swapin_optim_state["state"].values():
+            for k, v in per_param_state.items():
+                if isinstance(v, torch.Tensor):
+                    per_param_state[k] = v + 0.1
+        return module, optimizer, parameters, swapin_optim_state
 
     def _assert_optimizer_restored(
         self, optimizer, state_before, state_dict_before, params_before
@@ -165,35 +171,76 @@ class TestSwapInOptimizerParamsAndState(TestCase):
                 "got extra keys ['global_step']",
             )
 
+        with self.subTest("swapin_extra_key"):
+            osd = deepcopy(base_osd)
+            osd["param_groups"][0]["bogus"] = 1
+            expect(
+                optimizer,
+                parameters,
+                osd,
+                "Keys only in swap-in: ['bogus']",
+            )
+
+        with self.subTest("swapin_missing_key"):
+            osd = deepcopy(base_osd)
+            del osd["param_groups"][0]["betas"]
+            expect(
+                optimizer,
+                parameters,
+                osd,
+                "Keys only in live: ['betas']",
+            )
+
+        with self.subTest("too_few_parameters"):
+            short = dict(list(parameters.items())[:-1])
+            expect(
+                optimizer,
+                short,
+                base_osd,
+                "match optimizer.param_groups ordering",
+            )
+
+        with self.subTest("tensor_keyed_state"):
+            osd = deepcopy(base_osd)
+            osd["state"][torch.tensor(0)] = {}
+            expect(
+                optimizer,
+                parameters,
+                osd,
+                "state keyed by packed parameter ids",
+            )
+
     def test_swap_in_optimizer_params_and_state_handles_missing_param_state(self):
         # When some params have ``requires_grad=False`` their grads stay
         # ``None`` after ``loss.backward(); step()`` and the optimizer never
         # lazy-inits state for them. The resulting state_dict has packed ids
         # in param_groups that are absent from ``state`` —
-        # swap_in_optimizer_params_and_state must accept this shape, and mutations the
-        # trace makes to such params must stay local (not pollute the input
-        # ``optimizer_state_dict``).
+        # swap_in_optimizer_params_and_state must accept this shape, and mutations made in the context
+        # to such params must stay local (not pollute the input
+        # ``swapin_optim_state``).
         module, optimizer = self._init_optimizer(freeze_l1=True)
-        optimizer_state_dict = deepcopy(optimizer.state_dict())
+        swapin_optim_state = deepcopy(optimizer.state_dict())
         # Sanity: state has fewer entries than param_groups (2 trainable l2
         # params have state; 2 frozen l1 params do not).
-        self.assertEqual(len(optimizer_state_dict["param_groups"][0]["params"]), 4)
-        self.assertEqual(len(optimizer_state_dict["state"]), 2)
-        frozen_param_id = optimizer_state_dict["param_groups"][0]["params"][0]
-        self.assertNotIn(frozen_param_id, optimizer_state_dict["state"])
+        self.assertEqual(len(swapin_optim_state["param_groups"][0]["params"]), 4)
+        self.assertEqual(len(swapin_optim_state["state"]), 2)
+        frozen_param_id = swapin_optim_state["param_groups"][0]["params"][0]
+        self.assertNotIn(frozen_param_id, swapin_optim_state["state"])
 
         parameters = {
             name: torch.randn_like(param, requires_grad=param.requires_grad)
             for name, param in module.named_parameters()
         }
 
-        with swap_in_optimizer_params_and_state(optimizer, parameters, optimizer_state_dict):
+        with swap_in_optimizer_params_and_state(
+            optimizer, parameters, swapin_optim_state
+        ):
             # First param is frozen (l1.weight); mutations to its swapped-in
-            # state must not leak back into the input ``optimizer_state_dict``.
+            # state must not leak back into the input ``swapin_optim_state``.
             frozen_param = optimizer.param_groups[0]["params"][0]
             optimizer.state[frozen_param]["step"] = torch.tensor(7.0)
 
-        self.assertNotIn(frozen_param_id, optimizer_state_dict["state"])
+        self.assertNotIn(frozen_param_id, swapin_optim_state["state"])
 
     def test_swap_in_optimizer_params_and_state_supports_named_parameters_init(self):
         # Optimizer initialized with named_parameters() adds a ``param_names``
@@ -213,9 +260,11 @@ class TestSwapInOptimizerParamsAndState(TestCase):
             name: torch.randn_like(p, requires_grad=p.requires_grad)
             for name, p in module.named_parameters()
         }
-        optimizer_state_dict = deepcopy(optimizer.state_dict())
+        swapin_optim_state = deepcopy(optimizer.state_dict())
 
-        with swap_in_optimizer_params_and_state(optimizer, parameters, optimizer_state_dict):
+        with swap_in_optimizer_params_and_state(
+            optimizer, parameters, swapin_optim_state
+        ):
             # param_names is re-applied to the swapped-in group
             self.assertEqual(
                 [g["param_names"] for g in optimizer.param_groups],
@@ -229,12 +278,14 @@ class TestSwapInOptimizerParamsAndState(TestCase):
         )
 
     def test_swap_in_optimizer_params_and_state_restores_after_exception(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
+        _, optimizer, parameters, swapin_optim_state = self._make_reparam_inputs()
         state_before = optimizer.state
         state_dict_before = deepcopy(optimizer.state_dict())
         params_before = [group["params"] for group in optimizer.param_groups]
         try:
-            with swap_in_optimizer_params_and_state(optimizer, parameters, optimizer_state_dict):
+            with swap_in_optimizer_params_and_state(
+                optimizer, parameters, swapin_optim_state
+            ):
                 self.assertTrue(optimizer.state is not state_before)
                 self.assertTrue(
                     optimizer.param_groups[0]["params"] is not params_before[0]
@@ -256,19 +307,19 @@ class TestSwapInOptimizerParamsAndState(TestCase):
     # the user's CPU optimizer. See https://github.com/pytorch/pytorch/issues/182706.
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/182706")
     def test_swap_in_optimizer_params_and_state_reflects_state_mutations(self):
-        _, optimizer, parameters, optimizer_state_dict = self._make_reparam_inputs()
+        _, optimizer, parameters, swapin_optim_state = self._make_reparam_inputs()
         state_before = optimizer.state
         state_dict_before = deepcopy(optimizer.state_dict())
         params_before = [group["params"] for group in optimizer.param_groups]
 
-        first_param_id = optimizer_state_dict["param_groups"][0]["params"][0]
-        exp_avg_before = optimizer_state_dict["state"][first_param_id][
-            "exp_avg"
-        ].clone()
+        first_param_id = swapin_optim_state["param_groups"][0]["params"][0]
+        exp_avg_before = swapin_optim_state["state"][first_param_id]["exp_avg"].clone()
 
-        with swap_in_optimizer_params_and_state(optimizer, parameters, optimizer_state_dict):
+        with swap_in_optimizer_params_and_state(
+            optimizer, parameters, swapin_optim_state
+        ):
             first_param = optimizer.param_groups[0]["params"][0]
-            # In-place tensor op: tensor is shared with optimizer_state_dict
+            # In-place tensor op: tensor is shared with swapin_optim_state
             # (no clone), so the mutation is visible after exit.
             optimizer.state[first_param]["exp_avg"].add_(1)
             # Dict swap-in: per-param state dict is shallow-copied, so
@@ -280,15 +331,17 @@ class TestSwapInOptimizerParamsAndState(TestCase):
             optimizer, state_before, state_dict_before, params_before
         )
         self.assertEqual(
-            optimizer_state_dict["state"][first_param_id]["exp_avg"],
+            swapin_optim_state["state"][first_param_id]["exp_avg"],
             exp_avg_before + 1,
         )
         self.assertNotEqual(
-            optimizer_state_dict["state"][first_param_id]["step"],
+            swapin_optim_state["state"][first_param_id]["step"],
             torch.tensor(123.0),
         )
 
-    def test_make_fx_swap_in_optimizer_params_and_state_tensor_reassignment_stays_local(self):
+    def test_make_fx_swap_in_optimizer_params_and_state_tensor_reassignment_stays_local(
+        self,
+    ):
         module = ChainedLinear()
         optimizer = torch.optim.SGD(module.parameters(), lr=0.1, momentum=0.9)
         x = torch.randn(4, 2)
@@ -301,16 +354,18 @@ class TestSwapInOptimizerParamsAndState(TestCase):
             name: torch.randn_like(param, requires_grad=param.requires_grad)
             for name, param in module.named_parameters()
         }
-        optimizer_state_dict = deepcopy(optimizer.state_dict())
-        first_param_id = optimizer_state_dict["param_groups"][0]["params"][0]
-        original_momentum = optimizer_state_dict["state"][first_param_id][
+        swapin_optim_state = deepcopy(optimizer.state_dict())
+        first_param_id = swapin_optim_state["param_groups"][0]["params"][0]
+        original_momentum = swapin_optim_state["state"][first_param_id][
             "momentum_buffer"
         ]
 
         def f(state, x):
             params, optimizer_state = state
             with stateless._reparametrize_module(module, params):
-                with swap_in_optimizer_params_and_state(optimizer, params, optimizer_state):
+                with swap_in_optimizer_params_and_state(
+                    optimizer, params, optimizer_state
+                ):
                     p = optimizer.param_groups[0]["params"][0]
                     # Intentional tensor reassignment inside make_fx. The new
                     # tensor is a graph-internal value (proxy for ``zeros_like``)
@@ -322,10 +377,10 @@ class TestSwapInOptimizerParamsAndState(TestCase):
                     optimizer.step()
                     return module(x)
 
-        gm = make_fx(f)((parameters, optimizer_state_dict), x)
+        gm = make_fx(f)((parameters, swapin_optim_state), x)
         # Reassigned slot in the input dict still points at the original tensor.
         self.assertIs(
-            optimizer_state_dict["state"][first_param_id]["momentum_buffer"],
+            swapin_optim_state["state"][first_param_id]["momentum_buffer"],
             original_momentum,
         )
         self.assertExpectedInline(
@@ -372,19 +427,21 @@ def forward(self, state, x):
             name: torch.randn_like(param, requires_grad=param.requires_grad)
             for name, param in module.named_parameters()
         }
-        optimizer_state_dict = deepcopy(optimizer.state_dict())
+        swapin_optim_state = deepcopy(optimizer.state_dict())
 
         def f(state, x):
             params, optimizer_state = state
             with stateless._reparametrize_module(module, params):
-                with swap_in_optimizer_params_and_state(optimizer, params, optimizer_state):
+                with swap_in_optimizer_params_and_state(
+                    optimizer, params, optimizer_state
+                ):
                     y = module(x)
                     for param in module.parameters():
                         param.grad = torch.ones_like(param)
                     optimizer.step()
                     return y
 
-        gm = make_fx(f)((parameters, optimizer_state_dict), x)
+        gm = make_fx(f)((parameters, swapin_optim_state), x)
         self.assertExpectedInline(
             gm.code.strip(),
             """\

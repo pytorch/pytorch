@@ -70,8 +70,8 @@ def _validate_group_against_live(
     """Validate a single swap-in param group against its live counterpart and
     return its packed parameter ids.
 
-    Asserts: 
-    1. swap-in group is a dict. 
+    Asserts:
+    1. swap-in group is a dict.
     2. ``group['params']`` is a list of ints, and its length matches the params of the live optim group.
     3. Keys inside swapin group should match the keys in the live optim group.
     """
@@ -149,6 +149,11 @@ def _prepare_swap_in(
         seen_param_ids.update(swapin_param_ids)
 
         next_offset = flat_param_offset + len(swapin_param_ids)
+        if next_offset > len(flat_parameters):
+            raise RuntimeError(
+                "swap_in_optimizer_params_and_state requires the explicit parameter state to "
+                "match optimizer.param_groups ordering."
+            )
         swapin_params = flat_parameters[flat_param_offset:next_offset]
         flat_param_offset = next_offset
 
@@ -217,9 +222,9 @@ def swap_in_optimizer_params_and_state(
             with each ``"params"`` entry as a list of those packed ids
             and the remaining keys carrying per-group hyperparameters
             (``lr``, ``betas``, ``foreach``, ``capturable``, ...).
-            Only in-place tensor edits propagate back to the user supplied 
-            ``swapin_optim_state``; all other side-effects (e.g., 
-            assigning a new tensor to the optim state) 
+            Only in-place tensor edits propagate back to the user supplied
+            ``swapin_optim_state``; all other side-effects (e.g.,
+            assigning a new tensor to the optim state)
             are ignored.
 
     Example:
@@ -279,7 +284,7 @@ def swap_in_optimizer_params_and_state(
             ):
                 # Re-key per-parameter optimizer state from packed ids to the
                 # swapped-in parameter tensors. Shallow-copy the per-param dict so
-                # inplace tensor updates are propagated but structural mutations 
+                # inplace tensor updates are propagated but structural mutations
                 # to the state_dict during the context stay local.
                 swapin_state[swapin_param] = dict(state.get(param_id, {}))
 
