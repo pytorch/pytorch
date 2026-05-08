@@ -584,56 +584,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::numel(Tensor self) -> int"),
-        [](Stack& stack) {
-          at::Tensor arg = pop(stack).toTensor();
-          push(stack, arg.numel());
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::dim(Tensor self) -> int"),
-        dim,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("get_device", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              at::get_device((std::move(peek(stack, 0, 1))).toTensor());
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::storage_offset(Tensor self) -> int"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("storage_offset", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::is_contiguous(Tensor self) -> bool"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("is_contiguous", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
-        [](Stack& stack) {
-          auto memory_format = pop(stack).toMemoryFormat();
-          auto t = pop(stack).toTensor();
-          push(stack, t.is_contiguous(memory_format));
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
         // NB: intentionally suffixed with extra _format to prevent tests for
         // "_like" suffix from triggering on this
         TORCH_SELECTIVE_SCHEMA(

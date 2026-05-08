@@ -473,6 +473,12 @@ struct ConvParams {
                            (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
+        auto depthwise_kernel = at::globalContext().cudnnDepthwiseKernel();
+        if (depthwise_kernel == at::CuDNNDepthwiseKernel::NATIVE) {
+          return false;
+        } else if (depthwise_kernel == at::CuDNNDepthwiseKernel::CUDNN) {
+          return true;
+        }
         return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
       return false;
