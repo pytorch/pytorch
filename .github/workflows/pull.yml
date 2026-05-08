@@ -505,19 +505,19 @@ jobs:
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-xpu-n-py3.10 (build)                                     ║
+  # ║ linux-noble-xpu-n-py3.10 (build)                                     ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-xpu-n-py3_10-build:
+  linux-noble-xpu-n-py3_10-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ') }}
-    name: linux-jammy-xpu-n-py3.10
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      runner: linux.c7i.4xlarge
+      runner: linux.c7i.8xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       test-matrix: |
