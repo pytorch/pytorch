@@ -18,7 +18,7 @@ import collections
 import operator
 import sys
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -155,6 +155,14 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+        # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
+        # implement PyObject_RichCompare
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
+
     def call_tree_map_branch(
         self,
         tx: "InstructionTranslator",
@@ -282,16 +290,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__contains__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
-        elif name == "index":
+        if name == "index":
             if not len(args):
                 raise_args_mismatch(
                     tx,
@@ -680,6 +679,12 @@ class RangeVariable(BaseListVariable):
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
         return self.getitem_const(tx, key)
 
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
+        return VariableTracker.build(tx, self.range_count(item))
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
         if not all(var.is_python_constant() for var in self.items):
@@ -711,7 +716,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name in ("count", "__contains__"):
+        if name == "count":
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
             x = args[0].as_python_constant()
@@ -756,14 +761,9 @@ class RangeVariable(BaseListVariable):
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        l = self.range_length()
-        start = self.start()
-        step = self.step()
-        return hash((l, start, step))
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
+        return hash(self.as_python_constant()), False
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, variables.RangeVariable):
@@ -1167,13 +1167,27 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
 
-    def is_python_hashable(self) -> bool:
+    def is_hashable(self) -> bool:
         return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
 
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
+    # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def __init__(
         self,
@@ -1396,6 +1410,12 @@ class TupleVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
 
+    def reconstruct_pycode(self, codegen):
+        if len(self.items) == 0:
+            return "()"
+        else:
+            return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
@@ -1410,12 +1430,21 @@ class TupleVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr((), name))
 
-    def is_python_hashable(self) -> bool:
-        return all(item.is_python_hashable() for item in self.items)
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # CPython tuplehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L321
+        # Collect per-item hashes and feed them through tuplehash.  We wrap
+        # each hash in RawHash to bypass int.__hash__'s modular reduction,
+        # so tuplehash sees the original hash values — matching CPython exactly.
+        from .hashable import RawHash
+        from .object_protocol import generic_hash_impl
 
-    def get_python_hash(self) -> int:
-        items = tuple(x.get_python_hash() for x in self.items)
-        return hash(items)
+        is_fake = False
+        raw_hashes = []
+        for item in self.items:
+            h, fake = generic_hash_impl(tx, item)
+            is_fake = is_fake or fake
+            raw_hashes.append(RawHash(h))
+        return hash(tuple(raw_hashes)), is_fake
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.TupleVariable) and all(
@@ -1432,6 +1461,32 @@ class SizeVariable(TupleVariable):
         "proxy",
         *TupleVariable._nonvar_fields,
     }
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # torch.Size items may be TensorVariables wrapping scalar tensors with
+        # known constant values (node.meta["example_value"].constant).  Extract
+        # the actual int values so the hash matches eager torch.Size hashing.
+        from .tensor import TensorVariable
+
+        int_items: list[int] = []
+        for item in self.items:
+            if item.is_python_constant():
+                int_items.append(item.as_python_constant())
+                continue
+            if isinstance(item, TensorVariable):
+                proxy = getattr(item, "proxy", None)
+                node = getattr(proxy, "node", None)
+                meta = getattr(node, "meta", None) if node is not None else None
+                example_value = (
+                    meta.get("example_value") if isinstance(meta, dict) else None
+                )
+                constant = getattr(example_value, "constant", None)
+                if isinstance(constant, torch.Tensor) and constant.numel() == 1:
+                    int_items.append(int(constant.item()))
+                    continue
+            # Can't extract a concrete int — fall back to TupleVariable
+            return super().hash_impl(tx)
+        return hash(torch.Size(int_items)), False
 
     def __init__(
         self,
@@ -1674,6 +1729,16 @@ class SliceVariable(VariableTracker):
 
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
+
+    def is_hashable(self) -> bool:
+        # Slices became hashable in Python 3.12 (CPython slicehash).
+        return sys.version_info >= (3, 12)
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        if sys.version_info < (3, 12):
+            raise_type_error(tx, "unhashable type: 'slice'")
+        # CPython slicehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667
+        return hash(self.as_python_constant()), False
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)

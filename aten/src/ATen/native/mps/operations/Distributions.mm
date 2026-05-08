@@ -363,6 +363,11 @@ static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to,
 }
 
 static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {
+  // Match CPU/CUDA: only floating dtypes are supported. Without this the
+  // kernel-name lookup downstream produces a confusing
+  // "Failed to create function state object for: normal_int" RuntimeError.
+  TORCH_CHECK_TYPE(
+      at::isFloatingType(self.scalar_type()), "normal_kernel_mps not implemented for '", self.scalar_type(), "'");
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   distribution_kernel_mps_impl(iter, mean, std, "normal", 1, gen);
 }

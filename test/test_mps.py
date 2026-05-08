@@ -5108,6 +5108,13 @@ class TestMPS(TestCaseMPS):
 
     # TODO: fold into OpInfo-based consistency tests once there's a hook to
     # exercise the two-pass reduction path for scalar outputs.
+    def test_sum_full_reduction_non_contiguous(self):
+        x = torch.randn((2, 4, 256, 64), device="mps")
+        for s in (x[:, :, 128:, :], x.transpose(-1, -2), x[::2]):
+            self.assertEqual(s.sum().cpu(), s.cpu().sum())
+            self.assertEqual(s.mean().cpu(), s.cpu().mean())
+            self.assertEqual(s.count_nonzero().cpu(), s.cpu().count_nonzero())
+
     def test_sum_full_reduction_repeated(self):
         """Regression test for the two-pass full reduction: when
         reduction_size doesn't divide evenly into num_groups, the last TG
@@ -6744,6 +6751,7 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5))
 
         # Test complex half
+        torch.mps.manual_seed(0)
         x = torch.rand(8, device='mps', dtype=torch.chalf)
         rc_h = x.sqrt()
         rc_f = x.cfloat().sqrt().chalf()
@@ -9007,7 +9015,9 @@ class TestLogical(TestCaseMPS):
             if dtype == torch.float32 or dtype == torch.float16:
                 x = torch.randn((30, 15), device='mps', dtype=dtype)
             else:
-                x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+                # `randint(to=100, dtype=bool)` is out of range; cap at 2.
+                hi = 2 if dtype == torch.bool else 100
+                x = torch.randint(0, hi, (30, 15), device="mps", dtype=dtype)
             x_cpu = x.to("cpu")
 
             y = x.max()

@@ -167,6 +167,16 @@ def must_recompute(node: fx.Node) -> bool:
     ]
 
 
+def _is_assert_only_symbool(node: fx.Node) -> bool:
+    return (
+        isinstance(node.meta.get("val"), torch.SymBool)
+        and len(node.users) > 0
+        and all(
+            user.target is torch.ops.aten._assert_scalar.default for user in node.users
+        )
+    )
+
+
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
         if must_recompute(node):
@@ -1354,6 +1364,8 @@ def default_partition(
             continue
         if node.target in (
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
             # Profiler record_function ops are technically impure (they set up
             # profiling spans), but they're safe to duplicate during AC recompute.
             # We skip both enter and exit to keep profiling spans balanced.
@@ -1409,6 +1421,12 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
+    # These are runtime assertion intermediates and are not needed in backward
+    # for any real computation.
+    saved_sym_nodes = [
+        node for node in saved_sym_nodes if not _is_assert_only_symbool(node)
+    ]
     saved_opaque_nodes = list(dict.fromkeys(saved_opaque_nodes).keys())
 
     if config._sync_decision_cross_ranks:
@@ -1489,7 +1507,10 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr" or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and len(node.target._schema.returns) == 0
+    ):
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -3781,17 +3802,6 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
-
-    # save_for_backward on tensors and stashes symints in autograd .ctx
-    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
-    # These are runtime assertion intermediates and are not needed in backward
-    # for any real computation.
-    def _is_assert_only_symbool(n: fx.Node) -> bool:
-        return (
-            isinstance(n.meta.get("val"), torch.SymBool)
-            and len(n.users) > 0
-            and all(u.target is torch.ops.aten._assert_scalar.default for u in n.users)
-        )
 
     saved_sym_nodes = list(
         filter(
