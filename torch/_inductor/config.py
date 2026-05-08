@@ -468,13 +468,13 @@ estimate_op_runtime = "default"
 
 runtime_estimations_mms_benchmark: bool = False
 
-# unit: GB/s, uni-directional P2P bandwidth per card
-# default value is NVLink
-intra_node_bw = 300
+# unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
+# None = auto-detect from GPU generation; set to override.
+intra_node_bw: int | None = None
 
-# unit: GB/s, uni-directional P2P bandwidth per node
-# default value is InfiniBand
-inter_node_bw = 25
+# unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
+# None = auto-detect from GPU generation; set to override.
+inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
 # default value is PCIe; modify for your hardware or measured bandwidth
@@ -1255,6 +1255,9 @@ class aten_distributed_optimizations:
     # Replace NCCL collectives with low-contention variants that use
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
+
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
 
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
