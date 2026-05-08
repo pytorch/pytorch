@@ -72,6 +72,7 @@ jobs:
     with:
       build-environment: libtorch-linux-jammy-cuda13.0-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.r7i.4xlarge"
@@ -96,6 +97,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.9'
       test-matrix: |
         { include: [
@@ -152,6 +154,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-no-ops
       cuda-arch-list: '7.5 8.9'
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -265,6 +268,7 @@ jobs:
       runner_prefix: ""
       build-environment: linux-jammy-rocm-py3.10-mi355
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
       test-matrix: |
@@ -313,6 +317,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
@@ -331,6 +336,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -371,6 +377,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang18-executorch
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-executorch
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -382,6 +389,7 @@ jobs:
     name: linux-jammy-py3-clang18-executorch
     uses: ./.github/workflows/_linux-test.yml
     needs:
+      - get-label-type
       - linux-jammy-py3-clang18-executorch-build
       - job-filter
     with:
@@ -403,6 +411,7 @@ jobs:
       runner: linux.r7i.2xlarge
       build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -416,6 +425,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.arm64.m7g.4xlarge
       # Periodic AArch64 tests for SVE256 coverage
       test-matrix: |
