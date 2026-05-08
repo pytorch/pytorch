@@ -737,6 +737,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.len_impl(tx)
 
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        m = self._maybe_get_baseclass_method("__contains__")
+        if m:
+            return self.call_method(tx, "__contains__", [item], {})
+        return super().sq_contains(tx, item)
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__iter__")
         if m:
@@ -1809,6 +1817,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__contains__")
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.sq_contains(tx, item)
+
+        if isinstance(method, types.FunctionType):
+            method_var = self.resolve_type_attr(tx, "__contains__", method, self.source)
+            return method_var.call_function(tx, [item], {})
+        return super().sq_contains(tx, item)
+
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         method = self._maybe_get_baseclass_method("__next__")
         if (
@@ -1870,6 +1894,54 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method, self, source_fn=source_fn, source=self.source
             ).call_function(tx, [key], {})
         return super().mp_subscript_impl(tx, key)
+
+    def _vectorcall_maybe(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+    ) -> VariableTracker:
+        # Mirrors CPython's vectorcall_maybe: lookup `name` on the type's MRO
+        # (NOT the instance), bind via the descriptor protocol, and call.
+        # Returns NotImplemented if the attribute is missing.
+        #
+        # Crucially, this must NOT route through `call_method`, since
+        # `call_method` re-dispatches dunders like __add__ back through
+        # nb_<op>_impl -> SLOT1BIN, causing infinite recursion when the
+        # type's __<op>__ is a C-implemented slot wrapper that has no
+        # Python override.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2968-L2989
+        method = self._maybe_get_baseclass_method(name)
+        if method is None:
+            return variables.ConstantVariable.create(NotImplemented)
+        # Delegate to _base_vt for non-overridden base-class methods
+        # (e.g. UserDict, list/tuple subclasses) — mirrors the same
+        # delegation in `call_method`.
+        if (
+            self._base_vt is not None
+            and self._base_methods is not None
+            and method in self._base_methods
+        ):
+            return self._base_vt.call_method(tx, name, list(args), {})
+        if not isinstance(method, types.FunctionType):
+            # C-implemented method descriptors / slot wrappers (e.g.
+            # Tensor.__add__) cannot be invoked here without re-entering the
+            # nb_<op>_impl -> SLOT1BIN dispatch via call_method, which would
+            # infinitely recurse. Graph-break instead and let the outer
+            # binary-op machinery fall back.
+            unimplemented(
+                gb_type="vectorcall_maybe on C method descriptor",
+                context=f"name={name}, type={self.python_type_name()}, method={method}",
+                explanation=(
+                    f"Cannot trace special method '{name}' implemented in C "
+                    f"on user-defined type '{self.python_type_name()}'."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        method_var = self.resolve_type_attr(tx, name, method, self.source)
+        # resolve_type_attr returns a bound callable (self already bound via
+        # the descriptor protocol), so we pass only the remaining args.
+        return method_var.call_function(tx, list(args), {})  # type: ignore[arg-type]
 
     def SLOT1BIN(
         self,
@@ -1961,12 +2033,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     rdunder
                 ) != other_._maybe_get_baseclass_method(rdunder)
                 if method_is_overloaded:
-                    r = other_.call_method(tx, rdunder, [self_], {})
+                    r = other_._vectorcall_maybe(tx, rdunder, [self_])
                     if not is_nb_not_implemented(r):
                         return r
                     do_other = False
 
-            r = self_.call_method(tx, dunder, [other_], {})
+            r = self_._vectorcall_maybe(tx, dunder, [other_])
             if not is_nb_not_implemented(r) or py_is_type(o_type, s_type):
                 return r
 
@@ -1976,7 +2048,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     f"Expected UserDefinedObjectVariable, got {type(other_)}"
                 )
             if other_._maybe_get_baseclass_method(rdunder):
-                r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
+                r = other_._vectorcall_maybe(tx, rdunder, [self_])
                 if not is_nb_not_implemented(r):
                     return r
 
