@@ -664,6 +664,35 @@ class TestFxGraphCache(TestCase):
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalFxGraphCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self.reset()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
