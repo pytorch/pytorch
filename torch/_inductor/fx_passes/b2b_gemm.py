@@ -26,7 +26,6 @@ from ..pattern_matcher import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
-    ExternKernelChoice,
     SymbolicGridFn,
     TritonTemplate,
     TritonTemplateCaller,
@@ -430,26 +429,44 @@ def is_b2b_gemm_good_on(
     )  # even if average_ratio is close to 1, the number of stores is always better
 
 
-def unoptimized_b2b_gemm(
+def _make_unoptimized_b2b_gemm_choice(
     is_left_assoc: bool,
     subgraph: Subgraph,
-    A: torch.Tensor,
-    B: torch.Tensor,
-    C: torch.Tensor,
-    *,
-    out: torch.Tensor,
-) -> torch.Tensor:
-    """
-    The unoptimized version is used as a fallback when the b2b_gemm kernel is not beneficial.
-    """
-    if is_left_assoc:
-        torch.mm(subgraph.graph_module(torch.mm(A, B)), C, out=out)
-    else:
-        torch.mm(A, subgraph.graph_module(torch.mm(B, C)), out=out)
-    return out
+    input_nodes: list[TensorBox],
+    layout: FixedLayout,
+):  # -> SubgraphChoiceCaller (local import)
+    from ..codegen.subgraph import SubgraphChoiceCaller
 
+    tag = "left" if is_left_assoc else "right"
+    epilogue = subgraph.graph_module
 
-unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
+    def make_fx_graph(*args: torch.Tensor) -> torch.fx.GraphModule:
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        from ..decomposition import select_decomp_table
+
+        A, B, C = args
+
+        def computation(A, B, C):
+            if is_left_assoc:
+                return torch.mm(epilogue(torch.mm(A, B)), C)
+            else:
+                return torch.mm(A, epilogue(torch.mm(B, C)))
+
+        return make_fx(
+            computation,
+            decomposition_table=select_decomp_table(),
+            tracing_mode="symbolic",
+        )(A, B, C)
+
+    return SubgraphChoiceCaller(
+        name=f"unoptimized_b2b_gemm_{tag}",
+        # pyrefly: ignore [bad-argument-type]
+        input_nodes=input_nodes,
+        layout=layout,
+        description=f"unoptimized b2b_gemm ({tag}-associative)",
+        make_fx_graph=make_fx_graph,
+    )
 
 
 def build_subgraph_buffer(
@@ -565,9 +582,7 @@ def tuned_b2b_gemm(
             )
     # add the unoptimized choice to mitigate performance degradation
     choices.append(
-        unoptimized_choice.bind(
-            (A, B, C), layout, is_left_assoc=is_left_assoc, subgraph=subgraph
-        )
+        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
     )
     # autotune
     node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
