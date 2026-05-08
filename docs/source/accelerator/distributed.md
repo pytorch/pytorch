@@ -40,6 +40,7 @@ The factory function receives different arguments depending on `extended_api`:
 
 The standard mode is sufficient for most backends. The extended API provides additional context such as `group_id` and `global_ranks_in_group`.
 
+(collective-operations)=
 ### Collective Operations
 
 The [`c10d::Backend`][Backend.hpp] base class defines virtual methods for all collective, point-to-point, and synchronization operations. The table below lists the operations an OOT backend must implement:
@@ -86,7 +87,7 @@ The `Work` subclass manages the lifecycle of an asynchronous collective operatio
     :language: c++
     :start-after: class DummyWork : public Work {
     :end-at: };
-    :dedent: 3
+    :dedent:
     :linenos:
     :caption: ProcessGroupOCCL::DummyWork declaration (ProcessGroupOCCL.hpp)
 ```
