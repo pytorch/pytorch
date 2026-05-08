@@ -3,7 +3,7 @@ setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files s
 cmake>=3.27
 ninja
 numpy
-packaging
+packaging>=24.2  # required by setuptools>=77 to validate PEP 639 license expressions
 pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six
