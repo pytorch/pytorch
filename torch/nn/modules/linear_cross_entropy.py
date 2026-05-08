@@ -33,6 +33,54 @@ class LinearCrossEntropyOptions:
     hold, the call falls through to the reference implementation
     regardless of ``options``.
 
+    .. note::
+
+        **Memory characteristics — when chunking is worth it**
+
+        Letting ``B = batch_chunk_size``, ``N = num_batches``, ``C =
+        num_classes``, ``F = in_features``, the chunked implementation
+        on CUDA has approximate peak memory:
+
+        - ``"memory"``: ``6BC + 6CF + 4BF + 2NF`` bytes
+        - ``"accurate"``: ``4BC + 10CF + 4BF + 4NF`` bytes
+        - ``"lowmemory"``: ``6BC + 2CF + 4BF + 2NF`` bytes
+
+        The reference path (``options=None``) needs ``4NC + 2NF +
+        2CF`` bytes — the full logits tensor + saved softmax + grad
+        outputs.
+
+        The chunked path's value is the absence of the ``4NC`` term;
+        it pays a fixed ``O(CF)`` overhead instead. With
+        ``chunking_method="aspect_ratio"`` the heuristic ties ``B``
+        to ``N * F / C`` so the chunked op's memory grows as
+        ``O(NF + CF)`` rather than ``O(NC)``. Crossover with the
+        reference is around ``num_batches ≈ in_features``:
+
+        - ``num_batches < in_features`` — prefer ``options=None``.
+          The reference path is dramatically cheaper for short
+          sequences or small batches (e.g., test-sized inputs).
+        - ``num_batches ≥ in_features`` — chunking is competitive,
+          and the win grows linearly with ``num_batches`` from there.
+          For long-context training (``num_batches`` in the 10k-100k
+          range), chunking saves several GB.
+        - ``num_classes ≤ in_features`` — chunking has no memory
+          benefit; the heuristic degenerates to a single chunk and
+          the fixed overhead is pure cost.
+
+        Among the chunked policies on CUDA, ``"lowmemory"`` is the
+        smallest by ``4CF`` (the dropped ``weight_grad_chunk``
+        scratch); ``fp16+lowmemory`` further halves the
+        ``logits_buf`` term to ``2BC``.
+
+        For minimum memory in long-context training, combining
+        ``acc_policy="lowmemory"`` with
+        ``chunking_method="aspect_ratio:N"`` (``N >= 2``) is the
+        closest stock configuration to `Liger-Kernel
+        <https://github.com/linkedin/Liger-Kernel>`_'s Triton-fused
+        linear-cross-entropy. The remaining 30%-50% memory gap to
+        Liger is the cost of staying in pure PyTorch eager ops
+        without a fused softmax+grad-logits kernel.
+
     Example::
 
         options = LinearCrossEntropyOptions(
@@ -91,21 +139,42 @@ class LinearCrossEntropyOptions:
     - ``None`` (default) — use :attr:`batch_chunk_size` directly.
     """
 
-    acc_policy: Literal["memory", "accurate"] = "memory"
-    """Internal-precision policy when :attr:`acc_dtype` differs from
-    the input dtype.
+    acc_policy: Literal["memory", "accurate", "lowmemory"] = "memory"
+    """Precision/memory trade-off policy.
 
-    Controls which intermediate tensors (softmax workspace,
-    input-gradient accumulator) are stored in :attr:`acc_dtype` versus
-    the input dtype:
+    Controls which intermediate tensors are stored in :attr:`acc_dtype`
+    versus the input dtype, and whether the per-chunk weight-gradient
+    scratch buffer is materialized:
 
     - ``"memory"`` (default) — uses :attr:`acc_dtype` only where it's
-      needed for gradient correctness. Lower peak memory.
+      needed for gradient correctness; keeps a per-call ``(num_classes,
+      in_features)`` scratch buffer in :attr:`acc_dtype` for accurate
+      cross-chunk weight-gradient accumulation.
     - ``"accurate"`` — uses :attr:`acc_dtype` for more intermediates,
       noticeably improving input-gradient accuracy when the chunk size
-      is large relative to ``num_classes``. Higher peak memory.
+      is large relative to ``num_classes``. Higher peak memory than
+      ``"memory"``.
+    - ``"lowmemory"`` — like ``"memory"`` but additionally drops the
+      ``(num_classes, in_features)`` weight-gradient scratch buffer
+      and accumulates per-chunk weight gradients directly into
+      ``grad_linear_weight`` via ``addmm_``. cuBLAS still uses an
+      fp32 internal accumulator inside the matmul, so the per-chunk
+      gradient quality matches ``"memory"`` for the bulk of
+      ``grad_linear_weight``; rows scattered into by the
+      ``ignore_index`` correction take one extra dtype quantization
+      per chunk (typically a few extra ULP). Saves
+      ``num_classes * in_features * sizeof(weight_grad_chunk_dtype)``
+      bytes — roughly 800 MB for an LLM head with mixed precision.
+      The optimization only applies on CUDA when :attr:`acc_dtype`
+      differs from the input dtype, and on any backend when
+      :attr:`acc_dtype` equals the input dtype; on non-CUDA backends
+      with mixed precision, ``"lowmemory"`` silently falls back to
+      ``"memory"`` (the dtype-strict non-CUDA addmm has no
+      ``out_dtype=`` to bridge the dtype gap).
 
-    Has no effect when :attr:`acc_dtype` equals the input dtype.
+    Most policy effects (``"memory"`` vs ``"accurate"``) are visible
+    only when :attr:`acc_dtype` differs from the input dtype;
+    ``"lowmemory"`` saves memory in both regimes.
     """
 
     acc_dtype: torch.dtype | None = None
@@ -116,9 +185,10 @@ class LinearCrossEntropyOptions:
     """
 
     def __post_init__(self):
-        if self.acc_policy not in {"memory", "accurate"}:
+        if self.acc_policy not in {"memory", "accurate", "lowmemory"}:
             raise ValueError(
-                f"acc_policy must be 'memory' or 'accurate', got {self.acc_policy!r}"
+                f"acc_policy must be 'memory', 'accurate', or 'lowmemory', "
+                f"got {self.acc_policy!r}"
             )
         if self.chunking_method is not None:
             if ":" in self.chunking_method:
@@ -287,15 +357,19 @@ def _linear_cross_entropy_batch_chunked(
         raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
 
     # ===== Internal dtype layout =====
+    # "lowmemory" follows the same dtype layout as "memory"; the
+    # extra savings come from skipping weight_grad_chunk later, not
+    # from a different dtype layout.
+    is_memory_like = acc_policy in {"memory", "lowmemory"}
     if use_acc_dtype:
         output_dtype = acc_dtype if dtype == torch.float16 else dtype
-        grad_input_dtype = dtype if acc_policy == "memory" else acc_dtype
+        grad_input_dtype = dtype if is_memory_like else acc_dtype
         grad_linear_weight_dtype = dtype
-        # fp16+memory keeps the logits buffer in fp16 to halve its
-        # size; all other use_acc_dtype configs upcast for stable
-        # softmax accumulation.
+        # fp16+memory(-like) keeps the logits buffer in fp16 to
+        # halve its size; all other use_acc_dtype configs upcast
+        # for stable softmax accumulation.
         logits_buf_dtype = (
-            dtype if dtype == torch.float16 and acc_policy == "memory" else acc_dtype
+            dtype if dtype == torch.float16 and is_memory_like else acc_dtype
         )
         weight_grad_chunk_dtype = acc_dtype
     else:
@@ -364,21 +438,28 @@ def _linear_cross_entropy_batch_chunked(
 
     # Chunk buffer used to hold logits, then softmax of logits.
     logits_buf = alloc((batch_chunk_size, num_classes), logits_buf_dtype)
-    # logits_acc_buf: upcast scratch for the weight-grad mm in the
-    # fp16+memory non-CUDA path (where logits_buf is fp16 but
-    # weight_grad_chunk is fp32).
-    logits_acc_buf = alloc(
-        (batch_chunk_size, num_classes),
-        acc_dtype,
-        when=compute_linear_weight_grad
-        and not is_cuda
-        and logits_buf_dtype != acc_dtype,
-    )
     # weight_grad_chunk: per-chunk weight-gradient scratch.
+    # Skipped under acc_policy="lowmemory" when an addmm-into-grad_lw
+    # path is available (CUDA, or any backend with same-dtype mm).
+    keep_weight_grad_chunk = compute_linear_weight_grad and not (
+        acc_policy == "lowmemory"
+        and (is_cuda or logits_buf_dtype == grad_linear_weight_dtype)
+    )
     weight_grad_chunk = alloc(
         (num_classes, in_features),
         weight_grad_chunk_dtype,
-        when=compute_linear_weight_grad,
+        when=keep_weight_grad_chunk,
+    )
+    # logits_acc_buf: upcast scratch for the weight-grad mm in the
+    # fp16+memory non-CUDA path (where logits_buf is fp16 but
+    # weight_grad_chunk is fp32). Tied to keep_weight_grad_chunk —
+    # lowmemory's addmm path doesn't need the upcast scratch.
+    logits_acc_buf = alloc(
+        (batch_chunk_size, num_classes),
+        acc_dtype,
+        when=keep_weight_grad_chunk
+        and not is_cuda
+        and logits_buf_dtype != acc_dtype,
     )
     # input_grad_acc_buf: non-narrow scratch for the buf-and-copy
     # input-grad path on:
@@ -495,21 +576,43 @@ def _linear_cross_entropy_batch_chunked(
         # ----- Weight-grad mm (Part 1): consumes logits in logits_buf.dtype -----
         # Split from the accumulation step so the input-grad branch
         # below can reuse logits_buf's storage as a bf16 view.
+        # Two top-level dispatches: keep_weight_grad_chunk drives the
+        # acc_policy="lowmemory" path that addmm_'s straight into
+        # grad_linear_weight, skipping the (V, F) scratch.
         if compute_linear_weight_grad:
-            if weight_grad_mm_same_dtype:
-                torch.mm(logits.T, input_chunk_acc, out=weight_grad_chunk)
-            elif is_cuda:
-                torch.mm(
-                    logits.T,
-                    input_chunk,
-                    out_dtype=weight_grad_chunk.dtype,
-                    out=weight_grad_chunk,
-                )
+            if keep_weight_grad_chunk:
+                if weight_grad_mm_same_dtype:
+                    torch.mm(logits.T, input_chunk_acc, out=weight_grad_chunk)
+                elif is_cuda:
+                    torch.mm(
+                        logits.T,
+                        input_chunk,
+                        out_dtype=weight_grad_chunk.dtype,
+                        out=weight_grad_chunk,
+                    )
+                else:
+                    logits_acc_chunk = logits_acc_buf.narrow(
+                        0, 0, bchunk_size
+                    ).copy_(logits)
+                    torch.mm(
+                        logits_acc_chunk.T, input_chunk_acc, out=weight_grad_chunk
+                    )
+            elif logits.dtype == grad_linear_weight.dtype:
+                # Same dtype throughout (non-acc_dtype, or fp16+memory
+                # CUDA when invoked under "lowmemory"): simple in-place
+                # addmm_. cuBLAS Tensor Cores still use fp32 internally.
+                grad_linear_weight.addmm_(logits.T, input_chunk, alpha=-1)
             else:
-                logits_acc_chunk = logits_acc_buf.narrow(0, 0, bchunk_size).copy_(
-                    logits
+                # CUDA mixed-dtype lowmemory: cuBLAS keeps fp32
+                # internally; quantize once to grad_lw.dtype on store.
+                torch.addmm(
+                    grad_linear_weight,
+                    logits.T,
+                    input_chunk_acc,
+                    alpha=-1,
+                    out_dtype=grad_linear_weight.dtype,
+                    out=grad_linear_weight,
                 )
-                torch.mm(logits_acc_chunk.T, input_chunk_acc, out=weight_grad_chunk)
 
         # ----- Input-grad: lw_cast[target]*w - logits @ lw_cast -----
         if compute_input_grad:
@@ -527,20 +630,14 @@ def _linear_cross_entropy_batch_chunked(
 
             # Second term: subtract logits @ linear_weight_cast.
             # On CUDA mixed-dtype (bf16+memory): cast logits to
-            # linear_weight.dtype via a bf16 view of logits_buf
-            # storage, and use the original linear_weight so all
-            # addmm operands match. The view is non-contiguous (row
-            # stride = 2*num_classes elements); cuBLAS addmm handles
-            # arbitrary lda. logits' fp32 values were already
-            # consumed by the weight-grad mm above.
+            # linear_weight.dtype so all addmm operands match (cuBLAS
+            # is dtype-strict). The .to() allocates a fresh bf16/fp16
+            # tensor; the CUDA caching allocator reuses the same slot
+            # across iterations, so peak memory does not grow with
+            # the loop. (An earlier in-place storage view of
+            # logits_buf hits PyTorch's copy_ aliasing check.)
             if input_grad_uses_logits_lw:
-                mat1 = (
-                    logits_buf.view(linear_weight.dtype)
-                    .narrow(1, 0, num_classes)
-                    .narrow(0, 0, bchunk_size)
-                    .copy_(logits)
-                )
-                mat2 = linear_weight
+                mat1, mat2 = logits.to(linear_weight.dtype), linear_weight
             else:
                 mat1, mat2 = logits, linear_weight_cast
             torch.addmm(grad_input_chunk, mat1, mat2, alpha=-1, out=grad_input_chunk)
@@ -571,8 +668,22 @@ def _linear_cross_entropy_batch_chunked(
             else:
                 # No suitable buffer to reuse; allocate per chunk.
                 temp = input_chunk_acc * weight_chunk.unsqueeze(1)
-            weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
-            grad_linear_weight.sub_(weight_grad_chunk)
+            if keep_weight_grad_chunk:
+                # Original: scatter into scratch (alpha=-1), then sub_
+                # the whole chunk into grad_lw (one fp-cast per element).
+                weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
+                grad_linear_weight.sub_(weight_grad_chunk)
+            else:
+                # lowmemory: the mm part was already subtracted into
+                # grad_linear_weight via addmm_(alpha=-1) above; the
+                # ignore-index correction adds (sign flipped from -1
+                # to +1) directly into grad_lw at scattered rows.
+                # index_add_ is dtype-strict (unlike sub_), so cast
+                # temp to grad_lw.dtype first; .to() is a no-op when
+                # dtypes already match (non-acc_dtype paths).
+                grad_linear_weight.index_add_(
+                    0, target_chunk, temp.to(grad_linear_weight.dtype), alpha=1
+                )
 
     return output.to(dtype), grad_input.to(dtype), grad_linear_weight
 
