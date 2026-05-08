@@ -5,9 +5,8 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <limits>
-#include "torch/csrc/inductor/aoti_torch/c/macros.h"
 
-TEST(AotiTorchStableIValue, TestStableIValueUse) {
+TEST(TorchStableIValue, TestStableIValueUse) {
   StableIValue* a = nullptr;
   ASSERT_EQ(torch_new_stable_ivalue(&a), AOTI_TORCH_SUCCESS);
   // Check if it is now a valid pointer.
@@ -29,7 +28,7 @@ TEST(AotiTorchStableIValue, TestStableIValueUse) {
   ASSERT_EQ(torch_new_stable_ivalue(ret_value), AOTI_TORCH_FAILURE);
 }
 
-TEST(AotiTorch, TestStableIValueLargeAmount) {
+TEST(TorchStableIValue, TestStableIValueLargeAmount) {
   // Next, do a bunch of allocations and frees, such that if the delete isn't
   // working but the allocation is we see a clear memory leak in valgrind.
   StableIValue* v = nullptr;
