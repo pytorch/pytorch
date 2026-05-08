@@ -135,6 +135,89 @@ itself may be nondeterministic, unless either
 controls only this behavior, unlike :meth:`torch.use_deterministic_algorithms`
 which will make other PyTorch operations behave deterministically, too.
 
+CUDA Scaled Dot Product Attention
+---------------------------------
+:func:`torch.nn.functional.scaled_dot_product_attention` (SDPA) dispatches to
+multiple backends at runtime. Each backend has different determinism
+characteristics, summarized in the table below:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 15 45
+
+   * - Backend
+     - Forward
+     - Backward
+     - Notes
+   * - ``SDPBackend.MATH``
+     - Deterministic
+     - Deterministic
+     - Uses standard PyTorch operators (``matmul``, ``softmax``). Deterministic
+       when :meth:`torch.use_deterministic_algorithms` is enabled.
+   * - ``SDPBackend.FLASH_ATTENTION``
+     - Deterministic
+     - Non-deterministic
+     - The backward pass uses non-deterministic atomic operations by default.
+       Setting ``torch.use_deterministic_algorithms(True, warn_only=False)``
+       enables a deterministic backward implementation.
+   * - ``SDPBackend.EFFICIENT_ATTENTION``
+     - Deterministic
+     - Non-deterministic
+     - The backward pass may split work across keys (``num_splits_key > 1``)
+       for performance, which is non-deterministic. Setting
+       ``torch.use_deterministic_algorithms(True, warn_only=False)`` forces
+       ``num_splits_key = 1``, making the backward pass deterministic.
+   * - ``SDPBackend.CUDNN_ATTENTION``
+     - Deterministic
+     - Non-deterministic
+     - cuDNN provides an opt-in deterministic backward for ``float16``
+       starting in
+       `cuDNN 9.18 <https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html#cudnn-9-18-0>`_
+       (via
+       `set_deterministic_algorithm <https://docs.nvidia.com/deeplearning/cudnn/frontend/latest/operations/Attention.html#sdpa-fp16-bf16-backward>`_),
+       but this has not yet been integrated into PyTorch. This backend is
+       **disabled** when
+       ``torch.use_deterministic_algorithms(True, warn_only=False)`` is set,
+       regardless of whether inputs require gradients or the call is
+       inside a ``torch.no_grad()`` context.
+
+When :code:`torch.use_deterministic_algorithms(True, warn_only=True)` is set,
+the fused backends (Flash, Efficient, and cuDNN) emit a one-time warning but
+still use their default non-deterministic code paths. To actually enforce
+determinism, pass :code:`warn_only=False`.
+
+**Low-precision dtypes and numerical reproducibility**
+
+Bitwise matching numerics across different SDPA backends are **not
+guaranteed**, even for the same inputs and dtype. Each backend performs
+floating-point accumulation in a different order, and because floating-point
+addition is not associative, the results will differ between backends.
+
+The Math backend by default accumulates in ``float32`` even when given
+``float16`` or ``bfloat16`` inputs. The function
+:func:`torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp` can enable
+reduced-precision accumulation for higher performance at the cost of
+different numerical results.
+
+**Selecting a specific backend**
+
+Use the :func:`torch.nn.attention.sdpa_kernel` context manager to restrict
+which backends SDPA may use. For example, to guarantee deterministic behavior
+regardless of hardware::
+
+    import torch
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+
+    torch.use_deterministic_algorithms(True)
+
+    # Option 1: Use only the Math backend (always deterministic)
+    with sdpa_kernel(SDPBackend.MATH):
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+    # Option 2: Allow Flash and Efficient (deterministic with the flag above)
+    with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
 CUDA RNN and LSTM
 -----------------
 In some versions of CUDA, RNNs and LSTM networks may have non-deterministic behavior.
