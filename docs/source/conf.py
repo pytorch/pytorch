@@ -591,34 +591,22 @@ coverage_ignore_functions = [
     "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
-    # torch.fx.passes.annotate_getitem_nodes
-    "annotate_getitem_nodes",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
-    "get_size_of_all_nodes",
-    "get_size_of_node",
     "get_tensor_meta",
     # torch.fx.passes.split_module
     "split_module",
     "split_module_simple",
     # torch.fx.passes.split_utils
     "getattr_recursive",
-    "split_by_tags",
-    # torch.fx.passes.splitter_base
-    "generate_inputs_for_submodules",
     # torch.fx.passes.tools_common
     "get_acc_ops_name",
     "get_node_target",
     "legalize_graph",
-    # torch.fx.passes.utils.common
-    "lift_subgraph_as_module",
     # torch.fx.passes.utils.fuser_utils
-    "fuse_as_graphmodule",
     "fuse_by_partitions",
     "insert_subgm",
-    # torch.fx.passes.utils.source_matcher_utils
-    "get_source_partitions",
     # torch.fx.proxy
     "assert_fn",
     # torch.fx.traceback
