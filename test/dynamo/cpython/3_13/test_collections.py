@@ -93,10 +93,9 @@ class TestUserObjects(__TestCase):
         self._copy_test(obj)
 
     def test_dict_missing(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A(UserDict):
-                def __missing__(self, key):
-                    return 456
+        class A(UserDict):
+            def __missing__(self, key):
+                return 456
         self.assertEqual(A()[123], 456)
         # get() ignores __missing__ on dict
         self.assertIs(A().get(123), None)
@@ -193,10 +192,9 @@ class TestChainMap(__TestCase):
         self.assertTrue(ChainMap({}, {1:2}))
 
     def test_missing(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class DefaultChainMap(ChainMap):
-                def __missing__(self, key):
-                    return 999
+        class DefaultChainMap(ChainMap):
+            def __missing__(self, key):
+                return 999
         d = DefaultChainMap(dict(a=1, b=2), dict(b=20, c=30))
         for k, v in dict(a=1, b=2, c=30, d=999).items():
             self.assertEqual(d[k], v)                                  # check __getitem__ w/missing
@@ -228,14 +226,13 @@ class TestChainMap(__TestCase):
              ('i', 9999), ('j', 0)])
 
     def test_iter_not_calling_getitem_on_maps(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class DictWithGetItem(UserDict):
-                def __init__(self, *args, **kwds):
-                    self.called = False
-                    UserDict.__init__(self, *args, **kwds)
-                def __getitem__(self, item):
-                    self.called = True
-                    UserDict.__getitem__(self, item)
+        class DictWithGetItem(UserDict):
+            def __init__(self, *args, **kwds):
+                self.called = False
+                UserDict.__init__(self, *args, **kwds)
+            def __getitem__(self, item):
+                self.called = True
+                UserDict.__getitem__(self, item)
 
         d = DictWithGetItem(a=1)
         c = ChainMap(d)
@@ -260,16 +257,15 @@ class TestChainMap(__TestCase):
         self.assertIs(m, d.maps[0])
 
         # Use a different map than a dict
-        with torch._dynamo.error_on_graph_break(False):
-            class lowerdict(dict):
-                def __getitem__(self, key):
-                    if isinstance(key, str):
-                        key = key.lower()
-                    return dict.__getitem__(self, key)
-                def __contains__(self, key):
-                    if isinstance(key, str):
-                        key = key.lower()
-                    return dict.__contains__(self, key)
+        class lowerdict(dict):
+            def __getitem__(self, key):
+                if isinstance(key, str):
+                    key = key.lower()
+                return dict.__getitem__(self, key)
+            def __contains__(self, key):
+                if isinstance(key, str):
+                    key = key.lower()
+                return dict.__contains__(self, key)
 
         c = ChainMap()
         c['a'] = 1
@@ -690,9 +686,8 @@ class TestNamedTuple(__TestCase):
             NT = namedtuple('NT', ['abc', 'def'], False, True)
 
     def test_namedtuple_subclass_issue_24931(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Point(namedtuple('_Point', ['x', 'y'])):
-                pass
+        class Point(namedtuple('_Point', ['x', 'y'])):
+            pass
 
         a = Point(3, 4)
         self.assertEqual(a._asdict(), OrderedDict([('x', 3), ('y', 4)]))
@@ -753,9 +748,8 @@ class ABCTestCase(__TestCase):
         methodstubs = dict.fromkeys(names, lambda s, *args: 0)
 
         # everything should work will all required methods are present
-        with torch._dynamo.error_on_graph_break(False):
-            C = type('C', (abc,), methodstubs)
-            C()
+        C = type('C', (abc,), methodstubs)
+        C()
 
         # Dynamo raises a hard error here that we can't easily capture
         # Commenting this part as this would also fail in eager if a user
@@ -1011,21 +1005,19 @@ class TestOneTrickPonyABCs(ABCTestCase):
         for x in samples:
             self.assertIsInstance(x, Iterable)
             self.assertTrue(issubclass(type(x), Iterable), repr(type(x)))
-        with torch._dynamo.error_on_graph_break(False):
-            # Check direct subclassing
-            class I(Iterable):
-                def __iter__(self):
-                    return super().__iter__()
+        # Check direct subclassing
+        class I(Iterable):
+            def __iter__(self):
+                return super().__iter__()
         self.assertEqual(list(I()), [])
         self.assertFalse(issubclass(str, I))
         self.validate_abstract_methods(Iterable, '__iter__')
         self.validate_isinstance(Iterable, '__iter__')
-        with torch._dynamo.error_on_graph_break(False):
-            # Check None blocking
-            class It:
-                def __iter__(self): return iter([])
-            class ItBlocked(It):
-                __iter__ = None
+        # Check None blocking
+        class It:
+            def __iter__(self): return iter([])
+        class ItBlocked(It):
+            __iter__ = None
         self.assertTrue(issubclass(It, Iterable))
         self.assertTrue(isinstance(It(), Iterable))
         self.assertFalse(issubclass(ItBlocked, Iterable))
@@ -1055,35 +1047,32 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertTrue(issubclass(Sequence, Reversible), repr(Sequence))
         self.assertFalse(issubclass(Mapping, Reversible), repr(Mapping))
         self.assertFalse(issubclass(MutableMapping, Reversible), repr(MutableMapping))
-        with torch._dynamo.error_on_graph_break(False):
-            # Check direct subclassing
-            class R(Reversible):
-                def __iter__(self):
-                    return iter(list())
-                def __reversed__(self):
-                    return iter(list())
+        # Check direct subclassing
+        class R(Reversible):
+            def __iter__(self):
+                return iter(list())
+            def __reversed__(self):
+                return iter(list())
         self.assertEqual(list(reversed(R())), [])
         self.assertFalse(issubclass(float, R))
         self.validate_abstract_methods(Reversible, '__reversed__', '__iter__')
-        with torch._dynamo.error_on_graph_break(False):
-            # Check reversible non-iterable (which is not Reversible)
-            class RevNoIter:
-                def __reversed__(self): return reversed([])
-            class RevPlusIter(RevNoIter):
-                def __iter__(self): return iter([])
+        # Check reversible non-iterable (which is not Reversible)
+        class RevNoIter:
+            def __reversed__(self): return reversed([])
+        class RevPlusIter(RevNoIter):
+            def __iter__(self): return iter([])
         self.assertFalse(issubclass(RevNoIter, Reversible))
         self.assertFalse(isinstance(RevNoIter(), Reversible))
         self.assertTrue(issubclass(RevPlusIter, Reversible))
         self.assertTrue(isinstance(RevPlusIter(), Reversible))
-        with torch._dynamo.error_on_graph_break(False):
-            # Check None blocking
-            class Rev:
-                def __iter__(self): return iter([])
-                def __reversed__(self): return reversed([])
-            class RevItBlocked(Rev):
-                __iter__ = None
-            class RevRevBlocked(Rev):
-                __reversed__ = None
+        # Check None blocking
+        class Rev:
+            def __iter__(self): return iter([])
+            def __reversed__(self): return reversed([])
+        class RevItBlocked(Rev):
+            __iter__ = None
+        class RevRevBlocked(Rev):
+            __reversed__ = None
         self.assertTrue(issubclass(Rev, Reversible))
         self.assertTrue(isinstance(Rev(), Reversible))
         self.assertFalse(issubclass(RevItBlocked, Reversible))
@@ -1117,16 +1106,15 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertTrue(issubclass(Set, Collection), repr(Set))
         self.assertTrue(issubclass(MutableSet, Collection), repr(MutableSet))
         self.assertTrue(issubclass(Sequence, Collection), repr(MutableSet))
-        with torch._dynamo.error_on_graph_break(False):
-            # Check direct subclassing
-            class Col(Collection):
-                def __iter__(self):
-                    return iter(list())
-                def __len__(self):
-                    return 0
-                def __contains__(self, item):
-                    return False
-            class DerCol(Col): pass
+        # Check direct subclassing
+        class Col(Collection):
+            def __iter__(self):
+                return iter(list())
+            def __len__(self):
+                return 0
+            def __contains__(self, item):
+                return False
+        class DerCol(Col): pass
         self.assertEqual(list(iter(Col())), [])
         self.assertFalse(issubclass(list, Col))
         self.assertFalse(issubclass(set, Col))
@@ -1138,16 +1126,15 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.validate_abstract_methods(Collection, '__len__', '__iter__',
                                                    '__contains__')
         # Check sized container non-iterable (which is not Collection) etc.
-        with torch._dynamo.error_on_graph_break(False):
-            class ColNoIter:
-                def __len__(self): return 0
-                def __contains__(self, item): return False
-            class ColNoSize:
-                def __iter__(self): return iter([])
-                def __contains__(self, item): return False
-            class ColNoCont:
-                def __iter__(self): return iter([])
-                def __len__(self): return 0
+        class ColNoIter:
+            def __len__(self): return 0
+            def __contains__(self, item): return False
+        class ColNoSize:
+            def __iter__(self): return iter([])
+            def __contains__(self, item): return False
+        class ColNoCont:
+            def __iter__(self): return iter([])
+            def __len__(self): return 0
         self.assertFalse(issubclass(ColNoIter, Collection))
         self.assertFalse(isinstance(ColNoIter(), Collection))
         self.assertFalse(issubclass(ColNoSize, Collection))
@@ -1155,31 +1142,29 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertFalse(issubclass(ColNoCont, Collection))
         self.assertFalse(isinstance(ColNoCont(), Collection))
 
-        with torch._dynamo.error_on_graph_break(False):
-            # Check None blocking
-            class SizeBlock:
-                def __iter__(self): return iter([])
-                def __contains__(self): return False
-                __len__ = None
-            class IterBlock:
-                def __len__(self): return 0
-                def __contains__(self): return True
-                __iter__ = None
+        # Check None blocking
+        class SizeBlock:
+            def __iter__(self): return iter([])
+            def __contains__(self): return False
+            __len__ = None
+        class IterBlock:
+            def __len__(self): return 0
+            def __contains__(self): return True
+            __iter__ = None
         self.assertFalse(issubclass(SizeBlock, Collection))
         self.assertFalse(isinstance(SizeBlock(), Collection))
         self.assertFalse(issubclass(IterBlock, Collection))
         self.assertFalse(isinstance(IterBlock(), Collection))
-        with torch._dynamo.error_on_graph_break(False):
-            # Check None blocking in subclass
-            class ColImpl:
-                def __iter__(self):
-                    return iter(list())
-                def __len__(self):
-                    return 0
-                def __contains__(self, item):
-                    return False
-            class NonCol(ColImpl):
-                __contains__ = None
+        # Check None blocking in subclass
+        class ColImpl:
+            def __iter__(self):
+                return iter(list())
+            def __len__(self):
+                return 0
+            def __contains__(self, item):
+                return False
+        class NonCol(ColImpl):
+            __contains__ = None
         self.assertFalse(issubclass(NonCol, Collection))
         self.assertFalse(isinstance(NonCol(), Collection))
 
@@ -1202,32 +1187,30 @@ class TestOneTrickPonyABCs(ABCTestCase):
             self.assertTrue(issubclass(type(x), Iterator), repr(type(x)))
         self.validate_abstract_methods(Iterator, '__next__', '__iter__')
 
-        with torch._dynamo.error_on_graph_break(False):
-            # Issue 10565
-            class NextOnly:
-                def __next__(self):
-                    yield 1
-                    return
+        # Issue 10565
+        class NextOnly:
+            def __next__(self):
+                yield 1
+                return
         self.assertNotIsInstance(NextOnly(), Iterator)
 
     def test_Generator(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class NonGen1:
-                def __iter__(self): return self
-                def __next__(self): return None
-                def close(self): pass
-                def throw(self, typ, val=None, tb=None): pass
+        class NonGen1:
+            def __iter__(self): return self
+            def __next__(self): return None
+            def close(self): pass
+            def throw(self, typ, val=None, tb=None): pass
 
-            class NonGen2:
-                def __iter__(self): return self
-                def __next__(self): return None
-                def close(self): pass
-                def send(self, value): return value
+        class NonGen2:
+            def __iter__(self): return self
+            def __next__(self): return None
+            def close(self): pass
+            def send(self, value): return value
 
-            class NonGen3:
-                def close(self): pass
-                def send(self, value): return value
-                def throw(self, typ, val=None, tb=None): pass
+        class NonGen3:
+            def close(self): pass
+            def send(self, value): return value
+            def throw(self, typ, val=None, tb=None): pass
 
         non_samples = [
             None, 42, 3.14, 1j, b"", "", (), [], {}, set(),
@@ -1236,19 +1219,18 @@ class TestOneTrickPonyABCs(ABCTestCase):
             self.assertNotIsInstance(x, Generator)
             self.assertFalse(issubclass(type(x), Generator), repr(type(x)))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Gen:
-                def __iter__(self): return self
-                def __next__(self): return None
-                def close(self): pass
-                def send(self, value): return value
-                def throw(self, typ, val=None, tb=None): pass
+        class Gen:
+            def __iter__(self): return self
+            def __next__(self): return None
+            def close(self): pass
+            def send(self, value): return value
+            def throw(self, typ, val=None, tb=None): pass
 
-            class MinimalGen(Generator):
-                def send(self, value):
-                    return value
-                def throw(self, typ, val=None, tb=None):
-                    super().throw(typ, val, tb)
+        class MinimalGen(Generator):
+            def send(self, value):
+                return value
+            def throw(self, typ, val=None, tb=None):
+                super().throw(typ, val, tb)
 
         def gen():
             yield 1
@@ -1271,17 +1253,15 @@ class TestOneTrickPonyABCs(ABCTestCase):
                                mgen.throw, ValueError, ValueError("huhu"))
         self.assertRaises(StopIteration, mgen.throw, StopIteration())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class FailOnClose(Generator):
-                def send(self, value): return value
-                def throw(self, *args): raise ValueError
+        class FailOnClose(Generator):
+            def send(self, value): return value
+            def throw(self, *args): raise ValueError
 
         self.assertRaises(ValueError, FailOnClose().close)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class IgnoreGeneratorExit(Generator):
-                def send(self, value): return value
-                def throw(self, *args): pass
+        class IgnoreGeneratorExit(Generator):
+            def send(self, value): return value
+            def throw(self, *args): pass
 
         self.assertRaises(RuntimeError, IgnoreGeneratorExit().close)
 
@@ -1424,9 +1404,8 @@ class TestOneTrickPonyABCs(ABCTestCase):
 
     def test_direct_subclassing(self):
         for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(B):
-                    pass
+            class C(B):
+                pass
             self.assertTrue(issubclass(C, B))
             self.assertFalse(issubclass(int, C))
 
@@ -1469,14 +1448,13 @@ class TestCollectionABCs(ABCTestCase):
             self.assertIsInstance(sample(), Set)
             self.assertTrue(issubclass(sample, Set))
         self.validate_abstract_methods(Set, '__contains__', '__iter__', '__len__')
-        with torch._dynamo.error_on_graph_break(False):
-            class MySet(Set):
-                def __contains__(self, x):
-                    return False
-                def __len__(self):
-                    return 0
-                def __iter__(self):
-                    return iter([])
+        class MySet(Set):
+            def __contains__(self, x):
+                return False
+            def __len__(self):
+                return 0
+            def __iter__(self):
+                return iter([])
         self.validate_comparison(MySet())
 
     def test_hash_Set(self):
@@ -1495,16 +1473,15 @@ class TestCollectionABCs(ABCTestCase):
         self.assertTrue(hash(a) == hash(b))
 
     def test_isdisjoint_Set(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MySet(Set):
-                def __init__(self, itr):
-                    self.contents = itr
-                def __contains__(self, x):
-                    return x in self.contents
-                def __iter__(self):
-                    return iter(self.contents)
-                def __len__(self):
-                    return len([x for x in self.contents])
+        class MySet(Set):
+            def __init__(self, itr):
+                self.contents = itr
+            def __contains__(self, x):
+                return x in self.contents
+            def __iter__(self):
+                return iter(self.contents)
+            def __len__(self):
+                return len([x for x in self.contents])
         s1 = MySet((1, 2, 3))
         s2 = MySet((4, 5, 6))
         s3 = MySet((1, 5, 6))
@@ -1512,16 +1489,15 @@ class TestCollectionABCs(ABCTestCase):
         self.assertFalse(s1.isdisjoint(s3))
 
     def test_equality_Set(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MySet(Set):
-                def __init__(self, itr):
-                    self.contents = itr
-                def __contains__(self, x):
-                    return x in self.contents
-                def __iter__(self):
-                    return iter(self.contents)
-                def __len__(self):
-                    return len([x for x in self.contents])
+        class MySet(Set):
+            def __init__(self, itr):
+                self.contents = itr
+            def __contains__(self, x):
+                return x in self.contents
+            def __iter__(self):
+                return iter(self.contents)
+            def __len__(self):
+                return len([x for x in self.contents])
         s1 = MySet((1,))
         s2 = MySet((1, 2))
         s3 = MySet((3, 4))
@@ -1535,16 +1511,15 @@ class TestCollectionABCs(ABCTestCase):
         self.assertNotEqual(s2, s3)
 
     def test_arithmetic_Set(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MySet(Set):
-                def __init__(self, itr):
-                    self.contents = itr
-                def __contains__(self, x):
-                    return x in self.contents
-                def __iter__(self):
-                    return iter(self.contents)
-                def __len__(self):
-                    return len([x for x in self.contents])
+        class MySet(Set):
+            def __init__(self, itr):
+                self.contents = itr
+            def __contains__(self, x):
+                return x in self.contents
+            def __iter__(self):
+                return iter(self.contents)
+            def __len__(self):
+                return len([x for x in self.contents])
         s1 = MySet((1, 2, 3))
         s2 = MySet((3, 4, 5))
         s3 = s1 & s2
@@ -1566,29 +1541,28 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_issue_4920(self):
         # MutableSet.pop() method did not work
-        with torch._dynamo.error_on_graph_break(False):
-            class MySet(MutableSet):
-                __slots__=['__s']
-                def __init__(self,items=None):
-                    if items is None:
-                        items=[]
-                    self.__s=set(items)
-                def __contains__(self,v):
-                    return v in self.__s
-                def __iter__(self):
-                    return iter(self.__s)
-                def __len__(self):
-                    return len(self.__s)
-                def add(self,v):
-                    result=v not in self.__s
-                    self.__s.add(v)
-                    return result
-                def discard(self,v):
-                    result=v in self.__s
-                    self.__s.discard(v)
-                    return result
-                def __repr__(self):
-                    return "MySet(%s)" % repr(list(self))
+        class MySet(MutableSet):
+            __slots__=['__s']
+            def __init__(self,items=None):
+                if items is None:
+                    items=[]
+                self.__s=set(items)
+            def __contains__(self,v):
+                return v in self.__s
+            def __iter__(self):
+                return iter(self.__s)
+            def __len__(self):
+                return len(self.__s)
+            def add(self,v):
+                result=v not in self.__s
+                self.__s.add(v)
+                return result
+            def discard(self,v):
+                result=v in self.__s
+                self.__s.discard(v)
+                return result
+            def __repr__(self):
+                return "MySet(%s)" % repr(list(self))
         items = [5,43,2,1]
         s = MySet(items)
         r = s.pop()
@@ -1614,25 +1588,24 @@ class TestCollectionABCs(ABCTestCase):
     def test_issue16373(self):
         # Recursion error comparing comparable and noncomparable
         # Set instances
-        with torch._dynamo.error_on_graph_break(False):
-            class MyComparableSet(Set):
-                def __contains__(self, x):
-                    return False
-                def __len__(self):
-                    return 0
-                def __iter__(self):
-                    return iter([])
-            class MyNonComparableSet(Set):
-                def __contains__(self, x):
-                    return False
-                def __len__(self):
-                    return 0
-                def __iter__(self):
-                    return iter([])
-                def __le__(self, x):
-                    return NotImplemented
-                def __lt__(self, x):
-                    return NotImplemented
+        class MyComparableSet(Set):
+            def __contains__(self, x):
+                return False
+            def __len__(self):
+                return 0
+            def __iter__(self):
+                return iter([])
+        class MyNonComparableSet(Set):
+            def __contains__(self, x):
+                return False
+            def __len__(self):
+                return 0
+            def __iter__(self):
+                return iter([])
+            def __le__(self, x):
+                return NotImplemented
+            def __lt__(self, x):
+                return NotImplemented
 
         cs = MyComparableSet()
         ncs = MyNonComparableSet()
@@ -1643,14 +1616,13 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_issue26915(self):
         # Container membership test should check identity first
-        with torch._dynamo.error_on_graph_break(False):
-            class CustomSequence(Sequence):
-                def __init__(self, seq):
-                    self._seq = seq
-                def __getitem__(self, index):
-                    return self._seq[index]
-                def __len__(self):
-                    return len(self._seq)
+        class CustomSequence(Sequence):
+            def __init__(self, seq):
+                self._seq = seq
+            def __getitem__(self, index):
+                return self._seq[index]
+            def __len__(self):
+                return len(self._seq)
 
         nan = float('nan')
         obj = support.NEVER_EQ
@@ -1675,31 +1647,30 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_Set_from_iterable(self):
         """Verify _from_iterable overridden to an instance method works."""
-        with torch._dynamo.error_on_graph_break(False):
-            class SetUsingInstanceFromIterable(MutableSet):
-                def __init__(self, values, created_by):
-                    if not created_by:
-                        raise ValueError('created_by must be specified')
-                    self.created_by = created_by
-                    self._values = set(values)
+        class SetUsingInstanceFromIterable(MutableSet):
+            def __init__(self, values, created_by):
+                if not created_by:
+                    raise ValueError('created_by must be specified')
+                self.created_by = created_by
+                self._values = set(values)
 
-                def _from_iterable(self, values):
-                    return type(self)(values, 'from_iterable')
+            def _from_iterable(self, values):
+                return type(self)(values, 'from_iterable')
 
-                def __contains__(self, value):
-                    return value in self._values
+            def __contains__(self, value):
+                return value in self._values
 
-                def __iter__(self):
-                    yield from self._values
+            def __iter__(self):
+                yield from self._values
 
-                def __len__(self):
-                    return len(self._values)
+            def __len__(self):
+                return len(self._values)
 
-                def add(self, value):
-                    self._values.add(value)
+            def add(self, value):
+                self._values.add(value)
 
-                def discard(self, value):
-                    self._values.discard(value)
+            def discard(self, value):
+                self._values.discard(value)
 
         impl = SetUsingInstanceFromIterable([1, 2, 3], 'test')
 
@@ -1732,21 +1703,20 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_Set_interoperability_with_real_sets(self):
         # Issue: 8743
-        with torch._dynamo.error_on_graph_break(False):
-            class ListSet(Set):
-                def __init__(self, elements=()):
-                    self.data = []
-                    for elem in elements:
-                        if elem not in self.data:
-                            self.data.append(elem)
-                def __contains__(self, elem):
-                    return elem in self.data
-                def __iter__(self):
-                    return iter(self.data)
-                def __len__(self):
-                    return len(self.data)
-                def __repr__(self):
-                    return 'Set({!r})'.format(self.data)
+        class ListSet(Set):
+            def __init__(self, elements=()):
+                self.data = []
+                for elem in elements:
+                    if elem not in self.data:
+                        self.data.append(elem)
+            def __contains__(self, elem):
+                return elem in self.data
+            def __iter__(self):
+                return iter(self.data)
+            def __len__(self):
+                return len(self.data)
+            def __repr__(self):
+                return 'Set({!r})'.format(self.data)
 
         r1 = set('abc')
         r2 = set('bcd')
@@ -1901,14 +1871,13 @@ class TestCollectionABCs(ABCTestCase):
             self.assertTrue(issubclass(sample, Mapping))
         self.validate_abstract_methods(Mapping, '__contains__', '__iter__', '__len__',
             '__getitem__')
-        with torch._dynamo.error_on_graph_break(False):
-            class MyMapping(Mapping):
-                def __len__(self):
-                    return 0
-                def __getitem__(self, i):
-                    raise IndexError
-                def __iter__(self):
-                    return iter(())
+        class MyMapping(Mapping):
+            def __len__(self):
+                return 0
+            def __getitem__(self, i):
+                raise IndexError
+            def __iter__(self):
+                return iter(())
         self.validate_comparison(MyMapping())
         self.assertRaises(TypeError, reversed, MyMapping())
 
@@ -1959,16 +1928,15 @@ class TestCollectionABCs(ABCTestCase):
             '__getitem__')
 
     def test_Sequence_mixins(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class SequenceSubclass(Sequence):
-                def __init__(self, seq=()):
-                    self.seq = seq
+        class SequenceSubclass(Sequence):
+            def __init__(self, seq=()):
+                self.seq = seq
 
-                def __getitem__(self, index):
-                    return self.seq[index]
+            def __getitem__(self, index):
+                return self.seq[index]
 
-                def __len__(self):
-                    return len(self.seq)
+            def __len__(self):
+                return len(self.seq)
 
         # Compare Sequence.index() behavior to (list|str).index() behavior
         def assert_index_same(seq1, seq2, index_args):
@@ -2040,25 +2008,24 @@ class TestCollectionABCs(ABCTestCase):
     def test_MutableSequence_mixins(self):
         # Test the mixins of MutableSequence by creating a minimal concrete
         # class inherited from it.
-        with torch._dynamo.error_on_graph_break(False):
-            class MutableSequenceSubclass(MutableSequence):
-                def __init__(self):
-                    self.lst = []
+        class MutableSequenceSubclass(MutableSequence):
+            def __init__(self):
+                self.lst = []
 
-                def __setitem__(self, index, value):
-                    self.lst[index] = value
+            def __setitem__(self, index, value):
+                self.lst[index] = value
 
-                def __getitem__(self, index):
-                    return self.lst[index]
+            def __getitem__(self, index):
+                return self.lst[index]
 
-                def __len__(self):
-                    return len(self.lst)
+            def __len__(self):
+                return len(self.lst)
 
-                def __delitem__(self, index):
-                    del self.lst[index]
+            def __delitem__(self, index):
+                del self.lst[index]
 
-                def insert(self, index, value):
-                    self.lst.insert(index, value)
+            def insert(self, index, value):
+                self.lst.insert(index, value)
 
         mss = MutableSequenceSubclass()
         mss.append(0)
@@ -2283,9 +2250,8 @@ class TestCounter(__TestCase):
         check(Counter(words))
 
     def test_copy_subclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MyCounter(Counter):
-                pass
+        class MyCounter(Counter):
+            pass
         c = MyCounter('slartibartfast')
         d = c.copy()
         self.assertEqual(d, c)
