@@ -2355,9 +2355,13 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 logits = torch.nn.functional.linear(chunk_x, W) + bias
                 m = logits.amax(dim=-1, keepdim=True)
                 tok = (
-                    torch.log(torch.sum(torch.exp(logits - m), dim=-1, dtype=torch.float32))
+                    torch.log(
+                        torch.sum(torch.exp(logits - m), dim=-1, dtype=torch.float32)
+                    )
                     + m.squeeze(-1).to(torch.float32)
-                    - torch.gather(logits, -1, chunk_targets[..., None]).squeeze(-1).to(torch.float32)
+                    - torch.gather(logits, -1, chunk_targets[..., None])
+                    .squeeze(-1)
+                    .to(torch.float32)
                 )
                 out[..., start:end] = tok
             return out

@@ -1901,14 +1901,26 @@ class SIMDScheduling(BaseScheduling):
 
         # When unrolled chunked-loop slices are stitched into one fused
         # pointwise kernel, the per-chunk index has the form `c_K + V*x0 + i`
-        # where `V` is a per-chunk stride and `x0` ranges over the full
-        # output `numel`. The product `V * numel` can overflow int32 even
-        # when every individual buffer's storage fits. Conservatively check
-        # `numel * max_buf_size` against int32_max — this is the upper bound
-        # on cross-buffer indexing in such fused kernels.
-        if buf_sizes:
-            max_buf_size = sympy.Max(*buf_sizes) if len(buf_sizes) > 1 else buf_sizes[0]
-            cross_buf_index = numel * max_buf_size
+        # where `V` is a per-chunk stride from a buffer's layout and `x0`
+        # ranges over the full output `numel`. The product `V * numel` can
+        # overflow int32 even when every individual buffer's storage fits.
+        # Bound this by `numel * max_stride`, where max_stride is the largest
+        # stride across all buffer layouts.
+        buf_strides: list[sympy.Expr] = []
+        for buf in buffers:
+            if buf.has_tensor_output():
+                buf_strides.extend(buf.get_layout().stride)
+            elif isinstance(buf, ir.MutationOutput):
+                for mbuf in buf.get_mutation_buffers():
+                    if mbuf.has_tensor_output():
+                        buf_strides.extend(mbuf.get_layout().stride)
+
+        cross_buf_index = None
+        if buf_strides:
+            max_stride = (
+                sympy.Max(*buf_strides) if len(buf_strides) > 1 else buf_strides[0]
+            )
+            cross_buf_index = numel * max_stride
             if not expr_fits_within_32bit(cross_buf_index):
                 return False
 
@@ -1917,7 +1929,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
             V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
-        if buf_sizes:
+        if cross_buf_index is not None:
             V.graph.sizevars.check_leq(cross_buf_index, int_max)  # type: ignore[arg-type]
         return True
 
