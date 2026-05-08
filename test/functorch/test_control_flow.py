@@ -1671,6 +1671,217 @@ def forward(self, pred_1, x_1):
         a.add_(-1)
         self.assertEqual(gm(torch.tensor([0]), inp), inp + a)
 
+    def test_switch_branch_returns_none(self):
+        # None is allowed as a branch output leaf when every branch returns
+        # None in that position. cond._merge_output already handles None;
+        # the dynamo-side gate was over-rejecting it, now fixed.
+        def branch0(x):
+            return x.sin(), None
+
+        def branch1(x):
+            return x.cos(), None
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1), (x,))
+
+        x = torch.randn(4)
+        for i, fn in enumerate((branch0, branch1)):
+            idx = torch.tensor([i])
+            t, n = f(idx, x)
+            self.assertEqual(t, fn(x)[0])
+            self.assertIsNone(n)
+
+    def test_switch_branch_returns_float_rejected(self):
+        # Python float leaves are blocked by the shared HOP output gate.
+        # Captures the current behavior so a future relaxation of
+        # validate_subgraph_output_types must update this test.
+        def branch0(x):
+            return x.sin(), 3.14
+
+        def branch1(x):
+            return x.cos(), 3.14
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1), (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "HigherOrderOperator body's output must consist of tensors",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_arity(self):
+        # Branch 0 returns one tensor, branch 1 returns a tuple of two
+        # tensors — different number of outputs.
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos(), x.abs()
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1), (x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_structure(self):
+        # Branch 0 returns a tuple; branch 1 returns a dict. Two tensor
+        # leaves each, but the tree specs disagree.
+        def branch0(x):
+            return (x.sin(), x.cos())
+
+        def branch1(x):
+            return {"a": x.sin(), "b": x.cos()}
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1), (x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_structure_three_branches(self):
+        # Three-branch mismatch: branches 0 and 1 agree on a single-tensor
+        # return; branch 2 diverges by returning a two-tensor tuple.
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.abs(), x.sum()
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1, branch2), (x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_constant_index_specialization(self):
+        # When the index is a Python constant, dynamo specializes to that
+        # specific branch — the switch HOP never enters the graph.
+        # backend="eager" is used because PR 1 has no inductor lowering;
+        # specialization is a dynamo-level concern.
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        # Each compiled wrapper has its index baked in as a literal so
+        # dynamo definitely sees a ConstantVariable (sidestepping any
+        # scalar-argument promotion to SymInt).
+        @torch.compile(backend="eager", fullgraph=True)
+        def f0(x):
+            return torch.switch(0, branches, (x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f1(x):
+            return torch.switch(1, branches, (x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2(x):
+            return torch.switch(2, branches, (x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_neg(x):
+            return torch.switch(-5, branches, (x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_huge(x):
+            return torch.switch(99, branches, (x,))
+
+        x = torch.randn(4)
+        self.assertEqual(f0(x), branch0(x))
+        self.assertEqual(f1(x), branch1(x))
+        self.assertEqual(f2(x), branch2(x))
+        # Clamped negative index picks branch 0.
+        self.assertEqual(f_neg(x), branch0(x))
+        # Clamped above-range index picks branch N-1.
+        self.assertEqual(f_huge(x), branch2(x))
+
+    def test_switch_nn_module_branches(self):
+        # Each branch is a different nn.Module whose parameters are
+        # captured as free variables. Dynamo must lift the parameters of
+        # all branches into the HOP's operand tuple and rewrite every
+        # branch graph's signature to match.
+        linear0 = torch.nn.Linear(4, 3)
+        linear1 = torch.nn.Linear(4, 3)
+
+        def f(idx, x):
+            return torch.switch(idx, (linear0, linear1), (x,))
+
+        x = torch.randn(2, 4)
+        self.assertEqual(f(torch.tensor([0]), x), linear0(x))
+        self.assertEqual(f(torch.tensor([1]), x), linear1(x))
+
+    def test_switch_complex_nn_module_branches(self):
+        # Complex modules: each branch is a different multi-layer MLP with
+        # different hidden dimensions. As long as the final output shape
+        # matches across branches, dynamo captures and lifts all module
+        # parameters correctly.
+        class MLP(torch.nn.Module):
+            def __init__(self, in_dim, hidden, out_dim):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(in_dim, hidden)
+                self.fc2 = torch.nn.Linear(hidden, out_dim)
+
+            def forward(self, x):
+                return self.fc2(torch.relu(self.fc1(x)))
+
+        mlp_small = MLP(4, 8, 2)
+        mlp_large = MLP(4, 16, 2)
+        mlp_tiny = MLP(4, 3, 2)
+
+        def f(idx, x):
+            return torch.switch(idx, (mlp_small, mlp_large, mlp_tiny), (x,))
+
+        x = torch.randn(5, 4)
+        for i, mlp in enumerate((mlp_small, mlp_large, mlp_tiny)):
+            self.assertEqual(f(torch.tensor([i]), x), mlp(x))
+
+    def test_switch_heterogeneous_lifted_args(self):
+        # Branches with different combinations of lifted free variables:
+        # branch0 captures one tensor, branch1 captures two tensors,
+        # branch2 captures an nn.Module. dynamo unions all lifted
+        # freevars across branches and every branch graph receives the
+        # same placeholder signature.
+        bias = torch.ones(3)
+        offset = torch.tensor([0.5, 0.5, 0.5])
+        linear = torch.nn.Linear(4, 3)
+
+        def branch0(x):
+            return torch.nn.functional.linear(x, torch.eye(4, 3).t()) + bias
+
+        def branch1(x):
+            return torch.nn.functional.linear(x, torch.eye(4, 3).t()) + bias + offset
+
+        def branch2(x):
+            return linear(x)
+
+        def f(idx, x):
+            return torch.switch(idx, (branch0, branch1, branch2), (x,))
+
+        x = torch.randn(2, 4)
+        self.assertEqual(f(torch.tensor([0]), x), branch0(x))
+        self.assertEqual(f(torch.tensor([1]), x), branch1(x))
+        self.assertEqual(f(torch.tensor([2]), x), branch2(x))
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
         def f(x, y):
@@ -5885,6 +6096,101 @@ def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_co
     l_x__1 = l_x_
     add = l_x__1 + l_branch2_closure_0_cell_contents_1;  l_x__1 = l_branch2_closure_0_cell_contents_1 = None
     return (add,)""",
+        )
+
+    def test_switch_constant_index_specialization_check_graph(self):
+        # When the index is a Python constant, dynamo specializes into the
+        # selected branch and the switch HOP is not emitted at all. The
+        # captured graph contains only the ops of branches[idx].
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(
+            lambda x: torch.switch(1, branches, (x,)),
+            backend=backend,
+            fullgraph=True,
+        )(torch.randn(4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # No switch HOP in the graph — only branch1's cos op survives.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    cos = l_x_.cos();  l_x_ = None
+    return (cos,)""",
+        )
+        # And no branch submodules were installed because the HOP never ran.
+        self.assertEqual(list(dict(gm.named_children()).keys()), [])
+
+    def test_switch_nn_module_lifted_check_graph(self):
+        # nn.Module branches: every parameter of every branch's module is
+        # lifted into the HOP operand tuple, and each branch's submodule
+        # signature accepts the full union. Reads of foreign parameters
+        # are present in the signature but unused inside the branch body.
+        linear0 = torch.nn.Linear(4, 3)
+        linear1 = torch.nn.Linear(4, 3)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(
+            lambda idx, x: torch.switch(idx, (linear0, linear1), (x,)),
+            backend=backend,
+            fullgraph=True,
+        )(torch.tensor([1]), torch.randn(2, 4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+
+        # Both modules' weights AND biases are lifted into the HOP operand
+        # tuple, in sorted order of their placeholder names.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_idx_ : torch.Tensor, L_x_ : torch.Tensor, L_linear0_parameters_weight_ : torch.nn.parameter.Parameter, L_linear0_parameters_bias_ : torch.nn.parameter.Parameter, L_linear1_parameters_weight_ : torch.nn.parameter.Parameter, L_linear1_parameters_bias_ : torch.nn.parameter.Parameter):
+    l_idx_ = L_idx_
+    l_x_ = L_x_
+    l_linear0_parameters_weight_ = L_linear0_parameters_weight_
+    l_linear0_parameters_bias_ = L_linear0_parameters_bias_
+    l_linear1_parameters_weight_ = L_linear1_parameters_weight_
+    l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0], (l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_, l_x_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = l_x_ = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Each branch submodule receives the full union but only reads its
+        # own module's parameters.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_, l_x_):
+    l_linear0_parameters_bias__1 = l_linear0_parameters_bias_
+    l_linear0_parameters_weight__1 = l_linear0_parameters_weight_
+    l_x__1 = l_x_
+    linear = torch._C._nn.linear(l_x__1, l_linear0_parameters_weight__1, l_linear0_parameters_bias__1);  l_x__1 = l_linear0_parameters_weight__1 = l_linear0_parameters_bias__1 = None
+    return (linear,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_, l_x_):
+    l_linear1_parameters_bias__1 = l_linear1_parameters_bias_
+    l_linear1_parameters_weight__1 = l_linear1_parameters_weight_
+    l_x__1 = l_x_
+    linear = torch._C._nn.linear(l_x__1, l_linear1_parameters_weight__1, l_linear1_parameters_bias__1);  l_x__1 = l_linear1_parameters_weight__1 = l_linear1_parameters_bias__1 = None
+    return (linear,)""",
         )
 
     @torch._dynamo.config.patch(trace_autograd_ops=True)

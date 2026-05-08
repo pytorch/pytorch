@@ -5,7 +5,7 @@ import functools
 import logging
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -41,9 +41,9 @@ switch_op = SwitchOp()
 
 @exposed_in("torch")
 def switch(
-    index: Union[int, torch.Tensor],
-    branches: Union[tuple[Callable, ...], list[Callable]],
-    operands: Union[tuple, list] = (),
+    index: int | torch.Tensor,
+    branches: tuple[Callable, ...] | list[Callable],
+    operands: tuple | list = (),
 ) -> Any:
     r"""
     Selects and runs one of N branch functions by index.
@@ -247,9 +247,7 @@ def switch_fake_tensor_mode(mode, index, branches, operands):
     return pytree.tree_unflatten(merged_outs, branch_out_spec[0])
 
 
-def _merge_output(
-    xs: tuple[Optional[Union[torch.Tensor, int]], ...], mode: FakeTensorMode
-):
+def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMode):
     from torch._higher_order_ops.cond import _merge_output as cond_merge_output
 
     return functools.reduce(lambda a, b: cond_merge_output(a, b, mode), xs)

@@ -2300,6 +2300,16 @@
       ]
     }
   ],
+  "GB7694": [
+    {
+      "Gb_type": "torch.switch: unsupported branch return type (constant)",
+      "Context": "str(ret_val)",
+      "Explanation": "Constants returned from branches must be int or None.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0169": [
     {
       "Gb_type": "Write to immutable cell",
@@ -4781,6 +4791,14 @@
     }
   ],
   "GB0340": [
+    {
+      "Gb_type": "torch.switch: unsupported branch return type",
+      "Context": "str(ret_val)",
+      "Explanation": "Expected branches to return a possibly nested pytree of tensor or constant int/None leaves.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "torch.switch: unsupported branch return type",
       "Context": "str(ret_val)",

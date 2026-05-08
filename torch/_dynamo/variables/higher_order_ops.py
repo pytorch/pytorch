@@ -2725,23 +2725,29 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 raise AssertionError("tx.fake_mode must not be None")
             tx.fake_mode.epoch += 1
 
-            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
+            if not only_consist_of(
+                ret_val, (TensorVariable, ConstantVariable), allow_none=True
+            ):
                 unimplemented(
                     gb_type="torch.switch: unsupported branch return type",
                     context=str(ret_val),
-                    explanation="Expected branches to return a possibly nested pytree of tensors or constant ints.",
+                    explanation="Expected branches to return a possibly nested pytree of tensor or constant int/None leaves.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if ret.is_python_constant() and not isinstance(
-                    ret.as_python_constant(), int
-                ):
-                    unimplemented(
-                        gb_type="torch.switch: unsupported branch return type (constant non-int)",
-                        context=str(ret_val),
-                        explanation="Constants returned from branches must be ints.",
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
+                if ret.is_python_constant():
+                    const = ret.as_python_constant()
+                    # Python floats in branch outputs are blocked upstream by
+                    # validate_subgraph_output_types (shared HOP gate); we
+                    # mirror the whitelist here to keep the error specific to
+                    # torch.switch. bool is implicitly accepted via the int check.
+                    if not (isinstance(const, int) or const is None):
+                        unimplemented(
+                            gb_type="torch.switch: unsupported branch return type (constant)",
+                            context=str(ret_val),
+                            explanation="Constants returned from branches must be int or None.",
+                            hints=[*graph_break_hints.USER_ERROR],
+                        )
             return ret_val, ret_spec, ret_graph, ret_lifted_freevars
 
         branch_states: list[Any] = []
