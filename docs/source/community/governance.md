@@ -1,10 +1,10 @@
-:orphan:
+---
+orphan: true
+---
 
-PyTorch Governance | Mechanics
-==============================
+# PyTorch Governance | Mechanics
 
-Summary
--------
+## Summary
 
 PyTorch adopts a technical governance structure that is hierarchical.
 
@@ -35,12 +35,11 @@ That is, there are no seats reserved for specific companies, and
 membership is associated with the person rather than the company
 employing that person.
 
-Module Maintainers
-------------------
+## Module Maintainers
 
 Modules are defined as GitHub repositories within the PyTorch org,
 or as directories within the core repository
-`pytorch/pytorch <https://github.com/pytorch/pytorch>`__.
+[pytorch/pytorch](https://github.com/pytorch/pytorch).
 Each module will have its own maintainer group. Maintainer
 groups are responsible for reviewing and approving commits,
 improving design, and changing the scope of the module.
@@ -69,8 +68,7 @@ Responsibilities of the maintainer includes:
 * Supporting public documentation related to the module
 * Running public developer meetings
 
-Core Maintainers
-----------------
+## Core Maintainers
 
 The core maintainers are expected to have a deep understanding
 of the PyTorch code base and design philosophies. Their responsibilities
@@ -91,10 +89,9 @@ decision-making, and give a clear reasoning for their
 decisions, vetoes and dispute resolution.
 
 The core maintainers are admins of the PyTorch GitHub Org
-and are listed in `Maintainers <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__.
+and are listed in [Maintainers](https://pytorch.org/docs/stable/community/persons_of_interest.html).
 
-Lead Core Maintainer (BDFL)
----------------------------
+## Lead Core Maintainer (BDFL)
 
 There may be decisions in which the core maintainers cannot
 come to a consensus. To make such difficult decisions, the
@@ -107,11 +104,9 @@ decision-making, and give a clear reasoning for their
 decisions. The Lead Core Maintainer is also responsible for
 confirming or removing core maintainers.
 
-Nominating, Confirming and Removing Maintainers
------------------------------------------------
+## Nominating, Confirming and Removing Maintainers
 
-The Principles
-~~~~~~~~~~~~~~
+### The Principles
 
 * Membership in module maintainer groups is given to **individuals**
   on **merit basis** after they demonstrated strong expertise of the
@@ -127,12 +122,11 @@ The Principles
   period that’s appropriate for that module.
 * The membership is for an individual, not a company.
 
-The Process for Nomination
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+### The Process for Nomination
 
 * Each module has its own process. Please contact module maintainers for more information.
   However, if there is no process identified, you can file a request to the core
-  maintainers by submitting `this form <https://docs.google.com/forms/d/e/1FAIpQLSdRvcFm7RuIHA-jNJYdz9bEZqE_KBT_RShJu3-jrj_BPZo-qA/viewform>`__.
+  maintainers by submitting [this form](https://docs.google.com/forms/d/e/1FAIpQLSdRvcFm7RuIHA-jNJYdz9bEZqE_KBT_RShJu3-jrj_BPZo-qA/viewform).
   Core maintainers are meeting every three months.
 * If you are submitting a request to the core maintainers, the information in your request
   must include the following items:
@@ -148,8 +142,7 @@ The Process for Nomination
   decision of the core maintainers has to be articulated well
   and would be public.
 
-The Process for Removal
-~~~~~~~~~~~~~~~~~~~~~~~
+### The Process for Removal
 
 * Similar to the process for nomination, anyone in the community
   can nominate a person to be removed from a Module maintainer
@@ -172,8 +165,7 @@ The Process for Removal
   of the core maintainers has to be articulated well and would be
   public.
 
-Nominating Core Maintainers
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Nominating Core Maintainers
 
 * Any core or module maintainer can nominate someone to become a
   core maintainer
@@ -191,8 +183,7 @@ Nominating Core Maintainers
   decision to Confirm or Decline the nomination, with a clear public
   articulation of their reasoning behind the decision.
 
-Removing the Lead Core Maintainer and Nominating a New Lead Core Maintainer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Removing the Lead Core Maintainer and Nominating a New Lead Core Maintainer
 
 * A super-majority of core maintainers (75%) can choose to
   remove the Lead Core Maintainer
@@ -201,14 +192,13 @@ Removing the Lead Core Maintainer and Nominating a New Lead Core Maintainer
   Maintainer), the core maintainers follow a Ranked-Choice voting
   method to elect a new Lead Core Maintainer.
 
-Add, Remove, and Re-Scope Modules and Projects
-----------------------------------------------
+## Add, Remove, and Re-Scope Modules and Projects
 
 The core maintainers together are responsible for taking
 decisions on adding, removing and re-scoping new modules
 in the PyTorch org, either as new repositories in the
 PyTorch GitHub org, or as folders in the
-`pytorch/pytorch <https://github.com/pytorch/pytorch>`__
+[pytorch/pytorch](https://github.com/pytorch/pytorch)
 repository.
 
 They invite proposals from members in the community
@@ -217,32 +207,30 @@ The proposals are open-ended, but should have some basic
 ground-work to make a convincing case to make change. The
 following is an example approach to this process:
 
-#. Interview researchers / stakeholders, talk to community, gather issues;
-#. Read papers, attend conferences, build example pipelines based on experience;
-#. Create a state of the world - make sure this change is necessary,
+1. Interview researchers / stakeholders, talk to community, gather issues;
+2. Read papers, attend conferences, build example pipelines based on experience;
+3. Create a state of the world - make sure this change is necessary,
    for example adding a new project or module is worth the maintenance
    cost; or removing a project or module will not remove too much value
    from PyTorch;
-#. Create a proposal; the proposal covers the maintainership, development
+4. Create a proposal; the proposal covers the maintainership, development
    and community plan once the proposal is approved.
 
 The core maintainers take final decisions on the proposal, articulating
 the reasoning behind the decision publicly.
 
 
-Decision Making
----------------
+## Decision Making
 
-Uncontroversial Changes
-~~~~~~~~~~~~~~~~~~~~~~~
+### Uncontroversial Changes
 
 Primary work happens through issues and pull requests on
 GitHub. Maintainers should avoid pushing their changes directly to
 the PyTorch repository, instead relying on pull requests. Approving a
 pull request by a core or module maintainer allows it to be merged
 without further process. Core and module maintainers, as listed on
-the `Maintainers <https://pytorch.org/docs/stable/community/persons_of_interest.html>`__
-page and within `CODEOWNERS <https://github.com/pytorch/pytorch/blob/master/CODEOWNERS>`__
+the [Maintainers](https://pytorch.org/docs/stable/community/persons_of_interest.html)
+page and within [CODEOWNERS](https://github.com/pytorch/pytorch/blob/master/CODEOWNERS)
 ultimately approve these changes.
 
 Notifying relevant experts about an issue or a pull request
@@ -250,22 +238,20 @@ is important. Reviews from experts in the given interest area are
 strongly preferred, especially on pull request approvals. Failure to do
 so might end up with the change being reverted by the relevant expert.
 
-Controversial Decision Process
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Controversial Decision Process
 
 Substantial changes in a given interest area require a GitHub issue to
 be opened for discussion. This includes:
 
--  Any semantic or syntactic change to the PyTorch framework or library.
--  Backwards-incompatible changes to the Python or C++ API.
--  Additions to the core framework or library, including substantial new
+* Any semantic or syntactic change to the PyTorch framework or library.
+* Backwards-incompatible changes to the Python or C++ API.
+* Additions to the core framework or library, including substantial new
    functionality within an existing library.
--  Removal of core features or platform support
+* Removal of core features or platform support
 
 Core and module maintainers ultimately approve these changes.
 
-General Project Policies
-~~~~~~~~~~~~~~~~~~~~~~~~
+### General Project Policies
 
 PyTorch has been established as PyTorch a Series of LF Projects, LLC.
 Policies applicable to PyTorch and participants in PyTorch, including
@@ -281,12 +267,11 @@ All outbound code will be made available under the Project License.
 The Maintainers may approve the use of an alternative open license or
 licenses for inbound or outbound contributions on an exception basis.
 
-FAQ
----
+## FAQ
 
 **Q: What if I would like to own (or partly own) a part of the project
-such as a feature area or domain library, for example** `Linear Algebra <https://github.com/pytorch/pytorch/tree/master/torch/linalg>`__
-**or** `Torch Vision <https://github.com/pytorch/vision>`__ **?**
+such as a feature area or domain library, for example** [Linear Algebra](https://github.com/pytorch/pytorch/tree/master/torch/linalg)
+**or** [Torch Vision](https://github.com/pytorch/vision)**?**
 This is absolutely possible.
 The first step is to start contributing to the existing project area and
 supporting its health and success. In addition to this, you can
@@ -314,8 +299,8 @@ discuss.
 relatively minor, a pull request on GitHub can be opened up immediately
 for review and merge by the project committers. For larger changes,
 please open an issue to make a proposal to discuss prior. Please also
-see the `PyTorch Contributor
-Wiki <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`__ for contribution
+see the [PyTorch Contributor
+Wiki](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions) for contribution
 for a walkthrough.
 
 **Q: Can I become a committer on the project?** Unfortunately, the
@@ -329,5 +314,5 @@ to allow this.
 or otherwise? Do I need to be 'officially' a committer to do this?** No,
 we encourage community members to showcase their work wherever and
 whenever they can. Please reach out to
-`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
+[marketing@pytorch.org](mailto:marketing@pytorch.org)
 for marketing support.
