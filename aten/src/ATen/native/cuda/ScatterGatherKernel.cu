@@ -161,38 +161,6 @@ struct _cuda_scatter_gather_internal_kernel {
         return;
       }
     }
-
-#if !defined(USE_ROCM)
-    if constexpr (is_scatter_like && std::is_same_v<func_t, ReduceAdd> &&
-        (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double> ||
-         std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
-      constexpr size_t element_size = sizeof(scalar_t);
-      constexpr size_t alignment = 16;
-      if (at::native::fast_scatter_add_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
-        auto slice_size = iter.shape()[0] * element_size;
-        auto num_ind = iter.shape()[1];
-        auto self_stride_bytes = index_stride * element_size;
-        auto src_stride_bytes = iter.strides(1)[1];
-        if (iter.numel() == 0) return;
-        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
-          at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
-              reinterpret_cast<scalar_t*>(self_ptr),
-              reinterpret_cast<const scalar_t*>(src_ptr),
-              reinterpret_cast<index_t*>(index_ptr),
-              num_ind, static_cast<int>(iter.shape()[0]), index_size,
-              self_stride_bytes, src_stride_bytes);
-          return;
-        }
-        at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
-            reinterpret_cast<scalar_t*>(self_ptr),
-            reinterpret_cast<const scalar_t*>(src_ptr),
-            reinterpret_cast<index_t*>(index_ptr),
-            num_ind, slice_size, index_size,
-            self_stride_bytes, src_stride_bytes);
-        return;
-      }
-    }
-#endif
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
