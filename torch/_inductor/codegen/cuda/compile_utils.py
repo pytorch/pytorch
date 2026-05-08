@@ -35,7 +35,7 @@ def _cutlass_path() -> str | None:
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        from torch._inductor.codegen.cutlass_utils import try_import_cutlass
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         return config.cutlass.cutlass_dir if try_import_cutlass() else None
 
