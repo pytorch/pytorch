@@ -3382,7 +3382,7 @@ def native_group_norm(
     )
     reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
     biased_var, mean = torch.var_mean(
-        input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
+        input_reshaped, dim=reduction_dims, correction=0, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
 
@@ -3394,13 +3394,12 @@ def native_group_norm(
     else:
         w = rstd.broadcast_to((batch_size, num_groups, num_channels // num_groups, 1))
 
+    b = -mean * w
     if bias is not None:
         bias_reshaped = torch.reshape(
             bias, (1, num_groups, num_channels // num_groups, 1)
         )
-        b = torch.addcmul(bias_reshaped, -mean, w)
-    else:
-        b = -mean * w
+        b = b + bias_reshaped
 
     w = w.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
     b = b.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
@@ -3408,15 +3407,17 @@ def native_group_norm(
     broadcast_dims = list(range(2, input.ndim))
     unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
     unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-    out = torch.addcmul(unsqueeze_b, input_acc, unsqueeze_w)
+    out = input_acc * unsqueeze_w + unsqueeze_b
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
-    # remove broadcast dimensions from mean and rstd
-    mean = torch.squeeze(mean, reduction_dims)
-    rstd = torch.squeeze(rstd, reduction_dims)
+    # remove broadcast dimensions from mean and rstd.  The call to clone removes a view,
+    # matching the behavior of eager native_group_norm.
+    mean = torch.squeeze(mean, reduction_dims).clone()
+    rstd = torch.squeeze(rstd, reduction_dims).clone()
+
     return (out, mean, rstd)
 
 
