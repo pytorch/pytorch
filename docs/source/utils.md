@@ -19,6 +19,42 @@
     swap_tensors
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils.backend_registration
+```
+
+```{eval-rst}
+.. autofunction:: generate_methods_for_privateuse1_backend
+```
+
+```{eval-rst}
+.. autofunction:: rename_privateuse1_backend
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.cpp_backtrace
+```
+
+```{eval-rst}
+.. autofunction:: get_cpp_backtrace
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.hooks
+```
+
+```{eval-rst}
+.. autofunction:: unserializable_hook
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.throughput_benchmark
+```
+
+```{eval-rst}
+.. autofunction:: format_time
+```
+
 # torch.utils.collect_env
 ```{eval-rst}
 .. automodule:: torch.utils.collect_env
