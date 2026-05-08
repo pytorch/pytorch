@@ -1060,6 +1060,14 @@ def xfail_if_triton_cpu(fn):
     return fn
 
 
+def xfail_if_triton_cpu_no_avx512_bf16(fn):
+    # Triton CPU codegen for some BF16 kernels matches eager numerics only
+    # when avx512_bf16 is available; on older Intel CPUs the result drifts.
+    if not torch.cpu._is_avx512_bf16_supported():
+        fn._expected_failure_triton_cpu = True
+    return fn
+
+
 def xfail_if_pallas(fn):
     fn._expected_failure_pallas = True
     return fn
@@ -2649,7 +2657,7 @@ class CommonTemplate:
         self.common(fn, (a, b_int8pack, b_scales, c))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
@@ -2686,7 +2694,7 @@ class CommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
@@ -2729,7 +2737,7 @@ class CommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     # Pallas codegen doesn't handle reduction axis after FloorDiv(ModularIndexing) simplification
     @xfail_if_pallas
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
@@ -2775,7 +2783,7 @@ class CommonTemplate:
         self.common(fn, (a, q_group, in_features, out_features))
 
     @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
-    @xfail_if_triton_cpu
+    @xfail_if_triton_cpu_no_avx512_bf16
     @xfailIf(
         IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED
     )  # see https://github.com/pytorch/pytorch/issues/170787
@@ -7666,6 +7674,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
             ):
                 c_fn(x)
+
+    def test_convolution_errors_on_input_weight_dtype_mismatch(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only")
+
+        def fn(x):
+            return torch.nn.functional.conv2d(x, weight, bias=None)
+
+        weight = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float32)
+        x = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float16)
+        c_fn = torch.compile(fn)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Input type.*and weight type.*should be the same",
+        ):
+            c_fn(x)
 
     def test_log1p(self):
         def fn(x):
