@@ -614,6 +614,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             return variables.PropertyVariable(cls_attr, source=descriptor_source)
 
+        # member_get with obj=NULL returns self.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
+        if isinstance(cls_attr, types.MemberDescriptorType):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            return variables.MemberDescriptorVariable(
+                cls_attr, source=descriptor_source
+            )
+
         if isinstance(cls_attr, _collections._tuplegetter):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)

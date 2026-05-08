@@ -4666,6 +4666,16 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(42), int)
         self.assertEqual(fn("hello"), str)
 
+    def test_member_descriptor_isinstance_on_class(self):
+        class A:
+            __slots__ = ("x",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return isinstance(A.x, types.MemberDescriptorType)
+
+        self.assertTrue(fn())
+
 
 def udf_mul(x, y):
     return x * y
