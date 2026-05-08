@@ -305,7 +305,6 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
-
     test_case.assertEqual(
         orig,
         decomp,
