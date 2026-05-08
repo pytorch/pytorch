@@ -72,9 +72,8 @@ class TypesTests(CPythonTestCase):
         if not 'x': self.fail('\'x\' is false instead of true')
         if not {'x': 1}: self.fail('{\'x\': 1} is false instead of true')
         def f(): pass
-        with torch._dynamo.error_on_graph_break(False):
-            class C: pass
-            x = C()
+        class C: pass
+        x = C()
         if not f: self.fail('f is false instead of true')
         if not C: self.fail('C is false instead of true')
         if not sys: self.fail('sys is false instead of true')
@@ -784,14 +783,11 @@ class UnionTests(CPythonTestCase):
         self.assertEqual(hash(int | str), hash(typing.Union[int, str]))
 
     def test_union_of_unhashable(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class UnhashableMeta(type):
-                __hash__ = None
+        class UnhashableMeta(type):
+            __hash__ = None
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(metaclass=UnhashableMeta): ...
-        with torch._dynamo.error_on_graph_break(False):
-            class B(metaclass=UnhashableMeta): ...
+        class A(metaclass=UnhashableMeta): ...
+        class B(metaclass=UnhashableMeta): ...
 
         self.assertEqual((A | B).__args__, (A, B))
         union1 = A | B
@@ -864,19 +860,17 @@ class UnionTests(CPythonTestCase):
                     isinstance(object(), x)
 
     def test_bad_instancecheck(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class BadMeta(type):
-                def __instancecheck__(cls, inst):
-                    1/0
+        class BadMeta(type):
+            def __instancecheck__(cls, inst):
+                1/0
         x = int | BadMeta('A', (), {})
         self.assertTrue(isinstance(1, x))
         self.assertRaises(ZeroDivisionError, isinstance, [], x)
 
     def test_bad_subclasscheck(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class BadMeta(type):
-                def __subclasscheck__(cls, sub):
-                    1/0
+        class BadMeta(type):
+            def __subclasscheck__(cls, sub):
+                1/0
         x = int | BadMeta('A', (), {})
         self.assertTrue(issubclass(int, x))
         self.assertRaises(ZeroDivisionError, issubclass, list, x)
@@ -994,10 +988,9 @@ class UnionTests(CPythonTestCase):
                          (int, Forward))
 
     def test_or_type_operator_with_Protocol(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Proto(typing.Protocol):
-                def meth(self) -> int:
-                    ...
+        class Proto(typing.Protocol):
+            def meth(self) -> int:
+                ...
         self.assertEqual(Proto | str, typing.Union[Proto, str])
 
     def test_or_type_operator_with_Alias(self):
@@ -1009,11 +1002,10 @@ class UnionTests(CPythonTestCase):
         self.assertEqual(NT | str, typing.Union[NT, str])
 
     def test_or_type_operator_with_TypedDict(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Point2D(typing.TypedDict):
-                x: int
-                y: int
-                label: str
+        class Point2D(typing.TypedDict):
+            x: int
+            y: int
+            label: str
         self.assertEqual(Point2D | str, typing.Union[Point2D, str])
 
     def test_or_type_operator_with_NewType(self):
@@ -1044,10 +1036,9 @@ class UnionTests(CPythonTestCase):
         self.assertEqual(Literal['a'] | Literal['a'], Literal['a'])
 
         import enum
-        with torch._dynamo.error_on_graph_break(False):
-            class Ints(enum.IntEnum):
-                A = 0
-                B = 1
+        class Ints(enum.IntEnum):
+            A = 0
+            B = 1
 
         self.assertEqual(Literal[Ints.A] | Literal[Ints.A], Literal[Ints.A])
         self.assertEqual(Literal[Ints.B] | Literal[Ints.B], Literal[Ints.B])
@@ -1072,8 +1063,7 @@ class UnionTests(CPythonTestCase):
         a = list[int]
         b = list[str]
         c = dict[float, str]
-        with torch._dynamo.error_on_graph_break(False):
-            class SubClass(types.GenericAlias): ...
+        class SubClass(types.GenericAlias): ...
         d = SubClass(list, float)
         # equivalence with typing.Union
         self.assertEqual(a | b | c | d, typing.Union[a, b, c, d])
@@ -1084,10 +1074,9 @@ class UnionTests(CPythonTestCase):
         self.assertEqual(repr(a | b | c | d),
                          "list[int] | list[str] | dict[float, str] | list[float]")
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadType(type):
-                def __eq__(self, other):
-                    return 1 / 0
+        class BadType(type):
+            def __eq__(self, other):
+                return 1 / 0
 
         bt = BadType('bt', (), {})
         # Comparison should fail and errors should propagate out for bad types.
@@ -1105,12 +1094,11 @@ class UnionTests(CPythonTestCase):
                     issubclass(int, type_)
 
     def test_or_type_operator_with_bad_module(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class BadMeta(type):
-                __qualname__ = 'TypeVar'
-                @property
-                def __module__(self):
-                    1 / 0
+        class BadMeta(type):
+            __qualname__ = 'TypeVar'
+            @property
+            def __module__(self):
+                1 / 0
         TypeVar = BadMeta('TypeVar', (), {})
         _SpecialForm = BadMeta('_SpecialForm', (), {})
         # Crashes in Issue44483
@@ -1141,9 +1129,8 @@ class MappingProxyTests(CPythonTestCase):
     mappingproxy = types.MappingProxyType
 
     def test_constructor(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class userdict(dict):
-                pass
+        class userdict(dict):
+            pass
 
         mapping = {'x': 1, 'y': 2}
         self.assertEqual(self.mappingproxy(mapping), mapping)
@@ -1185,10 +1172,9 @@ class MappingProxyTests(CPythonTestCase):
         self.assertEqual(view.get('xxx', 42), 42)
 
     def test_missing(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class dictmissing(dict):
-                def __missing__(self, key):
-                    return "missing=%s" % key
+        class dictmissing(dict):
+            def __missing__(self, key):
+                return "missing=%s" % key
 
         view = self.mappingproxy(dictmissing(x=1))
         self.assertEqual(view['x'], 1)
@@ -1200,37 +1186,36 @@ class MappingProxyTests(CPythonTestCase):
         self.assertFalse('y' in view)
 
     def test_customdict(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class customdict(dict):
-                def __contains__(self, key):
-                    if key == 'magic':
-                        return True
-                    else:
-                        return dict.__contains__(self, key)
+        class customdict(dict):
+            def __contains__(self, key):
+                if key == 'magic':
+                    return True
+                else:
+                    return dict.__contains__(self, key)
 
-                def __iter__(self):
-                    return iter(('iter',))
+            def __iter__(self):
+                return iter(('iter',))
 
-                def __len__(self):
-                    return 500
+            def __len__(self):
+                return 500
 
-                def copy(self):
-                    return 'copy'
+            def copy(self):
+                return 'copy'
 
-                def keys(self):
-                    return 'keys'
+            def keys(self):
+                return 'keys'
 
-                def items(self):
-                    return 'items'
+            def items(self):
+                return 'items'
 
-                def values(self):
-                    return 'values'
+            def values(self):
+                return 'values'
 
-                def __getitem__(self, key):
-                    return "getitem=%s" % dict.__getitem__(self, key)
+            def __getitem__(self, key):
+                return "getitem=%s" % dict.__getitem__(self, key)
 
-                def get(self, key, default=None):
-                    return "get=%s" % dict.get(self, key, 'default=%r' % default)
+            def get(self, key, default=None):
+                return "get=%s" % dict.get(self, key, 'default=%r' % default)
 
         custom = customdict({'key': 'value'})
         view = self.mappingproxy(custom)
@@ -1345,10 +1330,9 @@ class MappingProxyTests(CPythonTestCase):
         self.assertDictEqual(other, {'c': 3, 'p': 0})
 
     def test_hash(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class HashableDict(dict):
-                def __hash__(self):
-                    return 3844817361
+        class HashableDict(dict):
+            def __hash__(self):
+                return 3844817361
         view = self.mappingproxy({'a': 1, 'b': 2})
         self.assertRaises(TypeError, hash, view)
         mapping = HashableDict({'a': 1, 'b': 2})
@@ -1430,12 +1414,10 @@ class ClassCreationTests(CPythonTestCase):
         self.assertEqual(C.z, 2)
 
     def test_new_class_with_mro_entry(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A: pass
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                def __mro_entries__(self, bases):
-                    return (A,)
+        class A: pass
+        class C:
+            def __mro_entries__(self, bases):
+                return (A,)
         c = C()
         D = types.new_class('D', (c,), {})
         self.assertEqual(D.__bases__, (A,))
@@ -1454,12 +1436,11 @@ class ClassCreationTests(CPythonTestCase):
         self.assertEqual(L2.__mro__, (L2, list, object))
 
     def test_new_class_with_mro_entry_none(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A: pass
-            class B: pass
-            class C:
-                def __mro_entries__(self, bases):
-                    return ()
+        class A: pass
+        class B: pass
+        class C:
+            def __mro_entries__(self, bases):
+                return ()
         c = C()
         D = types.new_class('D', (A, c, B), {})
         self.assertEqual(D.__bases__, (A, B))
@@ -1467,54 +1448,50 @@ class ClassCreationTests(CPythonTestCase):
         self.assertEqual(D.__mro__, (D, A, B, object))
 
     def test_new_class_with_mro_entry_error(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A: pass
-            class C:
-                def __mro_entries__(self, bases):
-                    return A
+        class A: pass
+        class C:
+            def __mro_entries__(self, bases):
+                return A
         c = C()
         with self.assertRaises(TypeError):
             types.new_class('D', (c,), {})
 
     def test_new_class_with_mro_entry_multiple(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A1: pass
-            class A2: pass
-            class B1: pass
-            class B2: pass
-            class A:
-                def __mro_entries__(self, bases):
-                    return (A1, A2)
-            class B:
-                def __mro_entries__(self, bases):
-                    return (B1, B2)
+        class A1: pass
+        class A2: pass
+        class B1: pass
+        class B2: pass
+        class A:
+            def __mro_entries__(self, bases):
+                return (A1, A2)
+        class B:
+            def __mro_entries__(self, bases):
+                return (B1, B2)
         D = types.new_class('D', (A(), B()), {})
         self.assertEqual(D.__bases__, (A1, A2, B1, B2))
 
     def test_new_class_with_mro_entry_multiple_2(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A1: pass
-            class A2: pass
-            class A3: pass
-            class B1: pass
-            class B2: pass
-            class A:
-                def __mro_entries__(self, bases):
-                    return (A1, A2, A3)
-            class B:
-                def __mro_entries__(self, bases):
-                    return (B1, B2)
-            class C: pass
+        class A1: pass
+        class A2: pass
+        class A3: pass
+        class B1: pass
+        class B2: pass
+        class A:
+            def __mro_entries__(self, bases):
+                return (A1, A2, A3)
+        class B:
+            def __mro_entries__(self, bases):
+                return (B1, B2)
+        class C: pass
         D = types.new_class('D', (A(), C, B()), {})
         self.assertEqual(D.__bases__, (A1, A2, A3, C, B1, B2))
 
     def test_get_original_bases(self):
         T = typing.TypeVar('T')
-        with torch._dynamo.error_on_graph_break(False):
-            class A: pass
-            class B(typing.Generic[T]): pass
-            class C(B[int]): pass
-            class D(B[str], float): pass
+        class A: pass
+        class B(typing.Generic[T]): pass
+        class C(B[int]): pass
+        class D(B[str], float): pass
 
         self.assertEqual(types.get_original_bases(A), (object,))
         self.assertEqual(types.get_original_bases(B), (typing.Generic[T],))
@@ -1522,33 +1499,29 @@ class ClassCreationTests(CPythonTestCase):
         self.assertEqual(types.get_original_bases(int), (object,))
         self.assertEqual(types.get_original_bases(D), (B[str], float))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class E(list[T]): pass
-            class F(list[int]): pass
+        class E(list[T]): pass
+        class F(list[int]): pass
 
         self.assertEqual(types.get_original_bases(E), (list[T],))
         self.assertEqual(types.get_original_bases(F), (list[int],))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class FirstBase(typing.Generic[T]): pass
-            class SecondBase(typing.Generic[T]): pass
-            class First(FirstBase[int]): pass
-            class Second(SecondBase[int]): pass
-            class G(First, Second): pass
+        class FirstBase(typing.Generic[T]): pass
+        class SecondBase(typing.Generic[T]): pass
+        class First(FirstBase[int]): pass
+        class Second(SecondBase[int]): pass
+        class G(First, Second): pass
         self.assertEqual(types.get_original_bases(G), (First, Second))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class First_(typing.Generic[T]): pass
-            class Second_(typing.Generic[T]): pass
-            class H(First_, Second_): pass
+        class First_(typing.Generic[T]): pass
+        class Second_(typing.Generic[T]): pass
+        class H(First_, Second_): pass
         self.assertEqual(types.get_original_bases(H), (First_, Second_))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class ClassBasedNamedTuple(typing.NamedTuple):
-                x: int
+        class ClassBasedNamedTuple(typing.NamedTuple):
+            x: int
 
-            class GenericNamedTuple(typing.NamedTuple, typing.Generic[T]):
-                x: T
+        class GenericNamedTuple(typing.NamedTuple, typing.Generic[T]):
+            x: T
 
         CallBasedNamedTuple = typing.NamedTuple("CallBasedNamedTuple", [("x", int)])
 
@@ -1563,12 +1536,11 @@ class ClassCreationTests(CPythonTestCase):
             types.get_original_bases(CallBasedNamedTuple)[0], typing.NamedTuple
         )
 
-        with torch._dynamo.error_on_graph_break(False):
-            class ClassBasedTypedDict(typing.TypedDict):
-                x: int
+        class ClassBasedTypedDict(typing.TypedDict):
+            x: int
 
-            class GenericTypedDict(typing.TypedDict, typing.Generic[T]):
-                x: T
+        class GenericTypedDict(typing.TypedDict, typing.Generic[T]):
+            x: T
 
         CallBasedTypedDict = typing.TypedDict("CallBasedTypedDict", {"x": int})
 
@@ -1592,13 +1564,12 @@ class ClassCreationTests(CPythonTestCase):
     def test_prepare_class(self):
         # Basic test of metaclass derivation
         expected_ns = {}
-        with torch._dynamo.error_on_graph_break(False):
-            class A(type):
-                def __new__(*args, **kwargs):
-                    return type.__new__(*args, **kwargs)
+        class A(type):
+            def __new__(*args, **kwargs):
+                return type.__new__(*args, **kwargs)
 
-                def __prepare__(*args):
-                    return expected_ns
+            def __prepare__(*args):
+                return expected_ns
 
         B = types.new_class("B", (object,))
         C = types.new_class("C", (object,), {"metaclass": A})
@@ -1611,22 +1582,20 @@ class ClassCreationTests(CPythonTestCase):
 
     def test_bad___prepare__(self):
         # __prepare__() must return a mapping.
-        with torch._dynamo.error_on_graph_break(False):
-            class BadMeta(type):
-                @classmethod
-                def __prepare__(*args):
-                    return None
+        class BadMeta(type):
+            @classmethod
+            def __prepare__(*args):
+                return None
         with self.assertRaisesRegex(TypeError,
                                     r'^BadMeta\.__prepare__\(\) must '
                                     r'return a mapping, not NoneType$'):
             class Foo(metaclass=BadMeta):
                 pass
         # Also test the case in which the metaclass is not a type.
-        with torch._dynamo.error_on_graph_break(False):
-            class BadMeta:
-                @classmethod
-                def __prepare__(*args):
-                    return None
+        class BadMeta:
+            @classmethod
+            def __prepare__(*args):
+                return None
         with self.assertRaisesRegex(TypeError,
                                     r'^<metaclass>\.__prepare__\(\) must '
                                     r'return a mapping, not NoneType$'):
@@ -1634,14 +1603,13 @@ class ClassCreationTests(CPythonTestCase):
                 pass
 
     def test_resolve_bases(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A: pass
-            class B: pass
-            class C:
-                def __mro_entries__(self, bases):
-                    if A in bases:
-                        return ()
-                    return (A,)
+        class A: pass
+        class B: pass
+        class C:
+            def __mro_entries__(self, bases):
+                if A in bases:
+                    return ()
+                return (A,)
         c = C()
         self.assertEqual(types.resolve_bases(()), ())
         self.assertEqual(types.resolve_bases((c,)), (A,))
@@ -1664,24 +1632,23 @@ class ClassCreationTests(CPythonTestCase):
     def test_metaclass_derivation(self):
         # issue1294232: correct metaclass calculation
         new_calls = []  # to check the order of __new__ calls
-        with torch._dynamo.error_on_graph_break(False):
-            class AMeta(type):
-                def __new__(mcls, name, bases, ns):
-                    new_calls.append('AMeta')
-                    return super().__new__(mcls, name, bases, ns)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    return {}
+        class AMeta(type):
+            def __new__(mcls, name, bases, ns):
+                new_calls.append('AMeta')
+                return super().__new__(mcls, name, bases, ns)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                return {}
 
-            class BMeta(AMeta):
-                def __new__(mcls, name, bases, ns):
-                    new_calls.append('BMeta')
-                    return super().__new__(mcls, name, bases, ns)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    ns = super().__prepare__(name, bases)
-                    ns['BMeta_was_here'] = True
-                    return ns
+        class BMeta(AMeta):
+            def __new__(mcls, name, bases, ns):
+                new_calls.append('BMeta')
+                return super().__new__(mcls, name, bases, ns)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                ns = super().__prepare__(name, bases)
+                ns['BMeta_was_here'] = True
+                return ns
 
         A = types.new_class("A", (), {"metaclass": AMeta})
         self.assertEqual(new_calls, ['AMeta'])
@@ -1719,9 +1686,8 @@ class ClassCreationTests(CPythonTestCase):
     def test_metaclass_override_function(self):
         # Special case: the given metaclass isn't a class,
         # so there is no metaclass calculation.
-        with torch._dynamo.error_on_graph_break(False):
-            class A(metaclass=self.Meta):
-                pass
+        class A(metaclass=self.Meta):
+            pass
 
         marker = object()
         def func(*args, **kwargs):
@@ -1739,24 +1705,23 @@ class ClassCreationTests(CPythonTestCase):
         # but not a descendant of type.
         new_calls = []  # to check the order of __new__ calls
         prepare_calls = []  # to track __prepare__ calls
-        with torch._dynamo.error_on_graph_break(False):
-            class ANotMeta:
-                def __new__(mcls, *args, **kwargs):
-                    new_calls.append('ANotMeta')
-                    return super().__new__(mcls)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    prepare_calls.append('ANotMeta')
-                    return {}
+        class ANotMeta:
+            def __new__(mcls, *args, **kwargs):
+                new_calls.append('ANotMeta')
+                return super().__new__(mcls)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                prepare_calls.append('ANotMeta')
+                return {}
 
-            class BNotMeta(ANotMeta):
-                def __new__(mcls, *args, **kwargs):
-                    new_calls.append('BNotMeta')
-                    return super().__new__(mcls)
-                @classmethod
-                def __prepare__(mcls, name, bases):
-                    prepare_calls.append('BNotMeta')
-                    return super().__prepare__(name, bases)
+        class BNotMeta(ANotMeta):
+            def __new__(mcls, *args, **kwargs):
+                new_calls.append('BNotMeta')
+                return super().__new__(mcls)
+            @classmethod
+            def __prepare__(mcls, name, bases):
+                prepare_calls.append('BNotMeta')
+                return super().__prepare__(name, bases)
 
         A = types.new_class("A", (), {"metaclass": ANotMeta})
         self.assertIs(ANotMeta, type(A))
@@ -1825,16 +1790,14 @@ class ClassCreationTests(CPythonTestCase):
         # Only type itself can use the one-argument form (#27157)
         self.assertIs(type(5), int)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class M(type):
-                pass
+        class M(type):
+            pass
         with self.assertRaises(TypeError) as cm:
             M(5)
         self.assertEqual(str(cm.exception), expected_message)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class N(type, metaclass=M):
-                pass
+        class N(type, metaclass=M):
+            pass
         with self.assertRaises(TypeError) as cm:
             N(5)
         self.assertEqual(str(cm.exception), expected_message)
@@ -1843,18 +1806,16 @@ class ClassCreationTests(CPythonTestCase):
         # bpo-44232: The C function type_new() must properly report the
         # exception when a metaclass constructor raises an exception and the
         # winner class is not the metaclass.
-        with torch._dynamo.error_on_graph_break(False):
-            class ModelBase(type):
-                def __new__(cls, name, bases, attrs):
-                    super_new = super().__new__
-                    new_class = super_new(cls, name, bases, {})
-                    if name != "Model":
-                        raise RuntimeWarning(f"{name=}")
-                    return new_class
+        class ModelBase(type):
+            def __new__(cls, name, bases, attrs):
+                super_new = super().__new__
+                new_class = super_new(cls, name, bases, {})
+                if name != "Model":
+                    raise RuntimeWarning(f"{name=}")
+                return new_class
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Model(metaclass=ModelBase):
-                pass
+        class Model(metaclass=ModelBase):
+            pass
 
         with self.assertRaises(RuntimeWarning):
             type("SouthPonies", (Model,), {})
@@ -1862,8 +1823,7 @@ class ClassCreationTests(CPythonTestCase):
     def test_tuple_subclass_as_bases(self):
         # gh-132176: it used to crash on using
         # tuple subclass for as base classes.
-        with torch._dynamo.error_on_graph_break(False):
-            class TupleSubclass(tuple): pass
+        class TupleSubclass(tuple): pass
 
         typ = type("typ", TupleSubclass((int, object)), {})
         self.assertEqual(typ.__bases__, (int, object))
@@ -2052,9 +2012,8 @@ class SimpleNamespaceTests(CPythonTestCase):
             ns['spam']
 
     def test_subclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Spam(types.SimpleNamespace):
-                pass
+        class Spam(types.SimpleNamespace):
+            pass
 
         spam = Spam(ham=8, eggs=9)
 
@@ -2092,9 +2051,8 @@ class SimpleNamespaceTests(CPythonTestCase):
         self.assertEqual(vars(copy.replace(ns, x=1, y=2)), {'x': 1, 'y': 2})
 
     def test_replace_subclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Spam(types.SimpleNamespace):
-                pass
+        class Spam(types.SimpleNamespace):
+            pass
 
         spam = Spam(ham=8, eggs=9)
         spam2 = copy.replace(spam, ham=5)
@@ -2105,9 +2063,8 @@ class SimpleNamespaceTests(CPythonTestCase):
     def test_fake_namespace_compare(self):
         # Issue #24257: Incorrect use of PyObject_IsInstance() caused
         # SystemError.
-        with torch._dynamo.error_on_graph_break(False):
-            class FakeSimpleNamespace(str):
-                __class__ = types.SimpleNamespace
+        class FakeSimpleNamespace(str):
+            __class__ = types.SimpleNamespace
         self.assertFalse(types.SimpleNamespace() == FakeSimpleNamespace())
         self.assertTrue(types.SimpleNamespace() != FakeSimpleNamespace())
         with self.assertRaises(TypeError):
@@ -2134,10 +2091,9 @@ class CoroutineTests(CPythonTestCase):
             return 'spam'
         self.assertEqual(foo(), 'spam')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Awaitable:
-                def __await__(self):
-                    return ()
+        class Awaitable:
+            def __await__(self):
+                return ()
         aw = Awaitable()
         @types.coroutine
         def foo():
@@ -2170,12 +2126,11 @@ class CoroutineTests(CPythonTestCase):
             coro.close()
 
     def test_duck_coro(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class CoroLike:
-                def send(self): pass
-                def throw(self): pass
-                def close(self): pass
-                def __await__(self): return self
+        class CoroLike:
+            def send(self): pass
+            def throw(self): pass
+            def close(self): pass
+            def __await__(self): return self
 
         coro = CoroLike()
         @types.coroutine
@@ -2185,14 +2140,13 @@ class CoroutineTests(CPythonTestCase):
         self.assertIs(foo().__await__(), coro)
 
     def test_duck_corogen(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class CoroGenLike:
-                def send(self): pass
-                def throw(self): pass
-                def close(self): pass
-                def __await__(self): return self
-                def __iter__(self): return self
-                def __next__(self): pass
+        class CoroGenLike:
+            def send(self): pass
+            def throw(self): pass
+            def close(self): pass
+            def __await__(self): return self
+            def __iter__(self): return self
+            def __next__(self): pass
 
         coro = CoroGenLike()
         @types.coroutine
@@ -2202,13 +2156,12 @@ class CoroutineTests(CPythonTestCase):
         self.assertIs(foo().__await__(), coro)
 
     def test_duck_gen(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class GenLike:
-                def send(self): pass
-                def throw(self): pass
-                def close(self): pass
-                def __iter__(self): pass
-                def __next__(self): pass
+        class GenLike:
+            def send(self): pass
+            def throw(self): pass
+            def close(self): pass
+            def __iter__(self): pass
+            def __next__(self): pass
 
         # Setup generator mock object
         gen = unittest.mock.MagicMock(GenLike)
@@ -2308,38 +2261,37 @@ class CoroutineTests(CPythonTestCase):
         self.assertIs(ref(), wrapper)
 
     def test_duck_functional_gen(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Generator:
-                """Emulates the following generator (very clumsy):
+        class Generator:
+            """Emulates the following generator (very clumsy):
 
-                  def gen(fut):
-                      result = yield fut
-                      return result * 2
-                """
-                def __init__(self, fut):
-                    self._i = 0
-                    self._fut = fut
-                def __iter__(self):
-                    return self
-                def __next__(self):
-                    return self.send(None)
-                def send(self, v):
-                    try:
-                        if self._i == 0:
-                            assert v is None
-                            return self._fut
-                        if self._i == 1:
-                            raise StopIteration(v * 2)
-                        if self._i > 1:
-                            raise StopIteration
-                    finally:
-                        self._i += 1
-                def throw(self, tp, *exc):
-                    self._i = 100
-                    if tp is not GeneratorExit:
-                        raise tp
-                def close(self):
-                    self.throw(GeneratorExit)
+              def gen(fut):
+                  result = yield fut
+                  return result * 2
+            """
+            def __init__(self, fut):
+                self._i = 0
+                self._fut = fut
+            def __iter__(self):
+                return self
+            def __next__(self):
+                return self.send(None)
+            def send(self, v):
+                try:
+                    if self._i == 0:
+                        assert v is None
+                        return self._fut
+                    if self._i == 1:
+                        raise StopIteration(v * 2)
+                    if self._i > 1:
+                        raise StopIteration
+                finally:
+                    self._i += 1
+            def throw(self, tp, *exc):
+                self._i = 100
+                if tp is not GeneratorExit:
+                    raise tp
+            def close(self):
+                self.throw(GeneratorExit)
 
         @types.coroutine
         def foo(): return Generator('spam')
