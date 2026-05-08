@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
@@ -574,6 +575,78 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             # fp32 tolerances, so only check full param/grad parity for fp32.
             if param_dtype is None:
                 check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardMixedPrecisionJVP(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_no_warmup_jvp_reshard_after_forward_false(self):
+        dtype = torch.bfloat16
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size,),
+            mesh_dim_names=("fsdp",),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=dtype,
+            reduce_dtype=torch.float32,
+            cast_forward_inputs=True,
+        )
+
+        with torch.device("meta"):
+            enc = nn.Linear(128, 256, bias=False)
+            dec = nn.Linear(256, 320, bias=False)
+
+        for module in (enc, dec):
+            fully_shard(
+                module,
+                mesh=mesh,
+                mp_policy=mp_policy,
+                reshard_after_forward=False,
+            )
+
+        gen = torch.Generator(device_type.type)
+        for idx, module in enumerate((enc, dec)):
+            module.to_empty(device=device_type.type)
+            with torch.no_grad():
+                module.weight.normal_(
+                    std=module.in_features**-0.5,
+                    generator=gen.manual_seed(42 + idx),
+                )
+
+        x = torch.randn(
+            (128,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(0),
+        )
+        primal = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(1),
+            requires_grad=True,
+        )
+        tangent = torch.randn(
+            (320,),
+            device=device_type.type,
+            dtype=dtype,
+            generator=gen.manual_seed(2),
+        )
+        e = enc(x)
+
+        def fn(unused: torch.Tensor) -> torch.Tensor:
+            return dec(e)
+
+        output, tangent_output = torch.func.jvp(fn, (primal,), (tangent,))
+
+        self.assertEqual(output.shape, (320,))
+        self.assertEqual(output.dtype, dtype)
+        self.assertEqual(tangent_output, torch.zeros_like(output))
 
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):

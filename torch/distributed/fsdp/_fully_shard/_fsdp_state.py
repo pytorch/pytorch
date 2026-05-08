@@ -417,8 +417,7 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        # output is the forward return value — pass directly without wrapping
-        # (unlike _register_post_backward_hook which wraps (args, kwargs))
+        # In eager, register hooks directly on grad-requiring outputs.
         tensors = collect_grad_tensors(output)
         for t in tensors:
             if t._base is not None:
@@ -434,6 +433,17 @@ class FSDPState(_State):
                     stacklevel=2,
                 )
             t.register_hook(self._pre_backward)
+        if torch._C._are_functorch_transforms_active():
+            # Under functorch, some differentiable outputs report
+            # requires_grad=False inside the transform even when returned
+            # primals participate in outer autograd.
+            return _apply_to_tensors(
+                lambda t: RegisterPreBackwardFunction.apply(self, t)
+                if not t.requires_grad
+                and (torch.is_floating_point(t) or torch.is_complex(t))
+                else t,
+                output,
+            )
         return output
 
     def _register_root_post_backward_final_callback(self):
@@ -479,6 +489,34 @@ def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
     if isinstance(state, FSDPState):
         return state
     return None
+
+
+class RegisterPreBackwardFunction(torch.autograd.Function):
+    generate_vmap_rule = True
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def forward(state: FSDPState, output: torch.Tensor):
+        return output
+
+    @staticmethod
+    def setup_context(ctx, inputs: tuple[Any, ...], output: Any) -> None:
+        state, _ = inputs
+        ctx.state = state
+
+    @staticmethod
+    def backward(ctx: Any, *grad_outputs: Any) -> Any:
+        (grad,) = grad_outputs
+        return None, ctx.state._pre_backward(grad)
+
+    @staticmethod
+    def jvp(ctx: Any, *grad_inputs: Any) -> Any:
+        # Drop the non-tensor FSDP state tangent; keep tangent backward on the
+        # FSDP pre-backward path.
+        tangent = grad_inputs[1]
+        if tangent is None:
+            return None
+        return RegisterPreBackwardFunction.apply(ctx.state, tangent)
 
 
 def _register_group_forward_hooks(
