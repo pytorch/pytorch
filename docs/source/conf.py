@@ -731,8 +731,6 @@ coverage_ignore_functions = [
     "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
     "apply_permutation",  # deprecated
-    # torch.nn.modules.utils
-    "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
     "broadcast",
     "broadcast_coalesced",
