@@ -1976,10 +1976,23 @@ class DeviceCachingAllocator {
   Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      // Processes end-of-life events for outstanding allocations used on
+      // multiple streams (checks if their GPU-side uses are complete and
+      // recycles their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      //    capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after
+      //    capture. Cross-stream memory use is uncommon, so the deferral's
+      //    effect on memory use during capture should be small.
       process_events(context);
-    } else if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-      free_safe_blocks_in_capture(context, stream);
+    } else {
+      if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+        // We check if there is some block that is safe to reuse on this stream
+        free_safe_blocks_in_capture(context, stream);
+      }
     }
 
     const size_t size = round_size(orig_size);
