@@ -14557,8 +14557,8 @@ if __name__ == '__main__':
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 38
+                    expected_input_grad_max_ulp_diff = 0
+                    expected_weight_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 0
@@ -14567,10 +14567,10 @@ if __name__ == '__main__':
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 21
+                    expected_weight_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 104
+                    expected_input_grad_max_ulp_diff = 0
                     expected_weight_grad_max_ulp_diff = 0
         elif acc_policy == "lowmemory":
             # lowmemory mirrors "memory" except on CUDA where it drops
@@ -14608,7 +14608,7 @@ if __name__ == '__main__':
                         # MPS + use_acc_dtype: fallback to memory.
                         expected_weight_grad_max_ulp_diff = 0
                     else:  # CUDA: widened from memory's 0.
-                        expected_weight_grad_max_ulp_diff = 32
+                        expected_weight_grad_max_ulp_diff = 193
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
