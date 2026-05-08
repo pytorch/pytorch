@@ -224,7 +224,9 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
                 [next(t.dtype for t in flat_outs if isinstance(t, torch.Tensor))]
             )
         )
-        compute_ns = get_compute_time(flop_key, args, kwargs, out, compute_dtypes)
+        compute_ns = get_compute_time(
+            flop_key, args, kwargs, out, compute_dtypes, node_meta=node.meta
+        )
         if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
             compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
 
