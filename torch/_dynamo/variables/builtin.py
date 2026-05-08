@@ -3609,7 +3609,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         # Realize non-constant lazy args; LazyConstantVariable.python_type()
         # installs only a TYPE_MATCH guard, which is what type() needs.
         if any(
-            isinstance(a, LazyVariableTracker) and not isinstance(a, LazyConstantVariable)
+            isinstance(a, LazyVariableTracker)
+            and not isinstance(a, LazyConstantVariable)
             for a in args
         ):
             args = [
@@ -3657,13 +3658,8 @@ class TypeBuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslator", args: Sequence[VariableTracker]
     ) -> VariableTracker:
         try:
-<<<<<<< HEAD
             name, bases, ns = (x.as_python_constant() for x in args)
             res = type(name, bases, ns)
-=======
-            name, bases, namespace = [x.as_python_constant() for x in args]
-            res = type(name, bases, namespace)
->>>>>>> aa4c830802b ([dynamo] Refactor builtins init static type check using _fn)
         except AsPythonConstantNotImplementedError:
             unimplemented(
                 gb_type="Failed to trace type() with 3 arguments",
