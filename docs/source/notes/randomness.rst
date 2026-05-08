@@ -170,8 +170,13 @@ characteristics, summarized in the table below:
    * - ``SDPBackend.CUDNN_ATTENTION``
      - Deterministic
      - Non-deterministic
-     - The backward pass is non-deterministic and no deterministic
-       implementation is available. This backend is **disabled** when
+     - cuDNN provides an opt-in deterministic backward for ``float16``
+       starting in
+       `cuDNN 9.18 <https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html#cudnn-9-18-0>`_
+       (via
+       `set_deterministic_algorithm <https://docs.nvidia.com/deeplearning/cudnn/frontend/latest/operations/Attention.html#sdpa-fp16-bf16-backward>`_),
+       but this has not yet been integrated into PyTorch. This backend is
+       **disabled** when
        ``torch.use_deterministic_algorithms(True, warn_only=False)`` is set,
        regardless of whether inputs require gradients or the call is
        inside a ``torch.no_grad()`` context.
