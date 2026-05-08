@@ -61,17 +61,43 @@ These backends include:
 ```{eval-rst}
 .. attribute::  allow_fp16_reduced_precision_reduction
 
-    A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
-    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
-    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
+    A :class:`bool` that controls whether reduced precision reductions (e.g.,
+    with fp16 accumulation type) are allowed with fp16 GEMMs.
+    Assigning a :class:`bool` sets this value and sets ``allow_splitk`` to
+    ``True``. Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets
+    you also toggle whether split-k reductions may be used when dispatching to
+    cuBLASLt. ``allow_splitk`` defaults to ``True`` and can only be disabled
+    when ``allow_reduced_precision`` is ``False``.
+```
+
+```{eval-rst}
+.. attribute::  allow_fp16_reduced_precision_reduction_split_k
+
+    A readonly :class:`bool` that reports whether split-K heuristics may be used
+    for fp16 GEMMs when dispatching to cuBLASLt. Set this through
+    :attr:`allow_fp16_reduced_precision_reduction` by assigning
+    ``(allow_reduced_precision, allow_splitk)``.
 ```
 
 ```{eval-rst}
 .. attribute::  allow_bf16_reduced_precision_reduction
 
-    A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
-    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
-    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
+    A :class:`bool` that controls whether reduced precision reductions are
+    allowed with bf16 GEMMs.
+    Assigning a :class:`bool` sets this value and sets ``allow_splitk`` to
+    ``True``. Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets
+    you also toggle whether split-k reductions may be used when dispatching to
+    cuBLASLt. ``allow_splitk`` defaults to ``True`` and can only be disabled
+    when ``allow_reduced_precision`` is ``False``.
+```
+
+```{eval-rst}
+.. attribute::  allow_bf16_reduced_precision_reduction_split_k
+
+    A readonly :class:`bool` that reports whether split-K heuristics may be used
+    for bf16 GEMMs when dispatching to cuBLASLt. Set this through
+    :attr:`allow_bf16_reduced_precision_reduction` by assigning
+    ``(allow_reduced_precision, allow_splitk)``.
 ```
 
 ```{eval-rst}
