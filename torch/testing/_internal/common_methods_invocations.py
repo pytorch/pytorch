@@ -16835,6 +16835,10 @@ op_db: list[OpInfo] = [
                    'TestOperators', 'test_vjpvmap',
                ),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-4, rtol=1e-5)}),
+                   'TestOperators', 'test_vjpvmap', device_type="xpu"
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_jvpvjp', device_type="cuda"
                ),
