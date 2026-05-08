@@ -91,6 +91,18 @@ def _base_cond_ok(*tensors: torch.Tensor) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _inner_contiguous(t: torch.Tensor) -> bool:
+    """True iff ``t.shape[1:]`` is packed contiguously (so flattening to
+    ``(t.shape[0], prod(t.shape[1:]))`` is a valid view), regardless of
+    the outer stride. Covers slices like ``X[:, :K]`` of a wider buffer.
+    """
+    if t.ndim == 0:
+        return False
+    if t.ndim == 1:
+        return t.stride(0) == 1
+    return t.select(0, 0).is_contiguous()
+
+
 def _expanded_1d_inner_size(
     self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
 ) -> int | None:
@@ -100,20 +112,26 @@ def _expanded_1d_inner_size(
     Requirements:
       - dim == 0
       - self, src, index have the same rank (>= 2) and shape
-      - self, src are contiguous, matching trailing shape
+      - self, src have inner-dim stride 1 (outer row stride can differ
+        from prod(shape[1:]) -- e.g. a slice like ``X[:, :K]`` of a
+        wider buffer works)
       - index.stride(i) == 0 for every axis i > 0 (the broadcast)
       - dtype in ``_SUPPORTED_DTYPES`` and self.dtype == src.dtype
-      - index.dtype == int64
+      - index.dtype in {int32, int64} (int32 is cast to int64 on the
+        host before the kernel launches)
     """
     if self.dtype not in _SUPPORTED_DTYPES or self.dtype != src.dtype:
         return None
-    if index.dtype != torch.int64:
+    if index.dtype not in (torch.int32, torch.int64):
         return None
     if dim != 0:
         return None
     if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim < 2:
         return None
-    if not (self.is_contiguous() and src.is_contiguous()):
+    # Inner-dim stride 1, plus ensure inner dims pack contiguously so we
+    # can flatten shape[1:] into a single N. A simple sufficient check:
+    # stride of each inner axis == product of strides below it.
+    if not _inner_contiguous(self) or not _inner_contiguous(src):
         return None
     if index.shape != src.shape or self.shape[1:] != src.shape[1:]:
         return None
@@ -128,21 +146,37 @@ def _expanded_1d_inner_size(
     return N
 
 
+def _flatten_2d_view(t: torch.Tensor) -> torch.Tensor:
+    """Flatten ``t.shape[1:]`` into a single N. Preserves the outer row
+    stride (so a slice like ``X[:, :K]`` stays a view of the wider
+    buffer). Caller must have verified ``_inner_contiguous(t)``.
+    """
+    if t.ndim == 2:
+        return t
+    N = math.prod(t.shape[1:])
+    # Outer stride carries through unchanged; inner dims collapse to
+    # stride 1 because they were packed (cond-enforced).
+    return t.as_strided((t.shape[0], N), (t.stride(0), 1))
+
+
 def _flatten_for_expanded_1d(
     self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Reshape eligible nD inputs to (self_2d, index_1d, src_2d).
 
     Caller must have verified eligibility via ``_expanded_1d_inner_size``.
-    All reshapes are views (self/src are contiguous by that cond), and the
-    1D index view is taken by selecting element 0 of every broadcast axis.
+    All reshapes are views; the 1D index view is taken by selecting
+    element 0 of every broadcast axis.
     """
-    N = math.prod(src.shape[1:])
-    self_2d = self.view(self.shape[0], N)
-    src_2d = src.view(src.shape[0], N)
+    self_2d = _flatten_2d_view(self)
+    src_2d = _flatten_2d_view(src)
     index_1d = index
     for _ in range(index.ndim - 1):
         index_1d = index_1d.select(-1, 0)
+    if index_1d.dtype != torch.int64:
+        # Kernel expects int64. aten accepts both int32 and int64; we
+        # widen on the host so the kernel stays dtype-specialized.
+        index_1d = index_1d.to(torch.int64)
     if not index_1d.is_contiguous():
         index_1d = index_1d.contiguous()
     return self_2d, index_1d, src_2d
@@ -161,12 +195,12 @@ def _is_tma_supported(
     N = _expanded_1d_inner_size(self, dim, index, src)
     if N is None:
         return False
-    # cp.async.bulk needs the transfer byte count to be 16-aligned. The
-    # kernel handles partial final chunks, so the only hard constraint is
-    # D * elem_size % 16 == 0.
-    from .tma_kernel import min_d_divisor_for
+    # TMA transfer size is baked in at compile time (chunk_bytes =
+    # min(row_bytes, 512)); row_bytes must evenly divide by chunk_bytes
+    # and chunk_bytes must be 16-byte aligned.
+    from .tma_kernel import row_shape_supported
 
-    return N % min_d_divisor_for(self.dtype) == 0
+    return row_shape_supported(self.dtype, N)
 
 
 def _is_vec_scatter_supported(
@@ -206,7 +240,13 @@ def _index_add_inner_size(
         return None
     if self.ndim != source.ndim or self.ndim < 1:
         return None
-    if not (self.is_contiguous() and source.is_contiguous()):
+    # Inner-dim stride 1 with packed inner axes; same relaxation as the
+    # scatter_add path. Slices like ``X[:, :K]`` work.
+    if self.ndim > 1 and (
+        not _inner_contiguous(self) or not _inner_contiguous(source)
+    ):
+        return None
+    if self.ndim == 1 and (self.stride(0) != 1 or source.stride(0) != 1):
         return None
     if index.ndim != 1 or index.shape[0] != source.shape[0]:
         return None
@@ -268,8 +308,10 @@ def _make_cond(
                 return False
             if out.ndim == 0:
                 return False
-            # Our kernels write out with stride(-1) == 1.
-            if not out.is_contiguous() or out.stride(-1) != 1:
+            # Kernels read/write ``out`` with inner-dim stride 1; outer
+            # stride can differ from prod(shape[1:]) (same relaxation as
+            # self/src). Inner dims must be packed for the 2D view.
+            if not _inner_contiguous(out):
                 return False
             return support_check(self, dim, index, src)
 
@@ -298,22 +340,21 @@ def _make_impls(kernel_getter):
     time.
     """
 
-    def _run(dst: torch.Tensor, self, index, src) -> torch.Tensor:
-        # Caller guarantees self/src/index pass _expanded_1d_inner_size.
-        _, index_1d, src_2d = _flatten_for_expanded_1d(self, index, src)
-        dst_2d = dst.view(dst.shape[0], src_2d.shape[1])
+    def _run(dst: torch.Tensor, index, src) -> torch.Tensor:
+        # Caller guarantees dst/src/index pass _expanded_1d_inner_size.
+        dst_2d, index_1d, src_2d = _flatten_for_expanded_1d(dst, index, src)
         kernel_getter()(dst_2d, index_1d, src_2d)
         return dst
 
     def impl(self, dim, index, src, *args, **kwargs):
-        return _run(self.clone(), self, index, src)
+        return _run(self.clone(), index, src)
 
     def out_impl(self, dim, index, src, *, out):
         _copy_if_distinct(out, self)
-        return _run(out, self, index, src)
+        return _run(out, index, src)
 
     def inplace_impl(self, dim, index, src, *args, **kwargs):
-        return _run(self, self, index, src)
+        return _run(self, index, src)
 
     return impl, out_impl, inplace_impl
 
@@ -356,9 +397,11 @@ def _make_index_add_cond(support_check, *, requires_out: bool = False) -> _OpCon
                 return False
             if out.ndim == 0:
                 return False
-            if not out.is_contiguous():
+            # Same relaxation as scatter_add: inner dims packed, outer
+            # stride free. 1D out just needs stride 1.
+            if out.ndim > 1 and not _inner_contiguous(out):
                 return False
-            if out.ndim > 1 and out.stride(-1) != 1:
+            if out.ndim == 1 and out.stride(0) != 1:
                 return False
             return support_check(self, dim, index, source)
 
@@ -385,12 +428,12 @@ def _make_index_add_impls(kernel_getter):
 
     def _run(dst: torch.Tensor, source: torch.Tensor, index: torch.Tensor, alpha):
         if source.ndim == 1:
-            src_2d = source.view(source.shape[0], 1)
-            dst_2d = dst.view(dst.shape[0], 1)
+            # 1D inputs have stride 1 (cond-enforced); reshape to (M, 1).
+            src_2d = source.unsqueeze(-1)
+            dst_2d = dst.unsqueeze(-1)
         else:
-            N = math.prod(source.shape[1:])
-            src_2d = source.view(source.shape[0], N)
-            dst_2d = dst.view(dst.shape[0], N)
+            src_2d = _flatten_2d_view(source)
+            dst_2d = _flatten_2d_view(dst)
         idx = index if index.dtype == torch.int64 else index.to(torch.int64)
         if not idx.is_contiguous():
             idx = idx.contiguous()

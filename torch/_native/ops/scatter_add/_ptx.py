@@ -52,27 +52,6 @@ def cvta_smem(ptr, *, loc=None, ip=None):
     )
 
 
-@dsl_user_op
-def bulk_load(smem_u64, gmem_addr_u64, size_bytes, mbar_u64, *, loc=None, ip=None):
-    """PTX ``cp.async.bulk.shared::cta.global.mbarrier``: issue a TMA
-    load of ``size_bytes`` from ``gmem_addr_u64`` to ``smem_u64``, and
-    signal ``mbar_u64`` on completion."""
-    _inline_asm(
-        None,
-        [
-            as_ir(smem_u64, loc=loc, ip=ip),
-            as_ir(gmem_addr_u64, loc=loc, ip=ip),
-            as_ir(size_bytes, loc=loc, ip=ip),
-            as_ir(mbar_u64, loc=loc, ip=ip),
-        ],
-        "cp.async.bulk.shared::cta.global.mbarrier::complete_tx::bytes"
-        " [$0], [$1], $2, [$3];",
-        "l,l,r,l",
-        loc=loc,
-        ip=ip,
-    )
-
-
 def make_bulk_reduce_add(ptx_suffix: str):
     """Emit ``cp.reduce.async.bulk.global.shared::cta.bulk_group.add.<suffix>``.
     Suffix selects the dtype: ``f32`` / ``noftz.f16`` / ``noftz.bf16``."""
