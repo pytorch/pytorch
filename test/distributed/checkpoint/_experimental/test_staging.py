@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
-import unittest
 from concurrent.futures import Future
 
 import torch
@@ -8,12 +7,7 @@ from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-requires_gpu = unittest.skipUnless(
-    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
-)
+from torch.testing._internal.common_utils import requires_gpu, run_tests, TestCase
 
 
 class TestDefaultStager(TestCase):

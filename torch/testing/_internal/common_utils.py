@@ -1726,6 +1726,9 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
+requires_gpu = unittest.skipUnless(
+    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+)
 def skipIfCrossRef(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
