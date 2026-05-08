@@ -15,7 +15,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -141,8 +140,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @parametrize("device", ["cpu", device_type])
+    @parametrize("device", ["cpu"] if device_type == "cpu" else ["cpu", device_type])
     @skip_if_lt_x_gpu(4)
     def test_check_rng_sync(
         self,
