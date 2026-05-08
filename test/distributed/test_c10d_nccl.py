@@ -53,6 +53,7 @@ from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
     MultiProcessTestCase,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
     requires_nccl_shrink,
@@ -67,11 +68,9 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_SANDCASTLE,
-    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
-    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
@@ -4623,7 +4622,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @runOnRocmArch(MI300_ARCH)
     @parametrize(
         "custom_group_name",
         [True, False],
@@ -4632,13 +4630,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
 
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+
         for peer in range(self.world_size):
             if peer == self.rank:
                 continue
             if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
                 raise SkipTest("Test requires p2p access")
 
-        if not SM80OrLater:
+        if not SM80OrLater and not TEST_WITH_ROCM:
             raise SkipTest("Test requires sm>=80")
 
         group_name = ""
@@ -4817,6 +4818,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.min_ctas, -2147483648)
         self.assertEqual(pg_opts_2.config.min_ctas, 2)
         self.assertEqual(nccl_cfg_2.min_ctas, 4)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_max_p2p_peers(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "max_p2p_peers"):
+            raise SkipTest(
+                "max_p2p_peers binding absent (PyTorch might be built against NCCL < 2.30)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_max_p2p_peers = 1
+        pg_opts.config.max_p2p_peers = new_max_p2p_peers
+        self.assertEqual(pg_opts.config.max_p2p_peers, new_max_p2p_peers)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
