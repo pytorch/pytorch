@@ -248,7 +248,7 @@ for k, v in fake_sd.items():
     print(f"key={k}, checkpoint_offset={v.untyped_storage()._checkpoint_offset}")
 ```
 
-For more information, [this tutorial](https://docs.pytorch.org/tutorials/prototype/gpu_direct_storage.html)
+For more information, [this tutorial](https://docs.pytorch.org/tutorials/unstable/gpu_direct_storage.html)
 offers a comprehensive example of using these features to manipulate a checkpoint.
 
 (weights-only)=
