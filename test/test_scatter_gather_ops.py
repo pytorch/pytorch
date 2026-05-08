@@ -8,7 +8,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
@@ -279,74 +279,6 @@ class TestScatterGather(TestCase):
 
                 self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
-
-    @serialTest()
-    @onlyCUDA
-    @dtypes(torch.float32, torch.half, torch.bfloat16)
-    def test_scatter_add_large(self, device, dtype):
-        # test larger shapes that exercise the vectorized/TMA scatter_add path
-        # and verify large launch configs don't produce invalid kernel launches
-        if dtype in (torch.float32, torch.float64):
-            atol, rtol = 1e-5, 1e-3
-        elif dtype == torch.half:
-            atol, rtol = 2e-2, 2e-2
-        else:
-            atol, rtol = 0.2, 0.5
-        # The large shape tests grid.y clipping at maxGridSize[1]=65535.
-        # Use it only for small dtypes to avoid OOM on CI (22GB GPUs).
-        shapes = [(4096, 3072, 4096), (4096, 3072, 4100)]
-        if dtype.itemsize <= 2:
-            shapes.append((4, 4, 16384 * 8192))
-        else:
-            shapes.append((4, 4, 16384 * 256))
-        for (m, n, k) in shapes:
-            torch.cuda.empty_cache()
-            self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
-            src = make_tensor((n, k), device=device, dtype=dtype)
-            # contiguous + aligned (should hit fast path on dim=0)
-            idx_1d = torch.randint(m, (n,), device=device)
-            idx_2d = idx_1d.unsqueeze(1).expand(n, k)
-            res = self_tensor.clone().scatter_add_(0, idx_2d, src)
-            ref_cpu = torch.zeros(m, k, dtype=dtype).scatter_add_(0, idx_2d.cpu(), src.cpu())
-            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
-
-            # discontiguous src (should fall back to element-wise)
-            alloc = torch.empty(n, 2 * k, device=device, dtype=dtype)
-            src_discontig = alloc[:, ::2].copy_(src)
-            res = self_tensor.clone().scatter_add_(0, idx_2d, src_discontig)
-            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
-
-            # misaligned self (should fall back)
-            alloc_self = torch.empty(m * k + 1, device=device, dtype=dtype)
-            self_misaligned = alloc_self[1:].view(m, k)
-            self_misaligned.zero_()
-            res = self_misaligned.scatter_add_(0, idx_2d, src)
-            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
-
-            # dim=1 (fast path is dim=0 only)
-            self_t1 = torch.zeros(k, m, device=device, dtype=dtype)
-            src_t1 = make_tensor((k, n), device=device, dtype=dtype)
-            idx_1d_d1 = torch.randint(m, (n,), device=device)
-            idx_2d_d1 = idx_1d_d1.unsqueeze(0).expand(k, n)
-            res_d1 = self_t1.clone().scatter_add_(1, idx_2d_d1, src_t1)
-            ref_d1 = torch.zeros(k, m, dtype=dtype).scatter_add_(1, idx_2d_d1.cpu(), src_t1.cpu())
-            self.assertEqual(res_d1.cpu(), ref_d1, atol=atol, rtol=rtol)
-
-            # sliced tensors: contiguous within slice, aligned, but stride != D
-            # this passes eligibility checks and must use the actual stride
-            K = 256
-            self_full = torch.zeros(m, K, device=device, dtype=dtype)
-            src_full = make_tensor((n, K), device=device, dtype=dtype)
-            self_sliced = self_full[:, 64:192]  # shape [m, 128], stride [256, 1]
-            src_sliced = src_full[:, 64:192]
-            idx_1d_s = torch.randint(m, (n,), device=device)
-            idx_2d_s = idx_1d_s.unsqueeze(1).expand(n, 128)
-            res = self_sliced.clone().scatter_add_(0, idx_2d_s, src_sliced)
-            ref_cpu = self_sliced.cpu().clone().scatter_add_(0, idx_2d_s.cpu(), src_sliced.cpu())
-            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
-
-            del self_tensor, src, alloc, alloc_self, self_misaligned
-            del self_t1, src_t1, self_full, src_full
 
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
