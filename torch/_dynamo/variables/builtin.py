@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -32,7 +33,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -1691,7 +1692,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name)
+            resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
                 # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
@@ -1878,6 +1879,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # Inline the user function
                 return user_func_variable.call_function(tx, [arg], {})
         return None
+
+    def call___build_class__(self, tx, *args, **kwargs):
+        def fail(args, kwargs) -> NoReturn:
+            unimplemented(
+                gb_type="Invalid call to __build_class__",
+                context=f"Non-constant args to __build_class__: {args} {kwargs}",
+                explanation="Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not torch._dynamo.config.enable_trace_load_build_class:
+            fail(args, kwargs)
+
+        try:
+            fn = args[0].get_function()
+        except NotImplementedError:
+            fail(args, kwargs)
+
+        if check_constant_args(args[1:], kwargs):
+            r = builtins.__build_class__(
+                fn,  # type: ignore[possibly-undefined]
+                *[a.as_python_constant() for a in args[1:]],
+            )
+            return VariableTracker.build(tx, r)
+        else:
+            fail(args, kwargs)
 
     def _call_min_max(
         self, tx: "InstructionTranslator", *args: VariableTracker
