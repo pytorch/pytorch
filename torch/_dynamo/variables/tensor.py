@@ -169,6 +169,14 @@ class TensorVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def reconstruct_pycode(self, codegen) -> str:
+        if id(self.proxy) in codegen.graph_outputs:
+            return f"__graph_out[{codegen.graph_outputs[id(self.proxy)].index}]"
+        elif self.source:
+            return self.source.reconstruct_pycode(codegen)
+        else:
+            raise RuntimeError(f"Python codegen for {self} failed with unknown source.")
+
     def get_real_value(self) -> torch.Tensor:
         """
         Get the actual value represented by this variable if computation is run
@@ -924,11 +932,22 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        proxy = tx.output.create_proxy(
-            "call_method",
-            name,
-            *proxy_args_kwargs([self, *args], kwargs),
-        )
+        try:
+            proxy = tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self, *args], kwargs),
+            )
+        except NotImplementedError as e:
+            unimplemented(
+                gb_type="Unsupported argument type in tensor method call",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation=f"Dynamo could not create a proxy for an argument in the call "
+                f"to Tensor.{name}(). This usually means an unsupported type was passed "
+                f"as an argument to a tensor method.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                from_exc=e,
+            )
 
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the
@@ -1575,6 +1594,25 @@ class TensorVariable(VariableTracker):
     def method___neg__(self, tx: "InstructionTranslator") -> VariableTracker:
         return self.nb_negative_impl(tx)
 
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.pos,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___pos__(self, tx: "InstructionTranslator") -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslator",
@@ -1806,20 +1844,25 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "copy_", [fma_result], {})
         return None
 
-    def method___contains__(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
     ) -> VariableTracker:
         # Rewrite __contains__ here so that downstream passes can trace through
         # without dealing with unbacked symbool. Roughly the code we translate is:
         # def __contains__(self, x):
         #     return (x == self).any().item()
         result = variables.TorchInGraphFunctionVariable(torch.eq).call_function(
-            tx, [self, arg], {}
+            tx, [self, item], {}
         )
         result = variables.TorchInGraphFunctionVariable(torch.any).call_function(
             tx, [result], {}
         )
         return result.call_method(tx, "item", [], {})
+
+    def method___contains__(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
+        return self.sq_contains(tx, arg)
 
     def method_register_hook(
         self,
@@ -2347,6 +2390,29 @@ class SymNodeVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         return hash(self.evaluate_expr()), False
+
+    def nb_positive_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        return SymNodeVariable.create(
+            tx,
+            operator.pos(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def method___pos__(
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return self.nb_positive_impl(tx)
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        # Essentially convert the SymNode to a constant variable whenever its
+        # searched for a dict key.
+        return hash(self.evaluate_expr())
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, SymNodeVariable):
