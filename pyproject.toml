@@ -3,7 +3,7 @@
 [build-system]
 requires = [
     "numpy",
-    "packaging",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
     "scikit-build-core",
 ]
@@ -80,7 +80,7 @@ dev = [
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
