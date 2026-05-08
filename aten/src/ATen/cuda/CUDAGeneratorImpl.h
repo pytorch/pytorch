@@ -137,8 +137,7 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
 
   void increase(uint64_t increment);
 
-  CUDAGeneratorCaptureState* get_capture_state(CaptureId_t capture_id);
-  void init_capture_state(CaptureId_t capture_id);
+  CUDAGeneratorCaptureState* get_capture_state(CaptureId_t capture_id, bool create_if_not_found = false);
   uint64_t capture_epilogue(CaptureId_t capture_id);
   void replay_prologue(CaptureId_t capture_id, uint64_t wholegraph_increment);
   void remove_capture_state(CaptureId_t capture_id);
@@ -169,8 +168,6 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
-
-  void register_graph(cuda::CUDAGraph* graph);
 
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
