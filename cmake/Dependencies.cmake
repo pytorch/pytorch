@@ -993,22 +993,12 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-    if(WIN32)
-      if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=static_dbg)
-        else()
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=static)
-        endif()
-      else()
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=dll_dbg)
-        else()
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=dll)
-        endif()
-      endif()
-    else()
-      list(APPEND HIP_CXX_FLAGS -fPIC)
+    # HIP_CXX_FLAGS: applied to targets via target_compile_options (definitions, warnings).
+    # These are used for both HIP device code and C++ code that needs HIP defines.
+    # MSVC runtime library flags for HIP are handled via CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_*
+    # mappings in LoadHIP.cmake (Windows) or -fPIC (Linux).
+    if(NOT WIN32)
+      string(APPEND CMAKE_HIP_FLAGS " -fPIC")
     endif()
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1031,15 +1021,16 @@ if(USE_ROCM)
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
-    list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    list(APPEND HIP_HIPCC_FLAGS -std=c++20)
+    # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
+    # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
+    string(APPEND CMAKE_HIP_FLAGS " --offload-compress -std=c++20")
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_hip_device_lib_path})
+      string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_hip_device_lib_path}")
     elseif(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
       file(TO_CMAKE_PATH "${ROCM_PATH}/lib/llvm/amdgcn/bitcode" _rocm_device_lib_path)
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_rocm_device_lib_path})
+      string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_rocm_device_lib_path}")
     endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
@@ -1054,7 +1045,7 @@ if(USE_ROCM)
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g2)
        list(APPEND HIP_CXX_FLAGS -O0)
-       list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
+       string(APPEND CMAKE_HIP_FLAGS " -fdebug-info-for-profiling")
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     # Get EnVar 'USE_LAYERNORM_FAST_RECIPROCAL' (or default to on).
@@ -1069,26 +1060,15 @@ if(USE_ROCM)
     endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
-    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
-
-    set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
-    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
-    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
-    set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
-    # Ask hcc to generate device code during compilation so we can use
-    # host linker to link.
-    list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
-    foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
-    endforeach()
+    string(APPEND CMAKE_HIP_FLAGS " -fclang-abi-compat=17")
+    # Use host linker instead of device linker (no relocatable device code by default)
+    string(APPEND CMAKE_HIP_FLAGS " -fno-gpu-rdc")
 
     set(Caffe2_HIP_INCLUDE
        $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
-    # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+      hip::host MIOpen hiprtc::hiprtc)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
