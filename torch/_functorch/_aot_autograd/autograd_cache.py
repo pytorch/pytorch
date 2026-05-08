@@ -514,7 +514,13 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        self.disable_amp = torch._C._is_any_autocast_enabled()
+        # Include per-device autocast dtype in cache key to avoid reusing
+        # a graph compiled for one autocast dtype (e.g. bfloat16) when
+        # running under a different autocast dtype (e.g. float16).
+        self.autocast_state: dict[str, torch.dtype] = {}
+        for device_type in torch._C._autocast_supported_devices():
+            if torch.is_autocast_enabled(device_type):
+                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
@@ -563,8 +569,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
             return self._reduce_tensor_subclass(obj)
-        # Return NotImplemented to fall back to default behavior
-        return NotImplemented
+        # Fall back to parent class reducer which handles unpicklable types
+        return super().reducer_override(obj)
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache
     # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable

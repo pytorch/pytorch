@@ -274,7 +274,7 @@ cmake_dependent_option(
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
-option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
+cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -1492,6 +1492,8 @@ include(cmake/FileMirroring.cmake)
 # setup.py package_data; now consolidated here for both scikit-build-core
 # and setuptools builds.
 include(cmake/PackageData.cmake)
+
+include(cmake/PostBuildSteps.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
