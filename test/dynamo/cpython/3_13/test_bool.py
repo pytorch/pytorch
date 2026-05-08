@@ -14,8 +14,6 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import run_tests
 
-__TestCase = CPythonTestCase
-
 # ======= END DYNAMO PATCH =======
 
 # Test properties of bool promised by PEP 285
@@ -25,13 +23,12 @@ from test.support import os_helper
 
 import os
 
-class BoolTest(__TestCase):
+class BoolTest(CPythonTestCase):
 
     def test_subclass(self):
         try:
-            with torch._dynamo.error_on_graph_break(False):
-                class C(bool):
-                    pass
+            class C(bool):
+                pass
         except TypeError:
             pass
         else:
@@ -328,46 +325,40 @@ class BoolTest(__TestCase):
         # from __bool__().  This isn't really a bool test, but
         # it's related.
         check = lambda o: self.assertRaises(TypeError, bool, o)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __bool__(self):
-                    return self
+        class Foo(object):
+            def __bool__(self):
+                return self
         check(Foo())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Bar(object):
-                def __bool__(self):
-                    return "Yes"
+        class Bar(object):
+            def __bool__(self):
+                return "Yes"
         check(Bar())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Baz(int):
-                def __bool__(self):
-                    return self
+        class Baz(int):
+            def __bool__(self):
+                return self
         check(Baz())
 
         # __bool__() must return a bool not an int
-        with torch._dynamo.error_on_graph_break(False):
-            class Spam(int):
-                def __bool__(self):
-                    return 1
+        class Spam(int):
+            def __bool__(self):
+                return 1
         check(Spam())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Eggs:
-                def __len__(self):
-                    return -1
+        class Eggs:
+            def __len__(self):
+                return -1
         self.assertRaises(ValueError, bool, Eggs())
 
     def test_interpreter_convert_to_bool_raises(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class SymbolicBool:
-                def __bool__(self):
-                    raise TypeError
+        class SymbolicBool:
+            def __bool__(self):
+                raise TypeError
 
-            class Symbol:
-                def __gt__(self, other):
-                    return SymbolicBool()
+        class Symbol:
+            def __gt__(self, other):
+                return SymbolicBool()
 
         x = Symbol()
 
@@ -388,10 +379,9 @@ class BoolTest(__TestCase):
         # this test just tests our assumptions about __len__
         # this will start failing if __len__ changes assertions
         for badval in ['illegal', -1, 1 << 32]:
-            with torch._dynamo.error_on_graph_break(False):
-                class A:
-                    def __len__(self):
-                        return badval
+            class A:
+                def __len__(self):
+                    return badval
             try:
                 bool(A())
             except (Exception) as e_bool:
@@ -401,16 +391,14 @@ class BoolTest(__TestCase):
                     self.assertEqual(str(e_bool), str(e_len))
 
     def test_blocked(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                __bool__ = None
+        class A:
+            __bool__ = None
         self.assertRaises(TypeError, bool, A())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                def __len__(self):
-                    return 10
-                __bool__ = None
+        class B:
+            def __len__(self):
+                return 10
+            __bool__ = None
         self.assertRaises(TypeError, bool, B())
 
     def test_real_and_imag(self):
@@ -424,13 +412,12 @@ class BoolTest(__TestCase):
         self.assertIs(type(False.imag), int)
 
     def test_bool_called_at_least_once(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class X:
-                def __init__(self):
-                    self.count = 0
-                def __bool__(self):
-                    self.count += 1
-                    return True
+        class X:
+            def __init__(self):
+                self.count = 0
+            def __bool__(self):
+                self.count += 1
+                return True
 
         def f(x):
             if x or True:

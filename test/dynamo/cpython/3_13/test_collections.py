@@ -1432,9 +1432,8 @@ class TestOneTrickPonyABCs(ABCTestCase):
 
     def test_registration(self):
         for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
-            with torch._dynamo.error_on_graph_break(False):
-                class C:
-                    __hash__ = None  # Make sure it isn't hashable by default
+            class C:
+                __hash__ = None  # Make sure it isn't hashable by default
             self.assertFalse(issubclass(C, B), B.__name__)
             B.register(C)
             self.assertTrue(issubclass(C, B))

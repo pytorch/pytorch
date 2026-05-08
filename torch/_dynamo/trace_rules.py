@@ -3223,6 +3223,7 @@ def _builtin_function_ids() -> dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
+    rv[id(builtins.__build_class__)] = "builtins.__build_class__"
     return rv
 
 
