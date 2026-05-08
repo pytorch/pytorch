@@ -1278,6 +1278,9 @@ class OpOverloadPacket(Generic[_P, _T]):
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+    def overload_ops(self):
+        return [getattr(self, n) for n in self.overloads()]
+
 
 # Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.

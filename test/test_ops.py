@@ -327,9 +327,7 @@ class TestCommon(TestCase):
                     kernel = get_opoverloadpacket_from_dispatch(kernel)
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -405,9 +403,7 @@ class TestCommon(TestCase):
 
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 

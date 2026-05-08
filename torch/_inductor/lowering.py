@@ -213,9 +213,7 @@ def add_needs_realized_inputs(
     if isinstance(fn, torch._ops.OpOverload):
         needs_realized_inputs.add(fn)
     elif isinstance(fn, torch._ops.OpOverloadPacket):
-        needs_realized_inputs.update(
-            getattr(fn, overload) for overload in fn.overloads()
-        )
+        needs_realized_inputs.update(fn.overload_ops())
     return None
 
 
@@ -224,8 +222,8 @@ def add_layout_constraint(
     constraint: Callable[..., tuple[Any, Any]],
 ) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        for overload in fn.overloads():
-            _maybe_layout_constraints[getattr(fn, overload)] = constraint
+        for overload in fn.overload_ops():
+            _maybe_layout_constraints[overload] = constraint
     else:
         _maybe_layout_constraints[fn] = constraint
 
@@ -327,8 +325,7 @@ def get_overloads(aten_fn):
 
     for fn in list(aten_fn):
         if isinstance(fn, torch._ops.OpOverloadPacket):
-            for overload in fn.overloads():
-                other_fn = getattr(fn, overload)
+            for other_fn in fn.overload_ops():
                 if other_fn not in lowerings:
                     aten_fn.append(other_fn)
 
@@ -2631,8 +2628,7 @@ def make_fallback(
         )
 
     if isinstance(op, torch._ops.OpOverloadPacket):
-        for ol in op.overloads():
-            op_overload = getattr(op, ol)
+        for op_overload in op.overload_ops():
             register_fallback(op_overload)
     elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
         register_fallback(op)
@@ -7925,8 +7921,7 @@ def _get_pointwise_overrides(ns, name):
             return fallback_handler(op)
 
     if isinstance(op, torch._ops.OpOverloadPacket):
-        for olname in op.overloads():
-            ol = getattr(op, olname)
+        for ol in op.overload_ops():
             yield ol, data.type_promotion_kind, make_triton_fallback(ol)
     else:
         yield op, data.type_promotion_kind, make_triton_fallback(op)
