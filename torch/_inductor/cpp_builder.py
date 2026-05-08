@@ -70,7 +70,9 @@ _IS_WINDOWS = sys.platform == "win32"
 
 MINGW_GXX = "x86_64-w64-mingw32-g++"
 
-SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (
+    (locale.getpreferredencoding(), "replace") if _IS_WINDOWS else ()
+)
 
 log = logging.getLogger(__name__)
 
