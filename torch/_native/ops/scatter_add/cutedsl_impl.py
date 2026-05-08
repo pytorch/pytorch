@@ -100,6 +100,15 @@ def _inner_contiguous(t: torch.Tensor) -> bool:
         return False
     if t.ndim == 1:
         return t.stride(0) == 1
+    if t.shape[0] == 0:
+        # select(0, 0) would raise on an empty outer axis. Check the
+        # inner layout by checking strides directly.
+        expected = 1
+        for d in range(t.ndim - 1, 0, -1):
+            if t.stride(d) != expected:
+                return False
+            expected *= t.shape[d]
+        return True
     return t.select(0, 0).is_contiguous()
 
 

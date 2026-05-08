@@ -34,14 +34,15 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI200_ARCH, MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    MI200_ARCH, MI300_ARCH, TEST_CUDA, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfNoCuteDSL, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
+    bytes_to_scalar, instantiate_parametrized_tests, parametrize, skipIfMPS, noncontiguous_like,
+    subtest,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf)
 from multiprocessing.reduction import ForkingPickler
@@ -11045,6 +11046,157 @@ class TestViewOps(TestCase):
 
 class TestTensorDeviceOps(TestCase):
     pass
+
+# ---------------------------------------------------------------------------
+# CuTeDSL index_add override tests. Two surfaces, same split as
+# scatter_add override tests in test_scatter_gather_ops.py:
+#   (a) dispatch conds: call the index_add eligibility predicates
+#       directly. No kernel execution.
+#   (b) correctness: run torch.index_add / index_add_ on shapes the conds
+#       accept, compare to a naive reference. Covers the alpha fast path
+#       (alpha=1 skips scale pass) and scale path (alpha!=1 uses the TMA
+#       smem scale + fence or vec-scatter inline multiply).
+# ---------------------------------------------------------------------------
+
+
+def _naive_index_add(self_t, idx_1d, src, alpha=1.0):
+    ref = self_t.clone().float()
+    src_f = src.float()
+    for i, r in enumerate(idx_1d.tolist()):
+        ref[r] += alpha * src_f[i]
+    return ref.to(self_t.dtype)
+
+
+def _index_add_tol(dtype):
+    return 1e-4 if dtype == torch.float32 else 0.5
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestIndexAddOverrideConds(TestCase):
+    """Unit tests for the index_add dispatch predicates."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cls.impl = cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    def _conds(self, self_t, idx_1d, src):
+        return (
+            self.impl._is_tma_index_add_supported(self_t, 0, idx_1d, src),
+            self.impl._is_vec_index_add_supported(self_t, 0, idx_1d, src),
+        )
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_accepts_basic_shapes(self, dtype):
+        self_t = torch.zeros(100, 128, device="cuda", dtype=dtype)
+        src = torch.randn(50, 128, device="cuda", dtype=dtype)
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_accepts_outer_strided(self):
+        big = torch.zeros(100, 192, device="cuda")
+        self_t = big[:, :128]
+        src = torch.randn(50, 128, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_rejects_1d(self):
+        # 1D source -> (M, 1) after flatten; N=1 fails both TMA alignment
+        # and vec_elems divisibility.
+        self_t = torch.zeros(100, device="cuda")
+        src = torch.randn(50, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_dim_nonzero(self):
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertFalse(self.impl._is_tma_index_add_supported(self_t, 1, idx, src))
+        self.assertFalse(self.impl._is_vec_index_add_supported(self_t, 1, idx, src))
+
+    def test_rejects_2d_index(self):
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        idx_2d = torch.randint(0, 100, (50, 128), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx_2d, src), (False, False))
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestIndexAddOverrideCorrectness(TestCase):
+    """End-to-end: torch.index_add vs naive reference, covering the alpha
+    fast path, scale path, op variants, int32 index, and outer-strided."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    @parametrize("dtype,alpha", [
+        subtest((torch.float32, 1.0), name="fp32_a1"),
+        subtest((torch.float32, 0.5), name="fp32_a_half"),
+        subtest((torch.float32, 2.5), name="fp32_a_2p5"),
+        subtest((torch.bfloat16, 1.0), name="bf16_a1"),
+        subtest((torch.bfloat16, 0.5), name="bf16_a_half"),
+        subtest((torch.float16, 1.0), name="fp16_a1"),
+        subtest((torch.float16, 0.5), name="fp16_a_half"),
+    ])
+    def test_alpha(self, dtype, alpha):
+        torch.manual_seed(0)
+        self_t = torch.zeros(200, 128, device="cuda", dtype=dtype)
+        src = torch.randn(100, 128, device="cuda", dtype=dtype)
+        idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int64)
+        got = torch.index_add(self_t, 0, idx, src, alpha=alpha)
+        ref = _naive_index_add(self_t, idx, src, alpha=alpha)
+        tol = _index_add_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("variant", ["functional", "out", "inplace"])
+    def test_op_variants(self, variant):
+        torch.manual_seed(0)
+        self_t = torch.zeros(200, 128, device="cuda")
+        src = torch.randn(100, 128, device="cuda")
+        idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int64)
+        ref = _naive_index_add(self_t, idx, src, alpha=0.5)
+        if variant == "functional":
+            got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
+        elif variant == "out":
+            got = torch.empty_like(self_t)
+            torch.index_add(self_t, 0, idx, src, alpha=0.5, out=got)
+        else:
+            got = self_t.clone()
+            ret = got.index_add_(0, idx, src, alpha=0.5)
+            self.assertIs(ret, got)
+        self.assertEqual(got, ref)
+
+    def test_int32_index(self):
+        torch.manual_seed(0)
+        self_t = torch.zeros(200, 128, device="cuda")
+        src = torch.randn(100, 128, device="cuda")
+        idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int32)
+        got = torch.index_add(self_t, 0, idx, src)
+        ref = _naive_index_add(self_t, idx, src)
+        self.assertEqual(got, ref)
+
+    def test_outer_strided(self):
+        torch.manual_seed(0)
+        big = torch.zeros(200, 192, device="cuda")
+        self_t = big[:, :128]
+        src = torch.randn(100, 128, device="cuda")
+        idx = torch.randint(0, 200, (100,), device="cuda", dtype=torch.int64)
+        got = torch.index_add(self_t, 0, idx, src, alpha=0.5)
+        ref = _naive_index_add(self_t, idx, src, alpha=0.5)
+        self.assertEqual(got, ref)
+
+
+instantiate_parametrized_tests(TestIndexAddOverrideConds)
+instantiate_parametrized_tests(TestIndexAddOverrideCorrectness)
+
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
