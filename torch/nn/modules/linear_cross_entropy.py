@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import torch
 
@@ -288,25 +288,43 @@ def _chunk_iter(total_size, chunk_size):
         yield start, min(chunk_size, total_size - start)
 
 
-# Argument count of _linear_cross_entropy_batch_chunked; backward
-# returns this many gradient slots. Keep in sync with the signature.
-_NUM_OP_INPUTS = 13
+class _LinearCrossEntropyChunkedSetup(NamedTuple):
+    """Pre-loop state computed by ``_linear_cross_entropy_setup``:
+    shape/device info, the dtype layout for every internal buffer,
+    and the prepared ``neg_weight_target`` plus its (possibly
+    re-mapped) ``target`` indices.
+
+    The fields named ``*_dtype`` drive the buffer allocations and
+    dispatch flags in ``_linear_cross_entropy_batch_chunked``. The
+    boolean flags (``is_cuda``, ``is_mps``, ``use_acc_dtype``,
+    ``is_memory_like``, ``is_ultralow``) are reused throughout the
+    chunked loop's dispatch. ``linear_weight_cast`` is computed by
+    the caller after this setup since it depends on
+    ``compute_input_grad`` dispatch and is naturally co-located
+    with the buffer allocation block.
+    """
+
+    device: torch.device
+    dtype: torch.dtype
+    num_batches: int
+    in_features: int
+    num_classes: int
+    is_cuda: bool
+    is_mps: bool
+    use_acc_dtype: bool
+    is_memory_like: bool
+    is_ultralow: bool
+    output_dtype: torch.dtype
+    grad_input_dtype: torch.dtype
+    grad_linear_weight_dtype: torch.dtype
+    logits_buf_dtype: torch.dtype
+    weight_grad_chunk_dtype: torch.dtype
+    weight_chunk_dtype: torch.dtype
+    target: torch.Tensor
+    neg_weight_target: torch.Tensor
 
 
-def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
-    *_, allow_retain_graph, compute_input_grad, compute_linear_weight_grad = inputs
-    ctx.allow_retain_graph = allow_retain_graph
-    ctx.compute_input_grad = compute_input_grad
-    ctx.compute_linear_weight_grad = compute_linear_weight_grad
-    _, grad_input, grad_linear_weight = output
-    ctx._gi = grad_input if compute_input_grad else None
-    ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
-
-
-@torch.library.custom_op(
-    "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
-)
-def _linear_cross_entropy_batch_chunked(
+def _linear_cross_entropy_setup(
     input: torch.Tensor,
     linear_weight: torch.Tensor,
     target: torch.Tensor,
@@ -314,31 +332,15 @@ def _linear_cross_entropy_batch_chunked(
     reduction: str,
     ignore_index: int,
     label_smoothing: float,
-    batch_chunk_size: int,
     acc_policy: str,
     acc_dtype: torch.dtype,
-    allow_retain_graph: bool,
-    compute_input_grad: bool,
-    compute_linear_weight_grad: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns ``(loss, grad_input, grad_linear_weight)``: gradients
-    are precomputed during the chunked forward loop and stashed on ctx
-    by ``setup_context``; backward is a single multiply by the
-    upstream gradient.
+) -> _LinearCrossEntropyChunkedSetup:
+    """Validate inputs, compute the internal dtype layout, and build
+    ``neg_weight_target``.
 
-    The unusual "compute gradients in forward" design is what makes
-    chunking save memory. The standard fprop/bprop split would need to
-    retain per-chunk softmax intermediates across the forward pass
-    (defeating the chunking) or recompute them in backward
-    (slower). Computing the gradient in the same chunk-loop iteration
-    that produces the loss term keeps peak memory at one chunk's worth
-    of logits.
+    Pulled out of ``_linear_cross_entropy_batch_chunked`` so the main
+    function focuses on buffer allocation and the chunked loop.
     """
-    # Body uses compute_input_grad / compute_linear_weight_grad as
-    # passed; do not derive from input.requires_grad — composite-
-    # compliance tests unwrap tensors before reaching the impl, losing
-    # requires_grad metadata.
-
     # ===== Setup =====
     device = input.device
     dtype = input.dtype
@@ -407,25 +409,6 @@ def _linear_cross_entropy_batch_chunked(
             logits_buf_dtype
         ) = weight_grad_chunk_dtype = weight_chunk_dtype = dtype
 
-    # linear_weight_cast: linear_weight materialized in
-    # logits_buf_dtype when actually needed:
-    # - non-CUDA + use_acc_dtype: forward mm operands and the
-    #   buf-and-copy input-grad addmm need matching dtypes.
-    # - CUDA + use_acc_dtype + accurate-mode input-grad
-    #   (grad_input_dtype == logits_buf_dtype): the fast-path addmm
-    #   needs self/mat2 to match logits' dtype.
-    # CUDA + use_acc_dtype + memory mode does NOT need the cast: the
-    # forward mm uses out_dtype= on the original linear_weight, the
-    # input-grad goes through the storage-trick path with the
-    # original linear_weight, and the input-grad first-term mul gets
-    # implicit type promotion through TensorIterator.
-    if use_acc_dtype and (
-        not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
-    ):
-        linear_weight_cast = linear_weight.to(logits_buf_dtype)
-    else:
-        linear_weight_cast = linear_weight
-
     # ===== Build neg_weight_target =====
     # Inf/NaN at X_[:, ignore_index] propagates through the
     # masked-by-zero multiply (matches cross_entropy; differs from
@@ -452,22 +435,158 @@ def _linear_cross_entropy_batch_chunked(
     else:  # "sum"
         neg_weight_target.neg_()
 
+    return _LinearCrossEntropyChunkedSetup(
+        device=device,
+        dtype=dtype,
+        num_batches=num_batches,
+        in_features=in_features,
+        num_classes=num_classes,
+        is_cuda=is_cuda,
+        is_mps=is_mps,
+        use_acc_dtype=use_acc_dtype,
+        is_memory_like=is_memory_like,
+        is_ultralow=is_ultralow,
+        output_dtype=output_dtype,
+        grad_input_dtype=grad_input_dtype,
+        grad_linear_weight_dtype=grad_linear_weight_dtype,
+        logits_buf_dtype=logits_buf_dtype,
+        weight_grad_chunk_dtype=weight_grad_chunk_dtype,
+        weight_chunk_dtype=weight_chunk_dtype,
+        target=target,
+        neg_weight_target=neg_weight_target,
+    )
+
+
+# Argument count of _linear_cross_entropy_batch_chunked; backward
+# returns this many gradient slots. Keep in sync with the signature.
+_NUM_OP_INPUTS = 13
+
+
+def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
+    *_, allow_retain_graph, compute_input_grad, compute_linear_weight_grad = inputs
+    ctx.allow_retain_graph = allow_retain_graph
+    ctx.compute_input_grad = compute_input_grad
+    ctx.compute_linear_weight_grad = compute_linear_weight_grad
+    _, grad_input, grad_linear_weight = output
+    ctx._gi = grad_input if compute_input_grad else None
+    ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
+
+
+@torch.library.custom_op(
+    "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
+)
+def _linear_cross_entropy_batch_chunked(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    weight: torch.Tensor | None,
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+    batch_chunk_size: int,
+    acc_policy: str,
+    acc_dtype: torch.dtype,
+    allow_retain_graph: bool,
+    compute_input_grad: bool,
+    compute_linear_weight_grad: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Returns ``(loss, grad_input, grad_linear_weight)``: gradients
+    are precomputed during the chunked forward loop and stashed on ctx
+    by ``setup_context``; backward is a single multiply by the
+    upstream gradient.
+
+    The unusual "compute gradients in forward" design is what makes
+    chunking save memory. The standard fprop/bprop split would need to
+    retain per-chunk softmax intermediates across the forward pass
+    (defeating the chunking) or recompute them in backward
+    (slower). Computing the gradient in the same chunk-loop iteration
+    that produces the loss term keeps peak memory at one chunk's worth
+    of logits.
+    """
+    # Body uses compute_input_grad / compute_linear_weight_grad as
+    # passed; do not derive from input.requires_grad — composite-
+    # compliance tests unwrap tensors before reaching the impl, losing
+    # requires_grad metadata.
+    setup = _linear_cross_entropy_setup(
+        input,
+        linear_weight,
+        target,
+        weight,
+        reduction,
+        ignore_index,
+        label_smoothing,
+        acc_policy,
+        acc_dtype,
+    )
+    device = setup.device
+    dtype = setup.dtype
+    num_batches = setup.num_batches
+    in_features = setup.in_features
+    num_classes = setup.num_classes
+    is_cuda = setup.is_cuda
+    is_mps = setup.is_mps
+    use_acc_dtype = setup.use_acc_dtype
+    is_ultralow = setup.is_ultralow
+    output_dtype = setup.output_dtype
+    grad_input_dtype = setup.grad_input_dtype
+    grad_linear_weight_dtype = setup.grad_linear_weight_dtype
+    logits_buf_dtype = setup.logits_buf_dtype
+    weight_grad_chunk_dtype = setup.weight_grad_chunk_dtype
+    target = setup.target
+    neg_weight_target = setup.neg_weight_target
+
+    # linear_weight_cast: linear_weight materialized in
+    # logits_buf_dtype when actually needed:
+    # - non-CUDA + use_acc_dtype: forward mm operands and the
+    #   buf-and-copy input-grad addmm need matching dtypes.
+    # - CUDA + use_acc_dtype + accurate-mode input-grad
+    #   (grad_input_dtype == logits_buf_dtype): the fast-path addmm
+    #   needs self/mat2 to match logits' dtype.
+    # CUDA + use_acc_dtype + memory mode does NOT need the cast: the
+    # forward mm uses out_dtype= on the original linear_weight, the
+    # input-grad goes through the storage-trick path with the
+    # original linear_weight, and the input-grad first-term mul gets
+    # implicit type promotion through TensorIterator. Kept here
+    # (rather than in _linear_cross_entropy_setup) because the gate
+    # depends on compute_input_grad and the result is naturally
+    # co-located with the buffer-allocation block below.
+    if use_acc_dtype and (
+        not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
+    ):
+        linear_weight_cast = linear_weight.to(logits_buf_dtype)
+    else:
+        linear_weight_cast = linear_weight
+
     # ===== Buffer allocations =====
     # TODO: per-call allocations cannot be cached across training-loop
     # iterations from inside the op. The largest in practice are
     # logits_buf and linear_weight_cast; a user-supplied workspace via
     # LinearCrossEntropyOptions should target those first, with
     # weight_grad_chunk/logits_acc_buf/input_grad_acc_buf as follow-ups.
-    def alloc(shape, dtype, when=True):
+    #
+    # make_empty / make_zeros wrap torch.empty / torch.zeros with a
+    # `when=False` fast path that returns a rank-matching empty tensor
+    # ((0,) * len(shape)), so persistent outputs returned to the
+    # caller still have the expected number of dimensions even when
+    # the corresponding gradient is not being computed.
+    def make_empty(shape, dtype, when=True):
         return torch.empty(
-            shape if when else (0, 0),
+            shape if when else (0,) * len(shape),
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+
+    def make_zeros(shape, dtype, when=True):
+        return torch.zeros(
+            shape if when else (0,) * len(shape),
             device=device,
             dtype=dtype,
             requires_grad=False,
         )
 
     # Chunk buffer used to hold logits, then softmax of logits.
-    logits_buf = alloc((batch_chunk_size, num_classes), logits_buf_dtype)
+    logits_buf = make_empty((batch_chunk_size, num_classes), logits_buf_dtype)
     # weight_grad_chunk: per-chunk weight-gradient scratch.
     # Skipped under acc_policy="lowmemory" when an addmm-into-grad_lw
     # path is available (CUDA, or any backend with same-dtype mm).
@@ -475,7 +594,7 @@ def _linear_cross_entropy_batch_chunked(
         acc_policy in {"lowmemory", "ultralow"}
         and (is_cuda or logits_buf_dtype == grad_linear_weight_dtype)
     )
-    weight_grad_chunk = alloc(
+    weight_grad_chunk = make_empty(
         (num_classes, in_features),
         weight_grad_chunk_dtype,
         when=keep_weight_grad_chunk,
@@ -484,7 +603,7 @@ def _linear_cross_entropy_batch_chunked(
     # fp16+memory non-CUDA path (where logits_buf is fp16 but
     # weight_grad_chunk is fp32). Tied to keep_weight_grad_chunk —
     # lowmemory's addmm path doesn't need the upcast scratch.
-    logits_acc_buf = alloc(
+    logits_acc_buf = make_empty(
         (batch_chunk_size, num_classes),
         acc_dtype,
         when=keep_weight_grad_chunk and not is_cuda and logits_buf_dtype != acc_dtype,
@@ -499,7 +618,7 @@ def _linear_cross_entropy_batch_chunked(
         and not is_cuda
         and (grad_input_dtype != linear_weight_cast.dtype or is_mps)
     )
-    input_grad_acc_buf = alloc(
+    input_grad_acc_buf = make_empty(
         (batch_chunk_size, in_features),
         linear_weight_cast.dtype,
         when=use_input_grad_acc,
@@ -512,7 +631,7 @@ def _linear_cross_entropy_batch_chunked(
     use_input_chunk_acc = use_acc_dtype and (
         compute_linear_weight_grad or (not is_cuda and dtype != logits_buf_dtype)
     )
-    input_chunk_acc_buf = alloc(
+    input_chunk_acc_buf = make_empty(
         (batch_chunk_size, in_features), acc_dtype, when=use_input_chunk_acc
     )
     # Chunk-sized scratch reused per iteration: first as logits_max
@@ -523,24 +642,16 @@ def _linear_cross_entropy_batch_chunked(
     # subsequent logits.mul_ promotes through fp32 internally so
     # the final bf16 logits matches what an fp32 tmp_chunk would
     # have produced.
-    tmp = torch.empty(
-        batch_chunk_size, device=device, dtype=logits_buf_dtype, requires_grad=False
-    )
+    tmp = make_empty((batch_chunk_size,), logits_buf_dtype)
 
-    # Persistent outputs (matching fake function's (0,) sentinels):
-    grad_input = torch.empty(
-        input.shape if compute_input_grad else (0,),
-        device=device,
-        dtype=grad_input_dtype,
-        requires_grad=False,
+    # Persistent outputs:
+    grad_input = make_empty(input.shape, grad_input_dtype, when=compute_input_grad)
+    grad_linear_weight = make_zeros(
+        linear_weight.shape,
+        grad_linear_weight_dtype,
+        when=compute_linear_weight_grad,
     )
-    grad_linear_weight = torch.zeros(
-        linear_weight.shape if compute_linear_weight_grad else (0,),
-        device=device,
-        dtype=grad_linear_weight_dtype,
-        requires_grad=False,
-    )
-    output = torch.zeros((), device=device, dtype=output_dtype, requires_grad=False)
+    output = make_zeros((), output_dtype)
     if reduction == "mean" and num_batches == 0:
         output.fill_(torch.nan)
 
@@ -778,9 +889,9 @@ def _(
         result = torch.empty((), dtype=input.dtype, device=input.device)
     else:
         raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
-    grad_input_shape = input.shape if compute_input_grad else (0,)
+    grad_input_shape = input.shape if compute_input_grad else (0, 0)
     grad_linear_weight_shape = (
-        linear_weight.shape if compute_linear_weight_grad else (0,)
+        linear_weight.shape if compute_linear_weight_grad else (0, 0)
     )
 
     grad_input = torch.empty(

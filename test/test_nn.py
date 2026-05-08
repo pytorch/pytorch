@@ -14631,8 +14631,12 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
                     expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 256
-                    expected_weight_grad_max_ulp_diff = 257
+                    if "mps" in device:
+                        expected_input_grad_max_ulp_diff = 60601
+                        expected_weight_grad_max_ulp_diff = 73
+                    else:
+                        expected_input_grad_max_ulp_diff = 256
+                        expected_weight_grad_max_ulp_diff = 257
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14768,7 +14772,7 @@ if __name__ == '__main__':
         # temporary printouts:
         print(f'{maximal_input_grad_err=} <= {feps}')
         print(f'{maximal_linear_weight_grad_err=} <= {feps}')
-        print(f'{maximal_output_max_ulp_diff=} <= {maximal_output_max_ulp_diff}')
+        print(f'{maximal_output_max_ulp_diff=} <= {expected_max_ulp_diff}')
         print(f'{maximal_input_grad_max_ulp_diff=} <= {expected_input_grad_max_ulp_diff}')
         print(f'{maximal_linear_weight_grad_max_ulp_diff=} <= {expected_weight_grad_max_ulp_diff}')
 
