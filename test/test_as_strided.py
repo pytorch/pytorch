@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 
 from collections import deque
-from typing import Optional
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -154,7 +153,7 @@ class TestAsStrided(TestCase):
         Test that for sizes 2..10, each smaller tensor results in a strict
         subset of possible states compared to the next one.
         """
-        prev_states: Optional[set[tuple[tuple[int, ...], tuple[int, ...]]]] = None
+        prev_states: set[tuple[tuple[int, ...], tuple[int, ...]]] | None = None
         for size in range(2, 11):
             current_states = enumerate_reachable_states(size)
 

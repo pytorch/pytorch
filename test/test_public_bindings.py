@@ -184,7 +184,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileReader",
             "PyTorchFileWriter",
             "qscheme",
-            "read_vitals",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -211,7 +210,6 @@ class TestPublicBindings(TestCase):
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
-            "set_vital",
             "Size",
             "StaticModule",
             "Stream",
@@ -232,7 +230,6 @@ class TestPublicBindings(TestCase):
             "Value",
             "set_autocast_gpu_dtype",
             "get_autocast_gpu_dtype",
-            "vitals_enabled",
             "wait",
             "Tag",
             "set_autocast_xla_enabled",
@@ -365,7 +362,10 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
-            "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass_cppgen
+            "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -412,9 +412,10 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist:
-                # make sure mod is actually private
-                if not any(t.startswith("_") for t in mod.split(".")):
+            if mod in private_allowlist or (
+                mod.startswith("torch._native.ops.") and "triton" in mod
+            ):
+                if self._is_mod_public(mod):
                     raise AssertionError(
                         f"Expected private module name to include '_' segments: {mod}"
                     )

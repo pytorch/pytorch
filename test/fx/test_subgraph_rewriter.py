@@ -950,7 +950,7 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""",
-        )  # noqa: B950
+        )
 
     def test_replacement_with_attrs(self):
         class M(torch.nn.Module):

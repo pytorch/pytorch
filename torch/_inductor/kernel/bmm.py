@@ -10,6 +10,7 @@ from torch._inductor.kernel.mm_common import load_kernel_template
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
+from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -43,8 +44,14 @@ aten = torch.ops.aten
 
 
 @SymbolicGridFn
-def bmm_grid(b, m, n, meta, *, cdiv):
-    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
+def bmm_grid(b, m, n, meta, *, cdiv, max):
+    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    # Split batch across grid_y and grid_z to avoid exceeding CUDA grid_y limit.
+    # When b <= max_y_grid, grid_z = 1 and behavior is identical to the original.
+    max_y_grid = get_max_y_grid()
+    grid_z = max(cdiv(b, max_y_grid), 1)
+    grid_y = cdiv(b, grid_z)
+    return (tiles, grid_y, grid_z)
 
 
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
@@ -67,6 +74,17 @@ aten_bmm_dtype = ExternKernelChoice(
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
+
+
+def _has_broadcast_batch_dim(mat1, mat2):
+    """Check if either input has a broadcast batch dimension (stride=0).
+
+    The Triton bmm template can trigger CUDA IMA during autotuning with
+    stride-0 inputs; the aten bmm fallback handles broadcast correctly.
+    """
+    return V.graph.sizevars.statically_known_equals(
+        mat1.get_stride()[0], 0
+    ) or V.graph.sizevars.statically_known_equals(mat2.get_stride()[0], 0)
 
 
 @L.register_lowering(aten.bmm)
@@ -179,11 +197,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout, check_max_autotune=False) and (
-        out_dtype is None or out_dtype == mat1.get_dtype()
-    ):
-        # TODO: add out_dtype support for Triton Template
-        templates_to_use.append(bmm_template)
+    if use_triton_template(layout, check_max_autotune=False):
+        if not _has_broadcast_batch_dim(mat1, mat2):
+            templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
     choices.extend(
@@ -225,7 +241,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
         add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @L.register_lowering(aten.baddbmm)
@@ -278,11 +295,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(aten_baddbmm)
 
     if use_triton_template(layout, check_max_autotune=False):
-        templates_to_use.append(bmm_template)
+        if not _has_broadcast_batch_dim(mat1, mat2):
+            templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node

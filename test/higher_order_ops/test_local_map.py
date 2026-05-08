@@ -1,12 +1,11 @@
 # Owner(s): ["module: higher order operators"]
-# flake8: noqa: B950
 
 
 import functools
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -756,8 +755,8 @@ class GraphModule(torch.nn.Module):
 
         def _all_to_all(
             self: torch.Tensor,
-            output_split_sizes: Optional[list[int]],
-            input_split_sizes: Optional[list[int]],
+            output_split_sizes: list[int] | None,
+            input_split_sizes: list[int] | None,
             group_name: str,
         ):
             group_size = c10d._get_group_size_by_name(group_name)
@@ -781,8 +780,8 @@ class GraphModule(torch.nn.Module):
             def forward(
                 ctx: Any,
                 x: torch.Tensor,
-                output_split_sizes: Optional[list[int]],
-                input_split_sizes: Optional[list[int]],
+                output_split_sizes: list[int] | None,
+                input_split_sizes: list[int] | None,
                 axis_name: str,
             ):
                 group_name = _get_group_name_from_axis_name(axis_name)

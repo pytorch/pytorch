@@ -7,7 +7,6 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import sympy
 
@@ -98,7 +97,7 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
-        compile_kwargs: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}
@@ -395,7 +394,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
@@ -1044,7 +1043,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",  # noqa: B950
+    return [buf1, buf2]""",
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):

@@ -83,8 +83,7 @@ TEST_F(StreamTest, AddTaskToStreamNullptr) {
   EXPECT_EQ(openreg::addTaskToStream(nullptr, [] {}), orErrorUnknown);
 }
 
-// Disabled: randomly hangs in CI. See https://github.com/pytorch/pytorch/issues/176286
-TEST_F(StreamTest, DISABLED_StreamQuery) {
+TEST_F(StreamTest, StreamQuery) {
   orStream_t stream = nullptr;
   EXPECT_EQ(orStreamCreate(&stream), orSuccess);
 

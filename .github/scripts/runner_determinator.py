@@ -1,9 +1,5 @@
 # flake8: noqa: G004
 
-# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
-#       must be kept in sync. You can do it easily by running the following command:
-#           python .github/scripts/update_runner_determinator.py
-
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
@@ -27,7 +23,11 @@ The user list has the following rules:
 
 - Users are GitHub usernames, which must start with the @ prefix
 - Each user is also a comma-separated list of features/experiments to enable
+- Each experiment can optionally include a per-user rollout percentage
+  using the syntax "experiment:percentage" (e.g. "arc:10" for 10% rollout)
+- Without a percentage, opted-in experiments are enabled 100% of the time
 - A "#" prefix opts the user out of all experiments
+- A "-" prefix on an experiment opts the user out of that experiment
 
 Example config:
     # A list of experiments that can be opted into.
@@ -46,12 +46,14 @@ Example config:
     # Opt-ins:
     # Users can opt into the LF fleet by adding their GitHub username to this list
     # and specifying experiments to enable in a comma-separated list.
+    # Optionally append :N to set a per-user rollout percentage (0-100).
     # To always opt out of an experiment, prefix it with a "-".
     # Experiments should be from the above list.
 
     @User1,-lf,split_build
     @User2,lf
     @User3,split_build
+    @User4,lf,arc:10
 """
 
 import json
@@ -79,12 +81,17 @@ WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundati
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+GH_OUTPUT_KEY_USE_ARC = "use-arc"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
 LF_FLEET_EXPERIMENT = "lf"
+ARC_FLEET_EXPERIMENT = "arc"
 CANARY_FLEET_SUFFIX = ".c"
+
+ARC_LABEL_PREFIX = "mt-"
+ARC_CANARY_LABEL_PREFIX = "c-"
 
 
 class Experiment(NamedTuple):
@@ -99,6 +106,11 @@ class Experiment(NamedTuple):
     )
 
     # Add more fields as needed
+
+
+class RunnerPrefixResult(NamedTuple):
+    prefix: str
+    use_arc: bool = False
 
 
 class Settings(NamedTuple):
@@ -295,9 +307,18 @@ def extract_settings_user_opt_in_from_text(rollout_state: str) -> tuple[str, str
         return "", rollout_state
 
 
-class UserOptins(dict[str, list[str]]):
+class UserExperimentConfig(NamedTuple):
     """
-    Dictionary of users with a list of features they have opted into
+    Per-user experiment configuration parsed from the opt-in line.
+    """
+
+    name: str
+    rollout_perc: float = 100  # default: always enabled when opted in
+
+
+class UserOptins(dict[str, list[UserExperimentConfig]]):
+    """
+    Dictionary of users with a list of experiment configs they have opted into
     """
 
 
@@ -320,7 +341,32 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
 
         if user:
             usr_name = user.split(",")[0].strip("@")
-            optins[usr_name] = [exp.strip(" ") for exp in user.split(",")[1:]]
+            configs = []
+            for exp_str in user.split(",")[1:]:
+                exp_str = exp_str.strip(" ")
+                if not exp_str:
+                    continue
+                # Parse optional per-user rollout percentage (e.g. "arc:10")
+                # Opt-out entries (e.g. "-lf") never have a percentage
+                if ":" in exp_str and not exp_str.startswith("-"):
+                    name, perc_str = exp_str.split(":", 1)
+                    try:
+                        perc = float(perc_str)
+                    except ValueError:
+                        log.warning(
+                            f"Invalid rollout percentage for user {usr_name}, experiment {exp_str}. Defaulting to 100%."
+                        )
+                        perc = 100
+                    if not (0 <= perc <= 100):
+                        log.warning(
+                            f"Rollout percentage {perc} for user {usr_name}, experiment {name} "
+                            f"is out of range [0, 100]. Clamping."
+                        )
+                        perc = max(0.0, min(100.0, perc))
+                    configs.append(UserExperimentConfig(name=name, rollout_perc=perc))
+                else:
+                    configs.append(UserExperimentConfig(name=exp_str, rollout_perc=100))
+            optins[usr_name] = configs
 
     return optins
 
@@ -352,11 +398,8 @@ def parse_settings_from_text(settings_text: str) -> Settings:
     """
     try:
         if settings_text:
-            # Escape the backtick as well so that we can have the settings in a code block on the GH issue
-            # for easy reading
-            # Note: Using ascii for the backtick so that the cat step in _runner-determinator.yml doesn't choke on
-            #       the backtick character in shell commands.
-            backtick = chr(96)  # backtick character
+            # Strip backticks so settings can be in a code block on the GH issue
+            backtick = chr(96)
             settings_text = settings_text.strip(f"\r\n\t{backtick} ")
             settings = load_yaml(settings_text)
 
@@ -408,11 +451,24 @@ def parse_users(rollout_state: str) -> UserOptins:
     return parse_user_opt_in_from_text(users_text)
 
 
+def get_user_experiment_config(
+    user: str, user_optins: UserOptins, experiment_name: str
+) -> UserExperimentConfig | None:
+    """
+    Get a user's experiment config if they are opted in.
+    Returns None if the user is not opted into the experiment.
+    """
+    for config in user_optins.get(user, []):
+        if config.name == experiment_name:
+            return config
+    return None
+
+
 def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
     """
     Check if a user is opted into an experiment
     """
-    return experiment_name in user_optins.get(user, [])
+    return get_user_experiment_config(user, user_optins, experiment_name) is not None
 
 
 def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) -> bool:
@@ -421,7 +477,10 @@ def is_user_opted_out(user: str, user_optins: UserOptins, experiment_name: str) 
     """
     # if the experiment is prefixed with a "-", then it's an opt-out
     experiment_optout = "-" + experiment_name
-    if experiment_optout not in user_optins.get(user, []):
+    opted_out = any(
+        config.name == experiment_optout for config in user_optins.get(user, [])
+    )
+    if not opted_out:
         return False
 
     if is_user_opted_in(user, user_optins, experiment_name):
@@ -439,12 +498,13 @@ def get_runner_prefix(
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
-) -> str:
+) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
 
     fleet_prefix = ""
     prefixes = []
+    use_arc = False
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -495,10 +555,37 @@ def get_runner_prefix(
 
         enabled = False
         if opted_in_users:
-            log.info(
-                f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
-            )
-            enabled = True
+            # Get the minimum per-user rollout percentage among opted-in requesters.
+            # This is conservative: if the PR author sets 10%, that intent is respected
+            # even if the triggering actor (e.g. pytorchmergebot) has 100%.
+            user_rollout_percs = [
+                get_user_experiment_config(u, user_optins, experiment_name).rollout_perc
+                for u in opted_in_users
+            ]
+            min_perc = min(user_rollout_percs)
+
+            if min_perc >= 100:
+                log.info(
+                    f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
+                )
+                enabled = True
+            elif min_perc > 0:
+                if random.uniform(0, 100) <= min_perc:
+                    log.info(
+                        f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                        f"with {min_perc}% rollout. Enabling this run."
+                    )
+                    enabled = True
+                else:
+                    log.info(
+                        f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                        f"with {min_perc}% rollout. Not enabling this run."
+                    )
+            else:
+                log.info(
+                    f"{', '.join(opted_in_users)} have opted into experiment {experiment_name} "
+                    f"with 0% rollout. Not enabling."
+                )
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
@@ -510,7 +597,12 @@ def get_runner_prefix(
 
         if enabled:
             label = experiment_name
-            if experiment_name == LF_FLEET_EXPERIMENT:
+            if experiment_name == ARC_FLEET_EXPERIMENT:
+                use_arc = True
+                log.info(
+                    f"ARC experiment enabled. Using ARC runner prefix ({'canary' if is_canary else 'production'})."
+                )
+            elif experiment_name == LF_FLEET_EXPERIMENT:
                 # We give some special treatment to the "lf" experiment since determines the fleet we use
                 #  - If it's enabled, then we always list it's prefix first
                 #  - If we're in the canary branch, then we append ".c" to the lf prefix
@@ -519,6 +611,15 @@ def get_runner_prefix(
                 fleet_prefix = label
             else:
                 prefixes.append(label)
+
+    # ARC experiment takes precedence: return a fixed label prefix
+    if use_arc:
+        arc_prefix = (
+            ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
+            if is_canary
+            else ARC_LABEL_PREFIX
+        )
+        return RunnerPrefixResult(prefix=arc_prefix, use_arc=True)
 
     if len(prefixes) > 1:
         log.error(
@@ -530,7 +631,8 @@ def get_runner_prefix(
     if fleet_prefix:
         prefixes.insert(0, fleet_prefix)
 
-    return ".".join(prefixes) + "." if prefixes else ""
+    prefix = ".".join(prefixes) + "." if prefixes else ""
+    return RunnerPrefixResult(prefix=prefix)
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -619,7 +721,7 @@ def main() -> None:
 
         is_canary = args.github_repo == "pytorch/pytorch-canary"
 
-        runner_label_prefix = get_runner_prefix(
+        result = get_runner_prefix(
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
@@ -627,6 +729,8 @@ def main() -> None:
             args.opt_out_experiments,
             is_canary,
         )
+        runner_label_prefix = result.prefix
+        set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())
 
     except Exception as e:
         log.error(

@@ -105,6 +105,33 @@ class _ITraceObserver(ABC):
         pass
 
 
+def _parse_activities(
+    activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]],
+) -> tuple[set[ProfilerActivity], dict[ProfilerActivity, set[str]]]:
+    """Parse a mixed activities list into a set of activities and a filter dict.
+
+    Each item is either a bare ``ProfilerActivity`` (collect all defaults) or a
+    ``dict[ProfilerActivity, list[str]]`` (collect only the named subset).
+    An empty list value (e.g. ``{CUDA: []}``) means collect nothing for that group.
+    """
+    parsed_activities: set[ProfilerActivity] = set()
+    activity_filters: dict[ProfilerActivity, set[str]] = {}
+    for item in activities:
+        if isinstance(item, ProfilerActivity):
+            if item in parsed_activities:
+                raise ValueError(f"Activity {item} specified more than once")
+            parsed_activities.add(item)
+        elif isinstance(item, dict):
+            for key, val in item.items():
+                if key in parsed_activities:
+                    raise ValueError(f"Activity {key} specified more than once")
+                parsed_activities.add(key)
+                activity_filters[key] = set(val)
+        else:
+            raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
+    return parsed_activities, activity_filters
+
+
 class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
@@ -114,6 +141,14 @@ class _KinetoProfile:
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -152,7 +187,8 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
@@ -164,7 +200,11 @@ class _KinetoProfile:
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        self.activities = set(activities) if activities else supported_activities()
+        if activities is not None:
+            self.activities, self.activity_filters = _parse_activities(activities)
+        else:
+            self.activities = supported_activities()
+            self.activity_filters: dict[ProfilerActivity, set[str]] = {}
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -210,6 +250,12 @@ class _KinetoProfile:
             import torch._inductor.config as inductor_config
 
             self.has_cudagraphs = inductor_config.triton.cudagraphs
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle. "
+                "Only events from the current cycle will be reported. "
+                "To keep events across cycles, set acc_events=True."
+            )
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -224,12 +270,9 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
-            )
-        if (self.profiler is not None) and (not self.acc_events):
-            _warn_once(
-                "Warning: Profiler clears events at the end of each cycle."
-                "Only events from the current cycle will be reported."
-                "To keep events across cycles, set acc_events=True."
+                activity_filters=self.activity_filters
+                if self.activity_filters
+                else None,
             )
         self.profiler._prepare_trace()
 
@@ -358,6 +401,8 @@ class _KinetoProfile:
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
 
+        Returns an :class:`~torch.autograd.profiler_util.EventList` of the aggregated events.
+
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
@@ -372,8 +417,8 @@ class _KinetoProfile:
 
     def events(self):
         """
-        Returns the list of unaggregated profiler events,
-        to be used in the trace callback or after the profiling is finished
+        Return the list of unaggregated :class:`~torch.autograd.profiler_util.FunctionEvent`
+        objects, for use in the trace callback or after profiling has finished.
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
@@ -494,13 +539,25 @@ class _KinetoProfile:
 
 class ProfilerAction(Enum):
     """
-    Profiler actions that can be taken at the specified intervals
+    Profiler actions that can be taken at the specified intervals.
+
+    NONE, WARMUP, RECORD, and RECORD_AND_SAVE are user-facing values that may
+    be returned from a user-provided schedule. DEVICE_STOPPED is set
+    internally by the profiler when device collection stops early due to
+    errors; it must not be returned from a user-provided schedule.
     """
 
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
+    DEVICE_STOPPED = 4
+
+
+def _unreachable_transition(prev: str, current: str) -> None:
+    raise RuntimeError(
+        f"Profiler internal error: {prev} -> {current} should be unreachable"
+    )
 
 
 def schedule(
@@ -612,10 +669,20 @@ class profile(_KinetoProfile):
             ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
+
+            Each item can be a ``ProfilerActivity`` enum (collects all default
+            activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
+            to a list of individual activity type names to collect, e.g.
+            ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
+            An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
+            nothing for that group.
+            The same activity group must not appear more than once.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (Callable): callable that is called at each step when ``schedule``
-            returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
+        on_trace_ready (Callable): callable invoked at the end of each profiling cycle
+            (when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``). Receives the
+            :class:`profile` instance as its only argument, typically used to export the
+            trace (e.g. via :meth:`export_chrome_trace`) or print a summary.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.
         with_stack (bool): record source information (file and line number) for the ops.
@@ -638,6 +705,9 @@ class profile(_KinetoProfile):
         post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
             results. If specified, event parsing will stop after this duration and return partial
             results. Useful for handling large traces that may take too long to process.
+        custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
+            invoked once per profiling cycle. Defaults to a random UUID; retrieve via
+            :meth:`get_trace_id`.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -740,7 +810,8 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,
         record_shapes: bool = False,
@@ -756,7 +827,16 @@ class profile(_KinetoProfile):
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        activities_set = set(activities) if activities else supported_activities()
+        # Extract activities for the use_cuda deprecation check.
+        if activities is not None:
+            activities_set: set[ProfilerActivity] = set()
+            for item in activities:
+                if isinstance(item, ProfilerActivity):
+                    activities_set.add(item)
+                elif isinstance(item, dict):
+                    activities_set.update(item.keys())
+        else:
+            activities_set = supported_activities()
         if use_cuda is not None:
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",
@@ -794,8 +874,20 @@ class profile(_KinetoProfile):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
-        self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: prof.record_function | None = None
+
+        schedule_action = self.schedule(self.step_num)
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+        self.current_action = schedule_action
+        # Raw schedule output of the previous step, separate from
+        # current_action which step() may override to DEVICE_STOPPED. Used to
+        # detect cycle boundaries (RECORD_AND_SAVE -> next) when warmup=0,
+        # so DEVICE_STOPPED can exit and resume profiling on the new cycle.
+        self._prev_schedule_action = schedule_action
 
         self.action_map: dict[
             tuple[ProfilerAction, ProfilerAction | None], list[Any]
@@ -850,6 +942,55 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
+            # DEVICE_STOPPED: entered when device collection stops early (e.g.
+            # CUPTI buffer overflow). Absorbs the remainder of the current
+            # profiling cycle, then exits at the next cycle boundary.
+            #
+            # All three entry transitions fire _trace_ready so the user's
+            # callback is invoked even when entry happens from WARMUP. This
+            # matters for active=1 schedules: the only active step (R&S) gets
+            # converted to DEVICE_STOPPED via WARMUP -> R&S override, and
+            # without _trace_ready firing here the user would never see a
+            # callback for that cycle. The trace will be empty (no recording
+            # ran), but the callback firing is the signal that the cycle
+            # completed.
+            (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
+                self.start_trace,
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
+                self.prepare_trace,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.NONE): [],
+            # Cycle boundary recovery: when the schedule has no WARMUP phase
+            # (warmup=0), DEVICE_STOPPED exits directly into the next cycle's
+            # active phase. Mirrors (NONE, RECORD) / (NONE, RECORD_AND_SAVE).
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            # Unreachable transitions:
+            # - prev=NONE: step()'s entry guard excludes it, and start() and
+            #   __init__ both reject DEVICE_STOPPED from a user schedule.
+            # - prev=RECORD_AND_SAVE: entry guard excludes it because the
+            #   natural (R&S, *) transitions already do the right thing to
+            #   recover.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "RECORD_AND_SAVE", "DEVICE_STOPPED"),
+            ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
@@ -857,6 +998,7 @@ class profile(_KinetoProfile):
                 self.stop_trace,
                 self._trace_ready,
             ],
+            (ProfilerAction.DEVICE_STOPPED, None): [],
         }
         # Start tracking increments to profiler step, this will be used
         # by Kineto
@@ -883,7 +1025,17 @@ class profile(_KinetoProfile):
     def stop(self) -> None:
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            self.step_rec_fn = None
         self._transit_action(self.current_action, None)
+        # Reset current_action to the schedule's view in case step() had
+        # overridden it to DEVICE_STOPPED. Without this, a subsequent start()
+        # would transit (NONE, DEVICE_STOPPED) — unreachable by contract —
+        # and leave the profiler running with no Kineto session.
+        if self._prev_schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise AssertionError(
+                "_prev_schedule_action must never be DEVICE_STOPPED here"
+            )
+        self.current_action = self._prev_schedule_action
 
     def step(self) -> None:
         """
@@ -891,9 +1043,76 @@ class profile(_KinetoProfile):
         """
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            # Drop our reference so a subsequent stop() / step() — e.g. after
+            # this step() raises — doesn't double-exit the same instance.
+            self.step_rec_fn = None
         prev_action = self.current_action
-        self.step_num += 1
-        self.current_action = self.schedule(self.step_num)
+        prev_schedule_action = self._prev_schedule_action
+        next_step = self.step_num + 1
+        schedule_action = self.schedule(next_step)
+
+        # Note that we check schedule validity BEFORE changing the profiler's
+        # internal state. This prevents the profiler from being in an invalid
+        # state.
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+
+        self.step_num = next_step
+        self.current_action = schedule_action
+        self._prev_schedule_action = schedule_action
+
+        # DEVICE_STOPPED handling: when Kineto signals that device collection
+        # has stopped early (e.g. CUPTI buffer overflow), we enter
+        # DEVICE_STOPPED and stay there until the current profiling cycle ends.
+        #
+        # Once in DEVICE_STOPPED (prev_action == DEVICE_STOPPED):
+        # - We exit at the next cycle boundary, defined by either:
+        #   - prev_schedule_action == RECORD_AND_SAVE: since active > 0,
+        #     every cycle ends with RECORD_AND_SAVE, so the next step starts
+        #     a new cycle regardless of warmup/wait shape.
+        #   - current_action == NONE: safety hatch for user-defined schedules
+        #     that may emit NONE without a preceding RECORD_AND_SAVE. (The
+        #     standard schedule() builder always pairs them.)
+        # - Otherwise we stay in DEVICE_STOPPED, absorbing the rest of the
+        #   cycle.
+        #
+        # Entering DEVICE_STOPPED (override current_action to DEVICE_STOPPED):
+        # - We enter when all of the following hold:
+        #   - _is_kineto_stopped() is True: Kineto reports the stop.
+        #   - use_device is set: a CPU-only profiler must not react to a
+        #     stale stopped flag from a previous device profiler.
+        #   - prev_action is WARMUP or RECORD: these have no built-in cleanup
+        #     in their natural transitions.
+        #   - current_action is not NONE: if the schedule is already stopping
+        #     us (e.g. RECORD_AND_SAVE -> NONE), respect that rather than
+        #     overriding.
+        # - Otherwise we leave current_action as the schedule's output.
+        # - prev_action == RECORD_AND_SAVE is excluded: the natural (R&S, *)
+        #   transitions already call prepare_trace, so overriding here would
+        #   skip the reset and waste the next cycle.
+
+        if prev_action == ProfilerAction.DEVICE_STOPPED:
+            at_cycle_boundary = (
+                prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
+                or self.current_action == ProfilerAction.NONE
+            )
+            if not at_cycle_boundary:
+                self.current_action = ProfilerAction.DEVICE_STOPPED
+        elif (
+            torch.autograd._is_kineto_stopped()
+            and self.use_device is not None
+            and prev_action in (ProfilerAction.WARMUP, ProfilerAction.RECORD)
+            and self.current_action != ProfilerAction.NONE
+        ):
+            warn(
+                "Device profiling activity collection was stopped early "
+                f"at step {self.step_num}. Profiler schedule is proceeding "
+                "until next cycle without actual profiler activity collection."
+            )
+            self.current_action = ProfilerAction.DEVICE_STOPPED
 
         self._transit_action(prev_action, self.current_action)
         if os.environ.get("KINETO_USE_DAEMON", "") or (
@@ -909,7 +1128,8 @@ class profile(_KinetoProfile):
 
     def set_custom_trace_id_callback(self, callback) -> None:
         """
-        Sets a callback to be called when a new trace ID is generated.
+        Set the trace ID generator. Called at the start of each cycle, so updating
+        it between cycles yields distinct IDs per cycle.
         """
         self.custom_trace_id_callback = callback
 
