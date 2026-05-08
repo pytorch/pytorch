@@ -2157,17 +2157,14 @@ def cat(inputs, dim=0):
 
         return count
 
-    # as of inputs increase, possibility for register spilling also increases
-    # past a certain threshold of inputs we only fuse if the input kernels
-    # are simple
-    # not sure if we want to expose to users via config since logic may change in future
-    MAX_COMPLEX_POINTWISE_CAT = 8
+    # as inputs increase, possibility for register spilling also increases.
+    # Past a certain threshold we only fuse if the input kernels are simple.
     MAX_SIMPLE_OP_COUNT = 2
 
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
-    if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
+    if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
