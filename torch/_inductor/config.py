@@ -951,7 +951,14 @@ max_fusion_buffer_group_pairwise_attempts = 64
 # The check is disabled if set to None.
 max_fusion_unique_io_buffers: int | None = None
 
-# max number of inputs to generate cat as a pointwise op with masked loads
+# max number of inputs to always fuse cat as a pointwise op regardless of
+# per-input op complexity. Beyond this limit (up to max_pointwise_cat_inputs),
+# fusion is only applied when every input has a low op count.
+max_complex_pointwise_cat_inputs = 8
+
+# max number of inputs to generate cat as a pointwise op with masked loads.
+# Inputs beyond max_complex_pointwise_cat_inputs but within this limit are
+# only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -1240,7 +1247,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
