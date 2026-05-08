@@ -9,7 +9,11 @@ import multiprocessing
 import os
 import re
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+)
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
@@ -36,6 +40,7 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
+    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -163,7 +168,7 @@ def after_fork():
 try:
     os.register_at_fork(after_in_child=after_fork)
 except AttributeError:
-    pass  # register_at_fork does not exists on windows
+    pass  # register_at_fork does not exist on windows
 
 
 def get_compile_threads() -> int:
@@ -236,6 +241,7 @@ class AsyncCompile:
     """
 
     _ready_future: Future[Any] | None = None
+    _metal_sources: list[tuple[str, str, list[str]]] | None = None
 
     def __init__(self) -> None:
         pass
@@ -535,18 +541,24 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext, aot_compile=False):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
+    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
         def task():
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                output_path, *_ = CUDACodeCache.compile(source_code, "o")
-                CUDACodeCache.aot_kernels_o.append(output_path)
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+                output_path, *_ = cache_cls.compile(source_code, "o")
+                cache_cls.aot_kernels_o.append(output_path)
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+
+    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("XPU Kernel:\n%s", source_code)
+        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
 
     def rocm(
         self,
@@ -695,6 +707,12 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
+        """Register a Metal kernel body; wait() compiles all registered kernels into one library."""
+        if self._metal_sources is None:
+            self._metal_sources = []
+        self._metal_sources.append((kernel_name, source, headers))
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(
@@ -705,6 +723,12 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+
+        if self._metal_sources:
+            from torch._inductor.runtime.runtime_utils import compile_mps_shaders
+
+            scope.update(compile_mps_shaders(self._metal_sources))
+            self._metal_sources.clear()
 
         _compile_end()
 
@@ -720,12 +744,25 @@ class AsyncCompile:
             disable=config.disable_progress,
             delay=0,
         )
+        # compile_worker_wait_timeout=0 (default) means "wait forever"; map
+        # it to None so both Future.result() and CodeCacheFuture.result()
+        # receive the same "no timeout" sentinel.
+        wait_timeout = config.compile_worker_wait_timeout or None
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
-                kernel = result.result()
+                kernel = result.result(timeout=wait_timeout)
                 scope[key] = kernel
+            except FuturesTimeoutError as e:
+                # concurrent.futures.TimeoutError became an alias of the
+                # builtin TimeoutError in Python 3.11; on 3.10 it is a
+                # distinct class, so catch it explicitly.
+                raise RuntimeError(
+                    f"Inductor compile-worker future for {key!r} did not "
+                    f"complete within {wait_timeout}s. Override with "
+                    "TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=<seconds>."
+                ) from e
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "

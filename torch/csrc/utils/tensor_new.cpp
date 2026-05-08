@@ -930,7 +930,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
 
   auto safe_get_attr_string = [](PyObject* o,
                                  const char* attr_name) -> PyObject* {
-    // Clear error indicator if attribute does not exists.
+    // Clear error indicator if attribute does not exist.
     // Otherwise subsequent Python C API calls might return bogus values.
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
     auto rc = PyObject_GetAttrString(o, attr_name);
@@ -1382,26 +1382,16 @@ static void _validate_sparse_compressed_tensor_args_template(
     ARG_SIZE,
     ARGS_COUNT
   };
-  static std::string sig;
-  switch (required_layout) {
-    case c10::Layout::SparseCsr:
-      sig =
-          "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size)";
-      break;
-    case c10::Layout::SparseCsc:
-      sig =
-          "_validate_sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size)";
-      break;
-    case c10::Layout::SparseBsr:
-      sig =
-          "_validate_sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size)";
-      break;
-    case c10::Layout::SparseBsc:
-      sig =
-          "_validate_sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size)";
-      break;
-    default:;
-  }
+  constexpr const char* sig = [] {
+    if constexpr (required_layout == c10::Layout::SparseCsr)
+      return "_validate_sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size)";
+    else if constexpr (required_layout == c10::Layout::SparseCsc)
+      return "_validate_sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size)";
+    else if constexpr (required_layout == c10::Layout::SparseBsr)
+      return "_validate_sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size)";
+    else if constexpr (required_layout == c10::Layout::SparseBsc)
+      return "_validate_sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size)";
+  }();
   static PythonArgParser parser({sig});
 
   ParsedArgs<ARGS_COUNT> parsed_args;

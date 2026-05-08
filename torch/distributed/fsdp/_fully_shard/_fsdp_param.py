@@ -78,7 +78,7 @@ case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
@@ -238,6 +238,7 @@ class FSDPParam:
         else:
             self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
             fsdp_placement = None
+        self._shard_mesh = self._init_shard_mesh()
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -559,9 +560,8 @@ class FSDPParam:
         all_gather_input_dtypes: list[torch.dtype],
         world_size: int,
         device: torch.device,
-        force_recreate: bool = False,
     ):
-        if not force_recreate and len(self.all_gather_outputs) > 0:
+        if len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
@@ -891,14 +891,17 @@ class FSDPParam:
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
 
-    @property
-    def shard_mesh(self):
+    def _init_shard_mesh(self) -> DeviceMesh:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
         if mesh.mesh_dim_names is None:
             raise AssertionError("Expected mesh_dim_names to not be None")
         return mesh[mesh.mesh_dim_names[-1]]
+
+    @property
+    def shard_mesh(self):
+        return self._shard_mesh
 
     @property
     def shard_mesh_from_root(self):
