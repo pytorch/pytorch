@@ -209,19 +209,3 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: DataParallelMeshDims
     :members:
 ```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.fsdp.wrap
-
-.. autofunction:: always_wrap_policy
-
-.. autofunction:: enable_wrap
-
-.. autofunction:: lambda_auto_wrap_policy
-
-.. autofunction:: size_based_auto_wrap_policy
-
-.. autofunction:: transformer_auto_wrap_policy
-
-.. autofunction:: wrap
-```
