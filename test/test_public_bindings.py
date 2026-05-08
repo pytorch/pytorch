@@ -412,12 +412,8 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if (
-                mod in private_allowlist
-                or (mod.startswith("torch._native.ops.") and "triton" in mod)
-                # torch._vendor.quack depends on cutlass / cuda-python, which
-                # are only installed on CUDA-enabled x86 Linux builds.
-                or mod.startswith("torch._vendor.quack")
+            if mod in private_allowlist or (
+                mod.startswith("torch._native.ops.") and "triton" in mod
             ):
                 if self._is_mod_public(mod):
                     raise AssertionError(

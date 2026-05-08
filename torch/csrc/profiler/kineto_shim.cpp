@@ -551,17 +551,6 @@ void profilerStep() {
 #endif // USE_KINETO
 }
 
-bool isKinetoStopped() {
-#ifdef USE_KINETO
-  if (libkineto::api().isProfilerInitialized()) {
-    return libkineto::api().activityProfiler().isStopped();
-  }
-  return false;
-#else
-  return false;
-#endif
-}
-
 } // namespace autograd::profiler
 
 } // namespace torch

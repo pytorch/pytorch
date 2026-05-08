@@ -5350,7 +5350,6 @@ xfail_by_backend = {
         "test_select_sum",  # batched gradients
         "test_custom_autograd_no_early_free",  # batched gradients
         "test_grad_batched_grad",  # batched gradients
-        "test_grad_dict_inputs_batched_grads",  # batched gradients
         # Uncategorized
         "test_lobpcg",  # NaNs
         "test_autograd_simple_views_python",  # gradient is None

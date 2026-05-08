@@ -8,13 +8,15 @@ from torch import Tensor
 
 
 class _GroupSwapinInfo(NamedTuple):
-    """Per-group bookkeeping for ``swap_in_optimizer_state``.
+    """Per-group bookkeeping for ``swap_in_optimizer_params_and_state``.
 
     Fields:
         live_group: live ``optimizer.param_groups[i]`` dict, mutated in place.
         swapin_group: per-group hyperparameter dict from the input state_dict
             (e.g. lr, betas, ...) plus packed ``params`` ids.
         swapin_params: replacement parameter tensors for ``live_group["params"]``.
+            Same order as ``swapin_group["params"]`` (i.e. the i-th tensor
+            corresponds to the i-th packed id), so the two are zippable.
     """
 
     live_group: dict[str, Any]
@@ -23,24 +25,21 @@ class _GroupSwapinInfo(NamedTuple):
 
 
 def _validate_state_field(state: Any) -> dict[Any, Any]:
-    """``state`` must be a dict keyed by packed parameter ids (not Tensors);
-    per-id values must be dicts. Non-int keys are tolerated here and rejected
-    later by the "extra keys" check.
-    """
+    """Check ``state`` is a dict mapping packed parameter ids to per-param state dicts."""
     if not isinstance(state, dict):
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optim_state['state'] to "
+            "swap_in_optimizer_params_and_state requires swapin_optim_state['state'] to "
             "be a dict mapping packed parameter ids to per-param state dicts, "
             f"got {type(state).__name__}."
         )
     if any(isinstance(k, torch.Tensor) for k in state):
         raise RuntimeError(
-            "swap_in_optimizer_state requires optimizer.state_dict()-style "
+            "swap_in_optimizer_params_and_state requires optimizer.state_dict()-style "
             "state keyed by packed parameter ids."
         )
     if any(isinstance(k, int) and not isinstance(v, dict) for k, v in state.items()):
         raise RuntimeError(
-            "swap_in_optimizer_state requires per-parameter optimizer "
+            "swap_in_optimizer_params_and_state requires per-parameter optimizer "
             "state entries to be dictionaries."
         )
     return state
@@ -52,7 +51,7 @@ def _validate_param_groups_field(
     """``param_groups`` must be a list whose length matches the live optimizer."""
     if not isinstance(param_groups, list):
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optim_state['param_groups'] "
+            "swap_in_optimizer_params_and_state requires swapin_optim_state['param_groups'] "
             f"to be a list of param-group dicts, got {type(param_groups).__name__}."
         )
     if len(optimizer.param_groups) != len(param_groups):
@@ -76,7 +75,7 @@ def _validate_group_against_live(
     """
     if not isinstance(swapin_group, dict):
         raise RuntimeError(
-            "swap_in_optimizer_state requires each optimizer param group "
+            "swap_in_optimizer_params_and_state requires each optimizer param group "
             "to be a dictionary."
         )
     swapin_param_ids = swapin_group.get("params")
@@ -84,7 +83,7 @@ def _validate_group_against_live(
         isinstance(pid, int) for pid in swapin_param_ids
     ):
         raise RuntimeError(
-            "swap_in_optimizer_state requires optimizer.state_dict()-style "
+            "swap_in_optimizer_params_and_state requires optimizer.state_dict()-style "
             "param_groups[*]['params'] entries keyed by packed parameter ids."
         )
     if len(group["params"]) != len(swapin_param_ids):
@@ -95,7 +94,7 @@ def _validate_group_against_live(
     missing_group_keys = [k for k in swapin_group if k != "params" and k not in group]
     if missing_group_keys:
         raise RuntimeError(
-            "swap_in_optimizer_state requires optimizer.state_dict()-style "
+            "swap_in_optimizer_params_and_state requires optimizer.state_dict()-style "
             "param group keys to match the live optimizer group keys. "
             f"Missing live keys for group {idx}: {missing_group_keys}"
         )
@@ -108,7 +107,7 @@ def _prepare_swap_in(
     swapin_optim_state: dict[str, Any],
 ) -> tuple[dict[Any, Any], list[_GroupSwapinInfo]]:
     """
-    Validate and normalize optimizer state for ``swap_in_optimizer_state``.
+    Validate and normalize optimizer state for ``swap_in_optimizer_params_and_state``.
 
     This follows the same structural assumptions as DCP-compatible optimizers,
     but consumes the raw ``optimizer.state_dict()`` format:
@@ -118,11 +117,11 @@ def _prepare_swap_in(
     """
     if not optimizer.state:
         raise RuntimeError(
-            "swap_in_optimizer_state requires initialized optimizer state."
+            "swap_in_optimizer_params_and_state requires initialized optimizer state."
         )
     if not isinstance(swapin_optim_state, dict):
         raise RuntimeError(
-            "swap_in_optimizer_state requires a DCP-style optimizer state_dict."
+            "swap_in_optimizer_params_and_state requires a DCP-style optimizer state_dict."
         )
     swapin_state = _validate_state_field(swapin_optim_state.get("state"))
     swapin_param_groups = _validate_param_groups_field(
@@ -148,7 +147,7 @@ def _prepare_swap_in(
         next_offset = flat_param_offset + len(swapin_param_ids)
         if next_offset > len(flat_parameters):
             raise RuntimeError(
-                "swap_in_optimizer_state requires the explicit parameter state to "
+                "swap_in_optimizer_params_and_state requires the explicit parameter state to "
                 "match optimizer.param_groups ordering."
             )
         swapin_params = flat_parameters[flat_param_offset:next_offset]
@@ -178,14 +177,14 @@ def _prepare_swap_in(
 
     if flat_param_offset != len(flat_parameters):
         raise RuntimeError(
-            "swap_in_optimizer_state requires the explicit parameter state to "
+            "swap_in_optimizer_params_and_state requires the explicit parameter state to "
             "match optimizer.param_groups ordering."
         )
 
     extra_keys = [k for k in swapin_state if k not in seen_param_ids]
     if extra_keys:
         raise RuntimeError(
-            "swap_in_optimizer_state requires swapin_optim_state['state'] to "
+            "swap_in_optimizer_params_and_state requires swapin_optim_state['state'] to "
             "be keyed only by packed parameter ids from "
             f"param_groups[*]['params']; got extra keys {extra_keys!r}."
         )
@@ -193,7 +192,7 @@ def _prepare_swap_in(
 
 
 @contextlib.contextmanager
-def swap_in_optimizer_state(
+def swap_in_optimizer_params_and_state(
     optimizer: "torch.optim.Optimizer",
     swapin_parameters: dict[str, Tensor],
     swapin_optim_state: dict[str, Any],
@@ -249,7 +248,7 @@ def swap_in_optimizer_state(
 
 
             def step_fn(params, osd):
-                with swap_in_optimizer_state(optimizer, params, osd):
+                with swap_in_optimizer_params_and_state(optimizer, params, osd):
                     optimizer.step()
                 return params, osd
 

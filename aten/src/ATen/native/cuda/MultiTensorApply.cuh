@@ -1,9 +1,6 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#if defined(USE_ROCM)
-#include <ATen/record_function.h>
-#endif
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -134,12 +131,6 @@ __global__ void multi_tensor_apply_kernel(
   callable(kChunkSize, tensorListMeta, args...);
 }
 
-inline void record_foreach_mta_launch() {
-#if defined(USE_ROCM)
-  RECORD_FUNCTION("aten::_foreach_mta_launch", {});
-#endif
-}
-
 } // namespace
 
 // multi_tensor_apply enables horizontal fusion across lists of tensors.
@@ -207,7 +198,6 @@ void multi_tensor_apply(
           (loc_block_info == depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
-        record_foreach_mta_launch();
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -240,7 +230,6 @@ void multi_tensor_apply(
   // if there's remaining work to be done but the tensors/blocks aren't full
   // yet we are at the end, submit the kernel to do the work!
   if (loc_block_info != 0) {
-    record_foreach_mta_launch();
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
@@ -295,7 +284,6 @@ void multi_tensor_apply(
           (loc_block_info == depth_to_max_blocks[depth - 1]);
 
       if (tensors_full || blocks_full) {
-        record_foreach_mta_launch();
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -325,7 +313,6 @@ void multi_tensor_apply(
 
   // see note: [finishing what we started]
   if (loc_block_info != 0) {
-    record_foreach_mta_launch();
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
@@ -379,7 +366,6 @@ void multi_tensor_apply_for_fused_optimizer(
       const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
 
       if (tensor_full || blocks_full) {
-        record_foreach_mta_launch();
         multi_tensor_apply_kernel<<<
             loc_block_info,
             kBlockSize,
@@ -409,7 +395,6 @@ void multi_tensor_apply_for_fused_optimizer(
 
   // see above note: [finishing what we've started]
   if (loc_block_info != 0) {
-    record_foreach_mta_launch();
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,

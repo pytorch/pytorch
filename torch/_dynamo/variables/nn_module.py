@@ -210,8 +210,7 @@ class NNModuleVariable(VariableTracker):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        if not res:
-            raise AssertionError("nn_module_stack_source must not be None")
+        assert res
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -219,9 +218,6 @@ class NNModuleVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.module_type
-
-    def get_id(self, tx: "InstructionTranslator") -> int | None:
-        return id(tx.output.get_submodule(self.module_key))
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -265,12 +261,9 @@ class NNModuleVariable(VariableTracker):
                 result.append(name_var)
             return result
 
-        if not isinstance(
+        assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
-        ):
-            raise AssertionError(
-                f"Expected ModuleList, ParameterList, or Sequential, got {typestr(base)}"
-            )
+        ), typestr(base)
         for idx, submod in enumerate(base):
             result.append(
                 tx.output.register_attr_or_module(
@@ -509,10 +502,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                if is_lazy:
-                    raise AssertionError(
-                        "Expected lazy sequential isn't a valid combination?"
-                    )
+                assert not is_lazy, (
+                    "Expected lazy sequential isn't a valid combination?"
+                )
                 if kwargs:
                     raise_args_mismatch(
                         tx,
@@ -589,8 +581,7 @@ class NNModuleVariable(VariableTracker):
                     fn_source = AttrSource(fn_source, "__func__")
                     args = [self] + list(args)
                 else:
-                    if not istype(fn, types.FunctionType):
-                        raise AssertionError(f"Expected FunctionType, got {type(fn)}")
+                    assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
@@ -604,6 +595,8 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
+        # TODO(follow-up): add tests for ModuleList negative index, ModuleList/Sequential
+        # slice, ModuleDict missing key, invalid key types
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
@@ -631,8 +624,7 @@ class NNModuleVariable(VariableTracker):
                 )
             fn = module.__getitem__.__func__  # pyrefly: ignore[missing-attribute]
 
-            if not isinstance(fn, types.FunctionType):
-                raise AssertionError(f"Expected FunctionType, got {type(fn)}")
+            assert isinstance(fn, types.FunctionType)
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
@@ -1034,8 +1026,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
-        if not res:
-            raise AssertionError("nn_module_stack_source must not be None")
+        assert res
         return res
 
     def set_nn_module_stack_source(self, source: Source) -> None:
@@ -1371,10 +1362,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     f"'{type(self.value).__name__}' object has no attribute '{name}'"
                 ],
             )
-        if out is None:
-            raise AssertionError(
-                f"manually_trace_nn_module_getattr failed to find attribute '{name}'"
-            )
+        assert out is not None
         return out
 
 
@@ -1402,10 +1390,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value: torch.nn.Module, **kwargs: Any) -> None:
         source = kwargs.get("source")
-        if source is None:
-            raise AssertionError(
-                "FSDPManagedNNModule depends on having an accurate source to control guarding."
-            )
+        assert source is not None, (
+            "FSDPManagedNNModule depends on having an accurate source to control guarding."
+        )
 
         super().__init__(value=value, **kwargs)
         self.source = source

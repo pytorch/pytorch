@@ -19,7 +19,6 @@
 
 #if GLOO_HAVE_TRANSPORT_IBVERBS
 #include <gloo/transport/ibverbs/device.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 #endif
 
 // On Linux, check that the tcp transport is available.

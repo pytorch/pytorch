@@ -388,7 +388,6 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
-        super().setUp()
         # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4

@@ -604,7 +604,7 @@ class GraphLowering(torch.fx.Interpreter):
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
             # NB: This is using the legacy default behavior from
-            # transfer_symbols_from_foreign_shape_env but we hope we can
+            # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
                 f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
@@ -613,10 +613,8 @@ class GraphLowering(torch.fx.Interpreter):
                 size,
                 stride,
                 _,
-            ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
-                ex.size(),
-                ex.stride(),
-                ex.storage_offset(),
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
+                ex,
                 source,
             )
 
@@ -932,8 +930,8 @@ class GraphLowering(torch.fx.Interpreter):
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
-           We need to convert it to channels last layout which results in the second copy.
-        With rule 2, we make sure all the tensors in the chain use channels last layout. So both copies
+           We need convert it to channels last layout which results in the second copy.
+        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
         can be saved.
         """
         last_conv = None
@@ -1440,9 +1438,7 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
-                "fallback_to_eager"
-            ):
+            if "should_fallback" in n.meta:
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1839,7 +1835,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                is_call_function
+                n.op == "call_function"
                 # this path only for built-in operators
                 and n.target
                 and isinstance(n.target, torch._ops.OpOverload)
@@ -1922,7 +1918,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            # 2: as_strided ops, we need to make sure its input has same size/stride with
+            # 2: as_strided ops, we need make sure its input has same size/stride with
             # eager model to align with eager behavior.
             as_strided_ops = [
                 torch.ops.aten.as_strided.default,

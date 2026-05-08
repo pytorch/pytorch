@@ -209,8 +209,7 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
         backend = lookup_backend(value_str)
 
         # Register the backend so its reset() is called during torch._dynamo.reset()
-        if backend is None:
-            raise AssertionError("Invalid override backend: " + value_str)
+        assert backend is not None, "Invalid override backend: " + value_str
         cached_backends.setdefault(id(backend), backend)
         self._backend_names[id(backend)] = value_str
         return backend

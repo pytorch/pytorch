@@ -219,7 +219,8 @@ class CppWrapperMps(CppWrapperGpu):
         )
 
     @staticmethod
-    def get_device_include_path_aot(device: str) -> str:
+    def get_device_include_path(device: str) -> str:
+        assert V.graph.aot_mode
         return (
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"

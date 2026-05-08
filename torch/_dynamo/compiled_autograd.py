@@ -52,6 +52,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
+    decompose,
     disable_autocast_cache,
     disable_proxy_modes_tracing,
     fetch_object_proxy,
@@ -136,32 +137,20 @@ class NaNChecker:
             op="call_function", target=call_accumulate_grad
         )
         output_nodes = graph.find_nodes(op="output")[0].args[0]
-        if self.accumulate_grad != bool(acc_grad_nodes):
-            raise AssertionError(
-                f"accumulate_grad mismatch: expected {self.accumulate_grad}, "
-                f"got {bool(acc_grad_nodes)} acc_grad_nodes"
-            )
-        if self.accumulate_grad != (not output_nodes):
-            raise AssertionError(
-                f"accumulate_grad mismatch with output_nodes: expected {self.accumulate_grad}, "
-                f"got {not output_nodes}"
-            )
+        assert self.accumulate_grad == bool(
+            acc_grad_nodes
+        ) and self.accumulate_grad == (not output_nodes)
 
         for node in acc_grad_nodes:
             param_node = node.args[0]
             # AccumulateGrad always saves a reference to the param
             # so Compiled Autograd will always lift the param and
             # this should always be true
-            if param_node.target is not operator.getitem:
-                raise AssertionError(
-                    f"Expected param_node target to be operator.getitem, got {param_node.target}"
-                )
-            if param_node.args[0] is not inputs_node:  # type: ignore[possibly-undefined]
-                raise AssertionError("Expected param_node.args[0] to be inputs_node")
-            if not isinstance(param_node.args[1], int):
-                raise AssertionError(
-                    f"Expected param_node.args[1] to be int, got {type(param_node.args[1])}"
-                )
+            assert (
+                param_node.target is operator.getitem
+                and param_node.args[0] is inputs_node  # type: ignore[possibly-undefined]
+                and isinstance(param_node.args[1], int)
+            )
             self.params_indices.append(param_node.args[1])
 
         self.output_names = [node.name for node in output_nodes]
@@ -175,27 +164,20 @@ class NaNChecker:
         for idx in self.params_indices:
             grad = inputs[idx].grad
             if grad is not None:
-                if torch.isnan(grad).any():
-                    raise AssertionError(
-                        f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                        f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
-                    )
+                assert not torch.isnan(grad).any(), (
+                    f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
+                    f"having NaN gradient. This is not supported. {TURN_OFF_MSG}"
+                )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
 
     def check(self, out: tuple[torch.Tensor, ...]) -> None:
         if self.accumulate_grad:
             # Using .backward, graph outputs are empty
-            if out:
-                raise AssertionError(
-                    "Expected empty output for accumulate_grad backward"
-                )
+            assert not out
             nan_params: list[str] = []
             for inputs_str, param in self.params_to_check.items():
-                if param.grad is None:  # not true for autograd.grad
-                    raise AssertionError(
-                        "Expected param.grad to be non-None for backward mode"
-                    )
+                assert param.grad is not None  # not true for autograd.grad
                 if torch.isnan(param.grad).any():
                     nan_params.append(inputs_str)
 
@@ -238,8 +220,7 @@ class OpNamespace:
             self.custom_function_name_counter[name] += 1
             name = f"{name}{count}"
 
-        if hasattr(self, name):
-            raise AssertionError(f"Op with name '{name}' already exists")
+        assert not hasattr(self, name)
         result = Op(name, fn, is_custom_function)
         if is_traceable:
             # pyrefly: ignore [deprecated]
@@ -318,8 +299,7 @@ class AutogradCompilerInstance:
         self.hooks_proxy: Proxy | None = None
 
     def wrap_fake(self, x: torch.Tensor, source: Source | None) -> FakeTensor:
-        if not isinstance(x, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
+        assert isinstance(x, torch.Tensor)
         return self.fake_tensor_mode.from_tensor(x, source=source)
 
     @staticmethod
@@ -431,12 +411,12 @@ class AutogradCompilerInstance:
             self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
         # TODO(jansel): are all these modes needed?
+        self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         # Needed to make sure we don't accidentally specialize any symbols
-        if self.fake_tensor_mode.shape_env is None:
-            raise AssertionError("fake_tensor_mode.shape_env must not be None")
+        assert self.fake_tensor_mode.shape_env is not None
         env = self.fake_tensor_mode.shape_env
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
@@ -453,8 +433,7 @@ class AutogradCompilerInstance:
         self,
         compile_reasons: list[str],
     ) -> None:
-        if not compile_reasons:
-            raise AssertionError("compile_reasons must not be empty")
+        assert compile_reasons
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -498,8 +477,6 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
-        bw_prologue_fn = CompiledFunction._bw_prologue_fn
-        bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
         if torch.is_grad_enabled():
@@ -516,12 +493,15 @@ class AutogradCompilerInstance:
             ctx_opaque_objs: Sequence[Any],
             flat_args: Sequence[Any],
         ) -> Any:
-            return bw_prologue_fn(
+            out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
                 ctx_symints,
                 ctx_opaque_objs,
+                metadata,
+                maybe_subclass_metadata,
                 flat_args,
             )
+            return out
 
         pgrads = self.fx_tracer.create_proxy(
             kind="call_function",
@@ -560,10 +540,7 @@ class AutogradCompilerInstance:
             ]
             # replace the symints with our symints
             symints = ctx._get_compiled_autograd_symints()
-            if len(symints) != len(ctx.symints):
-                raise AssertionError(
-                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"
-                )
+            assert len(symints) == len(ctx.symints)
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
             # Add backward_state
@@ -595,10 +572,7 @@ class AutogradCompilerInstance:
                     value_remap[node] = ph
                     args_idx += 1
                 elif node.op == "output":
-                    if len(node.args) != 1:
-                        raise AssertionError(
-                            f"Expected output node to have 1 arg, got {len(node.args)}"
-                        )
+                    assert len(node.args) == 1
                     poutputs = [
                         torch.fx.Proxy(value_remap[n], self.fx_tracer)
                         if isinstance(n, torch.fx.Node)
@@ -635,8 +609,7 @@ class AutogradCompilerInstance:
                 else:
                     raise AssertionError("shouldn't get here")
 
-            if poutputs is None:
-                raise AssertionError("No output node found in backward graph")
+            assert poutputs is not None
 
             # In general we don't know what the shapes of the outputs are, so allocate
             # some dummy sizes for them.
@@ -652,39 +625,33 @@ class AutogradCompilerInstance:
 
         outputs = copy_paste_aot_backward_graph()
 
-        if maybe_subclass_metadata is not None:
+        def proxy_subclass_constructor(
+            subclass_meta: Any, is_runtime: bool, unwrapped_args: Sequence[Any]
+        ) -> torch.Tensor:
+            @torch._dynamo.allow_in_graph  # type: ignore[misc]
+            def make_subclass(*unwrapped_args: Any) -> Any:
+                return subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
 
-            def proxy_subclass_constructor(
-                subclass_meta: Any,
-                is_runtime: bool,
-                unwrapped_args: Sequence[Any],
-            ) -> torch.Tensor:
-                @torch._dynamo.allow_in_graph  # type: ignore[misc]
-                def make_subclass(*unwrapped_args: Any) -> Any:
-                    return subclass_meta.creation_fn(
-                        unwrapped_args, is_runtime=is_runtime
-                    )
+            punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
 
-                punwrapped_args = pytree.tree_map(self.to_proxy, unwrapped_args)
-
-                poutput = self.fx_tracer.create_proxy(
-                    kind="call_function",
-                    # pyrefly: ignore [bad-argument-type]
-                    target=make_subclass,
-                    args=tuple(punwrapped_args),
-                    kwargs={},
-                )
-
-                output = self.allocate_dummy()
-                self.bind_objects_to_proxies([output], [poutput])
-                return output
-
-            results = bw_epilogue_fn(
-                outputs, make_subclass_override=proxy_subclass_constructor
+            poutput = self.fx_tracer.create_proxy(
+                kind="call_function",
+                # pyrefly: ignore [bad-argument-type]
+                target=make_subclass,
+                args=tuple(punwrapped_args),
+                kwargs={},
             )
-        else:
-            results = bw_epilogue_fn(outputs)
 
+            output = self.allocate_dummy()
+            self.bind_objects_to_proxies([output], [poutput])
+            return output
+
+        results = torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
+            metadata,
+            maybe_subclass_metadata,
+            outputs,
+            make_subclass_override=proxy_subclass_constructor,
+        )
         presults = pytree.tree_map(self.to_proxy, results)
         return presults
 
@@ -698,8 +665,7 @@ class AutogradCompilerInstance:
         maybe_backward_state_idx: int | None,
         opaque_object_indices: list[int],
     ) -> tuple[torch.Tensor | None, ...]:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before proxy_call_backward")
+        assert self.hooks_proxy is not None
         pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
         pinputs = self.to_proxy(inputs)
         psaved_tensors = self.to_proxy(saved_tensors)
@@ -730,8 +696,7 @@ class AutogradCompilerInstance:
                 ),
                 kwargs={},
             )
-        if proxies is None:
-            raise AssertionError("proxies must not be None after backward call")
+        assert proxies is not None
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
@@ -829,10 +794,7 @@ class AutogradCompilerInstance:
         new_proxy_outputs = self.fx_tracer.create_proxy(
             "call_function", op, args=proxy_args, kwargs={}
         )
-        if len(output_metadata) != len(outputs):
-            raise AssertionError(
-                f"output_metadata length ({len(output_metadata)}) != outputs length ({len(outputs)})"
-            )
+        assert len(output_metadata) == len(outputs)
         self.bind_objects_to_proxies(outputs, new_proxy_outputs)
         return outputs
 
@@ -874,8 +836,7 @@ class AutogradCompilerInstance:
         )
 
     def unpack_hook(self, hook_id: int, data_id: int) -> torch.Tensor:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before unpack_hook")
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         data = self.packed_data_proxy[data_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
@@ -890,8 +851,7 @@ class AutogradCompilerInstance:
     def tensor_pre_hook(
         self, inputs: list[torch.Tensor], hook_id: int, i: int
     ) -> list[torch.Tensor]:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before tensor_pre_hook")
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
@@ -918,8 +878,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def pre_hook(self, inputs: Sequence[Any], hook_id: int) -> list[torch.Tensor]:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before pre_hook")
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
@@ -934,8 +893,7 @@ class AutogradCompilerInstance:
     def post_hook(
         self, outputs: list[torch.Tensor], inputs: Sequence[torch.Tensor], hook_id: int
     ) -> list[torch.Tensor]:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before post_hook")
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
@@ -951,10 +909,8 @@ class AutogradCompilerInstance:
     def post_acc_grad_hook(
         self, input: torch.Tensor, hook_id: int
     ) -> list[torch.Tensor]:
-        if not isinstance(input, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(input)}")
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before post_acc_grad_hook")
+        assert isinstance(input, torch.Tensor)
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
@@ -975,19 +931,14 @@ class AutogradCompilerInstance:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
         nodes = list(graph.nodes)
-        if nodes[0].target != "inputs":
-            raise AssertionError(
-                f"Expected first node target to be 'inputs', got '{nodes[0].target}'"
-            )
+        assert nodes[0].target == "inputs"
         inputs = nodes[0]
         inputs_users = list(inputs.users.keys())
         # input access nodes should immediately follow placeholder nodes
         first_getitem_idx = len(_graph_placeholders)
-        if nodes[first_getitem_idx] != inputs_users[0]:
-            raise AssertionError("First getitem node does not match first inputs user")
+        assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
-        if nodes[last_getitem_idx] != inputs_users[-1]:
-            raise AssertionError("Last getitem node does not match last inputs user")
+        assert nodes[last_getitem_idx] == inputs_users[-1]
         # getitem nodes on inputs
         for i, node in enumerate(inputs_users):
             if not has_cuda_inputs and node.meta["val"].device.type == "cuda":
@@ -1042,10 +993,7 @@ class AutogradCompilerInstance:
         i: int | None = None
         for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
             unpack_nodes.update(node.users.keys())
-        if i != len(_graph_placeholders) - 1:
-            raise AssertionError(
-                f"Expected {len(_graph_placeholders) - 1} placeholders, got {i}"
-            )
+        assert i == len(_graph_placeholders) - 1
 
         def is_impure(node: torch.fx.Node) -> bool:
             if node in unpack_nodes or (
@@ -1067,16 +1015,10 @@ class AutogradCompilerInstance:
         it = iter(self.fx_tracer.graph.nodes)
         next(it)
         sizes_node = next(it)
-        if sizes_node.name != "sizes":
-            raise AssertionError(
-                f"Expected placeholder 'sizes', got '{sizes_node.name}'"
-            )
+        assert sizes_node.name == "sizes"
 
         for getitem_node in sizes_node.users:
-            if getitem_node.target is not operator.getitem:
-                raise AssertionError(
-                    f"Expected operator.getitem target, got {getitem_node.target}"
-                )
+            assert getitem_node.target is operator.getitem
             if getitem_node.users:
                 used_sizes.append(getitem_node)
             else:
@@ -1085,16 +1027,9 @@ class AutogradCompilerInstance:
 
         used_sizes_idx: set[int] = set()
         for used in used_sizes:
-            if not isinstance(used.args, tuple):
-                raise AssertionError(
-                    f"Expected used.args to be tuple, got {type(used.args)}"
-                )
-            if used.args[0] != sizes_node:
-                raise AssertionError("Expected used.args[0] to be sizes_node")
-            if not isinstance(used.args[1], int):
-                raise AssertionError(
-                    f"Expected used.args[1] to be int, got {type(used.args[1])}"
-                )
+            assert isinstance(used.args, tuple)
+            assert used.args[0] == sizes_node
+            assert isinstance(used.args[1], int)
             next_size_idx = len(used_sizes_idx)
             # used later reindex the runtime sizes arg
             used_sizes_idx.add(used.args[1])
@@ -1364,13 +1299,10 @@ class AutogradCompilerInstance:
                 continue
 
             # users are all getitem ops and they are used by same registered node
-            if not all(
+            assert all(
                 user.op == "call_function" and user.target is operator.getitem
                 for user in users
-            ):
-                raise AssertionError(
-                    "Expected all users of pre_hook to be operator.getitem call_function nodes"
-                )
+            )
             registered_node = next(iter(users[0].users.keys()))
 
             if registered_node is not node.next:
@@ -1407,10 +1339,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            if acc_grad_node is None:
-                raise AssertionError(
-                    "post_acc_grad_hook must have corresponding acc grad node"
-                )
+            assert acc_grad_node is not None, (
+                "post_acc_grad_hook must have corresponding acc grad node"
+            )
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
@@ -1487,10 +1418,7 @@ class AutogradCompilerInstance:
             # constant types like device, dtype, str
             return t
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
-        if not isinstance(
-            proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor
-        ):
-            raise AssertionError(f"Expected _ProxyTensor, got {type(proxy_tensor)}")
+        assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
 
     def bind_objects_to_proxies(
@@ -1501,10 +1429,7 @@ class AutogradCompilerInstance:
     ) -> Sequence[Any]:
         if isinstance(proxies, torch.fx.Proxy):
             if origins:
-                if len(origins) != len(objects):
-                    raise AssertionError(
-                        f"origins length ({len(origins)}) != objects length ({len(objects)})"
-                    )
+                assert len(origins) == len(objects)
                 bound_proxies = []
                 for i in range(len(objects)):
                     nodecall_index, node_name = origins[i]
@@ -1514,16 +1439,12 @@ class AutogradCompilerInstance:
             else:
                 proxies = [proxies[i] for i in range(len(objects))]  # type: ignore[index]
 
-        if len(objects) != len(proxies):
-            raise AssertionError(
-                f"objects length ({len(objects)}) != proxies length ({len(proxies)})"
-            )
+        assert len(objects) == len(proxies)
         track_tensor_tree(objects, proxies, constant=None, tracer=self.fx_tracer)
         return proxies
 
     def bind_backward_state(self, index: int) -> BackwardState:
-        if self.hooks_proxy is None:
-            raise AssertionError("hooks_proxy must be set before bind_backward_state")
+        assert self.hooks_proxy is not None
         proxy = self.hooks_proxy[index]  # type: ignore[index]
         bw_state = BackwardState()
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
@@ -1598,10 +1519,7 @@ def _enable(
         yield
     else:
         if dynamic:
-            if type(dynamic) is not bool:
-                raise AssertionError(
-                    f"Expected dynamic to be bool, got {type(dynamic)}"
-                )
+            assert type(dynamic) is bool
 
         from torch._dynamo import eval_frame
 
@@ -1643,10 +1561,9 @@ def _enable(
                     prior_compiler, prior_dynamic
                 )
                 depth -= 1
-                if depth != prior_depth:
-                    raise AssertionError(
-                        "Nested Compiled Autograd Contexts must return before their parent context"
-                    )
+                assert depth == prior_depth, (
+                    "Nested Compiled Autograd Contexts must return before their parent context"
+                )
 
 
 @contextlib.contextmanager
@@ -1675,8 +1592,7 @@ def _disable() -> Generator[None, None, None]:
 def reset() -> None:
     global compiled_autograd_enabled
     compiled_autograd_enabled = False
-    if in_compiled_autograd_region:
-        raise AssertionError("Cannot reset while in_compiled_autograd_region is True")
+    assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
     torch._C._dynamo.compiled_autograd.clear_cache()
@@ -1697,8 +1613,7 @@ def copy_slices_prologue(
 ) -> list[torch.Tensor]:
     grad = inputs[0]
     result = grad.new_empty_strided(base_sizes, base_strides)
-    if grad is None:
-        raise AssertionError("grad must not be None in copy_slices_prologue")
+    assert grad is not None
     result.copy_(grad)
     offset = view_storage_offset - base_storage_offset
     grad_slice = result.as_strided(view_sizes, view_strides, offset)
@@ -1720,10 +1635,7 @@ def copy_slices_epilogue(
                 continue
             if i == 0:
                 to_copy = res[i]
-                if to_copy is None:
-                    raise AssertionError(
-                        "res[0] must not be None for needs_input_grad[0]"
-                    )
+                assert to_copy is not None
                 grad_slice.copy_(to_copy)
                 grad_inputs[i] = result
             else:

@@ -196,14 +196,16 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 )
             if input_.dim() != 2:
                 raise RuntimeError(
-                    f"1D target tensor expects 2D input tensors, "
-                    f"but found inputs with size {input_.size()}"
+                    "1D target tensor expects 2D input tensors, "
+                    "but found inputs with size",
+                    input_.size(),
                 )
         elif targ_dim == 0:
             if input_.dim() != 1:
                 raise RuntimeError(
-                    f"0D target tensor expects 1D input tensors, "
-                    f"but found inputs with size {input_.size()}"
+                    "0D target tensor expects 1D input tensors, "
+                    "but found inputs with size",
+                    input_.size(),
                 )
         else:
             raise RuntimeError(

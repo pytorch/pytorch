@@ -1,8 +1,6 @@
 #!/bin/bash
 # Script used only in CD pipeline
 
-set -ex
-
 PREFIX="$1"
 
 ###########################

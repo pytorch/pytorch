@@ -244,13 +244,11 @@ class PyTorchOperatorTestCase:
         """
         self.mean = self.output.mean()
 
-    def run_backward(self, num_runs, print_per_iter=False, cuda_sync=False):
+    def run_backward(self, num_runs, print_per_iter=False):
         """Run the backward path of an op in many iterations"""
         # TODO: can we use JIT here to reduce python overhead?
         for _ in range(num_runs):
             self.mean.backward(retain_graph=True)
-        if cuda_sync:
-            torch.cuda.synchronize()
 
 
 def create_pytorch_op_test_case(op_bench, test_config):

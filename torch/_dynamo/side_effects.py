@@ -213,17 +213,13 @@ class SideEffects:
         check_allowed_side_effect.
         """
         key = (id(item), name)
-        if not value.is_python_constant():
-            raise AssertionError(
-                "value must be a python constant (guaranteed by caller store_attr)"
-            )
+        assert value.is_python_constant()  # guaranteed by caller (store_attr)
         current = value.as_python_constant()
         if key in self.deferred_attr_mutations:
             original = self.deferred_attr_mutations[key][0]
         else:
             output_graph = self.output_graph_weakref()
-            if output_graph is None:
-                raise AssertionError("output_graph weakref is dead")
+            assert output_graph is not None
             tx = output_graph.current_tx
             try:
                 original_vt = item.var_getattr(tx, name)  # type: ignore[arg-type]
@@ -263,8 +259,7 @@ class SideEffects:
         )
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, SideEffects):
-            raise AssertionError(f"Expected SideEffects, got {type(other)}")
+        assert isinstance(other, SideEffects)
         # NB: do NOT test keepalive
         return (
             self.id_to_variable == other.id_to_variable
@@ -298,8 +293,7 @@ class SideEffects:
     def clone(self) -> "SideEffects":
         """Create a shallow copy"""
         ref = self.output_graph_weakref()
-        if ref is None:
-            raise AssertionError("output_graph weakref is dead during clone")
+        assert ref is not None
         return self.__class__(
             output_graph=ref,
             id_to_variable=dict(self.id_to_variable),
@@ -380,10 +374,7 @@ class SideEffects:
                     *graph_break_hints.FUNDAMENTAL,
                 ],
             )
-        if item.mutation_type is None:
-            raise AssertionError(
-                f"mutation_type is None for {item} in check_allowed_side_effect"
-            )
+        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 gb_type="HOP: Unsafe side effect",
@@ -401,10 +392,7 @@ class SideEffects:
     def store_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
-        if not self.is_attribute_mutation(item):
-            raise AssertionError(
-                f"Expected attribute mutation for {item} in store_attr"
-            )
+        assert self.is_attribute_mutation(item)
         # For constant attribute mutations on outer-scope objects, defer
         # the side-effect check and validate after tracing that the
         # mutation was nullified (value restored to original).
@@ -437,10 +425,7 @@ class SideEffects:
         check: bool = False,
     ) -> VariableTracker:
         if check:
-            if not self.is_attribute_mutation(item):
-                raise AssertionError(
-                    f"Expected attribute mutation for {item} in load_attr"
-                )
+            assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented(
@@ -459,21 +444,12 @@ class SideEffects:
                 explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
                 hints=[*graph_break_hints.DIFFICULT],
             )
-        if not isinstance(cellvar, variables.CellVariable):
-            raise AssertionError(
-                f"Expected CellVariable, got {type(cellvar)} in store_cell"
-            )
-        if not isinstance(value, variables.VariableTracker):
-            raise AssertionError(
-                f"Expected VariableTracker, got {type(value)} in store_cell"
-            )
+        assert isinstance(cellvar, variables.CellVariable)
+        assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
-        if not isinstance(cellvar, variables.CellVariable):
-            raise AssertionError(
-                f"Expected CellVariable, got {type(cellvar)} in load_cell"
-            )
+        assert isinstance(cellvar, variables.CellVariable)
         # Track the cell_contents source during subgraph tracing so that
         # mutations (e.g. nonlocal counter = 3) are detected by the reuse
         # mechanism via set intersection with mutated_sources.
@@ -496,23 +472,14 @@ class SideEffects:
         )
 
     def load_global(self, gvar: VariableTracker, name: str) -> VariableTracker:
-        if not isinstance(gvar, variables.VariableTracker):
-            raise AssertionError(
-                f"Expected VariableTracker, got {type(gvar)} in load_global"
-            )
+        assert isinstance(gvar, variables.VariableTracker)
         return self.load_attr(gvar, name)
 
     def store_global(
         self, gvar: VariableTracker, name: str, value: VariableTracker
     ) -> None:
-        if not isinstance(gvar, variables.VariableTracker):
-            raise AssertionError(
-                f"Expected VariableTracker for gvar, got {type(gvar)} in store_global"
-            )
-        if not isinstance(value, variables.VariableTracker):
-            raise AssertionError(
-                f"Expected VariableTracker for value, got {type(value)} in store_global"
-            )
+        assert isinstance(gvar, variables.VariableTracker)
+        assert isinstance(value, variables.VariableTracker)
         self.store_attr(gvar, name, value)
 
     @staticmethod
@@ -554,8 +521,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-        if item.mutation_type is None:
-            raise AssertionError(f"mutation_type is None for {item} in is_modified")
+        assert item.mutation_type is not None
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
@@ -665,10 +631,7 @@ class SideEffects:
             variable_cls = variables.UserDefinedConstantVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
-        if not issubclass(variable_cls, variables.UserDefinedObjectVariable):
-            raise AssertionError(
-                f"Expected subclass of UserDefinedObjectVariable, got {variable_cls}"
-            )
+        assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 
     def get_example_value(
@@ -693,10 +656,9 @@ class SideEffects:
             else:
                 raise RuntimeError(f"Unexpected base_cls_vt {base_cls_vt}")
 
-            if not variables.UserDefinedClassVariable.is_supported_new_method(
+            assert variables.UserDefinedClassVariable.is_supported_new_method(
                 base_cls.__new__
-            ):
-                raise AssertionError(f"Unsupported __new__ method for {base_cls}")
+            )
             if is_structseq_class(user_cls):
                 # Structseq tp_new requires a sequence argument and rejects
                 # tuple.__new__, so create a dummy with None placeholders.
@@ -788,10 +750,7 @@ class SideEffects:
     def track_save_for_backward(
         self, ctx: VariableTracker, args: list[VariableTracker]
     ) -> None:
-        if not isinstance(ctx, variables.AutogradFunctionContextVariable):
-            raise AssertionError(
-                f"Expected AutogradFunctionContextVariable, got {type(ctx)}"
-            )
+        assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
     def track_runahead_tensor_and_symvar_side_effects(
@@ -852,10 +811,7 @@ class SideEffects:
                 # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
                 # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
                 # to the resume function creation as well.
-                if cur_tx.post_prune_cell_and_freevars is None:
-                    raise AssertionError(
-                        "post_prune_cell_and_freevars is None for non-root tx"
-                    )
+                assert cur_tx.post_prune_cell_and_freevars is not None
                 init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
         VariableTracker.visit(
@@ -916,11 +872,7 @@ class SideEffects:
         # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
         for var in self._get_modified_vars():
             if not isinstance(var.mutation_type, AttributeMutationNew):
-                if var.source is None:
-                    raise AssertionError(
-                        f"Expected source for modified var {var} "
-                        "with non-new mutation type"
-                    )
+                assert var.source is not None
                 continue
 
             # Namedtuples/structseqs with no pending mutations should skip
@@ -986,10 +938,7 @@ class SideEffects:
 
                     def load_new_method() -> None:
                         # pyrefly: ignore [missing-attribute]
-                        if var.base_cls_vt is None:
-                            raise AssertionError(
-                                "base_cls_vt is None in load_new_method"
-                            )
+                        assert var.base_cls_vt is not None
                         cg(var.base_cls_vt)  # type: ignore[attr-defined]
                         cg.extend_output([cg.create_load_attr("__new__")])
 
@@ -998,20 +947,7 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
-                if var.mutation_type.cls_source is None:
-                    unimplemented(
-                        gb_type="Reconstruct user defined class without a source",
-                        context=f"Class: {var.python_type().__name__}",
-                        explanation=(
-                            f"Cannot reconstruct an instance of {var.python_type().__name__} "
-                            "that escapes the compiled region. This happens when the class is "
-                            "defined dynamically (e.g., inside the compiled function) and the "
-                            "class object itself has no source that can be reconstructed. "
-                            "To fix this, move the class definition outside the compiled function "
-                            "or prevent the object from escaping the compiled region."
-                        ),
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
+                assert var.mutation_type.cls_source is not None
                 cg(var.mutation_type.cls_source)
 
                 # Generate the args to the __new__ method
@@ -1063,27 +999,19 @@ class SideEffects:
         handle: "variables.RemovableHandleVariable",
         name: str,
     ) -> None:
-        if not tensor.is_tensor():
-            raise AssertionError(
-                f"Expected tensor variable, got {type(tensor)} in register_hook"
-            )
-        if not isinstance(hook, variables.VariableTracker):
-            raise AssertionError(f"Expected VariableTracker for hook, got {type(hook)}")
-        if not isinstance(handle, variables.RemovableHandleVariable):
-            raise AssertionError(
-                f"Expected RemovableHandleVariable, got {type(handle)}"
-            )
-        if not handle.is_mutable():
-            raise AssertionError("handle must be mutable in register_hook")
-        if not hasattr(torch.Tensor, name):
-            raise AssertionError(f"torch.Tensor has no attribute '{name}'")
+        assert tensor.is_tensor()
+        assert isinstance(hook, variables.VariableTracker)
+        assert (
+            isinstance(handle, variables.RemovableHandleVariable)
+            and handle.is_mutable()
+        )
+        assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
         # duplicate index possible because of self.remove_hook()
         while idx in self.tensor_hooks:
             idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
-        if handle.idx:
-            raise AssertionError(f"handle.idx should be falsy, got {handle.idx}")
+        assert not handle.idx
         handle.idx = idx
 
     def remove_hook(self, idx: int) -> None:
@@ -1129,10 +1057,7 @@ class SideEffects:
             #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
             #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
-            if not tensor.source:
-                raise AssertionError(
-                    "Hooks on non input tensors NYI - should not get here"
-                )
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
 
             def gen_fn() -> None:
                 cg(tensor)
@@ -1158,11 +1083,7 @@ class SideEffects:
 
     def _format_side_effect_message(self, var: VariableTracker) -> str:
         """Format a side effect log message with user stack."""
-        if config.side_effect_replay_policy == "silent":
-            raise AssertionError(
-                "_format_side_effect_message should not be called "
-                "when side_effect_replay_policy is 'silent'"
-            )
+        assert config.side_effect_replay_policy != "silent"
         locations = self.mutation_user_stacks.get(var, [])
         description = f"Mutating object of type {var.python_type_name()}"
         source_info = " (no source)"
@@ -1515,11 +1436,7 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
-                            raise AssertionError(
-                                f"Expected GlobalSource for NewGlobalVariable, "
-                                f"got {type(var.source)}"  # type: ignore[attr-defined]
-                            )
+                        assert isinstance(var.source, GlobalSource)  # type: ignore[attr-defined]
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )

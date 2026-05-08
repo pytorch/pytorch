@@ -11,7 +11,6 @@ class TestDSLRegistry(TestCase):
 
     def setUp(self):
         """Set up clean registry state for each test"""
-        super().setUp()
         # Import registry here to avoid import-time side effects
         from torch._native.dsl_registry import DSLRegistry
 

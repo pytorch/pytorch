@@ -40,6 +40,4 @@ output compared to non-checkpointed passes is never guaranteed.
 .. autoclass:: SelectiveCheckpointContext
 .. autofunction:: create_selective_checkpoint_contexts
 .. autoclass:: GraphExecGroup
-.. autofunction:: set_checkpoint_early_stop
-.. autofunction:: set_device_states
 ```

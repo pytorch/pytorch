@@ -53,14 +53,12 @@ class ExecutionRecord:
     code_options: dict[str, Any] = field(default_factory=dict)
 
     def dump(self, f: IO[str] | BufferedWriter) -> None:
-        if dill is None:
-            raise AssertionError("replay_record requires `pip install dill`")
+        assert dill is not None, "replay_record requires `pip install dill`"
         dill.dump(self, f)
 
     @classmethod
     def load(cls, f: IO[bytes] | BufferedReader) -> Self:
-        if dill is None:
-            raise AssertionError("replay_record requires `pip install dill`")
+        assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 
 
@@ -89,8 +87,7 @@ class ExecutionRecorder:
             self.globals[name] = var
 
     def add_local_mod(self, name: str, mod: ModuleType) -> None:
-        if not isinstance(mod, ModuleType):
-            raise AssertionError(f"Expected ModuleType, got {type(mod)}")
+        assert isinstance(mod, ModuleType)
         self.add_global_var(name, mod)
 
     def record_module_access(self, mod: ModuleType, name: str, val: Any) -> None:
