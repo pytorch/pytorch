@@ -811,7 +811,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx: Any,
         grad_out: Tensor,
         grad_logsumexp: Tensor,
-        grad_max_scores: Tensor,
+        _grad_max_scores: Tensor,
     ) -> tuple[Tensor | None, ...]:
         fw_args = saved_values(ctx)
         (

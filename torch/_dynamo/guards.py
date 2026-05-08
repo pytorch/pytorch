@@ -4777,7 +4777,7 @@ class CheckFunctionManager:
     def compile_check_fn(
         self,
         builder: GuardBuilder,
-        guards_out: list[Guard],
+        _guards_out: list[Guard],
         guard_fail_fn: Callable[[GuardFail], None] | None,
     ) -> None:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c

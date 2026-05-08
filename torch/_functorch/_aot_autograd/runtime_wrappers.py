@@ -3361,7 +3361,7 @@ class _AOTDispatchAutogradFunctionFactory:
                 )
                 rng_state.add_backward_args(ctx, all_args)
 
-                def impl_fn(double_ctx: Any = None) -> Any:
+                def impl_fn(_double_ctx: Any = None) -> Any:
                     out = CompiledFunction._backward_impl(ctx, all_args)
                     return CompiledFunction._bw_epilogue_fn(out)
 
@@ -3392,7 +3392,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
                     @staticmethod
                     # pyrefly: ignore [bad-override]
-                    def forward(double_ctx: Any, *unused_args: Any) -> Any:
+                    def forward(double_ctx: Any, *_unused_args: Any) -> Any:
                         return impl_fn(double_ctx)
 
                     @staticmethod

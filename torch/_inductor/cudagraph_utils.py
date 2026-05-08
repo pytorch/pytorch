@@ -410,7 +410,6 @@ def log_data_ptr_mismatch(
 
 def maybe_warning_due_to_dynamic_shape(
     fn_cache: dict[tuple[int, ...], Callable[..., Any]],
-    new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 

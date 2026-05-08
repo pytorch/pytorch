@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from threading import Lock
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, override, Self
+from typing_extensions import override, Self
 
 from torch.utils._filelock import FileLock
 
@@ -292,8 +292,6 @@ class OnDiskCache(AsyncCache[Key, Value]):
             raise CacheError(
                 f"Failed to get fpath for key {key!r}, key is not pickle-able."
             ) from err
-        # pyrefly: ignore [bad-argument-type]
-        assert_never(key)
 
     def _flock_from_fpath(self: Self, fpath: Path) -> FileLock:
         """

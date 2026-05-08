@@ -360,9 +360,9 @@ class _LoggerState:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: types.TracebackType | None,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: types.TracebackType | None,
     ) -> None:
         assert self.captured_logs is not None
         self.captured_logs.remove()
@@ -704,22 +704,4 @@ class _DebugFileFxCompile(_SerializedFxCompile):
         with open(name, "wb") as f:
             f.write(pickled_input.value)
         print(f"Wrote to {name}")
-
-        if False:
-            name = os.path.join(
-                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_actual_{idx}.bin"
-            )
-            actual = self._run_in_child(pickled_input)
-            with open(name, "wb") as f:
-                f.write(actual.value)
-            return actual
-        elif False:
-            name = os.path.join(
-                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_output_{idx}.bin"
-            )
-            with open(name, "rb") as f:
-                result = _WireProtocolPickledOutput(f.read())
-                print(f"Read from {name}")
-            return result
-        else:
-            os._exit(-1)
+        os._exit(-1)

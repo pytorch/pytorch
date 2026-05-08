@@ -128,7 +128,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
 
     def get_fake_func(name: str) -> Callable[..., int]:
-        def func1(*args: Any) -> int:
+        def func1(*_args: Any) -> int:
             return 0
 
         func1.__name__ = name
@@ -225,7 +225,6 @@ def update_orig_fx_node_name_to_buf_name(
     nodes: SchedulerNodeList | None,
     node_name_to_buf_name: dict[str, str],
     parent_buf_name: str | None = None,
-    n_origins: int = 0,
 ) -> None:
     if nodes is None:
         return
@@ -517,9 +516,9 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: Any | None,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: Any | None,
     ) -> None:
         if self._prof:
             self._prof.disable()
@@ -596,7 +595,7 @@ class DebugFormatter:
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
-        inputs: list[torch.Tensor],
+        _inputs: list[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
