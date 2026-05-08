@@ -8,7 +8,6 @@ ciflow_push_tags:
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/dtensor
-- ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
 - ciflow/h100-distributed
