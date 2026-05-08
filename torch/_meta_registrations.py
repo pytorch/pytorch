@@ -6056,6 +6056,29 @@ def meta__scaled_dot_product_flash_attention_quantized(
     )
 
 
+@register_meta([aten._scaled_dot_product_cudnn_attention_quantized_per_tensor.default])
+def meta__scaled_dot_product_cudnn_attention_quantized_per_tensor(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    descale_q: Tensor,
+    descale_k: Tensor,
+    descale_v: Tensor,
+    scale_s: float = 256.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+):
+    B, H_q, S_Q, D_QK = query.shape
+    D_V = value.size(-1)
+    output = torch.empty((B, H_q, S_Q, D_V), dtype=torch.bfloat16, device=query.device)
+    softmax_stats = torch.empty(
+        (B, H_q, S_Q, 1), dtype=torch.float32, device=query.device
+    )
+    amax_s = torch.empty((1, 1, 1, 1), dtype=torch.float32, device=query.device)
+    amax_o = torch.empty((1, 1, 1, 1), dtype=torch.float32, device=query.device)
+    return output, softmax_stats, amax_s, amax_o
+
+
 def alloc_with_matching_layout(
     query: Tensor,
     res_shape: tuple[int, ...],

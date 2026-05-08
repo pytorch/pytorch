@@ -705,6 +705,45 @@ _scaled_dot_product_cudnn_attention_batch_rule(
   );
 }
 
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_cudnn_attention_quantized_per_tensor_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const Tensor& descale_q, std::optional<int64_t> descale_q_bdim,
+  const Tensor& descale_k, std::optional<int64_t> descale_k_bdim,
+  const Tensor& descale_v, std::optional<int64_t> descale_v_bdim,
+  double scale_s,
+  bool is_causal,
+  std::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  // Descale tensors are per-tensor scalars [1,1,1,1] — not batched
+  auto [output, softmax_stats, amax_s, amax_o] = at::_scaled_dot_product_cudnn_attention_quantized_per_tensor(
+      query_, key_, value_, descale_q, descale_k, descale_v, scale_s, is_causal, scale);
+
+  output = reshape_dim_outof(0, batch_size, output);
+  softmax_stats = reshape_dim_outof(0, batch_size, softmax_stats);
+  // amax_s and amax_o are per-tensor scalars [1,1,1,1] — not batched
+
+  return std::make_tuple(
+    std::move(output), 0,
+    std::move(softmax_stats), 0,
+    std::move(amax_s), std::nullopt,
+    std::move(amax_o), std::nullopt
+  );
+}
+
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -837,6 +876,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
   VMAP_SUPPORT2(_scaled_dot_product_flash_attention, quantized, _scaled_dot_product_flash_attention_quantized_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_cudnn_attention_quantized_per_tensor, _scaled_dot_product_cudnn_attention_quantized_per_tensor_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """
-This operator implements FP8 scaled dot product attention using Flash Attention 3.
+FP8 scaled dot product attention with per-head (FA3) and per-tensor (cuDNN) descaling.
 This operator is experimental and subject to change.
 """
 
@@ -22,7 +22,10 @@ class DescaleType(IntEnum):
     """
 
     PER_HEAD = 0
-    """Per-head descaling. Descale tensor shape: (batch_size, num_kv_heads)."""
+    """Per-head descaling (FA3 backend). Descale tensor shape: (batch_size, num_kv_heads)."""
+
+    PER_TENSOR = 1
+    """Per-tensor descaling (cuDNN backend). Descale tensor shape: (1, 1, 1, 1)."""
 
 
 def _validate_descale(
@@ -85,6 +88,13 @@ def _validate_descale(
                 f"expected {num_kv_heads}, got {descale.size(1)}"
             )
 
+    elif descale_type == DescaleType.PER_TENSOR:
+        if descale.dim() != 4 or descale.shape != (1, 1, 1, 1):
+            raise ValueError(
+                f"{name}_descale must have shape (1, 1, 1, 1) "
+                f"for PER_TENSOR descaling, got shape {tuple(descale.shape)}"
+            )
+
 
 def _scaled_dot_product_attention_quantized(
     query: Tensor,
@@ -98,15 +108,18 @@ def _scaled_dot_product_attention_quantized(
     q_descale_type: DescaleType = DescaleType.PER_HEAD,
     k_descale_type: DescaleType = DescaleType.PER_HEAD,
     v_descale_type: DescaleType = DescaleType.PER_HEAD,
+    scale_s: float | None = None,
 ) -> Tensor:
     r"""Scaled dot product attention for FP8 inputs.
 
     This is a specialized version of scaled_dot_product_attention that supports
-    FP8 quantized inputs (float8_e4m3fn) with per-head descaling. Requires the
-    Flash Attention 3 backend to be activated.
+    FP8 quantized inputs (float8_e4m3fn). Two backends are available:
+
+    - **PER_HEAD** (FA3): Per-head descaling, forward-only. Requires Flash Attention 3.
+    - **PER_TENSOR** (cuDNN): Per-tensor descaling, forward + backward. Requires cuDNN 9.1+.
 
     .. warning::
-        This function is experimental and only supports forward pass.
+        This function is experimental and subject to change.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(N, H_q, L, E)` dtype float8_e4m3fn
@@ -114,31 +127,75 @@ def _scaled_dot_product_attention_quantized(
         value (Tensor): Value tensor; shape :math:`(N, H, S, E_v)` dtype float8_e4m3fn
         is_causal (bool): Apply causal attention mask
         scale (float, optional): Scaling factor for attention weights
-        q_descale (Tensor, optional): Query descale tensor; shape :math:`(N, H)` for PER_HEAD
-        k_descale (Tensor, optional): Key descale tensor; shape :math:`(N, H)` for PER_HEAD
-        v_descale (Tensor, optional): Value descale tensor; shape :math:`(N, H)` for PER_HEAD
-        q_descale_type (DescaleType): Specifies the descaling granularity for query. Default: PER_HEAD
-        k_descale_type (DescaleType): Specifies the descaling granularity for key. Default: PER_HEAD
-        v_descale_type (DescaleType): Specifies the descaling granularity for value. Default: PER_HEAD
+        q_descale (Tensor, optional): Query descale tensor
+        k_descale (Tensor, optional): Key descale tensor
+        v_descale (Tensor, optional): Value descale tensor
+        q_descale_type (DescaleType): Descaling granularity for query. Default: PER_HEAD
+        k_descale_type (DescaleType): Descaling granularity for key. Default: PER_HEAD
+        v_descale_type (DescaleType): Descaling granularity for value. Default: PER_HEAD
+        scale_s (float, optional): Scale factor for the softmax output before FP8
+            requantization in BMM2. Only used with PER_TENSOR. Default: 256.0
+            (maps softmax output [0,1] to [0,256] to fill FP8 E4M3 range).
 
     Returns:
         Tensor: Attention output; shape :math:`(N, H_q, L, E_v)` dtype bfloat16
     """
-    # Validate descale tensors
-    _validate_descale(q_descale, "q", query, key, q_descale_type)
-    _validate_descale(k_descale, "k", query, key, k_descale_type)
-    _validate_descale(v_descale, "v", query, key, v_descale_type)
+    # Separate descale type parameters allow future backends to support mixed
+    # granularity (e.g., per-tensor Q/K with per-head V). For now, all
+    # quantized attention variants require the same type across Q, K, and V.
+    if not (q_descale_type == k_descale_type == v_descale_type):
+        raise ValueError(
+            "All descale types must match. Got "
+            f"q_descale_type={q_descale_type.name}, "
+            f"k_descale_type={k_descale_type.name}, "
+            f"v_descale_type={v_descale_type.name}"
+        )
+    descale_type = q_descale_type
 
+    # Validate descale tensors
+    _validate_descale(q_descale, "q", query, key, descale_type)
+    _validate_descale(k_descale, "k", query, key, descale_type)
+    _validate_descale(v_descale, "v", query, key, descale_type)
+
+    # Route to per-tensor cuDNN backend (forward-only for now)
+    if descale_type == DescaleType.PER_TENSOR:
+        if torch.is_grad_enabled() and (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        ):
+            warnings.warn(
+                "_scaled_dot_product_attention_quantized with PER_TENSOR descaling "
+                "does not yet support backward pass. "
+                "Gradients will not be computed for query, key, or value.",
+                UserWarning,
+            )
+        scale_s = scale_s if scale_s is not None else 256.0
+        _ones = torch.ones(1, 1, 1, 1, dtype=torch.float32, device=query.device)
+        with torch.no_grad():
+            result = (
+                torch.ops.aten._scaled_dot_product_cudnn_attention_quantized_per_tensor(
+                    query,
+                    key,
+                    value,
+                    q_descale if q_descale is not None else _ones,
+                    k_descale if k_descale is not None else _ones,
+                    v_descale if v_descale is not None else _ones,
+                    scale_s,
+                    is_causal,
+                    scale=scale,
+                )
+            )
+        return result[0]
+
+    # PER_HEAD: route to FA3 backend (forward-only)
     if torch.is_grad_enabled() and (
         query.requires_grad or key.requires_grad or value.requires_grad
     ):
         warnings.warn(
-            "_scaled_dot_product_attention_quantized does not support backward pass. "
+            "_scaled_dot_product_attention_quantized with PER_HEAD descaling "
+            "does not support backward pass. "
             "Gradients will not be computed for query, key, or value.",
             UserWarning,
         )
-    # Directly call the internal flash attention operator which has descale support
-    # NOTE: This should be torch._scaled_dot_product_flash_attention, but it does not work with torch.compile
     result = torch.ops.aten._scaled_dot_product_flash_attention.quantized(
         query,
         key,
@@ -151,4 +208,4 @@ def _scaled_dot_product_attention_quantized(
         False,
         scale=scale,
     )
-    return result[0]  # Return the output tensor, mirroring scaled_dot_product_attention
+    return result[0]
