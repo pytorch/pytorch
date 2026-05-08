@@ -2201,7 +2201,7 @@ namespace {
 // In member function ‘virtual void {anonymous}::VecConvertBFloat16_ExhaustiveToFloat_Test::TestBody()’:
 // vec_test_all_types.cpp:2265:10: internal compiler error: Segmentation fault
 // 2265 |     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
-#if !defined(CPU_CAPABILITY_ASIMD_BF16) && !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;

@@ -232,6 +232,8 @@ class SLoc:
         floc = (
             self.framework_loc
             if isinstance(self.framework_loc, str)
+            else ""
+            if self.framework_loc is None
             else format_frame(self.framework_loc)
         )
         if self.maybe_user_loc is not None:
@@ -1366,6 +1368,14 @@ class Source:
         return False
 
     def reconstruct(self, codegen: PyCodegen) -> None:
+        raise NotImplementedError
+
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        """
+        Reconstructs the source into a string of Python code. This method should
+        be eventually implemented for all subclasses of Source to achieve full
+        coverage of python wrapper code generation.
+        """
         raise NotImplementedError
 
     @functools.cached_property
