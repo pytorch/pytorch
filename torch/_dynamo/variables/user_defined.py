@@ -604,18 +604,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
-        # property and _tuplegetter accessed on the class return the
-        # descriptor itself (descriptor.__get__(None, cls) is descriptor).
-        # Build directly -- no need to invoke __get__.
-        if isinstance(cls_attr, (property, _collections._tuplegetter)):
-            if source:
-                return VariableTracker.build(tx, cls_attr, source)
-            return UserDefinedObjectVariable(cls_attr)
+        # property_descr_get with obj=NULL returns self.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
+        if isinstance(cls_attr, property):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            return variables.PropertyVariable(cls_attr, source=descriptor_source)
+
+        if isinstance(cls_attr, _collections._tuplegetter):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
+            return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
         # WrapperDescriptor/MethodDescriptor to avoid VT type mismatches in
         # identity checks. Revisit once we implement tp_richcompare slot.
-        # Comparison dunders inherited from object — defer to runtime.
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
@@ -2790,24 +2800,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
+        # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
         if isinstance(type_attr, property) and not self._is_c_defined_property(
             type_attr
         ):
-            # Python property -- trace fget directly.
+            # Source points to the descriptor in the class __dict__ via MRO
+            # walk, not via AttrSource(cls, name) which would trigger the
+            # descriptor protocol and skip past the property wrapper.
             if self.source:
-                source = AttrSource(self.get_source_by_walking_mro(tx, name), "fget")
-            fget_vt = VariableTracker.build(
-                tx, type_attr.fget, source=source, realize=True
+                source = self.get_source_by_walking_mro(tx, name)
+            prop_vt = variables.PropertyVariable(type_attr, source=source)
+            return prop_vt.tp_descr_get_impl(
+                tx, self, self.var_getattr(tx, "__class__")
             )
-            return fget_vt.call_function(tx, [self], {})
+        if isinstance(type_attr, types.MemberDescriptorType):
+            md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+            return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+
+        if isinstance(type_attr, types.GetSetDescriptorType):
+            gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+            return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+
+        if isinstance(type_attr, _collections._tuplegetter):
+            tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+            return tg_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
             # User-defined data descriptor with a Python __get__.
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # C-level data descriptors (member/getset descriptors, Cython attrs,
-        # _tuplegetter, etc.) -- resolve via __getattribute__.
+        # TODO - Check when are these called - and if we need to create new VTs.
+        # Remaining C-level data descriptors (Cython attrs, etc.)
+        # -- resolve via __getattribute__.
         try:
             resolved = type(self.value).__getattribute__(self.value, name)
         except AttributeError:
