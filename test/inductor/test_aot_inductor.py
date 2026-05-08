@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_ARM64,
     IS_CI,
-    IS_CPU_CAPABILITY_SVE256,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
@@ -1140,8 +1139,6 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
-    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/177243
     @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
@@ -4974,6 +4971,38 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    def test_proxy_executor_error_message_preserved(self):
+        @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
+        def validate_input(x: torch.Tensor) -> torch.Tensor:
+            if x.isnan().any():
+                raise RuntimeError("NaN detected in input tensor")
+            return x.clone()
+
+        @validate_input.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        from torch._inductor.lowering import make_fallback
+
+        make_fallback(torch.ops.aoti_test.validate_input.default, warn=False)
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = torch.ops.aoti_test.validate_input(x)
+                return x * 2
+
+        m = M()
+        sample = torch.ones(3, device=self.device)
+        so_path = AOTIRunnerUtil.compile(m, (sample,))
+        aoti_module = torch._inductor.aoti_load_package(so_path)
+        result = aoti_module(sample)
+        self.assertTrue(torch.allclose(result, sample * 2))
+        nan_input = torch.tensor([1.0, float("nan"), 3.0], device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "NaN detected in input tensor"):
+            aoti_module(nan_input)
+        result2 = aoti_module(sample)
+        self.assertTrue(torch.allclose(result2, sample * 2))
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
@@ -5446,6 +5475,21 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
 
         self.check_model(m, inputs)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_assert_size_stride_guarded_by_env_check(self):
+        # Verify that assert_size_stride calls in AOTI-generated code are
+        # guarded by _check_aoti_runtime_check_inputs_env() so they only
+        # fire when AOTI_RUNTIME_CHECK_INPUTS is set.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.qr(x)[0]
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        FileCheck().check(
+            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
+        ).run(code)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
@@ -7218,6 +7262,54 @@ class AOTInductorTestsTemplate:
 
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
+
+    def test_load_constants_allow_h2d_copy(self):
+        # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
+        # accepts a CPU state_dict for a non-CPU model, the way a typical user
+        # would after torch.load(..., map_location="cpu").
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k, device=device))
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        compiled = torch._inductor.aoti_load_package(package_path)
+
+        (weight_fqn,) = compiled.get_constant_fqns()
+        cpu_state_dict = {weight_fqn: torch.randn(N, K, device="cpu")}
+        compiled.load_constants(
+            cpu_state_dict, check_full_update=True, allow_h2d_copy=True
+        )
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = torch.nn.functional.linear(
+            test_inputs, cpu_state_dict[weight_fqn].to(self.device)
+        )
+        self.assertEqual(expected, compiled(test_inputs))
+
+        # Without allow_h2d_copy, the same call must error out.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(cpu_state_dict, check_full_update=True)
+
+        # allow_h2d_copy + user_managed must be rejected up-front.
+        with self.assertRaises(RuntimeError):
+            compiled.load_constants(
+                cpu_state_dict,
+                check_full_update=True,
+                user_managed=True,
+                allow_h2d_copy=True,
+            )
 
     def test_cond_share_predicate(self):
         class Model(torch.nn.Module):
