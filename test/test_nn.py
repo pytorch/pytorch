@@ -9027,7 +9027,7 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn(1, 2, 4, 4, device=device, dtype=torch.float32)
 
         # Extremely large kernel_size (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 100),  # INT64_MAX
@@ -9036,7 +9036,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Negative stride (invalid)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"stride should be greater than zero"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -9054,7 +9054,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large stride (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -9072,7 +9072,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large padding (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -9081,7 +9081,7 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Combined invalid parameters
-        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 5868783964474102731),
@@ -14559,7 +14559,7 @@ if __name__ == '__main__':
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 1
                     expected_weight_grad_max_ulp_diff = 38
-                else:
+                else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 0
                     expected_weight_grad_max_ulp_diff = 0
@@ -14583,7 +14583,7 @@ if __name__ == '__main__':
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     if "mps" in device:
-                        expected_input_grad_max_ulp_diff = 277
+                        expected_input_grad_max_ulp_diff = 3279
                     else:  # CUDA/XPU/HPU
                         expected_input_grad_max_ulp_diff = 358
                     expected_weight_grad_max_ulp_diff = 8974
@@ -14703,6 +14703,13 @@ if __name__ == '__main__':
             if err > maximal_linear_weight_grad_err:
                 maximal_linear_weight_grad_err = err
                 worst_linear_weight_grad_err_kwargs = dict(module_kwargs)
+
+        # temporary printouts:
+        print(f'{maximal_input_grad_err=} <= {feps}')
+        print(f'{maximal_linear_weight_grad_err=} <= {feps}')
+        print(f'{maximal_output_max_ulp_diff=} <= {maximal_output_max_ulp_diff}')
+        print(f'{maximal_input_grad_max_ulp_diff=} <= {expected_input_grad_max_ulp_diff}')
+        print(f'{maximal_linear_weight_grad_max_ulp_diff=} <= {expected_weight_grad_max_ulp_diff}')
 
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")

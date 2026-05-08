@@ -304,9 +304,20 @@ def _linear_cross_entropy_batch_chunked(
         ) = weight_grad_chunk_dtype = dtype
 
     # linear_weight_cast: linear_weight materialized in
-    # logits_buf_dtype when needed for the non-CUDA forward mm or the
-    # input-grad addmm; otherwise it's the original tensor.
-    if use_acc_dtype and (compute_input_grad or not is_cuda):
+    # logits_buf_dtype when actually needed:
+    # - non-CUDA + use_acc_dtype: forward mm operands and the
+    #   buf-and-copy input-grad addmm need matching dtypes.
+    # - CUDA + use_acc_dtype + accurate-mode input-grad
+    #   (grad_input_dtype == logits_buf_dtype): the fast-path addmm
+    #   needs self/mat2 to match logits' dtype.
+    # CUDA + use_acc_dtype + memory mode does NOT need the cast: the
+    # forward mm uses out_dtype= on the original linear_weight, the
+    # input-grad goes through the storage-trick path with the
+    # original linear_weight, and the input-grad first-term mul gets
+    # implicit type promotion through TensorIterator.
+    if use_acc_dtype and (
+        not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
+    ):
         linear_weight_cast = linear_weight.to(logits_buf_dtype)
     else:
         linear_weight_cast = linear_weight
@@ -423,8 +434,14 @@ def _linear_cross_entropy_batch_chunked(
     forward_use_acc_input = use_acc_dtype and not is_cuda and dtype != logits_buf_dtype
     use_cuda_out_dtype = is_cuda and use_acc_dtype
     weight_grad_mm_same_dtype = logits_buf_dtype == weight_grad_chunk_dtype
+    # Storage-trick fires when logits' dtype differs from the input-
+    # grad accumulator dtype: addmm needs operands in grad_input_dtype,
+    # so logits is cast down via a bf16 view of logits_buf storage.
+    # Uses logits_buf_dtype (not linear_weight_cast.dtype) because
+    # linear_weight_cast may now be the original bf16 tensor in CUDA
+    # memory mode.
     input_grad_uses_logits_lw = (
-        is_cuda and compute_input_grad and grad_input_dtype != linear_weight_cast.dtype
+        is_cuda and compute_input_grad and logits_buf_dtype != grad_input_dtype
     )
 
     # chunking along batches dimension:
