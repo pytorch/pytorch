@@ -745,10 +745,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: InstructionTranslator,
         key: VariableTracker,
         value: VariableTracker,
-    ) -> None:
+    ) -> VariableTracker:
         unimplemented(
             gb_type="missing_mp_ass_subscript",
-            context=f"mp_ass_subscript_impl not defined for {type(self).__name__}",
+            context=f"mp_ass_subscript_impl not defined for {self.python_type_name()}",
             explanation=f"Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
@@ -758,7 +758,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: InstructionTranslator,
         key: VariableTracker,
         value: VariableTracker,
-    ) -> None:
+    ) -> VariableTracker:
         unimplemented(
             gb_type="unsupported __setitem__ (sq_ass_item)",
             context=f"sq_ass_item_impl {self} {key} {value}",
@@ -814,8 +814,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             if len(args) == 2 and not kwargs:
                 from .object_protocol import generic_setitem
 
-                generic_setitem(tx, self, args[0], args[1])
-
+                return generic_setitem(tx, self, args[0], args[1])
             raise_args_mismatch(
                 tx,
                 name,

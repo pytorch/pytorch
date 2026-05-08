@@ -3870,8 +3870,15 @@ class OrderedDictVariable(UserDefinedDictVariable):
 
     def mp_ass_subscript_impl(
         self, tx: "InstructionTranslator", key: VariableTracker, value: VariableTracker
-    ) -> None:
-        raise_type_error(tx, "missing impl")
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method("__setitem__")
+        if method in self._base_methods:
+            if self._base_vt is None:
+                raise AssertionError(
+                    "_base_vt must not be None in mp_ass_subscript_impl"
+                )
+            return self._base_vt.mp_ass_subscript_impl(tx, key, value)
+        return super().mp_ass_subscript_impl(tx, key, value)
 
     def call_method(
         self,

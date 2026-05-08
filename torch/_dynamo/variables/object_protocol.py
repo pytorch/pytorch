@@ -117,6 +117,13 @@ def type_implements_sq_slot(obj_type: type, slot: int) -> bool:
     return has_slot(seq_slots, slot)
 
 
+def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
+    """Check whether obj_type implements the given mp slot."""
+    _, map_slots, _, _ = _get_cached_slots(obj_type)
+    return has_slot(map_slots, slot)
+
+
+# PySequenceSlots
 type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
 type_implements_sq_length = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_LENGTH
@@ -129,15 +136,21 @@ type_implements_sq_inplace_concat = partial(
 )
 type_implements_sq_contains = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_CONTAINS
+)
 type_implements_sq_ass_item = partial(
     type_implements_sq_slot, slot=PySequenceSlots.SQ_ASS_ITEM
 )
 
-
-def type_implements_mp_length(obj_type: type) -> bool:
-    """Check whether obj_type implements __len__ as mapping protocol"""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_LENGTH)
+# PyMappingSlots
+type_implements_mp_length = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_LENGTH
+)
+type_implements_mp_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_SUBSCRIPT
+)
+type_implements_mp_ass_subscript = partial(
+    type_implements_mp_slot, slot=PyMappingSlots.MP_ASS_SUBSCRIPT
+)
 
 
 def type_implements_nb_bool(obj_type: type) -> bool:
@@ -162,18 +175,6 @@ def type_implements_nb_float(obj_type: type) -> bool:
     """Check whether obj_type implements the nb_float slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
     return has_slot(number_slots, PyNumberSlots.NB_FLOAT)
-
-
-def type_implements_mp_subscript(obj_type: type) -> bool:
-    """Check whether obj_type has tp_as_mapping->mp_subscript."""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT)
-
-
-def type_implements_mp_ass_subscript(obj_type: type) -> bool:
-    """Check whether obj_type has tp_as_mapping->mp_ass_subscript."""
-    _, map_slots, _, _ = _get_cached_slots(obj_type)
-    return has_slot(map_slots, PyMappingSlots.MP_ASS_SUBSCRIPT)
 
 
 def type_implements_nb_negative(obj_type: type) -> bool:
@@ -413,14 +414,17 @@ def vt_sequence_setitem(
     s: VariableTracker,
     i: VariableTracker,
     o: VariableTracker,
-) -> None:
+) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1926-L1957 (PySequence_SetItem)
     s_type = maybe_get_python_type(s)
     if type_implements_sq_ass_item(s_type):
-        if i.as_python_constant() < 0:
-            if type_implements_sq_length(s_type):
-                l = s.sq_length(tx)
-                vt_inplace_add(tx, i, l)
+        # Negative index wrapping (abstract.c L1944-1952)
+        if isinstance(i, ConstantVariable):
+            index_val = i.as_python_constant()
+            if isinstance(index_val, int) and index_val < 0:
+                if type_implements_sq_length(s_type):
+                    length = s.sq_length(tx)
+                    i = ConstantVariable.create(index_val + length.as_python_constant())
         return s.sq_ass_item_impl(tx, i, o)
 
     if type_implements_mp_ass_subscript(s_type):
@@ -436,16 +440,17 @@ def generic_setitem(
     o: VariableTracker,
     key: VariableTracker,
     value: VariableTracker,
-) -> None:
+) -> VariableTracker:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L222-L254
     o_type = maybe_get_python_type(o)
     if type_implements_mp_ass_subscript(o_type):
         return o.mp_ass_subscript_impl(tx, key, value)
 
-    if pyindex_check(key.python_type()):
-        key = key.nb_index_impl(tx)
-        return vt_sequence_setitem(tx, o, key, value)
-    elif type_implements_sq_ass_item(o_type):
+    if type_implements_sq_ass_item(o_type):
+        key_type = maybe_get_python_type(key)
+        if pyindex_check(key_type):
+            key = key.nb_index_impl(tx)
+            return vt_sequence_setitem(tx, o, key, value)
         raise_type_error(
             tx, f"sequence index must be integer, not '{key.python_type_name()}'"
         )
