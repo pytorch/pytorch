@@ -62,6 +62,12 @@ class CudaKernelInputs final : public KernelInputs {
     arg_idx_++;
   }
 
+  void add_scalar_arg(const c10::IValue& value, std::string_view param_type)
+      override {
+    TORCH_CHECK(arg_idx_ < num_args_, "Too many args");
+    inputs_[arg_idx_++] = store_scalar_arg(value, param_type);
+  }
+
  private:
   std::vector<void*> arg_ptrs_;
   CUdeviceptr global_scratch_;
