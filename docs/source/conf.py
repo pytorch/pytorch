@@ -614,6 +614,11 @@ coverage_ignore_functions = [
     "set_grad_fn_seq_nr",
     "set_stack_trace",
     "get_current_replay_node",
+    # torch.fx.experimental.proxy_tensor
+    "wrap_key",
+    "wrapper_and_args_for_make_fx",
+    # torch.fx.experimental.sym_node
+    "wrap_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
