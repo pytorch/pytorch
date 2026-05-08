@@ -203,7 +203,7 @@ def swap_in_optimizer_state(
 
     Inside the context manager, ``optimizer.step()`` (and any hooks) run on
     ``swapin_parameters`` and ``swapin_optim_state`` instead of the live
-    optimizer's. 
+    optimizer's.
 
     Note that ``optimizer.load_state_dict`` only updates the optimizer's
     state and leaves the parameters in ``param_groups`` untouched, so
@@ -241,17 +241,18 @@ def swap_in_optimizer_state(
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             with fake_mode:
                 fake_params = {
-                    n: fake_mode.from_tensor(p)
-                    for n, p in model.named_parameters()
+                    n: fake_mode.from_tensor(p) for n, p in model.named_parameters()
                 }
                 fake_osd = pytree.tree_map_only(
                     torch.Tensor, fake_mode.from_tensor, optimizer.state_dict()
                 )
 
+
             def step_fn(params, osd):
                 with swap_in_optimizer_state(optimizer, params, osd):
                     optimizer.step()
                 return params, osd
+
 
             gm = make_fx(step_fn)(fake_params, fake_osd)
     """
