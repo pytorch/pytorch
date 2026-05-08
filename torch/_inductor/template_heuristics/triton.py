@@ -82,6 +82,22 @@ else:
     origami = None
 
 
+# TODO(rocm-origami): replace these wrappers with public accessors when the
+# rocm-origami package exposes them. Centralizing the private-attribute access
+# here keeps the noqa suppressions localized and makes the migration a one-line
+# change per helper instead of ~10 scattered call sites.
+def _origami_problem(selector):  # type: ignore[no-untyped-def]
+    return selector._problem
+
+
+def _origami_hardware(selector):  # type: ignore[no-untyped-def]
+    return selector._hardware
+
+
+def _origami_configs(selector):  # type: ignore[no-untyped-def]
+    return selector._configs
+
+
 # Gemm Configs
 @dataclasses.dataclass
 class BaseConfig:
@@ -2124,13 +2140,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 a_stride,
                 b_stride,
             )
-            # NOTE: Using private origami API (_problem, _hardware, _configs)
-            # This is a known limitation that depends on origami maintainers to expose
-            # these as public APIs.
+            # _origami_{problem,hardware,configs} wrap the private attrs;
+            # see TODO at top of file for the upstream-API migration plan.
             topk_results = origami.select_topk_configs(
-                selector._problem,
-                selector._hardware,
-                selector._configs,
+                _origami_problem(selector),
+                _origami_hardware(selector),
+                _origami_configs(selector),
                 config.rocm.origami_topk,
             )
             seen = OrderedSet()
@@ -2159,15 +2174,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     continue
                 seen.add(key)
                 grid = origami.select_grid_size(
-                    selector._problem,
-                    selector._hardware,
+                    _origami_problem(selector),
+                    _origami_hardware(selector),
                     cfg,
                     origami.grid_selection_t.data_parallel,
-                    selector._hardware.N_CU,
+                    _origami_hardware(selector).N_CU,
                 )
                 wgm_result = origami.select_workgroup_mapping(
-                    selector._problem,
-                    selector._hardware,
+                    _origami_problem(selector),
+                    _origami_hardware(selector),
                     cfg,
                     grid,
                 )
@@ -2181,9 +2196,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                         "Failed to get device warp size: %s. Using default 64.", e
                     )
                     warp_size = 64
-                max_warps = 2 * selector._hardware.parallel_mi_cu
+                max_warps = 2 * _origami_hardware(selector).parallel_mi_cu
                 # mfma_dim from origami hardware object; fall back to 16.
-                mfma_dim = getattr(selector._hardware, "mfma_m", 16)
+                mfma_dim = getattr(_origami_hardware(selector), "mfma_m", 16)
                 num_warps = min(
                     max_warps,
                     max(1, tile_area // (mfma_dim * warp_size)),
