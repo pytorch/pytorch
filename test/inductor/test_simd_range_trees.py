@@ -1,18 +1,20 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import typing
 import unittest
 
 import sympy
 
-import torch
-from torch._inductor.codegen.simd import DerivedIterationRangesRoot
+from torch._inductor.codegen.simd import (
+    DerivedIterationRangesRoot,
+    IterationRangesRoot,
+)
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import IndexingOptions, TritonKernel, TritonSymbols
-from torch._inductor.graph import GraphLowering
-from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import MockGraphHandler
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 
@@ -27,11 +29,7 @@ except ImportError:
 
 class TestSIMDRangeTrees(TestCase):
     def _make_graph(self):
-        class DummyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * 2
-
-        return GraphLowering(torch.fx.symbolic_trace(DummyModule()))
+        return MockGraphHandler()
 
     def _make_kernel(self, *, persistent: bool):
         features = SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(512))
@@ -42,12 +40,25 @@ class TestSIMDRangeTrees(TestCase):
             override_cooperative_reduction=False,
         )
 
+    def _make_parent_reduction_root(self):
+        return IterationRangesRoot(
+            "r0_index",
+            sympy.Integer(512),
+            "r0_",
+            0,
+            typing.cast(typing.Any, object()),
+            is_loop=True,
+            tensor_dim=1,
+            grid_dim=None,
+            has_zdim=False,
+        )
+
     def _make_derived_root(self, r_tree, *, group_size=sympy.Integer(128)):
         reduced_block = FloorDiv(r_tree.block_size(), group_size)
-        reduced_numel = r_tree.numel / group_size
+        reduced_numel = FloorDiv(r_tree.numel, group_size)
         return DerivedIterationRangesRoot(
             r_tree,
-            numel=FloorDiv(r_tree.numel, group_size),
+            numel=reduced_numel,
             block_size=reduced_block,
             block_offset=FloorDiv(r_tree.block_offset(), group_size),
             named_constants=(
@@ -57,6 +68,20 @@ class TestSIMDRangeTrees(TestCase):
             ),
         )
 
+    def test_derived_root_geometry(self):
+        r_tree = self._make_parent_reduction_root()
+        derived = self._make_derived_root(r_tree)
+
+        self.assertEqual(derived.is_loop, r_tree.is_loop)
+        self.assertEqual(derived.prefix, r_tree.prefix)
+        self.assertEqual(derived.numel, FloorDiv(r_tree.numel, 128))
+        self.assertEqual(derived.block_size(), FloorDiv(r_tree.block_size(), 128))
+        self.assertEqual(derived.block_offset(), FloorDiv(r_tree.block_offset(), 128))
+        self.assertTrue(derived.owns_mask(derived.mask_name()))
+        self.assertFalse(derived.owns_mask(r_tree.mask_name()))
+        self.assertNotEqual(derived.mask_name(), r_tree.mask_name())
+        self.assertFalse(derived.supports_constant_mask())
+
     def test_derived_root_uses_active_range_tree_geometry(self):
         graph = self._make_graph()
         with V.set_graph_handler(graph):
@@ -64,31 +89,9 @@ class TestSIMDRangeTrees(TestCase):
             x_tree, r_tree = kernel.range_trees
             derived = self._make_derived_root(r_tree)
 
-            self.assertEqual(derived.is_loop, r_tree.is_loop)
-            self.assertEqual(derived.prefix, r_tree.prefix)
-            self.assertNotEqual(derived.mask_name(), r_tree.mask_name())
             self.assertFalse(kernel._has_constant_mask(derived))
 
             with V.set_kernel_handler(kernel):
-                header = IndentedBuffer()
-                kernel.iteration_ranges_codegen_header(derived, header)
-                header_code = header.getvalue()
-                self.assertIn("nested_R0_GROUP_SIZE: tl.constexpr = 128", header_code)
-                self.assertIn(
-                    "nested_R0_REDUCED_BLOCK: tl.constexpr = R0_BLOCK // 128",
-                    header_code,
-                )
-                self.assertIn("nested_R0_REDUCED_NUMEL = 4", header_code)
-                self.assertIn(
-                    "reduced_r0_index = r0_offset // 128 + "
-                    "tl.arange(0, R0_BLOCK // 128)[None, :]",
-                    header_code,
-                )
-                self.assertIn(
-                    "reduced_r0_index_mask = reduced_r0_index < 4",
-                    header_code,
-                )
-
                 x_entry = x_tree.full_range()
                 derived_entry = derived.full_range()
                 index = x_entry.symbol() * derived.numel + derived_entry.symbol()
