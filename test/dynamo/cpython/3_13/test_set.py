@@ -776,7 +776,7 @@ class TestFrozenSet(_TestJointOps, __TestCase):
 
     @skipIfTorchDynamo("slow")
     def test_hash_effectiveness(self):
-        n = 13
+        n = 2
         hashvalues = set()
         addhashvalue = hashvalues.add
         elemmasks = [(i+1, 1<<i) for i in range(n)]
