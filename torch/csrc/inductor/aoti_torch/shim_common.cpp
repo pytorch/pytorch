@@ -65,6 +65,8 @@
 using namespace torch::aot_inductor;
 
 namespace {
+thread_local std::string last_error_msg;
+
 static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   if (device_type == aoti_torch_device_type_cpu()) {
     return c10::Device(static_cast<c10::DeviceType>(device_type));
@@ -75,6 +77,16 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
   }
 }
 } // namespace
+
+namespace torch::aot_inductor {
+const char* get_last_error() {
+  return last_error_msg.empty() ? nullptr : last_error_msg.c_str();
+}
+
+void set_last_error(const char* msg) {
+  last_error_msg = msg ? msg : "";
+}
+} // namespace torch::aot_inductor
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
