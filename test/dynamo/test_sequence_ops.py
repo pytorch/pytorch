@@ -339,6 +339,394 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(TestSqConcat)
 
 
+# ---------------------------------------------------------------------------
+# sq_ass_item / mp_ass_subscript on sequences (__setitem__)
+# ---------------------------------------------------------------------------
+
+
+class _WithSetitem:
+    """Sequence-shaped class with explicit __setitem__ (int keys)."""
+
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+
+class _MutableSequence:
+    """Custom sequence with __setitem__ via sq_ass_item."""
+
+    def __init__(self, data):
+        self.data = list(data)
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+    def __len__(self):
+        return len(self.data)
+
+
+class _ListSubclassSetitem(list):
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value + 1000)
+
+
+class _ListSubclassNoOverride(list):
+    pass
+
+
+class _ListSubclassExtra(list):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.write_count = 0
+
+    def __setitem__(self, key, value):
+        self.write_count += 1
+        super().__setitem__(key, value)
+
+
+class _ListSubclassSlice(list):
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            super().__setitem__(key, [v + 100 for v in value])
+        else:
+            super().__setitem__(key, value)
+
+
+# (label, factory) — factory builds an instance from a list.
+_SEQUENCE_TYPES = [
+    ("list", list),
+    ("deque", collections.deque),
+    ("WithSetitem", _WithSetitem),
+    ("MutableSequence", _MutableSequence),
+]
+
+
+class TestSqAssItem(torch._dynamo.test_case.TestCase):
+    """All sequence __setitem__ tests in one class."""
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+
+    # -- parameterized over sequence container type --
+
+    @parametrize("label,factory", _SEQUENCE_TYPES)
+    @make_dynamo_test
+    def test_setitem_basic(self, label, factory):
+        c = factory([1, 2, 3])
+        c[0] = 100
+        self.assertEqual(c[0], 100)
+
+    @parametrize("label,factory", _SEQUENCE_TYPES)
+    @make_dynamo_test
+    def test_setitem_multiple(self, label, factory):
+        c = factory([1, 2, 3])
+        c[0] = 100
+        c[1] = 200
+        self.assertEqual(c[0], 100)
+        self.assertEqual(c[1], 200)
+
+    @parametrize("label,factory", _SEQUENCE_TYPES)
+    @make_dynamo_test
+    def test_setitem_replaces_value(self, label, factory):
+        c = factory([1, 2, 3])
+        c[0] = 999
+        self.assertEqual(c[0], 999)
+
+    @parametrize("label,factory", _SEQUENCE_TYPES)
+    @make_dynamo_test
+    def test_setitem_negative_index(self, label, factory):
+        c = factory([1, 2, 3])
+        c[-1] = 777
+        self.assertEqual(c[-1], 777)
+
+    # -- list slice (mp_ass_subscript_impl slice branch) --
+
+    @make_dynamo_test
+    def test_slice_basic(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[1:3] = [10, 20]
+        self.assertEqual(lst, [1, 10, 20, 4, 5])
+
+    @make_dynamo_test
+    def test_slice_step(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[::2] = [10, 30, 50]
+        self.assertEqual(lst, [10, 2, 30, 4, 50])
+
+    @make_dynamo_test
+    def test_slice_extending(self):
+        lst = [1, 2, 3]
+        lst[10:] = [4, 5]
+        self.assertEqual(lst, [1, 2, 3, 4, 5])
+
+    @make_dynamo_test
+    def test_slice_shrinking(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[1:4] = [99]
+        self.assertEqual(lst, [1, 99, 5])
+
+    @make_dynamo_test
+    def test_slice_empty_insert(self):
+        lst = [1, 2, 3]
+        lst[1:1] = [10, 20]
+        self.assertEqual(lst, [1, 10, 20, 2, 3])
+
+    @make_dynamo_test
+    def test_slice_full_replace(self):
+        lst = [1, 2, 3]
+        lst[:] = [10, 20, 30, 40]
+        self.assertEqual(lst, [10, 20, 30, 40])
+
+    @make_dynamo_test
+    def test_slice_negative(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[-2:] = [99, 100]
+        self.assertEqual(lst, [1, 2, 3, 99, 100])
+
+    # -- nb_index path (bool key) --
+
+    @make_dynamo_test
+    def test_nb_index_bool_key(self):
+        lst = [1, 2, 3]
+        lst[True] = 99
+        self.assertEqual(lst[1], 99)
+
+    # -- SymNode key --
+
+    @make_dynamo_test
+    def test_symnode_list_key(self):
+        t = torch.randn(5)
+        lst = [0, 0, 0, 0, 0]
+        lst[t.shape[0] - 1] = 99
+        self.assertEqual(lst[4], 99)
+
+    @make_dynamo_test
+    def test_symnode_list_key_zero(self):
+        t = torch.randn(5)
+        lst = [0, 0, 0, 0, 0]
+        lst[t.shape[0] - 5] = 99
+        self.assertEqual(lst[0], 99)
+
+    @make_dynamo_test
+    def test_symnode_list_key_then_read(self):
+        t = torch.randn(5)
+        lst = [10, 20, 30, 40, 50]
+        idx = t.shape[0] - 3
+        lst[idx] = 999
+        self.assertEqual(lst[idx], 999)
+        self.assertEqual(lst[2], 999)
+
+    @make_dynamo_test
+    def test_symnode_slice_stop(self):
+        t = torch.randn(3)
+        lst = [1, 2, 3, 4, 5]
+        lst[1 : t.shape[0]] = [88, 99]
+        self.assertEqual(lst, [1, 88, 99, 4, 5])
+
+    @make_dynamo_test
+    def test_symnode_slice_start_stop(self):
+        t = torch.randn(4)
+        lst = [1, 2, 3, 4, 5]
+        lst[t.shape[0] - 3 : t.shape[0]] = [77, 88, 99]
+        self.assertEqual(lst, [1, 77, 88, 99, 5])
+
+    @make_dynamo_test
+    def test_symnode_deque_key(self):
+        t = torch.randn(5)
+        d = collections.deque([0, 0, 0, 0, 0])
+        d[t.shape[0] - 1] = 99
+        self.assertEqual(d[4], 99)
+
+    @make_dynamo_test
+    def test_symnode_mutable_sequence_key(self):
+        t = torch.randn(5)
+        seq = _MutableSequence([0, 0, 0, 0, 0])
+        seq[t.shape[0] - 2] = 99
+        self.assertEqual(seq[3], 99)
+
+    # -- list subclass --
+
+    @make_dynamo_test
+    def test_subclass_list_inherited_setitem(self):
+        lst = _ListSubclassNoOverride([1, 2, 3])
+        lst[0] = 99
+        self.assertEqual(lst[0], 99)
+        self.assertEqual(list(lst), [99, 2, 3])
+
+    @make_dynamo_test
+    def test_subclass_list_inherited_slice(self):
+        lst = _ListSubclassNoOverride([1, 2, 3, 4, 5])
+        lst[1:3] = [88, 99]
+        self.assertEqual(list(lst), [1, 88, 99, 4, 5])
+
+    @make_dynamo_test
+    def test_subclass_list_extra_state(self):
+        lst = _ListSubclassExtra([0, 0, 0])
+        lst[0] = 5
+        lst[1] = 6
+        self.assertEqual(lst[0], 5)
+        self.assertEqual(lst[1], 6)
+        self.assertEqual(lst.write_count, 2)
+
+    @make_dynamo_test
+    def test_subclass_list_slice_override(self):
+        lst = _ListSubclassSlice([1, 2, 3, 4, 5])
+        lst[1:3] = [10, 20]
+        self.assertEqual(list(lst), [1, 110, 120, 4, 5])
+
+    @make_dynamo_test
+    def test_subclass_list_negative_index(self):
+        lst = _ListSubclassNoOverride([1, 2, 3])
+        lst[-1] = 99
+        self.assertEqual(lst[-1], 99)
+
+    @make_dynamo_test
+    def test_subclass_list_replace_existing(self):
+        lst = _ListSubclassExtra([10, 20, 30])
+        lst[1] = 99
+        self.assertEqual(lst[1], 99)
+        self.assertEqual(lst.write_count, 1)
+
+    @make_dynamo_test
+    def test_subclass_list_overriding(self):
+        lst = _ListSubclassSetitem([0, 0, 0])
+        lst[0] = 5
+        self.assertEqual(lst[0], 1005)
+
+    # -- mutation visibility --
+
+    def test_mutation_outer_list_persists(self):
+        outer = [1, 2, 3]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            outer[0] = 99
+            return x + 1
+
+        f(torch.zeros(1))
+        self.assertEqual(outer, [99, 2, 3])
+
+    @make_dynamo_test
+    def test_mutation_setitem_then_read(self):
+        lst = [1, 2, 3]
+        lst[0] = 99
+        v = lst[0]
+        self.assertEqual(v, 99)
+
+    @make_dynamo_test
+    def test_mutation_list_of_dicts(self):
+        lst = [{"a": 1}, {"b": 2}]
+        lst[0]["a"] = 100
+        self.assertEqual(lst[0]["a"], 100)
+
+    @make_dynamo_test
+    def test_mutation_multiple_sequential(self):
+        lst = [0, 0, 0, 0, 0]
+        lst[0] = 1
+        lst[1] = 2
+        lst[2] = 3
+        lst[3] = 4
+        lst[4] = 5
+        self.assertEqual(lst, [1, 2, 3, 4, 5])
+
+    # -- misc index handling --
+
+    @make_dynamo_test
+    def test_list_int_var_index(self):
+        lst = [1, 2, 3]
+        idx = 1
+        lst[idx] = 42
+        self.assertEqual(lst[1], 42)
+
+    @make_dynamo_test
+    def test_list_negative_index_middle(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[-2] = 88
+        self.assertEqual(lst[-2], 88)
+        self.assertEqual(lst[3], 88)
+
+    @make_dynamo_test
+    def test_list_negative_index_last(self):
+        lst = [1, 2, 3, 4, 5]
+        lst[-1] = 99
+        self.assertEqual(lst[-1], 99)
+        self.assertEqual(lst[4], 99)
+
+    @make_dynamo_test
+    def test_mutable_sequence_negative_index(self):
+        seq = _MutableSequence([1, 2, 3, 4, 5])
+        seq[-1] = 99
+        self.assertEqual(seq[-1], 99)
+        self.assertEqual(seq[4], 99)
+
+    # -- errors --
+
+    @make_dynamo_test
+    def test_error_list_out_of_bounds(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(IndexError):
+            lst[10] = 100
+
+    @make_dynamo_test
+    def test_error_list_negative_oob(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(IndexError):
+            lst[-100] = 1
+
+    @make_dynamo_test
+    def test_error_list_string_key(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(TypeError):
+            lst["a"] = 1
+
+    @make_dynamo_test
+    def test_error_list_float_key(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(TypeError):
+            lst[2.5] = 1
+
+    @make_dynamo_test
+    def test_error_tuple_setitem(self):
+        t = (1, 2, 3)
+        with self.assertRaises(TypeError):
+            t[0] = 1  # type: ignore[index]
+
+    @make_dynamo_test
+    def test_error_str_setitem(self):
+        s = "abc"
+        with self.assertRaises(TypeError):
+            s[0] = "x"  # type: ignore[index]
+
+    @make_dynamo_test
+    def test_error_bytes_setitem(self):
+        b = b"abc"
+        with self.assertRaises(TypeError):
+            b[0] = 1  # type: ignore[index]
+
+    @make_dynamo_test
+    def test_error_frozenset_setitem(self):
+        fs = frozenset([1, 2, 3])
+        with self.assertRaises(TypeError):
+            fs[0] = 1  # type: ignore[index]
+
+
+instantiate_parametrized_tests(TestSqAssItem)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
