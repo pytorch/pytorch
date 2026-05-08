@@ -14273,6 +14273,7 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(correct, output)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
+    @xfailIf(MACOS_VERSION < 26.0)
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
         mps_tensor = torch.rand(32, device="mps")
