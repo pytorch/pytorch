@@ -13,7 +13,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
     Adding back known type annotation for getitem nodes to improve jit scriptability.
 
     Args:
-        graph (Graph): The graph to be annotated
+        graph (:class:`torch.fx.Graph`): The graph to be annotated
     """
     for node in graph.nodes:
         if node.target is operator.getitem:
