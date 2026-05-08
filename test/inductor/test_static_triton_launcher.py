@@ -21,7 +21,7 @@ from torch._inductor.runtime.triton_compat import (
 )
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfXpu, skipIfXpu_BUGGY
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -537,7 +537,7 @@ class TestStaticTritonCompileResult(TestCase):
 
 
 @requires_gpu_and_triton
-@skipIfXpu_BUGGY
+@skipIfXpu
 class TestFastCudaLauncher(TestCase):
     """Tests for _FastCudaLauncher vectorcall C extension."""
 
