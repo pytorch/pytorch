@@ -12,6 +12,12 @@
 #if !defined(USE_ROCM)
 #include <cuda/ptx>
 #endif
+// mbarrier and cp.async.bulk functions require __cccl_ptx_isa >= 700 (CUDA 11.0+)
+#if !defined(USE_ROCM) && defined(__cccl_ptx_isa) && __cccl_ptx_isa >= 700
+#define AT_USE_CUDA_PTX() 1
+#else
+#define AT_USE_CUDA_PTX() 0
+#endif
 
 // Must use ::cuda::ptx because inside namespace at::native,
 // unqualified cuda:: resolves to the sibling at::cuda namespace.
@@ -25,7 +31,7 @@ __global__ void tma_scatter_add_kernel(
     int num_ind, int D, int64_t self_dim_size,
     int64_t self_stride, int64_t src_stride,
     int entries_per_block, int chunk_elems) {
-#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#if AT_USE_CUDA_PTX() && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     namespace ptx = ::cuda::ptx;
 
     extern __shared__ char smem_raw[];
@@ -118,7 +124,7 @@ void tma_scatter_add_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int D, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
-#if !defined(USE_ROCM)
+#if AT_USE_CUDA_PTX()
     constexpr int max_threads = 256;
     // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     // Correctness depends on this being exactly one warp.
@@ -152,7 +158,7 @@ void tma_scatter_add_kernel_launch(
         entries_per_block, chunk_elems);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-    TORCH_CHECK(false, "TMA scatter_add not supported on ROCm");
+    TORCH_CHECK(false, "TMA scatter_add requires CUDA with cuda::ptx support (CUDA 12.0+)");
 #endif
 }
 
