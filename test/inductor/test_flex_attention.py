@@ -2567,6 +2567,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""
         import warnings
+
         import torch.nn.attention.flex_attention as fa
 
         make_tensor = functools.partial(
