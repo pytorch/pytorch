@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_vendor/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'test/test_torchfuzz_repros.py',
@@ -127,6 +128,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_vendor/**',
 ]
 command = [
     'uv',
@@ -344,7 +346,8 @@ include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
     'caffe2/**',
     'fb/**',
-    '**/fb/**'
+    '**/fb/**',
+    'torch/_vendor/**',
     ]
 command = [
     'python3',
@@ -1560,6 +1563,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_vendor/**',
     'test/dynamo/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
@@ -1842,14 +1846,31 @@ command = [
 code = 'STABLE_SHIM_USAGE'
 include_patterns = [
     'torch/csrc/stable/**/*.h',
-    # We're including the shim file because this linter writes a shim_function_versions.txt that it reads
-    # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want to
-    # update that file.
+    # We're including shim files because this linter writes a shim_function_versions.txt that it reads
+    # in order to check usages of the shim. Even if the shim API is added but not used anywhere, we want
+    # to update that file.
     'torch/csrc/inductor/aoti_torch/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h',
+    'torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.h',
 ]
 command = [
     'python3',
     'tools/linter/adapters/stable_shim_usage_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'GENERATED_SHIMS_VERSION'
+include_patterns = [
+    'torchgen/aoti/fallback_ops.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]

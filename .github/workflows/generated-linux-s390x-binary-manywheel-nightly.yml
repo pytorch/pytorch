@@ -64,6 +64,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_10-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "cpu"
@@ -72,6 +73,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_11-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.12"
             desired_cuda: "cpu"
@@ -80,6 +82,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_12-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13"
             desired_cuda: "cpu"
@@ -88,6 +91,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.13t"
             desired_cuda: "cpu"
@@ -96,6 +100,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_13t-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14"
             desired_cuda: "cpu"
@@ -104,6 +109,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
           - desired_python: "3.14t"
             desired_cuda: "cpu"
@@ -112,6 +118,7 @@ jobs:
             docker_image: "manylinuxs390x-builder"
             docker_image_tag_prefix: "cpu-s390x"
             build_name: "manywheel-py3_14t-cpu-s390x"
+            timeout_minutes: 420
             pytorch_extra_install_requirements: ""
     with:
       PYTORCH_ROOT: /pytorch
@@ -127,7 +134,7 @@ jobs:
       use_container_directive: false
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
-      timeout-minutes: 420
+      timeout-minutes: ${{ matrix.timeout_minutes }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-s390x-binary-manywheel
     secrets:
