@@ -994,6 +994,26 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         self.assertEqual(frozenset({1, 2}) - frozenset(), frozenset({1, 2}))
         self.assertEqual(frozenset() - frozenset({1, 2}), frozenset())
 
+    # --- Dict view difference ---
+
+    @make_dynamo_test
+    def test_dict_keys_difference(self):
+        self.assertEqual({"a": 1, "b": 2}.keys() - {"b"}, {"a"})
+
+    @make_dynamo_test
+    def test_dict_items_difference(self):
+        left = {"a": 1, "b": 2}.items()
+        right = {("b", 2)}
+        self.assertEqual(left - right, {("a", 1)})
+
+    def test_dict_values_difference_unsupported(self):
+        def fn():
+            {"a": 1}.values() - {"b": 2}.values()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn()
+
     # --- OrderedSet difference ---
 
     @make_dynamo_test
@@ -1064,6 +1084,14 @@ class TestNbSub(torch._dynamo.test_case.TestCase):
         f = frozenset({1, 2, 3})
         f -= frozenset()
         self.assertEqual(f, frozenset({1, 2, 3}))
+
+    @make_dynamo_test
+    def test_inplace_sub_orderedset_mutates_alias(self):
+        s = OrderedSet([1, 2, 3])
+        alias = s
+        s -= OrderedSet([2])
+        self.assertEqual(s, OrderedSet([1, 3]))
+        self.assertEqual(alias, OrderedSet([1, 3]))
 
     # --- Reversed sub (__rsub__) ---
 
@@ -1524,6 +1552,56 @@ class TestNbAdd(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Rat(1, 2))
 
     # --- NotImplemented handling from test_descr.py ---
+
+    @make_dynamo_test
+    def test_add_not_implemented_left(self):
+        # When left operand returns NotImplemented, should try right's __radd__
+        obj = _AddNotImplemented()
+        # Left returns NotImplemented, right (int) doesn't have __radd__, raises TypeError
+        with self.assertRaises(TypeError):
+            obj + 5
+
+    @make_dynamo_test
+    def test_add_not_implemented_with_custom_radd(self):
+        # When left returns NotImplemented, should use right's __radd__ if available
+        obj = _AddNotImplemented()
+        custom = _BaseWithAdd()
+        # Left (__add__) returns NotImplemented, right (__radd__) is called
+        result = obj + custom
+        self.assertEqual(result, "_BaseWithAdd.__radd__")
+
+    @make_dynamo_test
+    def test_radd_not_implemented_uses_left(self):
+        # When left has __add__ that works, it should be called even if right's __radd__ returns NotImplemented
+        obj = _RAddNotImplemented()
+        custom = _BaseWithAdd()
+        result = custom + obj
+        # Left (__add__) is called and returns successfully, right is not tried
+        self.assertEqual(result, "_BaseWithAdd.__add__")
+
+    @make_dynamo_test
+    def test_radd_not_implemented_right_used(self):
+        # When both __add__ and __radd__ return NotImplemented, should raise TypeError
+        obj1 = _RAddNotImplemented()
+        obj2 = _RAddNotImplemented()
+        with self.assertRaises(TypeError):
+            obj1 + obj2
+
+    @make_dynamo_test
+    def test_add_not_implemented_reverse_with_integer(self):
+        # Right operand with NotImplemented when left is int
+        obj = _AddNotImplemented()
+        with self.assertRaises(TypeError):
+            5 + obj
+
+    @make_dynamo_test
+    def test_add_not_implemented_with_int_and_custom(self):
+        # _AddNotImplemented returns NotImplemented, then _BaseWithAdd.__radd__ is called
+        obj_not_impl = _AddNotImplemented()
+        obj_impl = _BaseWithAdd()
+        # obj_not_impl.__add__ returns NotImplemented, tries obj_impl.__radd__
+        result = obj_not_impl + obj_impl
+        self.assertEqual(result, "_BaseWithAdd.__radd__")
 
 
 instantiate_parametrized_tests(TestNbOr)
