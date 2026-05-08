@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import logging
 import os
 import unittest
 from collections.abc import Callable
@@ -15,6 +16,13 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
+log = logging.getLogger(__name__)
+if not DO_PERF_TEST:
+    log.info(
+        "test_origami_runtime_matches_regular_max_autotune will be skipped: "
+        "set DO_PERF_TEST=1 to enable runtime perf benchmarks."
+    )
 
 # Test configuration parameters (hardcoded for stability and reproducibility)
 ORIGAMI_TOPK_VALUES = [5, 10]  # topk configs to test
@@ -199,7 +207,10 @@ class TestOrigami(TestCase):
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
-    @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
+    @unittest.skipIf(
+        not DO_PERF_TEST,
+        "Perf test not enabled; set DO_PERF_TEST=1 to enable runtime perf benchmarks",
+    )
     def test_origami_runtime_matches_regular_max_autotune(self):
         for op_name in ("mm", "addmm", "bmm"):
             for size in (8192, 16384):
@@ -451,48 +462,50 @@ class TestOrigami(TestCase):
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
 
-        # Also test with origami explicitly disabled in config
-        for op_name in ("mm", "addmm", "bmm"):
-            with self.subTest(op_name=op_name, mode="explicitly_disabled"):
-                fn, args = self._make_fn_and_inputs(op_name, 256)
-                expected = fn(*args)
+    def test_origami_module_gate_when_env_var_unset(self):
+        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI is unset.
 
-                torch._dynamo.reset()
-                counters.clear()
+        rocm.origami is a load-time-only knob (env-var driven). triton.py imports
+        the origami module at module load only when IS_ROCM and config.max_autotune
+        and config.rocm.origami are all true; otherwise it sets ``origami = None``.
+        Once cached, that decision is final for the process -- flipping
+        config.rocm.origami via config.patch() after import has no effect.
 
-                # Configuration with origami explicitly disabled
-                patch_config = {
-                    "max_autotune": True,
-                    "max_autotune_gemm": True,
-                    "rocm.origami": False,  # Explicitly disable origami
-                    "max_autotune_gemm_search_space": "DEFAULT",
-                    "max_autotune_gemm_backends": "TRITON",
-                    "test_configs.autotune_choice_name_regex": r"^triton_(b)?mm_",
-                    "triton.native_matmul": False,
-                }
-                # Note: mock.patch is safe here because TestOrigami class is
-                # @skipIf(not HAS_ORIGAMI), so origami is guaranteed to be available
+        This subprocess test exercises the realistic disabled path: a fresh
+        Python process with TORCHINDUCTOR_ORIGAMI unset must end up with
+        ``triton.origami is None``, regardless of config.patch() calls afterward.
+        """
+        import subprocess
+        import sys
 
-                with (
-                    fresh_cache(),
-                    config.patch(patch_config),
-                    mock.patch(
-                        "origami.select_topk_configs", wraps=origami.select_topk_configs
-                    ) as select_topk,
-                ):
-                    compiled = torch.compile(fn, dynamic=False)
-                    result = compiled(*args)
+        snippet = (
+            "import os, torch\n"
+            "from torch._inductor import config\n"
+            "from torch._inductor.template_heuristics import triton as th\n"
+            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') != '1', 'env var leaked'\n"
+            "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
+            "# Even after flipping the config knob mid-process, origami stays None\n"
+            "with config.patch({'rocm.origami': True, 'max_autotune': True}):\n"
+            "    assert th.origami is None, 'config.patch must not re-trigger import'\n"
+            "print('OK')\n"
+        )
 
-                # Verify compilation succeeded and produces correct results
-                torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
-                self.assertIsNotNone(compiled)
+        env = os.environ.copy()
+        env.pop("TORCHINDUCTOR_ORIGAMI", None)
 
-                # When origami is explicitly disabled, select_topk_configs should not be called
-                self.assertEqual(
-                    select_topk.call_count,
-                    0,
-                    msg="origami.select_topk_configs should not be called when origami is disabled",
-                )
+        result = subprocess.run(
+            [sys.executable, "-c", snippet],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+        )
+        self.assertIn("OK", result.stdout)
 
 
 @unittest.skipIf(

@@ -59,10 +59,27 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+
+# rocm-origami pip pkg is only available on ROCm builds and is only used when
+# both max_autotune and config.rocm.origami are enabled (env-var driven, set once
+# at config import). Cache the import here so the hot path never pays an exception
+# and CUDA/CPU/origami-disabled processes never attempt the import.
+if IS_ROCM and config.max_autotune and config.rocm.origami:
+    try:
+        import origami  # type: ignore[import-not-found]
+    except ImportError:
+        origami = None
+        log.info(
+            "rocm-origami not installed; ROCm origami GEMM selection disabled. "
+            "Install via pip install rocm-origami to enable."
+        )
+else:
+    origami = None
 
 
 # Gemm Configs
@@ -2083,219 +2100,203 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         dtype = kernel_inputs.dtype()
         # Get the appropriate config generator
         configs = self._get_config_generator()
-        # Generate and process configs
-        # Origami GEMM selection requires all conditions to be true:
-        # 1. max_autotune: Enable automatic kernel selection
-        # 2. IS_ROCM: Origami is AMD/ROCm-specific
-        # 3. _origami_enabled(): Explicitly enabled via config.rocm.origami
-        # 4. DEFAULT search space: Origami optimizes within default space, not exhaustive
-        # If any condition is false, origami is silently skipped and regular generator is used.
-        if (
-            config.max_autotune
-            and (IS_ROCM)
-            and _origami_enabled()
-            and config.max_autotune_gemm_search_space == "DEFAULT"
-        ):
-            try:
-                import origami  # type: ignore[import]
-            except ImportError:
-                log.warning(
-                    "Origami not imported, falling back to regular config generator"
+        # Generate and process configs.
+        # `origami is not None` implies the module-level gate passed:
+        # IS_ROCM and config.max_autotune and config.rocm.origami were all true at
+        # import time (see top of file). The only remaining per-call condition is
+        # the gemm search space — origami only operates with DEFAULT.
+        if origami is not None and config.max_autotune_gemm_search_space == "DEFAULT":
+            # Extract device and strides for origami GEMM
+            device = kernel_inputs.device()
+            strides = kernel_inputs.strides_symbolic()
+            a_stride = strides[kernel_inputs._mat1_idx]
+            b_stride = strides[kernel_inputs._mat2_idx]
+            origami_cfg_gen = self.get_exhaustive_mm_configs()
+            allcfgs = origami_cfg_gen(
+                m, n, k, dtype_size=dtype.itemsize, op_name=op_name
+            )
+            selector = origami.OrigamiMatmulSelector(
+                allcfgs,
+                m,
+                n,
+                k,
+                dtype,
+                dtype,
+                dtype,
+                device,
+                a_stride,
+                b_stride,
+            )
+            # NOTE: Using private origami API (_problem, _hardware, _configs)
+            # This is a known limitation that depends on origami maintainers to expose
+            # these as public APIs.
+            topk_results = origami.select_topk_configs(
+                selector._problem,
+                selector._hardware,
+                selector._configs,
+                config.rocm.origami_topk,
+            )
+            seen = OrderedSet()
+            # Collect origami-selected configs into a list before filtering
+            origami_configs: list[BaseConfig] = []
+            # Map config key (immutable tile dimensions) to origami parameters
+            origami_triton_configs: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+
+            def _config_key(cfg: BaseConfig) -> tuple[int, int, int]:
+                """
+                Generate a stable key for origami configs based on immutable tile dimensions.
+                Uses only block_m, block_n, block_k since these uniquely identify an origami
+                config and remain invariant across _filter_configs modifications (which may
+                change num_stages, num_warps, and other attributes).
+                """
+                return (
+                    cfg.block_m,
+                    cfg.block_n,
+                    cfg.block_k,
                 )
-                origami = None
-            if origami is not None:
-                # Extract device and strides for origami GEMM
-                device = kernel_inputs.device()
-                strides = kernel_inputs.strides_symbolic()
-                a_stride = strides[kernel_inputs._mat1_idx]
-                b_stride = strides[kernel_inputs._mat2_idx]
-                origami_cfg_gen = self.get_exhaustive_mm_configs()
-                allcfgs = origami_cfg_gen(
-                    m, n, k, dtype_size=dtype.itemsize, op_name=op_name
-                )
-                selector = origami.OrigamiMatmulSelector(
-                    allcfgs,
-                    m,
-                    n,
-                    k,
-                    dtype,
-                    dtype,
-                    dtype,
-                    device,
-                    a_stride,
-                    b_stride,
-                )
-                # NOTE: Using private origami API (_problem, _hardware, _configs)
-                # This is a known limitation that depends on origami maintainers to expose
-                # these as public APIs.
-                topk_results = origami.select_topk_configs(
+
+            for result in topk_results:
+                cfg = result.config
+                key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
+                if key in seen:
+                    continue
+                seen.add(key)
+                grid = origami.select_grid_size(
                     selector._problem,
                     selector._hardware,
-                    selector._configs,
-                    config.rocm.origami_topk,
+                    cfg,
+                    origami.grid_selection_t.data_parallel,
+                    selector._hardware.N_CU,
                 )
-                seen = OrderedSet()
-                # Collect origami-selected configs into a list before filtering
-                origami_configs: list[BaseConfig] = []
-                # Map config key (immutable tile dimensions) to origami parameters
-                origami_triton_configs: dict[tuple[int, int, int], tuple[Any, Any]] = {}
-
-                def _config_key(cfg: BaseConfig) -> tuple[int, int, int]:
-                    """
-                    Generate a stable key for origami configs based on immutable tile dimensions.
-                    Uses only block_m, block_n, block_k since these uniquely identify an origami
-                    config and remain invariant across _filter_configs modifications (which may
-                    change num_stages, num_warps, and other attributes).
-                    """
-                    return (
-                        cfg.block_m,
-                        cfg.block_n,
-                        cfg.block_k,
-                    )
-
-                for result in topk_results:
-                    cfg = result.config
-                    key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    grid = origami.select_grid_size(
-                        selector._problem,
-                        selector._hardware,
-                        cfg,
-                        origami.grid_selection_t.data_parallel,
-                        selector._hardware.N_CU,
-                    )
-                    wgm_result = origami.select_workgroup_mapping(
-                        selector._problem,
-                        selector._hardware,
-                        cfg,
-                        grid,
-                    )
-                    # Compute num_warps based on device hardware, not hardcoded values.
-                    # Previously, mfma_dim=16 and num_stages=2 were hardcoded, which only worked
-                    # for older GPUs. Now we query architecture-specific values from selector._hardware
-                    # to support MI300, MI350X, MI355, and other AMD GPUs with different matrix
-                    # instruction dimensions and occupancy characteristics.
-                    #
-                    # num_warps heuristic: We compute the number of warps based on the tile area
-                    # (block_m * block_n) and the mfma dimension of the GPU. The formula is:
-                    #   num_warps = min(max_warps, max(1, tile_area / (mfma_dim * warp_size)))
-                    # This ensures we schedule enough warps to cover the tile efficiently without
-                    # exceeding the maximum warps available on the CU (2 per MI CU for typical GPUs).
-                    tile_area = cfg.mt.m * cfg.mt.n
-                    try:
-                        warp_size = torch.cuda.get_device_properties(device).warp_size
-                    except (RuntimeError, AttributeError) as e:
-                        # Fallback to standard warp size if device properties unavailable
-                        log.warning(
-                            "Failed to get device warp size: %s. Using default 64.", e
-                        )
-                        warp_size = 64
-                    max_warps = 2 * selector._hardware.parallel_mi_cu
-                    # Use mfma_dim from hardware object if available, else fallback to 16.
-                    # mfma_dim varies by GPU: MI300X/MI325X uses 16, MI350X/MI355X may use different values.
-                    # selector._hardware.mfma_m is set by origami based on the target GPU architecture.
-                    mfma_dim = getattr(selector._hardware, "mfma_m", 16)
-                    num_warps = min(
-                        max_warps,
-                        max(1, tile_area // (mfma_dim * warp_size)),
-                    )
-                    # Use num_stages derived from config occupancy, not hardcoded.
-                    # origami provides occupancy-aware staging decisions per architecture.
-                    # Higher occupancy GPUs can support more pipeline stages for better throughput.
-                    num_stages = max(
-                        1,
-                        min(4, (cfg.occupancy * 4) // 100)
-                        if hasattr(cfg, "occupancy")
-                        else 2,
-                    )
-                    base_config = GemmConfig(
-                        block_m=cfg.mt.m,
-                        block_n=cfg.mt.n,
-                        block_k=cfg.mt.k,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                        group_m=wgm_result.wgm,
-                    )
-                    origami_configs.append(base_config)
-                    # Store triton config and its parameters for later conversion using stable key
-                    config_key = _config_key(base_config)
-                    origami_triton_configs[config_key] = (
-                        cfg.occupancy,
-                        wgm_result.wgm,
-                    )
-
-                # Filter the collected configs
-                # Note: _filter_configs validates configs (e.g., max block size, memory constraints)
-                # but does not reject origami's optimal selections. Tests validate that:
-                # - Compile work is reduced vs full max_autotune (test_origami_reduces_compile_work)
-                # - Runtime performance matches or exceeds max_autotune (test_origami_runtime_matches)
-                filtered_configs = self._filter_configs(origami_configs)
-
-                # If origami returned configs, use them; otherwise fall back to regular generator
-                if filtered_configs:
-                    # Convert filtered configs to template kwargs and yield
-                    for filtered_config in filtered_configs:
-                        # Retrieve stored origami parameters using stable config key
-                        config_key = _config_key(filtered_config)
-                        origami_params = origami_triton_configs.get(config_key)
-                        if origami_params is None:
-                            # If not found, log a warning about the lookup failure
-                            log.warning(
-                                "Config lookup failed for %s. "
-                                "This may indicate a config rebuilding issue in _filter_configs.",
-                                config_key,
-                            )
-                            continue
-                        occupancy, group_m = origami_params
-
-                        # Create TritonConfig from filtered config
-                        triton_config = self.triton_config(  # pyright: ignore[attr-defined]
-                            num_stages=filtered_config.num_stages,
-                            num_warps=filtered_config.num_warps,
-                            BLOCK_M=filtered_config.block_m,
-                            BLOCK_N=filtered_config.block_n,
-                            BLOCK_K=filtered_config.block_k,
-                            GROUP_M=group_m,
-                            waves_per_eu=occupancy,
-                        )
-                        template_kwargs = self._convert_config_to_template_kwargs(
-                            triton_config,
-                            m,
-                            n,
-                            k,
-                            kernel_inputs.out_dtype(),
-                        )
-                        yield template_kwargs
-                else:
-                    # No origami configs returned (e.g., topk=0), fall back to regular generator
+                wgm_result = origami.select_workgroup_mapping(
+                    selector._problem,
+                    selector._hardware,
+                    cfg,
+                    grid,
+                )
+                # Compute num_warps based on device hardware, not hardcoded values.
+                # Previously, mfma_dim=16 and num_stages=2 were hardcoded, which only worked
+                # for older GPUs. Now we query architecture-specific values from selector._hardware
+                # to support MI300, MI350X, MI355, and other AMD GPUs with different matrix
+                # instruction dimensions and occupancy characteristics.
+                #
+                # num_warps heuristic: We compute the number of warps based on the tile area
+                # (block_m * block_n) and the mfma dimension of the GPU. The formula is:
+                #   num_warps = min(max_warps, max(1, tile_area / (mfma_dim * warp_size)))
+                # This ensures we schedule enough warps to cover the tile efficiently without
+                # exceeding the maximum warps available on the CU (2 per MI CU for typical GPUs).
+                tile_area = cfg.mt.m * cfg.mt.n
+                try:
+                    warp_size = torch.cuda.get_device_properties(device).warp_size
+                except (RuntimeError, AttributeError) as e:
+                    # Fallback to standard warp size if device properties unavailable
                     log.warning(
-                        "Origami returned no configs, falling back to regular config generator"
+                        "Failed to get device warp size: %s. Using default 64.", e
                     )
-                    for c in configs(
+                    warp_size = 64
+                max_warps = 2 * selector._hardware.parallel_mi_cu
+                # Use mfma_dim from hardware object if available, else fallback to 16.
+                # mfma_dim varies by GPU: MI300X/MI325X uses 16, MI350X/MI355X may use different values.
+                # selector._hardware.mfma_m is set by origami based on the target GPU architecture.
+                mfma_dim = getattr(selector._hardware, "mfma_m", 16)
+                num_warps = min(
+                    max_warps,
+                    max(1, tile_area // (mfma_dim * warp_size)),
+                )
+                # Use num_stages derived from config occupancy, not hardcoded.
+                # origami provides occupancy-aware staging decisions per architecture.
+                # Higher occupancy GPUs can support more pipeline stages for better throughput.
+                num_stages = max(
+                    1,
+                    min(4, (cfg.occupancy * 4) // 100)
+                    if hasattr(cfg, "occupancy")
+                    else 2,
+                )
+                base_config = GemmConfig(
+                    block_m=cfg.mt.m,
+                    block_n=cfg.mt.n,
+                    block_k=cfg.mt.k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    group_m=wgm_result.wgm,
+                )
+                origami_configs.append(base_config)
+                # Store triton config and its parameters for later conversion using stable key
+                config_key = _config_key(base_config)
+                origami_triton_configs[config_key] = (
+                    cfg.occupancy,
+                    wgm_result.wgm,
+                )
+
+            # Filter the collected configs
+            # Note: _filter_configs validates configs (e.g., max block size, memory constraints)
+            # but does not reject origami's optimal selections. Tests validate that:
+            # - Compile work is reduced vs full max_autotune (test_origami_reduces_compile_work)
+            # - Runtime performance matches or exceeds max_autotune (test_origami_runtime_matches)
+            filtered_configs = self._filter_configs(origami_configs)
+
+            # If origami returned configs, use them; otherwise fall back to regular generator
+            if filtered_configs:
+                # Convert filtered configs to template kwargs and yield
+                for filtered_config in filtered_configs:
+                    # Retrieve stored origami parameters using stable config key
+                    config_key = _config_key(filtered_config)
+                    origami_params = origami_triton_configs.get(config_key)
+                    if origami_params is None:
+                        # If not found, log a warning about the lookup failure
+                        log.warning(
+                            "Config lookup failed for %s. "
+                            "This may indicate a config rebuilding issue in _filter_configs.",
+                            config_key,
+                        )
+                        continue
+                    occupancy, group_m = origami_params
+
+                    # Create TritonConfig from filtered config
+                    triton_config = self.triton_config(  # pyright: ignore[attr-defined]
+                        num_stages=filtered_config.num_stages,
+                        num_warps=filtered_config.num_warps,
+                        BLOCK_M=filtered_config.block_m,
+                        BLOCK_N=filtered_config.block_n,
+                        BLOCK_K=filtered_config.block_k,
+                        GROUP_M=group_m,
+                        waves_per_eu=occupancy,
+                    )
+                    template_kwargs = self._convert_config_to_template_kwargs(
+                        triton_config,
                         m,
                         n,
                         k,
-                        dtype_size=dtype.itemsize,
-                        op_name=op_name,
-                        **kwargs,
-                    ):
-                        template_kwargs = self._convert_config_to_template_kwargs(
-                            c,
-                            m,
-                            n,
-                            k,
-                            kernel_inputs.out_dtype(),
-                        )
-                        yield template_kwargs
+                        kernel_inputs.out_dtype(),
+                    )
+                    yield template_kwargs
+            else:
+                # No origami configs returned (e.g., topk=0), fall back to regular generator
+                log.warning(
+                    "Origami returned no configs, falling back to regular config generator"
+                )
+                for c in configs(
+                    m,
+                    n,
+                    k,
+                    dtype_size=dtype.itemsize,
+                    op_name=op_name,
+                    **kwargs,
+                ):
+                    template_kwargs = self._convert_config_to_template_kwargs(
+                        c,
+                        m,
+                        n,
+                        k,
+                        kernel_inputs.out_dtype(),
+                    )
+                    yield template_kwargs
 
         else:
-            # Warn if origami is enabled but not used due to EXHAUSTIVE search space
+            # Warn if origami was enabled but not used due to EXHAUSTIVE search space.
+            # `origami is not None` already covers IS_ROCM + max_autotune + rocm.origami.
             if (
-                config.max_autotune
-                and (IS_ROCM)
-                and _origami_enabled()
+                origami is not None
                 and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
             ):
                 log.warning(
