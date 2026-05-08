@@ -21,6 +21,71 @@ class Info:
     _setup_context_fn: Callable | None
 
 
+def _codegen_autograd_forward(
+    op: _ops.OpOverload,
+    info: InfoProtocol,
+    has_kwarg_only_args: bool,
+) -> tuple[Callable, Callable]:
+    code_globals: dict[str, object] = {
+        "_AutoDispatchBelowAutograd_": _C._AutoDispatchBelowAutograd,
+        "_after_autograd_keyset_": _C._after_autograd_keyset,
+        "_op_": op,
+    }
+
+    lines: list[str] = []
+
+    lines.append("def forward_no_grad(*args):")
+    lines.append("    metadata = args[-1]")
+    lines.append("    args = args[:-1]")
+    lines.append("    with _AutoDispatchBelowAutograd_():")
+    lines.append("        keyset = metadata.keyset")
+    lines.append("        kwargs = metadata.keyword_only_args")
+    lines.append(
+        "        return _op_.redispatch(keyset & _after_autograd_keyset_, *args, **kwargs)"
+    )
+
+    lines.append("")
+    lines.append("def forward(ctx, *args):")
+    lines.append("    metadata = args[-1]")
+    lines.append("    args = args[:-1]")
+    lines.append("    with _AutoDispatchBelowAutograd_():")
+    lines.append("        keyset = metadata.keyset")
+    lines.append("        kwargs = metadata.keyword_only_args")
+
+    if info._setup_context_fn:
+        code_globals["_fill_defaults_"] = utils.fill_defaults
+        code_globals["_schema_"] = op._schema
+        code_globals["_setup_context_fn_"] = info._setup_context_fn
+        lines.append(
+            "        result = _op_.redispatch(keyset & _after_autograd_keyset_, *args, **kwargs)"
+        )
+        # The dispatcher strips args equal to their default values for
+        # serialization forward/backward compatibility. We fill them back
+        # so setup_context sees all declared args — adding a new default
+        # arg requires the user to update setup_context anyway.
+        lines.append("        args, kwargs = _fill_defaults_(_schema_, args, kwargs)")
+        if has_kwarg_only_args:
+            lines.append(
+                "        _setup_context_fn_(ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result)"
+            )
+        else:
+            lines.append(
+                "        _setup_context_fn_(ctx=ctx, inputs=args, output=result)"
+            )
+        lines.append("        return result")
+    else:
+        lines.append(
+            "        return _op_.redispatch(keyset & _after_autograd_keyset_, *args, **kwargs)"
+        )
+
+    source = "\n".join(lines)
+    code = compile(source, f"<custom_op_autograd_{op._namespace}_{op._opname}>", "exec")
+    local_dict: dict[str, object] = {}
+    exec(code, code_globals, local_dict)
+
+    return local_dict["forward_no_grad"], local_dict["forward"]  # type: ignore[return-value]
+
+
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
@@ -31,44 +96,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         keyset: _C.DispatchKeySet
         keyword_only_args: dict[str, Any]
 
-    def forward_no_grad(*args):
-        metadata = args[-1]
-        args = args[:-1]
-
-        with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            return result
-
-    def forward(ctx, *args):
-        metadata = args[-1]
-        args = args[:-1]
-
-        with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            if info._setup_context_fn:
-                # The Dispatcher will remove args that are equal to their default
-                # values from (args, kwargs). We're going to add it back so that
-                # the user can access them.
-                #
-                # This is OK to do: The Dispatcher removed the args for serialization
-                # FC/BC reasons (that is, a graph will not store args that are equal
-                # to their default values), but that doesn't matter here. If the user
-                # adds a new default arg, then they must update
-                # their setup_context (along with the rest of their operator
-                # registrations)
-                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
-
-                if has_kwarg_only_args:
-                    info._setup_context_fn(
-                        ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
-                    )
-                else:
-                    info._setup_context_fn(ctx=ctx, inputs=args, output=result)
-            return result
+    forward_no_grad, forward = _codegen_autograd_forward(op, info, has_kwarg_only_args)
 
     def backward(ctx, *grads):
         if info._backward_fn:

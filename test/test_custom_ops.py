@@ -2640,6 +2640,235 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(called, 1)
         self.assertEqual(y, x + 2.0)
 
+    def test_codegen_forward_no_setup_context(self):
+        @torch.library.custom_op("_torch_testing::mul", mutates_args=())
+        def mul(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        def backward(ctx, grad):
+            x, y = ctx.saved_tensors
+            return grad * y, grad * x
+
+        def setup_context(ctx, inputs, output):
+            x, y = inputs
+            ctx.save_for_backward(x, y)
+
+        mul.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        out = mul(x, y)
+        self.assertEqual(out, x * y)
+        out.sum().backward()
+        self.assertEqual(x.grad, y)
+        self.assertEqual(y.grad, x)
+
+    def test_codegen_forward_no_setup_context_no_grad(self):
+        @torch.library.custom_op("_torch_testing::mul2", mutates_args=())
+        def mul2(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        setup_called = 0
+
+        def backward(ctx, grad):
+            return grad, grad
+
+        def setup_context(ctx, inputs, output):
+            nonlocal setup_called
+            setup_called += 1
+
+        mul2.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            out = mul2(x, y)
+        self.assertEqual(out, x * y)
+        self.assertEqual(setup_called, 0)
+
+        out = mul2(x, y)
+        self.assertEqual(setup_called, 1)
+
+    def test_codegen_forward_without_setup_context_registered(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("noctx(Tensor x) -> Tensor")
+
+            def impl(x):
+                return x * 2
+
+            lib.impl("noctx", impl, "CPU")
+
+            def backward(ctx, grad):
+                return grad * 2
+
+            torch.library.register_autograd("_torch_testing::noctx", backward, lib=lib)
+
+            x = torch.randn(3, requires_grad=True)
+            out = torch.ops._torch_testing.noctx(x)
+            self.assertEqual(out, x * 2)
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.full((3,), 2.0))
+
+    def test_codegen_forward_kwarg_only(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("kwop(Tensor x, *, float scale, float bias) -> Tensor")
+
+            def impl(x, *, scale, bias):
+                return x * scale + bias
+
+            lib.impl("kwop", impl, "CPU")
+
+            setup_kw = {}
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                setup_kw.update(keyword_only_inputs)
+                ctx.scale = keyword_only_inputs["scale"]
+
+            def backward(ctx, grad):
+                return grad * ctx.scale
+
+            torch.library.register_autograd(
+                "_torch_testing::kwop", backward, setup_context=setup_context, lib=lib
+            )
+
+            x = torch.randn(3, requires_grad=True)
+            out = torch.ops._torch_testing.kwop(x, scale=2.5, bias=1.0)
+            self.assertEqual(out, x * 2.5 + 1.0)
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.full((3,), 2.5))
+            self.assertEqual(setup_kw, {"scale": 2.5, "bias": 1.0})
+
+    def test_codegen_forward_kwarg_only_no_grad(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("kwop2(Tensor x, *, float scale) -> Tensor")
+
+            def impl(x, *, scale):
+                return x * scale
+
+            lib.impl("kwop2", impl, "CPU")
+
+            setup_called = 0
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                nonlocal setup_called
+                setup_called += 1
+
+            def backward(ctx, grad):
+                return grad
+
+            torch.library.register_autograd(
+                "_torch_testing::kwop2",
+                backward,
+                setup_context=setup_context,
+                lib=lib,
+            )
+
+            x = torch.randn(3, requires_grad=True)
+            with torch.no_grad():
+                out = torch.ops._torch_testing.kwop2(x, scale=3.0)
+            self.assertEqual(out, x * 3.0)
+            self.assertEqual(setup_called, 0)
+
+            out = torch.ops._torch_testing.kwop2(x, scale=3.0)
+            self.assertEqual(setup_called, 1)
+
+    def test_codegen_forward_default_args_filled(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("defop(Tensor x, int a = 10, *, int b = 20) -> Tensor")
+
+            def impl(x, a=10, *, b=20):
+                return x * a * b
+
+            lib.impl("defop", impl, "CPU")
+
+            received_inputs = []
+            received_kw = []
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                received_inputs.append(inputs)
+                received_kw.append(keyword_only_inputs)
+                ctx.c = inputs[1] * keyword_only_inputs["b"]
+
+            def backward(ctx, grad):
+                return grad * ctx.c
+
+            torch.library.register_autograd(
+                "_torch_testing::defop",
+                backward,
+                setup_context=setup_context,
+                lib=lib,
+            )
+
+            x = torch.randn(3, requires_grad=True)
+            out = torch.ops._torch_testing.defop(x, b=20)
+            self.assertEqual(out, x * 10 * 20)
+            self.assertEqual(len(received_inputs), 1)
+            self.assertEqual(received_inputs[0][1], 10)
+            self.assertEqual(received_kw[0], {"b": 20})
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.full((3,), 200.0))
+
+    def test_codegen_forward_multi_output(self):
+        @torch.library.custom_op("_torch_testing::split_op", mutates_args=())
+        def split_op(x: Tensor) -> tuple[Tensor, Tensor]:
+            return x * 2, x * 3
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+
+        def backward(ctx, grad0, grad1):
+            (x,) = ctx.saved_tensors
+            return grad0 * 2 + grad1 * 3
+
+        split_op.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(4, requires_grad=True)
+        a, b = split_op(x)
+        self.assertEqual(a, x * 2)
+        self.assertEqual(b, x * 3)
+        (a.sum() + b.sum()).backward()
+        self.assertEqual(x.grad, torch.full((4,), 5.0))
+
+    def test_codegen_forward_preserves_requires_grad_false(self):
+        @torch.library.custom_op("_torch_testing::addone", mutates_args=())
+        def addone(x: Tensor) -> Tensor:
+            return x + 1
+
+        setup_called = 0
+
+        def setup_context(ctx, inputs, output):
+            nonlocal setup_called
+            setup_called += 1
+
+        def backward(ctx, grad):
+            raise AssertionError("should not be reached")
+
+        addone.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=False)
+        y = addone(x)
+        self.assertEqual(y, x + 1)
+        self.assertEqual(setup_called, 0)
+
+    def test_codegen_forward_second_order_grad(self):
+        @torch.library.custom_op("_torch_testing::square", mutates_args=())
+        def square(x: Tensor) -> Tensor:
+            return x * x
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 2 * x
+
+        square.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y = square(x)
+        (grad_x,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+        self.assertEqual(grad_x, 2 * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
