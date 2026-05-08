@@ -29,8 +29,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/native/cuda/Resize.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <cuda_runtime.h>
 #endif
 
 #include <ATen/detail/PrivateUse1HooksInterface.h>
@@ -40,47 +39,6 @@
 #define LSEEK _lseeki64
 #else
 #define LSEEK lseek
-#endif
-
-#ifdef USE_CUDA
-namespace {
-
-void resize_storage_cuda_with_addr(
-    const at::Storage& storage,
-    size_t size_bytes,
-    void* addr) {
-  if (size_bytes == 0) {
-    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), 0);
-    return;
-  }
-
-  auto* storage_impl = storage.unsafeGetStorageImpl();
-  TORCH_CHECK(
-      storage_impl->resizable(),
-      "Trying to resize storage that is not resizable");
-  auto allocator = storage_impl->allocator();
-  TORCH_CHECK(
-      allocator != nullptr, "Trying to resize storage without an allocator");
-  TORCH_CHECK(
-      storage.nbytes() == 0,
-      "_resize_with_addr_ only supports resizing a zero-sized CUDA storage to a non-zero size, but got current size ",
-      storage.nbytes(),
-      " bytes");
-  TORCH_CHECK(
-      addr != nullptr,
-      "_resize_with_addr_ expects a non-null addr when size is non-zero");
-  TORCH_CHECK(
-      allocator == c10::cuda::CUDACachingAllocator::get(),
-      "_resize_with_addr_ only supports storages allocated by the current CUDA caching allocator");
-
-  c10::cuda::CUDAGuard guard(storage.device().index());
-  auto data = c10::cuda::CUDACachingAllocator::allocateWithAddress(
-      size_bytes, addr);
-  storage_impl->set_data_ptr_noswap(std::move(data));
-  storage_impl->set_nbytes(size_bytes);
-}
-
-} // namespace
 #endif
 
 static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
@@ -247,7 +205,8 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
         size_bytes_i,
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    resize_storage_cuda_with_addr(storage, size_bytes, addr);
+    at::native::resize_bytes_cuda_with_addr(
+        storage.unsafeGetStorageImpl(), size_bytes, addr);
 #else
     TORCH_CHECK(false, "built without USE_CUDA");
 #endif

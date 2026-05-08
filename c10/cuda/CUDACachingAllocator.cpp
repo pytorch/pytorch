@@ -1738,6 +1738,8 @@ class DeviceCachingAllocator {
     // First, try to get a block from the existing pool.
     bool block_found = false;
     if (addr != nullptr) {
+      // Exact-address mode must either reuse this address or fail. Do not
+      // silently fall back to a different cached block.
       params.block = get_free_block_by_exact_address(pool, size, stream, addr);
       if (!params.block) {
         return nullptr;
@@ -4933,7 +4935,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
 
-  DataPtr allocateWithAddress(size_t size, void* addr) {
+  DataPtr allocateWithAddress(size_t size, void* addr) override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     TORCH_CHECK(
@@ -5268,13 +5270,6 @@ namespace CudaMallocAsync {
 CUDAAllocator* allocator();
 
 } // namespace CudaMallocAsync
-
-DataPtr allocateWithAddress(size_t size, void* addr) {
-  TORCH_CHECK(
-      get() == &Native::allocator,
-      "Exact-address allocation is only supported by the native CUDA caching allocator");
-  return Native::allocator.allocateWithAddress(size, addr);
-}
 
 struct BackendStaticInitializer {
   // Parses the environment configuration for CUDA/ROCm allocator backend at
