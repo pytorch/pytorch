@@ -3941,11 +3941,9 @@ def _get_fake_value_impl(
         ):
             log.debug("get_fake_value: using C++ fake tensor mode for %s", node.target)
             fake_mode_ctx = contextlib.nullcontext()
-            python_dispatcher_ctx = contextlib.nullcontext()
         else:
             fake_mode_ctx = fake_mode
-            python_dispatcher_ctx = enable_python_dispatcher()
-        with fake_mode_ctx, python_dispatcher_ctx:
+        with fake_mode_ctx, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )

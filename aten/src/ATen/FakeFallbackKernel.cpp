@@ -656,40 +656,8 @@ void fakeFallback(
   // TODO: user registered
   // structured kernels?
 
-  // special handling for funcs registered through `register_op_impl`.
-  // Skip aten tensor constructors (no tensor inputs, single tensor output)
-  // because the C++ path below (rewrite_device_args_to_meta + Meta kernel)
-  // already handles them correctly, and the Python constructors handler
-  // creates Python FakeTensors that don't convert cleanly back to C++ fakes.
-  auto is_aten_tensor_constructor = [&]() {
-    auto ns = schema.operator_name().getNamespace();
-    if (!ns.has_value() || *ns != "aten")
-      return false;
-    if (schema.returns().size() != 1 ||
-        !schema.returns()[0].type()->isSubtypeOf(*c10::TensorType::get()))
-      return false;
-    for (const auto& arg : schema.arguments()) {
-      if (arg.type()->isSubtypeOf(*c10::TensorType::get()) ||
-          arg.type()->isSubtypeOf(*c10::ListType::ofTensors()) ||
-          arg.type()->isSubtypeOf(
-              *c10::OptionalType::create(c10::TensorType::get()))) {
-        return false;
-      }
-    }
-    return true;
-  };
+  // special handling for funcs registered through `register_op_impl`
 
-  if (mode && mode->op_impl_fn_ && !is_aten_tensor_constructor()) {
-    bool found = false;
-    try {
-      found = mode->op_impl_fn_(&op, stack);
-    } catch (...) {
-      throw;
-    }
-    if (found) {
-      return;
-    }
-  }
 
   auto device_from_args = rewrite_device_args_to_meta(
       stack, arguments_begin, num_arguments, schema);
