@@ -395,6 +395,13 @@ def get_caching_autotuner_plugins(
     imports kept inside the relevant branch.
     """
     plugins: list[CachingAutotunerPlugin] = []
+    if autotuner.inductor_meta.get("incremental_autotune", False):
+        try:
+            from .fb.incremental import IncrementalAutotunePlugin
+
+            plugins.append(IncrementalAutotunePlugin())
+        except ImportError:
+            pass
     return plugins
 
 

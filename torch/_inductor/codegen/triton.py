@@ -5583,6 +5583,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "autotune_remote_cache": config.autotune_remote_cache,
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
+            "incremental_autotune": config.incremental_autotune,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,

@@ -241,6 +241,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
+    off_by_default=True,
+)
+register_artifact(
     "node_runtime_estimation",
     "Node runtime estimation for compile-time optimization decisions.",
     off_by_default=True,
