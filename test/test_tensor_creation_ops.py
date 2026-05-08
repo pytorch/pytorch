@@ -2562,6 +2562,9 @@ class TestTensorCreation(TestCase):
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
+        self.assertRaisesRegex(
+            RuntimeError, "step must be nonzero",
+            lambda: torch.arange(0, 5, 0.5, dtype=torch.int64, device=device))
 
         self.assertRaisesRegex(
             RuntimeError, "overflow",
