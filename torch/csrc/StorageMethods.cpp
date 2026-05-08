@@ -178,9 +178,7 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
       "Attempted to call _resize_with_addr_() on an invalid python storage.")
   Py_ssize_t nargs = PyTuple_GET_SIZE(args);
   TORCH_CHECK(
-      nargs == 2,
-      "_resize_with_addr_ expects 2 arguments, got ",
-      nargs);
+      nargs == 2, "_resize_with_addr_ expects 2 arguments, got ", nargs);
   PyObject* number_arg = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(
       THPUtils_checkLong(number_arg),

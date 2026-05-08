@@ -178,8 +178,8 @@ struct BlockPool {
         is_small(small),
         owner_PrivatePool(private_pool) {}
 
-  // Do not insert a Block to blocks directly; use insert_into_blocks(),
-  // instead.
+  // Do not insert or erase a Block from blocks/blocks_by_addr directly; use
+  // insert_into_blocks()/erase_from_blocks() instead.
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> blocks_by_addr;
   std::set<Block*, Comparison> unmapped;
@@ -191,6 +191,7 @@ struct BlockPool {
   // Add a Block into blocks set with updating gc counter.
   std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
       Block* block);
+  size_t erase_from_blocks(Block* block);
 
   MempoolId_t owner_MempoolId() const;
 };
@@ -270,7 +271,17 @@ struct Block {
 std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
     insert_into_blocks(Block* block) {
   block->gc_count_base = get_free_blocks_call_count;
-  return blocks.insert(block);
+  auto inserted = blocks.insert(block);
+  auto inserted_by_addr = blocks_by_addr.insert(block);
+  TORCH_INTERNAL_ASSERT(inserted.second == inserted_by_addr.second);
+  return inserted;
+}
+
+size_t BlockPool::erase_from_blocks(Block* block) {
+  auto erased = blocks.erase(block);
+  auto erased_by_addr = blocks_by_addr.erase(block);
+  TORCH_INTERNAL_ASSERT(erased == erased_by_addr);
+  return erased;
 }
 
 struct SegmentRange {
@@ -1653,13 +1664,13 @@ class DeviceCachingAllocator {
       cudaStream_t stream,
       void* addr) {
     Block search_key(device_id, stream, 0);
-    auto it = pool.blocks.lower_bound(&search_key);
-    for (; it != pool.blocks.end() && (*it)->stream == stream; ++it) {
-      if ((*it)->ptr == addr && (*it)->size >= size) {
-        Block* block = *it;
-        pool.blocks.erase(it);
-        return block;
-      }
+    search_key.ptr = addr;
+    auto it = pool.blocks_by_addr.lower_bound(&search_key);
+    if (it != pool.blocks_by_addr.end() && (*it)->stream == stream &&
+        (*it)->ptr == addr && (*it)->size >= size) {
+      Block* block = *it;
+      pool.erase_from_blocks(block);
+      return block;
     }
     return nullptr;
   }
@@ -1671,15 +1682,20 @@ class DeviceCachingAllocator {
       void* addr) {
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     Block search_key(device_id, stream, 0);
-    auto it = pool.blocks.lower_bound(&search_key);
-    for (; it != pool.blocks.end() && (*it)->stream == stream; ++it) {
-      Block* block = *it;
-      const auto block_begin = reinterpret_cast<uintptr_t>(block->ptr);
-      const auto block_end = block_begin + block->size;
-      if (block_begin <= requested_addr &&
-          requested_addr + size <= block_end) {
-        return block;
-      }
+    search_key.ptr = addr;
+    auto it = pool.blocks_by_addr.upper_bound(&search_key);
+    if (it == pool.blocks_by_addr.begin()) {
+      return nullptr;
+    }
+    --it;
+    if ((*it)->stream != stream) {
+      return nullptr;
+    }
+    Block* block = *it;
+    const auto block_begin = reinterpret_cast<uintptr_t>(block->ptr);
+    const auto block_end = block_begin + block->size;
+    if (block_begin <= requested_addr && requested_addr + size <= block_end) {
+      return block;
     }
     return nullptr;
   }
@@ -1687,10 +1703,7 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(
-      size_t orig_size,
-      cudaStream_t stream,
-      void* addr = nullptr) {
+  Block* malloc(size_t orig_size, cudaStream_t stream, void* addr = nullptr) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1960,10 +1973,7 @@ class DeviceCachingAllocator {
         params, orig_size, std::move(context), split_remainder);
   }
 
-  Block* mallocWithAddress(
-      size_t orig_size,
-      cudaStream_t stream,
-      void* addr) {
+  Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
     if (C10_LIKELY(captures_underway.empty())) {
@@ -2725,7 +2735,7 @@ class DeviceCachingAllocator {
           &pool,
           block_state.size,
           curr_block->expandable_segment_ != nullptr);
-      pool.blocks.erase(curr_block);
+      pool.erase_from_blocks(curr_block);
       params.block = curr_block;
       params.stat_types = get_stat_types_for_pool(pool);
 
@@ -3452,7 +3462,7 @@ class DeviceCachingAllocator {
       }
       candidate = new_candidate;
     }
-    pool->blocks.erase(candidate);
+    pool->erase_from_blocks(candidate);
     return candidate;
   }
 
@@ -3561,7 +3571,7 @@ class DeviceCachingAllocator {
     dst->size += subsumed_size;
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto erased =
-        src->mapped ? pool.blocks.erase(src) : pool.unmapped.erase(src);
+        src->mapped ? pool.erase_from_blocks(src) : pool.unmapped.erase(src);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
     delete src;
 
@@ -3718,7 +3728,7 @@ class DeviceCachingAllocator {
          p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
-    pool.blocks.erase(it);
+    pool.erase_from_blocks(p.block);
     return true;
   }
 
@@ -4121,7 +4131,7 @@ class DeviceCachingAllocator {
 
     if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_segments.decrease(1);
-    pool->blocks.erase(block);
+    pool->erase_from_blocks(block);
     delete block;
   }
 
@@ -4133,7 +4143,7 @@ class DeviceCachingAllocator {
     if (unmapped.size == 0) {
       return;
     }
-    block->pool->blocks.erase(block);
+    block->pool->erase_from_blocks(block);
 
     ptrdiff_t before_size = unmapped.ptr - static_cast<char*>(block->ptr);
     if (before_size > 0) {
