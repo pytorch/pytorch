@@ -33,7 +33,9 @@ jobs:
   attn-microbenchmark-build:
     if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
@@ -43,17 +45,27 @@ jobs:
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   attn-microbenchmark-test:
     name: attn-microbenchmark-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: attn-microbenchmark-build
+    needs:
+      - attn-microbenchmark-build
+      - get-label-type
     with:
       timeout-minutes: 500
       build-environment: ${{ needs.attn-microbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.attn-microbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.0"
     secrets: inherit
 
   # B200 runner (OSDC), always use OSDC runner to test this workflow
