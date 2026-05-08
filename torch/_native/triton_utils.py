@@ -14,8 +14,7 @@ from .common_utils import (
 )
 from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
-    _OpCondFn,
-    _OpImplFn,
+    _OpFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -99,8 +98,7 @@ def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    cond: _OpCondFn | None,
-    impl: _OpImplFn,
+    impl: _OpFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -122,7 +120,6 @@ def register_op_override(
         lib_symbol,
         op_symbol,
         dispatch_key,
-        cond,
         impl,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,

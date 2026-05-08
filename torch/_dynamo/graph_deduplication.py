@@ -352,8 +352,7 @@ def _stable_topological_sort_impl(
 
         if node.target == "output":
             outputs.add(node)
-            if node.users:
-                raise AssertionError("output nodes should have no users")
+            assert not node.users, "output nodes should have no users"
             continue
 
         waiting_for = [
@@ -382,8 +381,7 @@ def _stable_topological_sort(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
 ) -> None:
-    if not _stable_topological_sort_impl(graph, node_to_additional_deps):
-        raise AssertionError("stable topological sort failed")
+    assert _stable_topological_sort_impl(graph, node_to_additional_deps)
 
 
 def _has_cycle(
@@ -495,8 +493,7 @@ def _has_aliasing(
             continue
         if out_node:
             example_value = out_node.meta["example_value"]
-            if isinstance(example_value, list):
-                raise AssertionError("expected example_value to not be a list")
+            assert not isinstance(example_value, list)
             if isinstance(example_value, torch.Tensor):
                 storage = StorageWeakRef(example_value._typed_storage())
                 if storage in output_storages:
@@ -553,8 +550,7 @@ def _create_getitem_nodes(
     node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
 ) -> tuple[list[Node], dict[tuple[int, ...], int]]:
     tup = node.meta["example_value"]
-    if not isinstance(tup, tuple):
-        raise AssertionError("_get_getitem_children expects tuple")
+    assert isinstance(tup, tuple), "_get_getitem_children expects tuple"
 
     getitem_nodes: list[Node] = []
     queue = deque([(e, (i,), subgraph_tuple_node) for i, e in enumerate(tup)])
@@ -587,8 +583,7 @@ def _replace_tuple_outputs(
     invoke_subgraph_node: Node,
     graph: torch.fx.Graph,
 ) -> OrderedSet[Node]:
-    if not _is_tuple_node(node):
-        raise AssertionError("_replace_tuple_outputs expects a tuple node")
+    assert _is_tuple_node(node), "_replace_tuple_outputs expects a tuple node"
 
     queue = deque((c, (c.args[1],)) for c in _get_children_getitems(node))
     erased_nodes: OrderedSet[Node] = OrderedSet()

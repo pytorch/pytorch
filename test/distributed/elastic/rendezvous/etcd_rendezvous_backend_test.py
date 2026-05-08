@@ -42,7 +42,6 @@ class EtcdRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):
         cls._server.stop()
 
     def setUp(self) -> None:
-        super().setUp()
         self._client = self._server.get_client()
 
         # Make sure we have a clean slate.
@@ -72,7 +71,6 @@ class CreateBackendTest(TestCase):
         cls._server.stop()
 
     def setUp(self) -> None:
-        super().setUp()
         self._params = RendezvousParameters(
             backend="dummy_backend",
             endpoint=self._server.get_endpoint(),

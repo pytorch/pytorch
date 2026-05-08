@@ -11,7 +11,7 @@ load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
-load("//tools/build_defs/apple:build_mode_defs.bzl", "build_mode_select")
+load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -71,17 +71,13 @@ def read_bool(section, field, default, required = True):
         fail("`{}:{}`: no value set".format(section, field))
 
 def _select_if_build_mode_dev(dev_value, default = []):
-    dev_select = select({
+    if is_production_build_ios() or is_profile_build_ios():
+        return default
+
+    return select({
         "DEFAULT": default,
         "ovr_config//build_mode:optimization[dev]": dev_value,
     })
-    return build_mode_select(
-        local = dev_select,
-        development = dev_select,
-        production = default,
-        profile = default,
-        release = dev_select,
-    )
 
 
 def _get_enable_lightweight_dispatch():
@@ -102,17 +98,14 @@ def strip_error_messages_select(value, default = []):
     strip_error = read_bool("pt", "strip_error_messages", default = None, required = False)
 
     if strip_error == None:
-        opt_select = select({
+
+        if is_production_build_ios() or is_profile_build_ios():
+            return value
+
+        return select({
             "DEFAULT": default,
             "ovr_config//build_mode:optimization[opt]": value,
         })
-        return build_mode_select(
-            local = opt_select,
-            development = opt_select,
-            production = value,
-            profile = value,
-            release = opt_select,
-        )
 
     if strip_error:
         return value
@@ -688,11 +681,6 @@ def pt_operator_query_codegen(
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_3.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_4.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_5.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_6.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_7.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_8.cpp]".format(unboxing_and_autograd_genrule),
-        ":{}[autograd/generated/VariableType_9.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/ADInplaceOrViewType_1.cpp]".format(unboxing_and_autograd_genrule),
     ] if train else []) + ([
@@ -1547,25 +1535,6 @@ def define_buck_targets(
         exported_deps = [
             ":torch",
             ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
-        ],
-    )
-
-    # Standalone target for the C++ API enum tag definitions
-    # (torch/csrc/api/src/enum.cpp). Lets consumers link only the enum
-    # globals without pulling in the full torch C++ API.
-    # @lint-ignore BUCKLINT link_whole
-    pt_xplat_cxx_library(
-        name = "torch_enum",
-        srcs = ["torch/csrc/api/src/enum.cpp"],
-        compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
-        link_whole = True,
-        linker_flags = get_no_as_needed_linker_flag(),
-        visibility = ["PUBLIC"],
-        exported_deps = [
-            ":aten_cpu",
-            ":torch_headers",
-            C10,
         ],
     )
 

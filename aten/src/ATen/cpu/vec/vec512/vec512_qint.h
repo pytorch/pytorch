@@ -400,7 +400,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
+      memcpy(ptr, &vals, count * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -422,7 +422,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -624,7 +624,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
+      memcpy(ptr, &vals, count * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -646,7 +646,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -859,7 +859,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
+      memcpy(ptr, &vals, count * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -881,7 +881,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1090,10 +1090,7 @@ struct VectorizedQuantizedConverter {
   }
 
   void store(void* ptr, int count = size()) const {
-    memcpy(
-        ptr,
-        vals.data(),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+    memcpy(ptr, vals.data(), count * sizeof(value_type));
   }
 
   float_vec_return_type dequantize(
@@ -1183,7 +1180,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1335,7 +1332,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1476,7 +1473,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        std::min<int64_t>(count, size()) * sizeof(value_type));
+        count * sizeof(value_type));
     return loadu(tmp_values);
   }
 

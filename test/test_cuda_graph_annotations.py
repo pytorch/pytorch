@@ -35,7 +35,6 @@ except ImportError:
 )
 class TestMarkKernels(TestCase):
     def setUp(self):
-        super().setUp()
         enable_annotations()
         clear_kernel_annotations()
 

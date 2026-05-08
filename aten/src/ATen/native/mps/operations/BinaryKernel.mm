@@ -252,6 +252,10 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   });
 }
 
+static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
+  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
+}
+
 static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
@@ -294,26 +298,6 @@ static void gcd_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "gcd");
 }
 
-static void bitwise_and_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "bitwise_and");
-}
-
-static void bitwise_or_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "bitwise_or");
-}
-
-static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "bitwise_xor");
-}
-
-static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "bitwise_left_shift");
-}
-
-static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "bitwise_right_shift");
-}
-
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -350,9 +334,4 @@ REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
-REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
-REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
-REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
-REGISTER_DISPATCH(lshift_stub, &bitwise_left_shift_mps_kernel)
-REGISTER_DISPATCH(rshift_stub, &bitwise_right_shift_mps_kernel)
 } // namespace at::native

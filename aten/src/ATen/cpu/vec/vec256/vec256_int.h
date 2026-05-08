@@ -121,8 +121,7 @@ class Vectorized<int64_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(
-        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int64_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -133,8 +132,7 @@ class Vectorized<int64_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int64_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(
-          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int64_t));
+      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
     }
   }
   const int64_t& operator[](int idx) const = delete;
@@ -273,8 +271,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(
-        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int32_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -285,8 +282,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int32_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(
-          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int32_t));
+      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
   }
   const int32_t& operator[](int idx) const = delete;
@@ -575,8 +571,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(
-        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int16_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -587,8 +582,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(
-          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int16_t));
+      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
   }
   const int16_t& operator[](int idx) const = delete;
@@ -925,7 +919,7 @@ class Vectorized8 : public Vectorizedi {
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
+    std::memcpy(tmp_values, ptr, count * sizeof(T));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -941,8 +935,7 @@ class Vectorized8 : public Vectorizedi {
       } else {
         __at_align__ T tmp_values[size()];
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-        std::memcpy(
-            ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(T));
+        std::memcpy(ptr, tmp_values, count * sizeof(T));
       }
     }
   }

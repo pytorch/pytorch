@@ -1233,18 +1233,6 @@ class NoIterNoGetitem:
     pass
 
 
-class BlockedIter:
-    __iter__ = None
-
-
-class BlockedGetItem:
-    __getitem__ = None
-
-
-class BlockedLen:
-    __len__ = None
-
-
 class TestIterErrors(torch._dynamo.test_case.TestCase):
     """Test that iter() raises the correct exceptions"""
 
@@ -1272,11 +1260,13 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             iter(42, None)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_iter_bad_iter_return_raises_type_error(self):
         with self.assertRaises(TypeError):
             iter(BadIterReturnsNonIterator())
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_iter_returns_self_without_next_raises_type_error(self):
         with self.assertRaises(TypeError):
@@ -1331,21 +1321,6 @@ class TestIterErrors(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             d["d"] = 4
             next(it)
-
-    @make_dynamo_test
-    def test_iter_blocked_slot_raises_type_error(self):
-        with self.assertRaises(TypeError):
-            iter(BlockedIter())
-
-    @make_dynamo_test
-    def test_getitem_blocked_slot_raises_type_error(self):
-        with self.assertRaises(TypeError):
-            BlockedGetItem()[0]
-
-    @make_dynamo_test
-    def test_len_blocked_slot_raises_type_error(self):
-        with self.assertRaises(TypeError):
-            len(BlockedLen())
 
 
 if __name__ == "__main__":

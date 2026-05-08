@@ -160,7 +160,6 @@ def monres(state: WorkerState):
 
 class RecordWorkerEventsTest(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.spec = MagicMock()
         self.spec.role = "test_role"
         self.spec.get_entrypoint_name.return_value = "test_entrypoint"
@@ -278,7 +277,6 @@ class RecordWorkerEventsTest(unittest.TestCase):
 
 class ConstructEventTest(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         # Create minimal spec and agent for testing
         self.spec = MagicMock()
         self.spec.role = "test_role"

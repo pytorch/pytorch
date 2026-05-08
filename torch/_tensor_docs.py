@@ -6301,7 +6301,7 @@ Args:
 add_docstr_all(
     "expand",
     r"""
-expand(*size) -> Tensor
+expand(*sizes) -> Tensor
 
 Returns a new view of the :attr:`self` tensor with singleton dimensions expanded
 to a larger size.
@@ -6320,7 +6320,7 @@ of size 1 can be expanded to an arbitrary value without allocating new
 memory.
 
 Args:
-    *size (torch.Size or int...): the desired expanded size
+    *sizes (torch.Size or int...): the desired expanded size
 
 .. warning::
 
@@ -6944,7 +6944,7 @@ add_docstr_all(
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-Returns :attr:`self` if :attr:`self` is a real-valued tensor.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
 

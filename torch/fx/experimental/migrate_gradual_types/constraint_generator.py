@@ -1139,7 +1139,7 @@ def arange_inference_rule(
     arange, counter = gen_tvar(counter)
     symbols[n] = arange
 
-    # either a parameter is a number or it is Dyn
+    # either the a parameter is a number or it is Dyn
     c1 = Disj(
         [
             BinConstraintD(end, Dyn, op_eq),

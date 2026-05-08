@@ -200,8 +200,7 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromStringAndSize(
-        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
+    return PyUnicode_FromString(primary_name.data());
   });
   END_HANDLE_TH_ERRORS
 }
@@ -234,8 +233,7 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
-    return PyUnicode_FromStringAndSize(
-        primary_name.data(), static_cast<Py_ssize_t>(primary_name.size()));
+    return PyUnicode_FromString(primary_name.data());
   });
   END_HANDLE_TH_ERRORS
 }

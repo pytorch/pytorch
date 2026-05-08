@@ -175,11 +175,7 @@ class SourceInfo:
         sourcelines, firstlineno = inspect.getsourcelines(code)
         lastlineno = firstlineno + len(sourcelines)
         source = "".join(sourcelines)
-        if source != "".join(_get_sourcelines(module, firstlineno, lastlineno)):
-            raise AssertionError(
-                f"Source mismatch for {module.__name__} "
-                f"(line {firstlineno}-{lastlineno})"
-            )
+        assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
         self.inlined_sources.add(
             InlinedSource(
                 module=module.__name__,
@@ -205,7 +201,7 @@ class _DynamoCodeCacheEntry:
          multiple function objects pointing to the same code such as recursive functions.
       4. A list of guarded code that eval frame dispatches to.
       5. A list of imported module objects unioned from all compiled branches.
-      6. A list of "backends" (compiled fx graph) unioned from all compiled branches.
+      6. A list of "backends" (compiled fx graph) unioned from all compield branches.
       7. A string path used to access the original code object users defined.
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
@@ -226,10 +222,7 @@ class _DynamoCodeCacheEntry:
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
-    if len(entry.function_names) != 1:
-        raise AssertionError(
-            f"Expected exactly one function name, got {len(entry.function_names)}"
-        )
+    assert len(entry.function_names) == 1
     fn: Any = sys.modules[entry.python_module]
     parts = entry.function_names[0].split(".")
     for part in parts:
@@ -239,14 +232,7 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
-                if not isinstance(index_begin, int):
-                    raise AssertionError(
-                        f"Expected int for index_begin, got {type(index_begin)}"
-                    )
-                if index_begin < 0:
-                    raise AssertionError(
-                        f"Expected non-negative index_begin, got {index_begin}"
-                    )
+                assert isinstance(index_begin, int) and index_begin >= 0
                 attr = getattr(fn, part[:index_begin], None)
                 if attr is None:
                     raise PackageError(f"Cannot find source for code entry {entry}")
@@ -255,10 +241,7 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
                 fn = getattr(fn, part)
     else:
         raise PackageError(f"Cannot find source for code entry {entry}")
-    if not isinstance(fn, types.CodeType):
-        raise AssertionError(
-            f"Expected CodeType, got {type(fn)} for code entry {entry}"
-        )
+    assert isinstance(fn, types.CodeType)
     return fn
 
 
@@ -473,8 +456,7 @@ class _DynamoCacheEntry:
         self.system_info.check_compatibility(current_system_info, self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
-        if len(self.codes) == 0:
-            raise AssertionError("Expected at least one code entry")
+        assert len(self.codes) > 0
         return {
             "num_codes": str(len(self.codes)),
             "fn_name": self.fn_name,
@@ -487,7 +469,7 @@ class _DynamoCacheEntry:
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
-    CacheArtifactRecorder,
+    CacheArtifactManager,
 )
 
 
@@ -647,15 +629,12 @@ class CompilePackage:
     ) -> None:
         from .eval_frame import innermost_fn
 
-        if self._initialized:
-            raise AssertionError("CompilePackage is already initialized")
+        assert not self._initialized
         self._source_info = SourceInfo(inlined_sources=set())
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
-        if self._innermost_fn is None:
-            raise AssertionError("innermost_fn returned None")
+        assert self._innermost_fn is not None
         if dynamo is not None:
-            if not isinstance(dynamo, _DynamoCacheEntry):
-                raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
+            assert isinstance(dynamo, _DynamoCacheEntry)
             dynamo.check_versions()
             if not ignore_inlined_sources:
                 for code in dynamo.source_info.inlined_sources:
@@ -700,18 +679,9 @@ class CompilePackage:
             self._codes[python_code] = code
         else:
             code = self._codes[python_code]
-            if code.python_module != python_module:
-                raise AssertionError(
-                    f"python_module mismatch: {code.python_module} != {python_module}"
-                )
-            if code.install_to_global != install_to_global:
-                raise AssertionError(
-                    f"install_to_global mismatch: {code.install_to_global} != {install_to_global}"
-                )
-            if code.code_source != code_source:
-                raise AssertionError(
-                    f"code_source mismatch: {code.code_source} != {code_source}"
-                )
+            assert code.python_module == python_module
+            assert code.install_to_global == install_to_global
+            assert code.code_source == code_source
 
         if function_name is not None:
             code.function_names.append(function_name)
@@ -722,8 +692,7 @@ class CompilePackage:
 
     @functools.cached_property
     def source_id(self) -> str:
-        if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set")
+        assert self._innermost_fn is not None
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
     def _add_user_function(self, code: types.CodeType) -> None:
@@ -740,8 +709,7 @@ class CompilePackage:
 
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
-        if self._current_entry is not None:
-            raise AssertionError("_current_entry is already set in code_context")
+        assert self._current_entry is None
 
         # Sometimes user code cannot be inlined in dynamo resulting in extra user code
         # being compiled. We should record these as when they are actually invoked.
@@ -761,8 +729,7 @@ class CompilePackage:
         guards_state: bytes,
         dynamo_code: types.CodeType,
     ) -> None:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in add_guarded_code")
+        assert self._current_entry is not None
         if self._current_entry.bypassed:
             return
         guarded_code_entry = _GuardedCodeCacheEntry(
@@ -772,8 +739,7 @@ class CompilePackage:
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in add_inlined_source")
+        assert self._current_entry is not None
         if self._current_entry.bypassed:
             return
         for code in sources:
@@ -785,8 +751,7 @@ class CompilePackage:
         self._device_type = _graph_device_type(graph)
 
     def bypass_current_entry(self) -> None:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in bypass_current_entry")
+        assert self._current_entry is not None
         self._current_entry.bypassed = True
 
     def add_resume_function(
@@ -804,33 +769,22 @@ class CompilePackage:
         self._resume_codes.add(python_code)
 
     def add_import_source(self, alias: str, module_name: str) -> None:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in add_import_source")
+        assert self._current_entry is not None
         self._current_entry.import_sources[alias] = module_name
 
     def add_backend_id(self, backend_id: str, backend: Any | None = None) -> None:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in add_backend_id")
-        if not backend_id.startswith("__compiled_fn_"):
-            raise AssertionError(
-                f"backend_id must start with '__compiled_fn_', got '{backend_id}'"
-            )
+        assert self._current_entry is not None
+        assert backend_id.startswith("__compiled_fn_")  # sanity check
         backend_id = _BackendId(backend_id)
         self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
 
     def validate(self) -> None:
-        if self._current_entry is not None:
-            raise AssertionError("_current_entry should be None during validate")
-        if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set during validate")
-        if not self._initialized:
-            raise AssertionError("CompilePackage is not initialized during validate")
-        if next(iter(self._codes)) is not self._innermost_fn.__code__:
-            raise AssertionError(
-                "First code entry does not match _innermost_fn.__code__"
-            )
+        assert self._current_entry is None
+        assert self._innermost_fn is not None
+        assert self._initialized
+        assert next(iter(self._codes)) is self._innermost_fn.__code__
 
     def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
         module.__dict__[name] = value
@@ -839,8 +793,7 @@ class CompilePackage:
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
-        if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set in uninstall")
+        assert self._innermost_fn is not None
         for module, names in self._installed_globals.items():
             for name in names:
                 module.__dict__.pop(name)
@@ -939,19 +892,12 @@ class CompilePackage:
                     ):
                         builtins_dict = get_builtins_dict(runtime_global_scope)
                         if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
-                                )
+                            assert (
+                                runtime_global_scope[builtin_dict_name] is builtins_dict
+                            )
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
-                    if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
-                        raise AssertionError(
-                            f"Expected GuardsState, got {type(guards_state)}"
-                        )
+                    assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                     with dynamo_timed("precompile_build_guards"):
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
@@ -964,8 +910,7 @@ class CompilePackage:
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
-        if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set in cache_entry")
+        assert self._innermost_fn is not None
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
@@ -1054,10 +999,7 @@ class DynamoStore(abc.ABC):
                 raise RuntimeError(
                     f"Backend {backend_id} is not found in the given backends"
                 )
-            if not isinstance(serialized_backend, BackendCacheArtifact):
-                raise AssertionError(
-                    f"Expected BackendCacheArtifact, got {type(serialized_backend)}"
-                )
+            assert isinstance(serialized_backend, BackendCacheArtifact)
             backend_content[backend_id] = serialized_backend
 
         entry = PrecompileCacheEntry(cache_entry, backend_content)
@@ -1093,10 +1035,7 @@ class DynamoStore(abc.ABC):
 
         precompile_entry = self.read(key)
         for backend in precompile_entry.backends.values():
-            if not isinstance(backend, BackendCacheArtifact):
-                raise AssertionError(
-                    f"Expected BackendCacheArtifact, got {type(backend)}"
-                )
+            assert isinstance(backend, BackendCacheArtifact)
             PrecompileContext.record_artifact(backend)
 
         return precompile_entry
@@ -1177,8 +1116,8 @@ class DiskDynamoStore(DynamoStore):
         """
         try:
             pickled_content: bytes = pickle.dumps(cache_entry)
-            CacheArtifactRecorder(PrecompileCacheArtifact.type(), path).record(
-                pickled_content
+            CacheArtifactManager.record_artifact(
+                PrecompileCacheArtifact.type(), path, pickled_content
             )
             self._write_to_local_cache(pickled_content, path)
         except Exception as e:

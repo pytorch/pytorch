@@ -26,7 +26,6 @@ c_stderr = ctypes.c_void_p.in_dll(libc, "stderr")
 
 class RedirectsTest(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
 
     def tearDown(self):

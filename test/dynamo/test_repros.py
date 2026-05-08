@@ -90,7 +90,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 _orig_module_call = torch.nn.Module.__call__
 
 # Custom operator that only supports CPU and Meta
-lib = torch.library.Library("test_sample", "DEF")  # noqa: SCOPED_LIBRARY
+lib = torch.library.Library("test_sample", "DEF")  # noqa: TOR901
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 
@@ -982,22 +982,24 @@ class LRUCacheWarningTests(LoggingTestCase):
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
         prev_default = torch._C._get_default_device()
-        try:
-            torch.set_default_device("cuda")
 
-            @torch.compile(backend="eager")
-            def f(x):
-                torch.get_device_module()
-                x = x.cos().sin()
-                return x
-
-            result = f(torch.randn(1024))
-            self.assertIsInstance(result, torch.Tensor)
-        finally:
+        def _restore_default_device():
             if prev_default == "cpu":
                 torch.set_default_device(None)
             else:
                 torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
+        torch.set_default_device("cuda")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            torch.get_device_module()
+            x = x.cos().sin()
+            return x
+
+        result = f(torch.randn(1024))
+        self.assertIsInstance(result, torch.Tensor)
 
         for record in records:
             if "call to a lru_cache wrapped function at:" in record.getMessage():
@@ -7268,40 +7270,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = f()
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
-
-    @torch._dynamo.config.patch("use_recursive_dict_tags_for_guards", True)
-    def test_guard_tag_safe_tensor_metadata_segfault(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/180741
-        # When a submodule becomes a tag-safe root, the recording pass stashes
-        # tensor pointers found during traversal.  PythonLambdaGuardAccessor
-        # (from ___from_numpy on the np.float64 attribute) creates a temporary
-        # tensor with refcount 1, which is freed after Py_DECREF.  The stashed
-        # raw pointer then dangles and check_tensor_metadata_fast segfaults.
-        import numpy as np
-
-        class Layer(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-                self.scale = np.float64(8.0)
-
-            def forward(self, x):
-                return self.linear(x) / self.scale
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layers = torch.nn.ModuleList([Layer()])
-
-            def forward(self, x):
-                for layer in self.layers:
-                    x = layer(x)
-                return x
-
-        model = Model()
-        compiled = torch.compile(model, backend="eager")
-        out = compiled(torch.randn(2, 10))
-        self.assertEqual(out.shape, torch.Size([2, 10]))
 
     def test_deleted_compile_wrapper_segfault(self):
         def fn(x):
