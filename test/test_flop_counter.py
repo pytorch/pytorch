@@ -1356,7 +1356,7 @@ class TestFlexAttentionEstimation(TestCase):
                     return flex_attention(q, k, v)
 
         with FakeTensorMode():
-            q = torch.randn(1, 8, 64, 64, device="cuda", dtype=torch.bfloat16)
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
             with preserve_node_meta():
                 ep = torch.export.export(M(), (q, q, q), strict=False)
 
