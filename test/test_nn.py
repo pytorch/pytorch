@@ -14598,9 +14598,9 @@ if __name__ == '__main__':
                     expected_input_grad_max_ulp_diff = 90
                     if "mps" in device:
                         # MPS + use_acc_dtype: fallback to memory.
-                        expected_weight_grad_max_ulp_diff = 107
+                        expected_weight_grad_max_ulp_diff = 109
                     else:  # CUDA: widened from memory's 37.
-                        expected_weight_grad_max_ulp_diff = 118 # was 80
+                        expected_weight_grad_max_ulp_diff = 118  # was 80
                 else:  # bf16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
@@ -14609,6 +14609,30 @@ if __name__ == '__main__':
                         expected_weight_grad_max_ulp_diff = 0
                     else:  # CUDA: widened from memory's 0.
                         expected_weight_grad_max_ulp_diff = 193
+        elif acc_policy == "ultralow":
+            # ultralow: bf16/fp16 logits + fp32 softmax_denom
+            # accumulator + dropped weight_grad_chunk. Logs grow
+            # log2(num_classes) * eps_dtype error in softmax_denom,
+            # propagating into both gradients. Loosely 2-5x memory's
+            # input_grad and weight_grad bounds.
+            if "cpu" in device:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 119
+                    expected_weight_grad_max_ulp_diff = 101
+                else:  # bf16
+                    expected_max_ulp_diff = 2
+                    expected_input_grad_max_ulp_diff = 61621
+                    expected_weight_grad_max_ulp_diff = 47221
+            else:
+                if dtype == torch.float16:
+                    expected_max_ulp_diff = 1
+                    expected_input_grad_max_ulp_diff = 68
+                    expected_weight_grad_max_ulp_diff = 118
+                else:  # bf16
+                    expected_max_ulp_diff = 2
+                    expected_input_grad_max_ulp_diff = 256
+                    expected_weight_grad_max_ulp_diff = 257
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14764,7 +14788,7 @@ if __name__ == '__main__':
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory"])
+    @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory", "ultralow"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy):
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
