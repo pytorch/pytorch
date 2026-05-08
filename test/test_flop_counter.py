@@ -1373,6 +1373,7 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertIn("sparsity_hint", custom)
         self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
 
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     def test_sparsity_hint_affects_flex_attention_estimate(self):
         """sparsity_hint via annotate reduces flex_attention roofline estimate."""
         from torch._inductor.fx_passes.overlap_scheduling import (
