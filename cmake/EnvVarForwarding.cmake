@@ -108,21 +108,35 @@ foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
   endif()
 endforeach()
 
-# Ensure Python's purelib is on CMAKE_PREFIX_PATH so CMake can find
-# packages installed there (e.g., pybind11, numpy).
+# Ensure Python's sys.prefix (the venv/conda env root) and purelib are on
+# CMAKE_PREFIX_PATH so CMake can find packages installed there.
+#
+# - sys.prefix is needed because conda-style envs put libraries under
+#   <prefix>/lib (Linux) or <prefix>/Library/lib (Windows). CMake 3.28
+#   removed the find_library() heuristic that derived <prefix>/lib from
+#   <prefix>/bin entries on PATH, so without sys.prefix on the prefix
+#   path, find_package(MKL) and similar fail to locate conda-provided
+#   libraries (e.g. mkl_intel_lp64, libiomp5md). The Linux CI scripts
+#   used to set CMAKE_PREFIX_PATH=$CONDA_PREFIX explicitly as a
+#   workaround for the same issue (see gh-119557); having it here makes
+#   that redundant and gives the same coverage to Windows pull-CI and
+#   to local builds outside of CI.
+# - purelib is needed for python-package CMake configs (e.g., pybind11,
+#   numpy headers).
 if(Python_EXECUTABLE)
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"
-    OUTPUT_VARIABLE _py_purelib
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import sys, sysconfig; print(sys.prefix); print(sysconfig.get_path('purelib'))"
+    OUTPUT_VARIABLE _py_paths
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
-  if(_py_purelib AND NOT "${_py_purelib}" STREQUAL "")
-    list(PREPEND CMAKE_PREFIX_PATH "${_py_purelib}")
+  if(_py_paths AND NOT "${_py_paths}" STREQUAL "")
+    string(REPLACE "\n" ";" _py_paths "${_py_paths}")
+    list(PREPEND CMAKE_PREFIX_PATH ${_py_paths})
     # Preserve paths from the CMAKE_PREFIX_PATH environment variable.
     # Setting the cmake variable shadows the env var, so we must merge it in
-    # explicitly. This ensures conda's prefix (e.g. /opt/conda/envs/py_3.10)
-    # is present so cmake can find conda-provided libraries (libgomp, libnuma).
+    # explicitly.
     if(DEFINED ENV{CMAKE_PREFIX_PATH} AND NOT "$ENV{CMAKE_PREFIX_PATH}" STREQUAL "")
       if(WIN32)
         # On Windows the env var is already ;-separated and : appears in drive
