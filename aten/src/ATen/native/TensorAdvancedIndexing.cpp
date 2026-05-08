@@ -679,7 +679,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list) {
   // For CUDA/MPS/XPU tensors, force all index tensors to have the same striding
   // to simplify the CUDA/MPS/XPU kernel.
   if (indices.size() >= 2 &&
-      (this->src.device().type() == kCUDA ||
+      (c10::Device::isCudaOrPrivateUse1MatchesCuda(this->src.device().type()) ||
        this->src.device().type() == kMPS ||
        this->src.device().type() == kXPU)) {
     if (!all_strides_match(indices)) {

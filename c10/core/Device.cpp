@@ -1,5 +1,6 @@
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 #include <algorithm>
 #include <array>
@@ -155,6 +156,17 @@ std::string Device::str() const {
     str.append(std::to_string(index()));
   }
   return str;
+}
+
+bool Device::privateUse1MatchesCuda() {
+  static const bool privateuse1_matches_cuda =
+      c10::utils::check_env("PYTORCH_PRIVATEUSE1_MATCHES_CUDA").value_or(false);
+  return privateuse1_matches_cuda;
+}
+
+bool Device::isCudaOrPrivateUse1MatchesCuda(DeviceType type) {
+  return type == DeviceType::CUDA ||
+      (type == DeviceType::PrivateUse1 && privateUse1MatchesCuda());
 }
 
 std::ostream& operator<<(std::ostream& stream, const Device& device) {

@@ -217,8 +217,11 @@ inline TensorIterator make_reduction(
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  const bool gpu_lowp_to_f32 = (
-        (self.is_cuda() || self.is_xpu()) && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
+  const bool gpu_lowp_to_f32 =
+      ((c10::Device::isCudaOrPrivateUse1MatchesCuda(self.device().type()) ||
+        self.is_xpu()) &&
+       (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
+       out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
                    : self.is_complex() ? c10::toComplexType(out_dtype)
                                        : out_dtype;
@@ -254,7 +257,8 @@ inline TensorIterator make_reduction(
   // We don't generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   if (self.scalar_type() == dtype1 ||
-      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+      (c10::Device::isCudaOrPrivateUse1MatchesCuda(self.device().type()) &&
+       self.scalar_type() == kHalf && dtype1 == kFloat)) {
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
@@ -450,7 +454,7 @@ inline TensorIterator make_reduction(
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 =
-      (self.is_cuda() &&
+      (c10::Device::isCudaOrPrivateUse1MatchesCuda(self.device().type()) &&
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;

@@ -87,6 +87,13 @@ struct C10_API Device final {
     return type_ == DeviceType::PrivateUse1;
   }
 
+  /// Return true if PrivateUse1 should use CUDA semantics.
+  static bool privateUse1MatchesCuda();
+
+  /// Return true if the device is CUDA or PrivateUse1 should use CUDA
+  /// semantics.
+  static bool isCudaOrPrivateUse1MatchesCuda(DeviceType type);
+
   /// Return true if the device is of MPS type.
   bool is_mps() const noexcept {
     return type_ == DeviceType::MPS;
