@@ -108,7 +108,9 @@ class CuteDSLTemplate(KernelTemplate):
             capture_nodes_by_name: dict[str, Any] = {}
             extra_capture_nodes = []
             for name in extra_capture_names:
-                node = graph_captures.get(name, V.graph.get_buffer(name))
+                node = graph_captures.get(name)
+                if node is None:
+                    node = V.graph.get_buffer(name)
                 capture_nodes_by_name[name] = node
                 extra_capture_nodes.append(node)
             input_nodes = list(input_nodes) + extra_capture_nodes

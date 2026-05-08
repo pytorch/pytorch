@@ -186,24 +186,39 @@ def realize_captures_for_cutedsl(buffers):
     Unlike maybe_realize (used by the Triton path), CuteDSL needs physical
     tensors passed at runtime. Pointwise/computed captures must be materialized
     into a fresh buffer whose layout matches the logical shape the subgraph
-    indexes. Plain InputBuffers and zero-offset views (ReinterpretView) are
-    kept as-is since CuteDSL can emit reinterpret_tensor() at the call-site.
+    indexes. ReinterpretView captures use unique synthetic inputs so aliased
+    views keep distinct call-site size/stride/offset metadata while the kernel
+    indexes each captured view argument from offset zero.
 
     Realized captures are registered on V.graph so the CuteDSL template can
     resolve view nodes without explicit plumbing from callers.
     """
-    from ...ir import ExternKernel, InputBuffer, ReinterpretView
+    from ...ir import ExternKernel, FixedLayout, InputBuffer, ReinterpretView
+
+    view_captures: dict[str, ReinterpretView] = {}
 
     def _realize(x):
         if x is None or isinstance(x, sympy.Expr):
             return x
         realized = ExternKernel.realize_input(x)
-        if isinstance(realized, InputBuffer) or (
-            isinstance(realized, ReinterpretView)
-            and V.graph.sizevars.statically_known_equals(
-                realized.get_layout().offset, 0
+        if isinstance(realized, ReinterpretView):
+            layout = realized.get_layout()
+            capture_index = len(V.graph._cutedsl_capture_nodes) + len(view_captures)
+            name = V.graph.qualify_name(f"cutedsl_capture{capture_index}")
+            view_captures[name] = realized
+            # Give each captured view a logical input name so aliasing views do
+            # not collapse to their shared base buffer.
+            return InputBuffer(
+                name=name,
+                layout=FixedLayout(
+                    layout.device,
+                    layout.dtype,
+                    layout.size,
+                    layout.stride,
+                    is_pinned=layout.is_pinned,
+                ),
             )
-        ):
+        if isinstance(realized, InputBuffer):
             return realized
         return ExternKernel.copy_input(realized)
 
@@ -211,8 +226,10 @@ def realize_captures_for_cutedsl(buffers):
     freeze_irnodes(buffers)
 
     for buf in tree_map_only(IRNode, lambda x: x, buffers) if buffers else []:
-        if buf is not None and hasattr(buf, "get_name"):
-            V.graph._cutedsl_capture_nodes[buf.get_name()] = buf
+        if isinstance(buf, IRNode) and (name := buf.maybe_get_name()):
+            V.graph._cutedsl_capture_nodes[name] = buf
+    # Keep the original view nodes for call-site reinterpret_tensor emission.
+    V.graph._cutedsl_capture_nodes.update(view_captures)
 
     return buffers
 
