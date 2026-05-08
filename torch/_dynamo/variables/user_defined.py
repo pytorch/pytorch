@@ -660,6 +660,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        #
+        # Torch classes are excluded: their C-level descriptors (e.g.
+        # Tensor.detach, Size.__add__) must go through VariableTracker.build /
+        # trace_rules to get TorchInGraphFunctionVariable, which carries guards
+        # like inplace-view-on-input-tensor detection. The descriptor VTs would
+        # bypass trace_rules and lose those guards.
         if (
             isinstance(cls_attr, types.WrapperDescriptorType)
             and not is_torch_class(self.value)
@@ -705,19 +711,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             im_vt = variables.InstanceMethodVariable(cls_attr, source=descriptor_source)
             return im_vt.tp_descr_get_impl(tx, None, self)
 
-        # C-level descriptors not matched above (e.g. wrapper/method
-        # descriptors on torch classes that need trace_rules).
-        # OrderedDict's C-level methods are handled at runtime.
-        if inspect.ismethoddescriptor(cls_attr):
-            if (
-                source
-                and self.value is not collections.OrderedDict
-                and (
-                    name in getattr(self.value, "__dict__", {})
-                    or self.value.__module__.startswith("torch.")
-                    or self.value.__module__ == "torch"
-                )
-            ):
+        # Remaining C-level descriptors: wrapper/method descriptors on torch
+        # classes (excluded from the VT checks above by is_torch_class). These
+        # must go through VariableTracker.build / trace_rules to get the right
+        # VT (e.g. TorchInGraphFunctionVariable for Tensor.detach).
+        if inspect.ismethoddescriptor(cls_attr) and is_torch_class(self.value):
+            if source:
                 return VariableTracker.build(tx, cls_attr, source)
             return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
