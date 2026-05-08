@@ -212,7 +212,7 @@ if(USE_FLASH_ATTENTION)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(USE_ROCM AND USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})
       list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
       if(NUM_ARCHS GREATER 1)
@@ -294,9 +294,22 @@ if(USE_FLASH_ATTENTION)
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
+
+    # ck_sdpa is not supported on gfx9 "0x" family parts; filter them out of the
+    # per-target HIP arch list so we don't try to codegen for them.
+    set(CK_SDPA_HIP_EXCLUDE_ARCHS gfx900 gfx906 gfx90c)
+    set(_ck_sdpa_hip_arches "")
+    foreach(ARCH ${PYTORCH_ROCM_ARCH})
+      if(NOT "${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_ARCHS)
+        list(APPEND _ck_sdpa_hip_arches ${ARCH})
+      endif()
+    endforeach()
+
     add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
     target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
-    set_target_properties(ck_sdpa PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(ck_sdpa PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
