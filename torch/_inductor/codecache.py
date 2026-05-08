@@ -134,7 +134,7 @@ from .cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from .output_code import CompiledFxGraph
-from .remote_cache import create_cache
+from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
@@ -1729,6 +1729,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_hit_count",
@@ -1744,6 +1745,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 key,
             )
         if local_miss:
+            cache_stats.miss("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_miss_count",
@@ -1995,6 +1997,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
+                cache_stats.put("LocalFxGraphCache")
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
