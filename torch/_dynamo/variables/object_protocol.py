@@ -459,6 +459,53 @@ def generic_setitem(
     )
 
 
+def sequence_delitem(
+    tx: "InstructionTranslator",
+    s: VariableTracker,
+    i: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L1959-L1990
+
+    s_type = maybe_get_python_type(s)
+    if type_implements_sq_ass_item(s_type):
+        idx = i.as_python_constant()
+        if idx < 0:
+            if type_implements_sq_length(s_type):
+                l = s.sq_length(tx)
+                i = vt_add(tx, i, l)
+        return s.sq_ass_item_impl(tx, i, None)
+
+    if type_implements_mp_ass_subscript(s_type):
+        raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
+
+    raise_type_error(
+        tx, f"'{s.python_type_name()}' object does not support item deletion"
+    )
+
+
+def generic_delitem(
+    tx: "InstructionTranslator",
+    o: VariableTracker,
+    key: VariableTracker,
+) -> VariableTracker:
+    # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L256-L288
+
+    o_type = maybe_get_python_type(o)
+    if type_implements_mp_ass_subscript(o_type):
+        return o.mp_ass_subscript_impl(tx, key, None)
+
+    key_type = maybe_get_python_type(key)
+    if pyindex_check(key_type):
+        key_value = key.nb_index_impl(tx)
+        return sequence_delitem(tx, o, key_value)
+    elif type_implements_sq_ass_item(o_type):
+        raise_type_error(
+            tx, f"sequence index must be integer, not {key.python_type_name()}"
+        )
+
+    raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
+
+
 def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
     """Mirrors PyNumber_Long (int(x) dispatch).
 

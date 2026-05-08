@@ -5671,7 +5671,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        if code.co_name in ("__setitem__", "__setattr__") and not (
+        if code.co_name in (
+            "__setitem__",
+            "__setattr__",
+            "__delitem__",
+            "__delattr__",
+        ) and not (
             args
             and isinstance(
                 args[0],
@@ -5682,7 +5687,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         ):
             unimplemented(
-                gb_type="Unsupported __setitem__/__setattr__ inline attempt",
+                gb_type="Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
                 hints=[],

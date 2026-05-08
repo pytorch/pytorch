@@ -373,33 +373,6 @@ class _MutableSequence:
         return len(self.data)
 
 
-class _ListSubclassSetitem(list):
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value + 1000)
-
-
-class _ListSubclassNoOverride(list):
-    pass
-
-
-class _ListSubclassExtra(list):
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.write_count = 0
-
-    def __setitem__(self, key, value):
-        self.write_count += 1
-        super().__setitem__(key, value)
-
-
-class _ListSubclassSlice(list):
-    def __setitem__(self, key, value):
-        if isinstance(key, slice):
-            super().__setitem__(key, [v + 100 for v in value])
-        else:
-            super().__setitem__(key, value)
-
-
 # (label, factory) — factory builds an instance from a list.
 _SEQUENCE_TYPES = [
     ("list", list),
@@ -415,11 +388,14 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
+        self._b_prev = torch._dynamo.config.enable_trace_load_build_class
         torch._dynamo.config.enable_trace_unittest = True
+        torch._dynamo.config.enable_trace_load_build_class = True
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_trace_unittest = self._u_prev
+        torch._dynamo.config.enable_trace_load_build_class = self._b_prev
 
     # -- parameterized over sequence container type --
 
@@ -561,49 +537,69 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
     # -- list subclass --
 
     @make_dynamo_test
-    def test_subclass_list_inherited_setitem(self):
-        lst = _ListSubclassNoOverride([1, 2, 3])
+    def test_subclass_list_inherited(self):
+        class L(list):
+            pass
+
+        lst = L([1, 2, 3])
         lst[0] = 99
         self.assertEqual(lst[0], 99)
         self.assertEqual(list(lst), [99, 2, 3])
 
-    @make_dynamo_test
-    def test_subclass_list_inherited_slice(self):
-        lst = _ListSubclassNoOverride([1, 2, 3, 4, 5])
-        lst[1:3] = [88, 99]
-        self.assertEqual(list(lst), [1, 88, 99, 4, 5])
+        # slice
+        lst2 = L([1, 2, 3, 4, 5])
+        lst2[1:3] = [88, 99]
+        self.assertEqual(list(lst2), [1, 88, 99, 4, 5])
+
+        # negative
+        lst3 = L([1, 2, 3])
+        lst3[-1] = 99
+        self.assertEqual(lst3[-1], 99)
 
     @make_dynamo_test
     def test_subclass_list_extra_state(self):
-        lst = _ListSubclassExtra([0, 0, 0])
+        class L(list):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.write_count = 0
+
+            def __setitem__(self, key, value):
+                self.write_count += 1
+                super().__setitem__(key, value)
+
+        lst = L([0, 0, 0])
         lst[0] = 5
         lst[1] = 6
         self.assertEqual(lst[0], 5)
         self.assertEqual(lst[1], 6)
         self.assertEqual(lst.write_count, 2)
 
+        # replace existing
+        lst2 = L([10, 20, 30])
+        lst2[1] = 99
+        self.assertEqual(lst2[1], 99)
+        self.assertEqual(lst2.write_count, 1)
+
     @make_dynamo_test
     def test_subclass_list_slice_override(self):
-        lst = _ListSubclassSlice([1, 2, 3, 4, 5])
+        class L(list):
+            def __setitem__(self, key, value):
+                if isinstance(key, slice):
+                    super().__setitem__(key, [v + 100 for v in value])
+                else:
+                    super().__setitem__(key, value)
+
+        lst = L([1, 2, 3, 4, 5])
         lst[1:3] = [10, 20]
         self.assertEqual(list(lst), [1, 110, 120, 4, 5])
 
     @make_dynamo_test
-    def test_subclass_list_negative_index(self):
-        lst = _ListSubclassNoOverride([1, 2, 3])
-        lst[-1] = 99
-        self.assertEqual(lst[-1], 99)
-
-    @make_dynamo_test
-    def test_subclass_list_replace_existing(self):
-        lst = _ListSubclassExtra([10, 20, 30])
-        lst[1] = 99
-        self.assertEqual(lst[1], 99)
-        self.assertEqual(lst.write_count, 1)
-
-    @make_dynamo_test
     def test_subclass_list_overriding(self):
-        lst = _ListSubclassSetitem([0, 0, 0])
+        class L(list):
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value + 1000)
+
+        lst = L([0, 0, 0])
         lst[0] = 5
         self.assertEqual(lst[0], 1005)
 
@@ -722,6 +718,117 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
         fs = frozenset([1, 2, 3])
         with self.assertRaises(TypeError):
             fs[0] = 1  # type: ignore[index]
+
+    # -- __delitem__ (NULL value via mp_ass_subscript / sq_ass_item) --
+    # Only list/deque among the parametrized types support __delitem__.
+
+    @parametrize(
+        "label,factory",
+        [("list", list), ("deque", collections.deque)],
+    )
+    @make_dynamo_test
+    def test_delitem_basic(self, label, factory):
+        c = factory([1, 2, 3, 4, 5])
+        del c[2]
+        self.assertEqual(list(c), [1, 2, 4, 5])
+
+    @parametrize(
+        "label,factory",
+        [("list", list), ("deque", collections.deque)],
+    )
+    @make_dynamo_test
+    def test_delitem_negative(self, label, factory):
+        c = factory([1, 2, 3, 4, 5])
+        del c[-1]
+        self.assertEqual(list(c), [1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_delitem_list_first(self):
+        lst = [1, 2, 3]
+        del lst[0]
+        self.assertEqual(lst, [2, 3])
+
+    @make_dynamo_test
+    def test_delitem_list_slice(self):
+        lst = [1, 2, 3, 4, 5]
+        del lst[1:3]
+        self.assertEqual(lst, [1, 4, 5])
+
+    @make_dynamo_test
+    def test_delitem_list_slice_step(self):
+        lst = [1, 2, 3, 4, 5]
+        del lst[::2]
+        self.assertEqual(lst, [2, 4])
+
+    @make_dynamo_test
+    def test_delitem_list_full_slice(self):
+        lst = [1, 2, 3]
+        del lst[:]
+        self.assertEqual(lst, [])
+
+    @make_dynamo_test
+    def test_delitem_list_multiple(self):
+        lst = [1, 2, 3, 4, 5]
+        del lst[0]
+        del lst[0]
+        self.assertEqual(lst, [3, 4, 5])
+
+    @make_dynamo_test
+    def test_delitem_symnode_key(self):
+        t = torch.randn(5)
+        lst = [10, 20, 30, 40, 50]
+        del lst[t.shape[0] - 1]
+        self.assertEqual(lst, [10, 20, 30, 40])
+
+    @make_dynamo_test
+    def test_delitem_error_oob(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(IndexError):
+            del lst[10]
+
+    @make_dynamo_test
+    def test_delitem_error_string_key(self):
+        lst = [1, 2, 3]
+        with self.assertRaises(TypeError):
+            del lst["a"]
+
+    @make_dynamo_test
+    def test_delitem_error_tuple(self):
+        t = (1, 2, 3)
+        with self.assertRaises(TypeError):
+            del t[0]  # type: ignore[attr-defined]
+
+    @make_dynamo_test
+    def test_delitem_error_str(self):
+        s = "abc"
+        with self.assertRaises(TypeError):
+            del s[0]  # type: ignore[attr-defined]
+
+    @make_dynamo_test
+    def test_delitem_subclass_list_inherited(self):
+        class L(list):
+            pass
+
+        lst = L([1, 2, 3, 4])
+        del lst[1]
+        self.assertEqual(list(lst), [1, 3, 4])
+
+    @make_dynamo_test
+    def test_delitem_subclass_list_override(self):
+        class L(list):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.del_count = 0
+
+            def __delitem__(self, key):
+                self.del_count += 1
+                super().__delitem__(key)
+
+        lst = L([1, 2, 3])
+        del lst[0]
+        del lst[0]
+        self.assertEqual(list(lst), [3])
+        self.assertEqual(lst.del_count, 2)
 
 
 instantiate_parametrized_tests(TestSqAssItem)

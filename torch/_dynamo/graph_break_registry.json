@@ -1730,6 +1730,12 @@
   ],
   "GB0131": [
     {
+      "Gb_type": "Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
+      "Context": "code name: {code.co_name}, args: {args}",
+      "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
+      "Hints": []
+    },
+    {
       "Gb_type": "Unsupported __setitem__/__setattr__ inline attempt",
       "Context": "code name: {code.co_name}, args: {args}",
       "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",

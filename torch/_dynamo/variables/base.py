@@ -747,7 +747,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslator,
         key: VariableTracker,
-        value: VariableTracker,
+        value: VariableTracker | None,
     ) -> VariableTracker:
         unimplemented(
             gb_type="missing_mp_ass_subscript",
@@ -760,7 +760,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslator,
         key: VariableTracker,
-        value: VariableTracker,
+        value: VariableTracker | None,
     ) -> VariableTracker:
         unimplemented(
             gb_type="unsupported __setitem__ (sq_ass_item)",
@@ -822,6 +822,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 tx,
                 name,
                 "2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elif name == "__delitem__":
+            if len(args) == 1 and not kwargs:
+                from .object_protocol import generic_delitem
+
+                return generic_delitem(tx, self, args[0])
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         elif name == "__len__" and not (args or kwargs):

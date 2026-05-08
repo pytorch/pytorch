@@ -713,90 +713,11 @@ class TestClassSetattr(TestCase):
 # ---------------------------------------------------------------------------
 
 
-class _NoSetitem:
-    def __init__(self, data):
-        self.data = data
-
-    def __getitem__(self, key):
-        return self.data[key]
+# Metaclasses kept at module level — Dynamo's traced LOAD_BUILD_CLASS does
+# not currently propagate the `metaclass=` kwarg.
 
 
-class _ValidatingSetitem:
-    def __init__(self):
-        self.data = {}
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        if not isinstance(key, str):
-            raise TypeError("only string keys allowed")
-        if value < 0:
-            raise ValueError("negative values forbidden")
-        self.data[key] = value
-
-
-class _TransformingSetitem:
-    def __init__(self):
-        self.data = {}
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        self.data[key] = value * 2
-
-
-class _BaseWithSetitem:
-    def __init__(self):
-        self.data = {}
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        self.data[key] = value
-
-
-class _InheritedSetitem(_BaseWithSetitem):
-    pass
-
-
-class _OverridingSetitem(_BaseWithSetitem):
-    def __setitem__(self, key, value):
-        self.data[key] = value + 100
-
-
-class _SetitemReturnsValue:
-    def __init__(self):
-        self.data = {}
-
-    def __setitem__(self, key, value):
-        self.data[key] = value
-        return "ignored"
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-
-class _SetitemUsesArgs:
-    def __init__(self):
-        self.data = {}
-        self.last_key = None
-        self.last_value = None
-        self.call_count = 0
-
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        self.last_key = key
-        self.last_value = value
-        self.call_count += 1
-        self.data[key] = value
-
-
-class _SetitemMeta(type):
+class _SetitemMetaBasic(type):
     def __setitem__(cls, key, value):
         cls._store[key] = value
 
@@ -804,7 +725,7 @@ class _SetitemMeta(type):
         return cls._store[key]
 
 
-class _ClassWithSetitemMeta(metaclass=_SetitemMeta):
+class _ClassWithBasicMeta(metaclass=_SetitemMetaBasic):
     _store: dict = {}
 
 
@@ -831,65 +752,157 @@ class _ValidatingClass(metaclass=_SetitemMetaValidating):
     registry: dict = {}
 
 
+class _SetitemDelitemMeta(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+    def __delitem__(cls, key):
+        del cls._store[key]
+
+
+class _DelClassMeta(metaclass=_SetitemDelitemMeta):
+    _store: dict = {}
+
+
 class TestUserDefinedSetitem(TestCase):
-    """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV)."""
+    """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV).
+
+    enable_trace_load_build_class lets us define helper classes inside the
+    test body — keeps the helper next to the assertion that exercises it.
+    """
 
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
+        self._b_prev = torch._dynamo.config.enable_trace_load_build_class
         torch._dynamo.config.enable_trace_unittest = True
+        torch._dynamo.config.enable_trace_load_build_class = True
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_trace_unittest = self._u_prev
+        torch._dynamo.config.enable_trace_load_build_class = self._b_prev
 
     # -- instance __setitem__ --
 
     @make_dynamo_test
     def test_validating_ok(self):
-        obj = _ValidatingSetitem()
+        class V:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                if not isinstance(key, str):
+                    raise TypeError("only string keys allowed")
+                if value < 0:
+                    raise ValueError("negative values forbidden")
+                self.data[key] = value
+
+        obj = V()
         obj["a"] = 5
         self.assertEqual(obj["a"], 5)
-
-    @make_dynamo_test
-    def test_validating_raises_type(self):
-        obj = _ValidatingSetitem()
         with self.assertRaises(TypeError):
             obj[1] = 5
-
-    @make_dynamo_test
-    def test_validating_raises_value(self):
-        obj = _ValidatingSetitem()
         with self.assertRaises(ValueError):
             obj["a"] = -1
 
     @make_dynamo_test
     def test_transforming_value(self):
-        obj = _TransformingSetitem()
+        class T:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value * 2
+
+        obj = T()
         obj["a"] = 5
         self.assertEqual(obj["a"], 10)
 
     @make_dynamo_test
     def test_inherited_method(self):
-        obj = _InheritedSetitem()
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Derived(Base):
+            pass
+
+        obj = Derived()
         obj["a"] = 5
         self.assertEqual(obj["a"], 5)
 
     @make_dynamo_test
     def test_overriding_method(self):
-        obj = _OverridingSetitem()
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Override(Base):
+            def __setitem__(self, key, value):
+                self.data[key] = value + 100
+
+        obj = Override()
         obj["a"] = 5
         self.assertEqual(obj["a"], 105)
 
     @make_dynamo_test
     def test_return_value_ignored(self):
-        obj = _SetitemReturnsValue()
+        class R:
+            def __init__(self):
+                self.data = {}
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+                return "ignored"
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = R()
         obj["a"] = 5
         self.assertEqual(obj["a"], 5)
 
     @make_dynamo_test
     def test_side_effects_in_method(self):
-        obj = _SetitemUsesArgs()
+        class S:
+            def __init__(self):
+                self.data = {}
+                self.last_key = None
+                self.last_value = None
+                self.call_count = 0
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.last_key = key
+                self.last_value = value
+                self.call_count += 1
+                self.data[key] = value
+
+        obj = S()
         obj["a"] = 1
         obj["b"] = 2
         self.assertEqual(obj.call_count, 2)
@@ -900,13 +913,33 @@ class TestUserDefinedSetitem(TestCase):
 
     @make_dynamo_test
     def test_explicit_method_call(self):
-        obj = _BaseWithSetitem()
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
         obj.__setitem__("a", 5)
         self.assertEqual(obj["a"], 5)
 
     @make_dynamo_test
     def test_multiple_keys(self):
-        obj = _BaseWithSetitem()
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
         for i in range(5):
             obj[i] = i * 10
         for i in range(5):
@@ -914,7 +947,14 @@ class TestUserDefinedSetitem(TestCase):
 
     @make_dynamo_test
     def test_no_setitem_raises_typeerror(self):
-        obj = _NoSetitem([1, 2, 3])
+        class N:
+            def __init__(self, data):
+                self.data = data
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = N([1, 2, 3])
         with self.assertRaises(TypeError):
             obj[0] = 100
 
@@ -922,8 +962,8 @@ class TestUserDefinedSetitem(TestCase):
 
     @make_dynamo_test
     def test_metaclass_basic(self):
-        _ClassWithSetitemMeta["a"] = 1
-        self.assertEqual(_ClassWithSetitemMeta["a"], 1)
+        _ClassWithBasicMeta["a"] = 1
+        self.assertEqual(_ClassWithBasicMeta["a"], 1)
 
     @make_dynamo_test
     def test_metaclass_multiple(self):
@@ -933,14 +973,102 @@ class TestUserDefinedSetitem(TestCase):
         self.assertEqual(_PerClassEntries["y"], 20)
 
     @make_dynamo_test
-    def test_metaclass_validating_ok(self):
+    def test_metaclass_validating(self):
         _ValidatingClass["k"] = 99
         self.assertEqual(_ValidatingClass.registry["k"], 99)
-
-    @make_dynamo_test
-    def test_metaclass_validating_raises(self):
         with self.assertRaises(TypeError):
             _ValidatingClass[123] = 99
+
+    # -- __delitem__ on user-defined classes --
+
+    @make_dynamo_test
+    def test_delitem_basic(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        self.assertNotIn("a", obj.data)
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_tracks(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2, "c": 3}
+                self.deleted = []
+
+            def __delitem__(self, key):
+                self.deleted.append(key)
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        del obj["c"]
+        self.assertEqual(obj.deleted, ["a", "c"])
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_validating(self):
+        class D:
+            def __init__(self):
+                self.data = {1: "a"}
+
+            def __delitem__(self, key):
+                if not isinstance(key, int):
+                    raise TypeError("only int keys")
+                del self.data[key]
+
+        obj = D()
+        del obj[1]
+        self.assertEqual(obj.data, {})
+
+        obj2 = D()
+        with self.assertRaises(TypeError):
+            del obj2["nope"]
+
+    @make_dynamo_test
+    def test_delitem_explicit_method_call(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1}
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        obj.__delitem__("a")
+        self.assertEqual(obj.data, {})
+
+    @make_dynamo_test
+    def test_delitem_no_method_typeerror(self):
+        class D:
+            def __init__(self):
+                self.data = [1, 2, 3]
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = D()
+        with self.assertRaises(TypeError):
+            del obj[0]
+
+    # -- metaclass __delitem__: del Cls[k] --
+
+    @make_dynamo_test
+    def test_metaclass_delitem(self):
+        _DelClassMeta["x"] = 1
+        _DelClassMeta["y"] = 2
+        del _DelClassMeta["x"]
+        self.assertNotIn("x", _DelClassMeta._store)
+        self.assertEqual(_DelClassMeta["y"], 2)
 
 
 if __name__ == "__main__":
