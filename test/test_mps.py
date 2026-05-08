@@ -6751,6 +6751,7 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5))
 
         # Test complex half
+        torch.mps.manual_seed(0)
         x = torch.rand(8, device='mps', dtype=torch.chalf)
         rc_h = x.sqrt()
         rc_f = x.cfloat().sqrt().chalf()
@@ -8144,12 +8145,12 @@ class TestMPS(TestCaseMPS):
         # save the default generator's state (offset = 1) to restore it later
         g_state = torch.mps.get_rng_state()
 
-        # generate random numbers with offset `1`
+        # generate random numbers with offset `2`
         mps_x = torch.randn(5, device='mps')
         # in this case, the random results must differ from the last generated random results
         self.assertNotEqual(mps_x, mps_y)
-        # since we called randn twice after seeding, the offset should be 2
-        self.assertEqual(torch.mps._get_default_mps_generator().get_offset(), 2)
+        # The Metal randn kernel packs 4 samples per Philox round, so single `randn(5)` call advances the offset by 2
+        self.assertEqual(torch.mps._get_default_mps_generator().get_offset(), 4)
 
         # mps_x was produced by g_state, we use it as our reference mps_y.
         mps_y = mps_x
@@ -8857,13 +8858,39 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @serialTest()
-    def test_rand_2b_raises(self):
-        int32_max = torch.iinfo(torch.int32).max
-        with self.assertRaises(RuntimeError):
-            # This used to crash with NDArray dimension length > INT_MAX
-            x = torch.randint(0, 10, (int32_max + 1,), dtype=torch.int8, device='mps')
-        x = torch.randint(0, 10, (int32_max,), dtype=torch.int8, device='mps')
-        self.assertEqual(x.numel(), int32_max)
+    def test_rand_4b(self):
+        # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
+        # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
+        # We pick `numel > 2**32` on purpose: it forces TensorIterator to emit
+        # at least two sub-iters, *and* without the splitting the kernel's
+        # `uint32_t` numel argument would silently wrap (so the second half
+        # would be `empty_like` garbage). 4 GiB of int8 covers both checks.
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        n = (1 << 32) + 1
+
+        torch.mps.manual_seed(42)
+        g = torch.mps._get_default_mps_generator()
+        before = g.get_offset()
+        x = torch.randint(0, 100, (n,), dtype=torch.int8, device='mps')
+        after = g.get_offset()
+        self.assertEqual(x.numel(), n)
+        # `random_int` packs `16 / sizeof(T)` outputs per thread (one Philox
+        # round per thread), so for an int8 output it advances the generator
+        # by `ceil(n / 16)` slots. If only the first sub-iter ran, this
+        # would be at most ceil(2**31 / 16).
+        self.assertGreaterEqual(after - before, (n + 15) // 16)
+
+        # Re-seeding and drawing 1024 elements walks the same philox prefix
+        # the first sub-iter used, so it must match `x[:1024]` byte-for-byte.
+        torch.mps.manual_seed(42)
+        head_ref = torch.randint(0, 100, (1024,), dtype=torch.int8, device='mps')
+        self.assertTrue(torch.equal(x[:1024], head_ref))
+
+        # The tail must look like a uniform draw, not `empty_like` garbage:
+        # if the later sub-iters never ran, the tail would be all zeros.
+        tail = x[-1024:]
+        self.assertGreater(tail.unique().numel(), 50)
         del x
 
 
@@ -8988,7 +9015,9 @@ class TestLogical(TestCaseMPS):
             if dtype == torch.float32 or dtype == torch.float16:
                 x = torch.randn((30, 15), device='mps', dtype=dtype)
             else:
-                x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+                # `randint(to=100, dtype=bool)` is out of range; cap at 2.
+                hi = 2 if dtype == torch.bool else 100
+                x = torch.randint(0, hi, (30, 15), device="mps", dtype=dtype)
             x_cpu = x.to("cpu")
 
             y = x.max()
@@ -10089,7 +10118,13 @@ class TestLinalgMPS(TestCaseMPS):
 
 class TestSDPA(TestCaseMPS):
     def _compare_tensors(self, y, ref, tol=0.01):
-        denom = torch.maximum(ref.abs(), torch.tensor([1e-6], device=ref.device, dtype=ref.dtype))
+        # Floor the denominator at 1e-3: below that, |ref| is at the level of
+        # bfloat16/float16 ULP noise of zero, and dividing a 1-ULP absolute
+        # diff by a near-zero reference produces a huge relative ratio that
+        # dominates the mean and makes the metric meaningless. 1e-6 (the prior
+        # floor) was tight enough that a single near-zero output cell could
+        # blow up `err` past `tol` even with sub-ULP absolute error.
+        denom = torch.maximum(ref.abs(), torch.tensor([1e-3], device=ref.device, dtype=ref.dtype))
         err = ((y - ref).abs() / denom).mean().item()
         self.assertLess(err, tol)
 
@@ -13558,6 +13593,32 @@ class TestConsistency(TestCaseMPS):
             return (1.0, 0.0)
         if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16, torch.bfloat16]:
             return (0.01, 0.01)
+        # Migrating MPS rand/randn from MPSGraph to native Metal in #182386
+        # shifted the Philox sequence consumed by seeded sample inputs, which
+        # exposed a long tail of "1 element near zero, relative ratio explodes"
+        # mismatches. Track consolidation via a magnitude-floored helper in
+        # #182817; until then bump per-op tolerances.
+        if dtype == torch.float32:
+            if op.name == "digamma":
+                return (1e-2, 2e-5)
+            if op.name == "triangular_solve":
+                return (1e-4, 5e-6)
+            if op.name == "linalg.householder_product":
+                return (5e-5, 5e-5)
+            if op.name == "nn.functional.linear_cross_entropy":
+                return (1e-4, 1e-5)
+            if op.name == "linalg.matrix_power":
+                return (1e-3, 1e-5)
+        if dtype == torch.float16:
+            if op.name == "rsub":
+                return (2e-3, 2e-3)
+            if op.name in ("nanmean", "nansum"):
+                return (5e-3, 5e-3)
+            if op.name in ("special.bessel_y0", "special.bessel_y1"):
+                return (5e-4, 2e-3)
+        if dtype == torch.complex64:
+            if op.name == "mv":
+                return (2e-5, 1e-5)
         return (None, None)
 
     # Used for accept mode only
@@ -13727,6 +13788,29 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-3, 5e-3
             if op.name == "index_reduce" and op.variant_test_name in ['mean', 'prod'] and dtype in [torch.float16]:
                 atol, rtol = 0.02, 0.02
+            # RNG-shift fallout from #182386 (MPS distribution dispatch).
+            # See comment in `_compute_tolerances`. Tracked: #182817.
+            if op.name == "grid_sampler_2d" and dtype == torch.float32:
+                atol, rtol = 5e-5, 3e-5
+            if op.name == "grid_sampler_2d" and dtype == torch.float16:
+                atol, rtol = 0.1, 5e-3
+            if op.name == "linalg.matrix_power" and dtype == torch.float32:
+                atol, rtol = 1e-3, 1e-5
+            if op.name in ("nanmean", "nansum") and dtype == torch.float16:
+                atol, rtol = 5e-3, 5e-3
+            if op.name == "nn.functional.soft_margin_loss" and dtype == torch.float16:
+                atol, rtol = 5e-4, 2e-3
+            if op.name in ("polygamma", "special.polygamma") and dtype == torch.float32:
+                atol, rtol = 1e-2, 5e-6
+            if op.name in ("polygamma", "special.polygamma") and dtype == torch.float16:
+                atol, rtol = 5e-5, 2.5e-2
+            if op.name in ("special.bessel_y0", "special.bessel_y1") and dtype == torch.float16:
+                atol, rtol = 5e-4, 2e-3
+            if op.name == "polar" and dtype == torch.float16:
+                # `d(real)/d(abs) = cos(angle)` near pi/2 collapses to ~0 in
+                # fp16; one unlucky seeded angle can produce ~0.1 absolute
+                # drift on a single element while the rest match.
+                atol, rtol = 0.15, 0.1
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
@@ -14191,15 +14275,15 @@ class TestMetalLibrary(TestCaseMPS):
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
         lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
-        mps_tensor = torch.rand(32, device="mps")
         capture_name = f"lib_full{''.join(random.choice('0123456789') for i in range(5))}"
         capture_dirname = f"0000-{capture_name}.gputrace"
         if os.path.exists(capture_dirname):
             shutil.rmtree(capture_dirname)
         with torch.mps.profiler.metal_capture(capture_name):
             self.assertTrue(torch.mps.profiler.is_capturing_metal())
+            mps_tensor = torch.rand(32, device="mps")
             lib.full(mps_tensor)
-        self.assertEqual(mps_tensor.sum().item(), 32.0)
+        self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
         self.assertTrue(os.path.exists(capture_dirname), f"Capture file {capture_dirname} has not been generated")
         capture_listdir = os.listdir(capture_dirname)
         shutil.rmtree(capture_dirname)
