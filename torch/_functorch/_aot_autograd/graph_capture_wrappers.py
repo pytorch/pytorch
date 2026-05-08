@@ -93,6 +93,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses_maybe_joint,
 )
 from .utils import (
+    _detect_rng_device_type,
     _is_tangent,
     call_and_expect_output_descs,
     maybe_to_fresh_input,
@@ -516,14 +517,8 @@ def create_functionalized_rng_ops_wrapper(
     # Detect device type from tensor arguments.
     # When trace_joint=True, args is (primals_list, tangents_list) — a nested tuple.
     # Flatten to get individual tensors before device inspection.
-    _devices = {
-        t.device.type
-        for t in pytree.arg_tree_leaves(*args)
-        if isinstance(t, torch.Tensor)
-    }
-    device_type = (
-        "cuda" if "cuda" in _devices else ("xpu" if "xpu" in _devices else "cuda")
-    )
+
+    device_type = _detect_rng_device_type(*args)
 
     fake_mode_det = detect_fake_mode()
     fake_mode: AbstractContextManager[Any] = nullcontext()

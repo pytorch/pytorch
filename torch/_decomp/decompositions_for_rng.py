@@ -20,18 +20,20 @@ def register_rng_decomposition(aten_op):
 
 
 def throw_on_unsupported_rng_device(device):
-    raise RuntimeError(
-        f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
-        f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
-        "not supported. Supported devices: CUDA, XPU."
-    )
+    if device.type not in ("cuda", "xpu"):
+        raise RuntimeError(
+            f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
+            f"use Philox/counter-based RNG. Therefore, functionalizing a {device.type} RNG operator is "
+            f"not supported. Supported devices: CUDA, XPU. "
+            f"We are discussing the possibility of a Philox-based RNG implementation for CPU."
+        )
 
 
 # TODO - We have to register many more distributions here, and also higher level
 # ops like dropout which have fused implementation and can hide the rand inside.
 @register_rng_decomposition(aten.rand)
 def rand(shape, dtype=None, layout=torch.strided, device=None, pin_memory=False):
-    if device and device.type not in ("cuda", "xpu"):
+    if device:
         throw_on_unsupported_rng_device(device)
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     dtype = dtype or torch.float32
@@ -52,8 +54,7 @@ def rand_like(
     memory_format=torch.preserve_format,
 ):
     device = device or x.device
-    if device.type not in ("cuda", "xpu"):
-        throw_on_unsupported_rng_device(device)
+    throw_on_unsupported_rng_device(device)
     dtype = dtype or x.dtype
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     out, offset_jump = torch.ops.rngprims.philox_rand(

@@ -838,3 +838,9 @@ def _is_fwd_seed_offset(node: torch.fx.Node) -> bool:
     return node.op == "placeholder" and (
         "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
     )
+
+
+def _detect_rng_device_type(tensors: Sequence[Any]) -> str:
+    """Detect accelerator device type from an iterable of tensors."""
+    _devices = {t.device.type for t in tensors if isinstance(t, torch.Tensor)}
+    return "cuda" if "cuda" in _devices else ("xpu" if "xpu" in _devices else "cuda")

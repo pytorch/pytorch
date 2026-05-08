@@ -92,6 +92,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 from .utils import (
+    _detect_rng_device_type,
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -1143,12 +1144,6 @@ def _create_runtime_wrapper(
             return runtime_wrapper(*args, **kwargs)
 
     return _runtime_wrapper
-
-
-def _detect_rng_device_type(tensors: Sequence[Any]) -> str:
-    """Detect accelerator device type from an iterable of tensors."""
-    _devices = {t.device.type for t in tensors if isinstance(t, torch.Tensor)}
-    return "cuda" if "cuda" in _devices else ("xpu" if "xpu" in _devices else "cuda")
 
 
 # WARNING: this does NOT operate on TraceFn
