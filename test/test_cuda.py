@@ -1196,6 +1196,32 @@ print(t.is_pinned())
             self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
+    def test_lazy_call_reentrant_set_rng_state_does_not_deadlock(self):
+        code = r"""
+import torch
+
+torch.cuda.init()
+state = torch.cuda.get_rng_state()
+
+def cb():
+    torch.cuda.set_rng_state(state)
+
+torch.cuda._lazy_call(cb)
+print("done")
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                f"subprocess failed rc={proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        self.assertIn("done", proc.stdout)
+
     def test_specify_improper_device_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, "tempfile.pt")
