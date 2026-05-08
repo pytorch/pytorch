@@ -497,8 +497,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
         self.name_to_op: dict[str, ir.Operation] = {}
-        # Side table for CuteDSL capture nodes (may include ReinterpretViews)
-        self._cutedsl_capture_nodes: dict[str, ir.IRNode] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper

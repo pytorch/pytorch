@@ -56,12 +56,6 @@ class CuteDSLScheduling(BaseScheduling):
         """
         return False
 
-    def can_fuse_horizontal(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        """CuteDSL doesn't support horizontal fusion yet."""
-        return False
-
     def define_kernel(self, src_code_str: str, node_schedule) -> str:
         """Produce the kernel string
         Args:
