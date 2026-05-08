@@ -174,6 +174,7 @@ struct _cuda_scatter_gather_internal_kernel {
         auto self_stride_bytes = index_stride * element_size;
         auto src_stride_bytes = iter.strides(1)[1];
         if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
           at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
               reinterpret_cast<scalar_t*>(self_ptr),
@@ -183,6 +184,7 @@ struct _cuda_scatter_gather_internal_kernel {
               self_stride_bytes, src_stride_bytes);
           return;
         }
+#endif
         at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
             reinterpret_cast<scalar_t*>(self_ptr),
             reinterpret_cast<const scalar_t*>(src_ptr),

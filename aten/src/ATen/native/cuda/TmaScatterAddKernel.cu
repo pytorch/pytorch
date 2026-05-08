@@ -1,7 +1,7 @@
-// TMA-based scatter_add using cp.reduce.async.bulk (sm_90+)
+// TMA-based scatter_add using cp.reduce.async.bulk (sm_90+, CUDA 12.8+)
 // Uses inline PTX rather than cuda::ptx wrappers to avoid CCCL version
-// compatibility issues: CUDA 12.8's CCCL reports __cccl_ptx_isa=830 despite
-// the ptxas supporting these instructions for sm_90+ targets.
+// compatibility issues across different CUDA toolkit versions.
+// Requires CUDA 12.8+ for cp.async.bulk.shared::cta.global (PTX ISA 8.7).
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ceil_div.h>
@@ -12,7 +12,8 @@
 
 namespace at::native {
 
-#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
 namespace tma {
 
@@ -111,7 +112,8 @@ __global__ void tma_scatter_add_kernel(
     int num_ind, int D, int64_t self_dim_size,
     int64_t self_stride, int64_t src_stride,
     int entries_per_block, int chunk_elems) {
-#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
+    defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
     extern __shared__ char smem_raw[];
 
@@ -193,7 +195,7 @@ void tma_scatter_add_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int D, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     constexpr int max_threads = 256;
     // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     constexpr int threads_per_entry = C10_WARP_SIZE;
@@ -226,7 +228,7 @@ void tma_scatter_add_kernel_launch(
         entries_per_block, chunk_elems);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-    TORCH_CHECK(false, "TMA scatter_add not supported on ROCm");
+    TORCH_CHECK(false, "TMA scatter_add requires CUDA 12.8+ and NVIDIA GPU");
 #endif
 }
 
