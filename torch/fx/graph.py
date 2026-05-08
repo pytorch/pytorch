@@ -1370,9 +1370,7 @@ class Graph:
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
-    # TODO: should return GraphModule | None, but causes downstream errors
-    # where callers pass it to functions expecting non-optional GraphModule
-    def owning_module(self):  # pyrefly: ignore[unannotated-return]
+    def owning_module(self) -> GraphModule | None:
         return self._owning_module
 
     @owning_module.setter
@@ -1608,7 +1606,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporary set the insert point and
+        When used within a 'with' statement, this will temporarily set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_before(n):
@@ -1633,7 +1631,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def inserting_after(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporary set the insert point and
+        When used within a 'with' statement, this will temporarily set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_after(n):
