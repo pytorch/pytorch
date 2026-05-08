@@ -149,6 +149,10 @@ if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH
   # certain threshold. However, this is not supported inside Docker container atm
 fi
 
+echo "Current file descriptor limit: $(ulimit -n)"
+ulimit -n 1024
+echo "Updated file descriptor limit: $(ulimit -n)"
+
 # Get fully qualified path using realpath
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 
