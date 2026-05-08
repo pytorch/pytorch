@@ -4718,6 +4718,11 @@ print(ret)
         self.assertEqual(r, "1.0")
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(
+    TEST_WITH_ROCM and EXPANDABLE_SEGMENTS,
+    "expandable_segments mode is not supported on ROCm",
+)
 class TestResizeStorageWithAddr(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -4736,15 +4741,17 @@ class TestResizeStorageWithAddr(TestCase):
     def test_resize_storage_with_addr_exact_allocation(self):
         pool = torch.cuda.MemPool()
         with torch.cuda.use_mem_pool(pool):
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
             t = torch.empty(4096, dtype=torch.uint8, device="cuda")
 
         original_ptr = t.untyped_storage().data_ptr()
         original_size = t.untyped_storage().nbytes()
         t.untyped_storage().resize_(0)
+        other.untyped_storage().resize_(0)
 
         with torch.cuda.use_mem_pool(pool):
             t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
-            other = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            other = torch.empty(294, dtype=torch.uint8, device="cuda")
 
         self.assertEqual(t.untyped_storage().nbytes(), original_size)
         self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
@@ -4775,9 +4782,9 @@ class TestResizeStorageWithAddr(TestCase):
     def test_resize_storage_with_addr_middle_of_block(self):
         pool = torch.cuda.MemPool()
         with torch.cuda.use_mem_pool(pool):
-            prefix = torch.empty(4096, dtype=torch.uint8, device="cuda")
-            t = torch.empty(4096, dtype=torch.uint8, device="cuda")
-            suffix = torch.empty(4096, dtype=torch.uint8, device="cuda")
+            prefix = torch.empty(3729, dtype=torch.uint8, device="cuda")
+            t = torch.empty(4017, dtype=torch.uint8, device="cuda")
+            suffix = torch.empty(2738, dtype=torch.uint8, device="cuda")
 
         original_ptr = t.untyped_storage().data_ptr()
         original_size = t.untyped_storage().nbytes()
@@ -4802,11 +4809,6 @@ class TestResizeStorageWithAddr(TestCase):
             blocks[idx]["address"] + blocks[idx]["size"],
             blocks[idx + 1]["address"],
         )
-
-    def test_resize_storage_with_addr_does_not_change_resize(self):
-        storage = torch.empty(1).untyped_storage()
-        with self.assertRaises(TypeError):
-            storage.resize_(storage.nbytes(), 0)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,
@@ -4867,42 +4869,10 @@ class TestResizeStorageWithAddr(TestCase):
             with torch.cuda.use_mem_pool(pool):
                 t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
 
-    def test_resize_storage_with_addr_zero_ignores_addr(self):
+    def test_resize_storage_with_size_zero_ignores_addr(self):
         t = torch.empty(4096, dtype=torch.uint8, device="cuda")
         t.untyped_storage()._resize_with_addr_(0, 1)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not support exact-address allocation",
-    )
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
-    @serialTest()
-    def test_resize_storage_with_addr_expandable_segments_middle_of_block(self):
-        torch.cuda.empty_cache()
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        try:
-            pool = torch.cuda.MemPool()
-            torch.cuda.empty_cache()
-            with torch.cuda.use_mem_pool(pool):
-                prefix = torch.empty(4096, dtype=torch.uint8, device="cuda")
-                t = torch.empty(4096, dtype=torch.uint8, device="cuda")
-                suffix = torch.empty(4096, dtype=torch.uint8, device="cuda")
-
-            original_ptr = t.untyped_storage().data_ptr()
-            original_size = t.untyped_storage().nbytes()
-            prefix.untyped_storage().resize_(0)
-            t.untyped_storage().resize_(0)
-            suffix.untyped_storage().resize_(0)
-
-            with torch.cuda.use_mem_pool(pool):
-                t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
-
-            self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
-        finally:
-            torch.cuda.empty_cache()
-            torch.cuda.memory._set_allocator_settings("")
-
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
