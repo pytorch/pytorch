@@ -477,7 +477,15 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
   // and must keep it alive for the duration of DLTensor usage
-  out->data = src.data_ptr();
+  if (src.device().type() == kMPS) {
+    // MPS: DLTensor.data is an opaque id<MTLBuffer>; encode the offset
+    // separately, mirroring toDLPackImpl above.
+    out->data = src.storage().mutable_data();
+    out->byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  } else {
+    out->data = src.data_ptr();
+    out->byte_offset = 0;
+  }
   out->device = torchDeviceToDLDevice(src.device());
   out->ndim = static_cast<int32_t>(src.dim());
   out->dtype = getDLDataType(src);
@@ -485,7 +493,6 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // which remains valid as long as the tensor is alive
   out->shape = const_cast<int64_t*>(src.sizes().data());
   out->strides = const_cast<int64_t*>(src.strides().data());
-  out->byte_offset = 0;
 }
 
 DLManagedTensor* toDLPack(const Tensor& src) {
