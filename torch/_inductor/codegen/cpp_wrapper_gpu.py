@@ -478,7 +478,7 @@ class DeferredTritonCallWrapper:
             f" kernel_args_, stream_"
         )
 
-        prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
+        prefix.writeline_jit(f"void* kernel_args_[] = {{{call_args_str}}};")
         prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
@@ -846,8 +846,8 @@ class CppWrapperGpu(CppWrapperCpu):
         return CppWrapperGpu()
 
     def write_header(self):
-        # Const graph needs its own header in dual-mode (standalone JIT compile).
         if V.graph.is_const_graph and not is_dual_mode():
+            # We do not write header for constant graph, it will be written by main module.
             return
 
         super().write_header()
