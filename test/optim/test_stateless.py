@@ -142,7 +142,7 @@ class TestSwapInOptimizerParamsAndState(TestCase):
                 optimizer,
                 parameters,
                 osd,
-                "does not match the size of live optimizer param group 0",
+                "param group 0 has a different number of params",
             )
 
         with self.subTest("non_dict_param_state"):
