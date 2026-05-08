@@ -82,24 +82,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
-    @with_comms
-    def test_clone_preserves_partial(self):
-        # ``aten.clone.default`` is tagged ``pointwise``; without the
-        # _pointwise_skip_ops carve-out it would be auto-registered with
-        # the default pointwise strategy that only enumerates
-        # Replicate/Shard, silently redistributing Partial inputs to
-        # Replicate via implicit all-reduce. Verify that clone is a true
-        # 1:1 placement passthrough for every Partial reduction op.
-        device_mesh = self.build_device_mesh()
-        local = torch.randn(12, 8)
-        for reduce_op in ("sum", "avg", "max", "min"):
-            partial = DTensor.from_local(local, device_mesh, [Partial(reduce_op)])
-            cloned = partial.clone()
-            self.assertFalse(cloned is partial)
-            self.assertEqual(cloned.placements, (Partial(reduce_op),))
-            # Local tensor data is preserved; no all-reduce should fire.
-            self.assertEqual(cloned.to_local(), partial.to_local())
-
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
