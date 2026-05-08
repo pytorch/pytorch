@@ -2644,38 +2644,39 @@ def _enforce_reduction_config_block_minimums(
         assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
             f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
         )
-        block_names = [name for name in ("XBLOCK", "R0_BLOCK") if name in cfg.kwargs]
-        if not block_names:
+        has_xblock = "XBLOCK" in cfg.kwargs
+        has_rblock = "R0_BLOCK" in cfg.kwargs
+        if not (has_xblock or has_rblock):
             continue
-        target_tile_product = conditional_product(
-            *(cfg.kwargs[name] for name in block_names)
+
+        x_floor = min_xblock if min_xblock is not None else 1
+        r_floor = min_rblock if min_rblock is not None else 1
+        target_tile_product = (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+            cfg.kwargs["R0_BLOCK"] if has_rblock else 1
         )
-        min_x = 1
-        min_r = 1
 
-        if min_xblock is not None and "XBLOCK" in cfg.kwargs:
-            min_x = min_xblock
-            cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], min_xblock)
-
-        if min_rblock is not None and "R0_BLOCK" in cfg.kwargs:
-            min_r = min_rblock
-            cfg.kwargs["R0_BLOCK"] = max(cfg.kwargs["R0_BLOCK"], min_rblock)
+        if has_xblock:
+            cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], x_floor)
+        if has_rblock:
+            cfg.kwargs["R0_BLOCK"] = max(cfg.kwargs["R0_BLOCK"], r_floor)
 
         def current_tile_product() -> int:
-            return conditional_product(*(cfg.kwargs[name] for name in block_names))
+            return (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+                cfg.kwargs["R0_BLOCK"] if has_rblock else 1
+            )
 
-        while (
-            "R0_BLOCK" in cfg.kwargs
-            and current_tile_product() > target_tile_product
-            and cfg.kwargs["R0_BLOCK"] > min_r
-        ):
-            cfg.kwargs["R0_BLOCK"] //= 2
-        while (
-            "XBLOCK" in cfg.kwargs
-            and current_tile_product() > target_tile_product
-            and cfg.kwargs["XBLOCK"] > min_x
-        ):
-            cfg.kwargs["XBLOCK"] //= 2
+        def shrink_to_budget(name: str, floor: int) -> None:
+            while (
+                name in cfg.kwargs
+                and current_tile_product() > target_tile_product
+                and cfg.kwargs[name] > floor
+            ):
+                cfg.kwargs[name] //= 2
+
+        # Preserve the autotuner's original tile-size budget where possible:
+        # raising one block to satisfy a floor should shrink the other block.
+        shrink_to_budget("R0_BLOCK", r_floor)
+        shrink_to_budget("XBLOCK", x_floor)
 
         check_max_block(cfg.kwargs)
         check_config(
