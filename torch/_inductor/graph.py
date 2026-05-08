@@ -1442,7 +1442,9 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            if "should_fallback" in n.meta:
+            if "should_fallback" in n.meta or n.meta.get("custom", {}).get(
+                "fallback_to_eager"
+            ):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
@@ -1839,7 +1841,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                n.op == "call_function"
+                is_call_function
                 # this path only for built-in operators
                 and n.target
                 and isinstance(n.target, torch._ops.OpOverload)
