@@ -1045,7 +1045,10 @@ class TestMaxAutotune(TestCase):
     )
     @parametrize("carveout", (None, 0, 27))
     @parametrize("op", ("mm", "scaled_mm"))
-    def test_honor_sm_carveout_with_triton_tma(self, carveout, op: str):
+    @parametrize("use_inductor_config", (False, True))
+    def test_honor_sm_carveout_with_triton_tma(
+        self, carveout, op: str, use_inductor_config: bool
+    ):
         def mm_func(a, b):
             return torch.mm(a, b)
 
@@ -1076,22 +1079,25 @@ class TestMaxAutotune(TestCase):
         )
         func = scaled_mm if op == "scaled_mm" else mm_func
 
-        # Set the specified carveout value
-        torch._C._set_sm_carveout_experimental(carveout)
-        if carveout is None:
-            self.assertIsNone(torch._C._get_sm_carveout_experimental())
-        else:
-            self.assertEqual(torch._C._get_sm_carveout_experimental(), carveout)
+        config_patch = {
+            "max_autotune": True,
+            "triton.enable_persistent_tma_matmul": True,
+            "triton.native_matmul": False,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.autotune_choice_name_regex": "tma",
+        }
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "triton.enable_persistent_tma_matmul": True,
-                "triton.native_matmul": False,
-                "max_autotune_gemm_backends": "TRITON",
-                "test_configs.autotune_choice_name_regex": "tma",
-            }
-        ):
+        if use_inductor_config:
+            config_patch["triton.persistent_matmul_sm_carveout"] = carveout
+        else:
+            # Set the specified carveout value via global API
+            torch._C._set_sm_carveout_experimental(carveout)
+            if carveout is None:
+                self.assertIsNone(torch._C._get_sm_carveout_experimental())
+            else:
+                self.assertEqual(torch._C._get_sm_carveout_experimental(), carveout)
+
+        with config.patch(config_patch):
             compiled_mm = torch.compile(func, mode="max-autotune-no-cudagraphs")
             compiled_mm(*args)  # Warm-up compilation
 

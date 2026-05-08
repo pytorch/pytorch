@@ -2027,6 +2027,18 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+
+    # Number of SMs to carve out from persistent matmul kernels.
+    # Allows persistent kernels to coexist with background ops (e.g., NCCL)
+    # that occupy some SMs, avoiding wave quantization issues.
+    # If None, falls back to torch._C._get_sm_carveout_experimental().
+    persistent_matmul_sm_carveout: int | None = (
+        int(v)
+        if (v := os.environ.get("TORCHINDUCTOR_PERSISTENT_MATMUL_SM_CARVEOUT"))
+        is not None
+        else None
+    )
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 

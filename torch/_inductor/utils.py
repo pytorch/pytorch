@@ -1790,11 +1790,18 @@ def using_b200() -> bool:
 
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
+    from torch._inductor import config
+
     # TODO we need to properly guard on this global
     if torch.xpu.is_available():
         return get_max_num_sms()
-    carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+
+    # Use inductor config if set, otherwise fall back to global setting
+    carveout = config.triton.persistent_matmul_sm_carveout
+    if carveout is None:
+        carveout = torch._C._get_sm_carveout_experimental() or 0
+
+    return get_max_num_sms() - carveout
 
 
 def get_tma_workspace_arg(
