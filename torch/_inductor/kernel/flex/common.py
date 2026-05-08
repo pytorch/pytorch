@@ -186,8 +186,8 @@ def realize_captures_for_cutedsl(buffers):
     Unlike maybe_realize (used by the Triton path), CuteDSL needs physical
     tensors passed at runtime. Pointwise/computed captures must be materialized
     into a fresh buffer whose layout matches the logical shape the subgraph
-    indexes. Views (ReinterpretView) and plain InputBuffers are kept as-is
-    since CuteDSL can emit reinterpret_tensor() at the call-site.
+    indexes. Plain InputBuffers and zero-offset views (ReinterpretView) are
+    kept as-is since CuteDSL can emit reinterpret_tensor() at the call-site.
 
     Realized captures are registered on V.graph so the CuteDSL template can
     resolve view nodes without explicit plumbing from callers.
@@ -198,7 +198,12 @@ def realize_captures_for_cutedsl(buffers):
         if x is None or isinstance(x, sympy.Expr):
             return x
         realized = ExternKernel.realize_input(x)
-        if isinstance(realized, (InputBuffer, ReinterpretView)):
+        if isinstance(realized, InputBuffer) or (
+            isinstance(realized, ReinterpretView)
+            and V.graph.sizevars.statically_known_equals(
+                realized.get_layout().offset, 0
+            )
+        ):
             return realized
         return ExternKernel.copy_input(realized)
 
