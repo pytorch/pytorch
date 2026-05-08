@@ -926,19 +926,20 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generating triton kernel callers can modify the prefix (cached dtypes),
         # so do this before running finalize_prefix(), but put the generated code
         # after the finalize_prefix() code.
-        self.prefix = IndentedBuffer()
-        for kernel in self._triton_call_wrappers.values():
-            self.prefix.writeline("\n")
-            kernel.generate(self)
+        triton_prefix = IndentedBuffer()
+        with self._target_buf("prefix", triton_prefix):
+            for kernel in self._triton_call_wrappers.values():
+                self.prefix.writeline("\n")
+                kernel.generate(self)
 
-        # Generate parallel kernel compilation initialization function
-        if self._lazy_kernel_names:
-            start_compile_calls = "\n    ".join(
-                f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
-                for name in self._lazy_kernel_names
-            )
-            self.prefix.splice(
-                f"""\
+            # Generate parallel kernel compilation initialization function
+            if self._lazy_kernel_names:
+                start_compile_calls = "\n    ".join(
+                    f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
+                    for name in self._lazy_kernel_names
+                )
+                self.prefix.splice(
+                    f"""\
 // Start parallel compilation of all Triton kernels
 static inline void start_all_triton_kernel_compiles() {{
     loadLazyCompileFuncs();
@@ -954,9 +955,7 @@ static struct TritonKernelCompileInit {{
     }}
 }} __triton_kernel_compile_init;
 """
-            )
-
-        triton_prefix = self.prefix
+                )
 
         self.prefix = IndentedBuffer()
         super().finalize_prefix()
