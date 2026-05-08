@@ -11659,6 +11659,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)  # MPS doesn't support float64
+    @skipMPSIf(MACOS_VERSION < 15.0, "macOS 14 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
