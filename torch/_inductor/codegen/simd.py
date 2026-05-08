@@ -299,7 +299,7 @@ class IterationRangesRoot(IterationRanges):
             return (divisor_hint, not length_is_one_hint)
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
-        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes = [n for n in nodes if n and n.root is self]
         nodes.sort(key=lambda x: get_sort_key(x))
         divisor = sympy.S.One
         index_vars = []
@@ -428,7 +428,6 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
             grid_dim=parent.grid_dim,
             has_zdim=parent.has_zdim,
         )
-        self.parent = parent
         self._block_size = block_size
         self._block_offset = block_offset
         self._named_constants = named_constants
