@@ -1746,6 +1746,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [key], {})
         return super().mp_subscript_impl(tx, key)
 
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # CPython's slot wrapper for ``__mul__`` on a list/tuple subclass that
+        # doesn't override ``__mul__`` calls the base class's sq_repeat,
+        # producing a plain list/tuple (not the subclass).  Delegate to the
+        # inner _base_vt which has the right sq_repeat_impl.
+        if self._base_vt is not None:
+            return self._base_vt.sq_repeat_impl(tx, count)
+        return super().sq_repeat_impl(tx, count)
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslator",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        if self._base_vt is not None:
+            return self._base_vt.sq_inplace_repeat_impl(tx, count)
+        return super().sq_inplace_repeat_impl(tx, count)
+
     def SLOT1BIN(
         self,
         tx: "InstructionTranslator",
@@ -1855,6 +1877,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return r
 
         return variables.ConstantVariable.create(NotImplemented)
+
+    def nb_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__mul__",
+            "__rmul__",
+            nb_slot=PyNumberSlots.NB_MULTIPLY,
+            reverse=reverse,
+        )
 
     def nb_or_impl(
         self,
