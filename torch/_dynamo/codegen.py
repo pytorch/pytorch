@@ -102,6 +102,15 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self.pycodes = []
+
+    def add_pycode(self, pycode: str, *args):
+        if not config.generate_pycode:
+            return
+        for a in args:
+            if isinstance(a, VariableTracker):
+                a.realize()
+        self.pycodes.append(pycode.format(*[a.reconstruct_pycode(self) for a in args]))
 
     def restore_stack(
         self, stack_values: list[Any], *, value_from_source: bool = True
@@ -110,6 +119,12 @@ class PyCodegen:
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
+            # `restore_stack` is called once per codegen pass (e.g. pass1 for
+            # use tracking, pass2 for actual emission). Reset the stack counter
+            # so each pass produces the same `__stackN` names.
+            self.tx.reset_pycode_varname_counter("stack")
+            for v in stack_values:
+                self.add_pycode(f"{self.tx.new_pycode_varname('stack')} = {{}}", v)
         finally:
             self.value_from_source = prev
 
@@ -449,6 +464,11 @@ class PyCodegen:
     def get_instructions(self) -> list[Instruction]:
         return self._output
 
+    def get_pycode(self) -> list[str] | None:
+        if not config.generate_pycode:
+            return None
+        return self.pycodes
+
     def create_load(self, name: str) -> Instruction:
         if name not in self.code_options["co_varnames"]:
             raise AssertionError(f"{name} missing")
@@ -681,7 +701,10 @@ class PyCodegen:
             cm_var = self.new_var()
             self.store(cm_var)
 
-        for arg in graphargs:
+        arg_varnames = []
+        for i, arg in enumerate(graphargs):
+            arg_varname = self.tx.new_pycode_varname("arg")
+            arg_varnames.append(arg_varname)
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
                     lambda: self.extend_output(
@@ -693,8 +716,10 @@ class PyCodegen:
                 )
                 self.call_reconstruct(arg)
                 self.extend_output(create_call_function(1, False))
+                self.add_pycode(f"{arg_varname} = torch._as_tensor_fullprec({{}})", arg)
             else:
                 self.call_reconstruct(arg)
+                self.add_pycode(f"{arg_varname} = {{}}", arg)
 
         if config.record_runtime_overhead:
             # Record the pregraph bytecode end
@@ -710,6 +735,9 @@ class PyCodegen:
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
+        self.add_pycode(
+            f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
+        )
 
     def create_import_name(self, module_name: str) -> Instruction:
         return create_instruction("IMPORT_NAME", argval=module_name)
