@@ -548,16 +548,19 @@ class TestScatterAddOverrideConds(TestCase):
         self.assertTrue(tma)
         self.assertTrue(vec)
 
-    def test_tma_rejects_partial_chunk(self):
-        # fp32 D=129 -> row_bytes=516, not a multiple of 512 -> TMA rejects.
+    def test_rejects_row_bytes_not_16_aligned(self):
+        # fp32 D=129 -> row_bytes=516, 516 % 16 != 0 -> TMA rejects
+        # (cp.reduce.async.bulk requires 16-aligned gmem operands).
         # 129 % 4 != 0 -> vec also rejects.
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
-    def test_vec_accepts_non_tma_shape(self):
-        # bf16 D=264 -> row_bytes=528, TMA rejects; 264 % 8 == 0 vec accepts.
+    def test_tma_accepts_row_not_chunk_multiple(self):
+        # bf16 D=264 -> row_bytes=528, 16-aligned but not a multiple of
+        # chunk_bytes (512). TMA descriptor handles the partial final
+        # chunk via OOB-clamp-to-zero; cond should accept.
         self_t, idx, src, _ = _make_override_triple(100, 50, (264,), dtype=torch.bfloat16)
-        self.assertEqual(self._conds(self_t, idx, src), (False, True))
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
 
     def test_rejects_unsupported_dtype(self):
         self_t, idx, src, _ = _make_override_triple(100, 50, (128,), dtype=torch.float64)
@@ -622,13 +625,13 @@ class TestScatterAddOverrideCorrectness(TestCase):
         cutedsl_impl.register_to_dispatch()
 
     @parametrize("dtype,shape_tail", [
-        subtest((torch.float32, (128,)), name="fp32_N128"),       # TMA
-        subtest((torch.float32, (1024,)), name="fp32_N1024"),     # TMA, chunked
+        subtest((torch.float32, (128,)), name="fp32_N128"),       # TMA, single chunk
+        subtest((torch.float32, (1024,)), name="fp32_N1024"),     # TMA, full chunks
         subtest((torch.bfloat16, (128,)), name="bf16_N128"),
         subtest((torch.bfloat16, (1024,)), name="bf16_N1024"),
         subtest((torch.float16, (256,)), name="fp16_N256"),
-        subtest((torch.float32, (264,)), name="fp32_N264_vec"),   # vec only
-        subtest((torch.bfloat16, (264,)), name="bf16_N264_vec"),
+        subtest((torch.float32, (132,)), name="fp32_N132_partial"),   # TMA partial final chunk
+        subtest((torch.bfloat16, (264,)), name="bf16_N264_partial"),  # TMA partial final chunk
         subtest((torch.float32, (4, 32)), name="fp32_3d"),        # nD flatten
     ])
     def test_matches_reference(self, dtype, shape_tail):

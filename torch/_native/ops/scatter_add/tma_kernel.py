@@ -1,33 +1,47 @@
 """TMA-based scatter_add for the ``index.unsqueeze(-1).expand(-1, N)`` pattern.
 
 Port of the CUDA C++ kernel from https://github.com/pytorch/pytorch/pull/182675
-to CuTeDSL. Each warp handles one source row (within an assigned D-range):
-a TMA bulk load (``cute.copy`` with ``CopyBulkG2SOp``) stages
+to CuTeDSL. Each CTA (one warp) handles one source row (within an assigned
+chunk-index range): a tile-mode TMA bulk load (``cute.copy`` with
+``CopyBulkTensorTileG2SOp`` via ``make_tiled_tma_atom``) stages
 ``src[i, d_start:d_end]`` into smem, then
 ``cp.reduce.async.bulk.global.shared::cta.bulk_group.add`` deposits the
 reduction into ``out[index[i], d_start:d_end]``.
 
-Chunks along D in ``chunk_bytes``-sized slices, double-buffered so the
-next chunk's load overlaps the current chunk's reduce. ``chunk_bytes`` is
-``min(row_bytes, _MAX_CHUNK_BYTES)`` at compile time: small rows travel
-as a single chunk, large rows chunk at 512B. Because ``cute.copy``
-derives the transfer size from the tensor shape, ``chunk_bytes`` must
-evenly divide ``row_bytes`` -- the host cond enforces this.
+Using the tile-mode TMA with a descriptor over the full ``(M_src, N)``
+source tensor lets TMA clamp out-of-range column reads to zero, so the
+final partial chunk (when ``N`` isn't a multiple of ``chunk_elems``) is
+handled natively -- we just reduce only the valid byte count on the
+store side. That widens coverage to any ``row_bytes`` that's 16-byte
+aligned (the ``cp.reduce.async.bulk`` gmem operand requirement).
 
-Grid layout is 2D to maintain SM utilization for shapes with small N and
-large D: ``(grid_x, grid_y)``, where ``grid_y`` partitions the D axis
-into disjoint chunks and each warp iterates only its assigned chunk.
-When N is large the host sets ``grid_y = 1`` so the inner chunk loop
-recovers the classic schedule. When N is tiny (say 100 rows, D=640K),
-``grid_y`` grows so the grid still fills the machine.
+Synchronization between the load and the reduce uses
+``cutlass.pipeline.PipelineTmaAsync`` with ``num_stages=2``: producer
+``acquire``/``commit`` guards the TMA issue, consumer ``wait``/``release``
+guards the reduce. Producer and consumer cooperative groups are both
+``Agent.Thread, size=1`` -- the single driver thread inside the warp
+does both roles. ``PipelineState.advance()`` handles the stage index +
+phase bit.
+
+Chunks along D at a compile-time ``chunk_elems``: small rows travel as
+a single chunk, large rows chunk at 512 B. The TMA descriptor OOB-clamp
+handles rows whose length isn't a multiple of ``chunk_elems``.
+
+Grid layout is 2D to maintain SM utilization for shapes with small N
+and large D: ``(grid_x, grid_y)``, where ``grid_y`` partitions the
+chunk-index axis. When N is large the host sets ``grid_y = 1`` so the
+inner chunk loop recovers the classic schedule. When N is tiny (say
+100 rows, D=640K), ``grid_y`` grows so the grid still fills the
+machine.
 
 Restrictions (enforced by the host cond in ``cutedsl_impl.py``):
   - sm_90+ (cp.reduce.async.bulk availability)
-  - dim == 0, rank >= 2, self/src contiguous
+  - dim == 0, rank >= 2, self/src inner-contiguous
   - index is the expanded-1D pattern (same shape as src, stride 0 on every
     axis except 0)
   - dtype in {fp32, fp16, bf16}
-  - row_bytes is a multiple of ``min(row_bytes, 512)``
+  - ``row_bytes % 16 == 0`` (for both the TMA load operand and the
+    cp.reduce.async.bulk gmem operand)
 """
 
 import math
@@ -79,41 +93,43 @@ def _make_kernel(
     /contig/scale are Python-time constants that the preprocessor folds at
     cute.compile time.
 
-    ``chunk_elems`` is baked in at compile time, so the bulk-load transfer
-    size is fixed. That lets us use ``cute.copy(CopyBulkG2SOp(), ...)``
-    for the load and ``PipelineTmaAsync`` (tx_count = chunk_bytes) for
-    the producer/consumer synchronization. The bulk-reduce side still
-    emits raw PTX because cutedsl only ships a tile-mode TMA reduce op,
-    which requires a TMA descriptor and doesn't fit our dynamic per-row
-    gather.
+    ``chunk_elems`` is baked in at compile time. The TMA descriptor
+    built in ``_launch`` (via ``make_tiled_tma_atom`` on the source
+    tensor) enables OOB-clamp-to-zero for reads past column ``N``; the
+    reduce side then writes only the actual valid byte count, so
+    partial final chunks are handled natively.
 
     One CTA = one warp. The single driver thread (tidx == 0) serves as
     both producer (issues the TMA load) and consumer (issues the
     bulk-reduce). Both CooperativeGroups are ``Agent.Thread, size=1``
     so the mbarrier arrive counts match the single-threaded flow.
 
-    ``contig`` toggles a fast path: when True, row offset is computed as
-    ``entry_id * D`` using the compile-time D, avoiding a runtime
-    stride multiply. When False the kernel takes runtime row-stride
-    arguments so outer-strided tensors (e.g. slices) work.
+    ``contig`` gates a fast path on the reduce side: when True, the
+    output row stride is D at compile time, avoiding a runtime stride
+    multiply. When False the kernel takes a runtime
+    ``out_row_stride`` arg so outer-strided outputs (e.g. slices) work.
+    The TMA load always goes through the descriptor and doesn't use
+    ``contig``.
 
-    When ``scale`` is True, after the TMA bulk load completes the 32
-    lanes cooperatively multiply the smem buffer by the runtime
-    ``alpha`` before the bulk-reduce. The ``alpha == 1`` fast path uses
-    ``scale=False`` and avoids the smem pass + proxy fence entirely.
+    When ``scale`` is True, after ``consumer_wait`` the driver thread
+    multiplies the chunk_elems smem buffer in place before the
+    bulk-reduce, followed by ``fence_view_async_shared`` so the
+    bulk-reduce sees the scaled values through the async proxy. The
+    ``alpha == 1`` fast path uses ``scale=False`` and avoids the smem
+    pass + proxy fence entirely.
     """
 
     chunk_bytes = chunk_elems * elem_bytes
 
     @cute.kernel
     def _kernel(
-        mSrc: cute.Tensor,
+        tma_atom: cute.CopyAtom,
+        tma_tensor_src: cute.Tensor,  # TMA-view of mSrc
         mIndex: cute.Tensor,
         mOut: cute.Tensor,
         num_entries: Int32,
         D: Int32,
-        d_tile_size: Int32,
-        src_row_stride: Int64,
+        chunk_tile_size: Int32,  # number of chunks per grid_y slot
         out_row_stride: Int64,
         alpha: cute.Numeric,
     ):
@@ -121,18 +137,21 @@ def _make_kernel(
         bidx, bidy, _ = cute.arch.block_idx()
         gdim_x, _, _ = cute.arch.grid_dim()
 
-        load_atom = cute.make_copy_atom(cpasync.CopyBulkG2SOp(), dtype)
+        # Chunk-index range assigned to this CTA. bidy partitions the
+        # chunk axis into disjoint slices of chunk_tile_size; when
+        # chunk_tile_size == num_chunks, grid_y == 1 and every CTA sees
+        # the whole D.
+        num_chunks = (D + Int32(chunk_elems) - Int32(1)) // Int32(chunk_elems)
+        chunk_start = bidy * chunk_tile_size
+        chunk_end = chunk_start + chunk_tile_size
+        if chunk_end > num_chunks:
+            chunk_end = num_chunks
 
-        d_start = bidy * d_tile_size
-        d_end = d_start + d_tile_size
-        if d_end > D:
-            d_end = D
-
-        # For the contiguous fast path, row stride is just D; the
-        # runtime stride args get ignored.
+        # Reduce-side out-row stride: compile-time D (contig) or runtime.
         if const_expr(contig):
-            src_row_stride = Int64(D)
-            out_row_stride = Int64(D)
+            out_rs = Int64(D)
+        else:
+            out_rs = out_row_stride
 
         smem = cutlass.utils.SmemAllocator()
         sBuf = smem.allocate_tensor(
@@ -151,6 +170,19 @@ def _make_kernel(
             tidx=tidx,
         )
 
+        # Tile the source (M, N) by (1, chunk_elems) to get
+        # (1, chunk_elems, M, num_chunks); tma_partition collapses and
+        # returns tma_gmem[None, row_idx, chunk_idx] and tma_smem[None,
+        # stage].
+        tiled_gmem = cute.local_tile(tma_tensor_src, (1, chunk_elems), (None, None))
+        tma_smem, tma_gmem = cpasync.tma_partition(
+            tma_atom,
+            Int32(0),
+            cute.make_layout(1),
+            cute.group_modes(sBuf, 0, 1),
+            cute.group_modes(tiled_gmem, 0, 2),
+        )
+
         producer_state = pipeline.make_pipeline_state(
             pipeline.PipelineUserType.Producer, 2
         )
@@ -163,23 +195,15 @@ def _make_kernel(
             entry_id = base
             r = Int64(mIndex[entry_id])
 
-            off = d_start
-            while off < d_end:
+            chunk_idx = chunk_start
+            while chunk_idx < chunk_end:
                 if tidx == Int32(0):
                     pipe.producer_acquire(producer_state)
-                    src_slice = cute.make_tensor(
-                        mSrc.iterator + (Int64(entry_id) * src_row_stride + Int64(off)),
-                        cute.make_layout(chunk_elems),
-                    )
-                    dst_slice = cute.make_tensor(
-                        sBuf.iterator + producer_state.index * Int32(chunk_elems),
-                        cute.make_layout(chunk_elems),
-                    )
                     cute.copy(
-                        load_atom,
-                        src_slice,
-                        dst_slice,
-                        mbar_ptr=pipe.producer_get_barrier(producer_state),
+                        tma_atom,
+                        tma_gmem[None, entry_id, chunk_idx],
+                        tma_smem[None, producer_state.index],
+                        tma_bar_ptr=pipe.producer_get_barrier(producer_state),
                     )
                     pipe.producer_commit(producer_state)
 
@@ -201,16 +225,25 @@ def _make_kernel(
                             slot[0] = slot[0] * alpha_t
                         cute.arch.fence_view_async_shared()
 
-                    dst_off = r * out_row_stride + Int64(off)
+                    # Partial-chunk handling: actual valid element count
+                    # is min(chunk_elems, D - off). TMA OOB-clamped the
+                    # tail to 0 in smem, we reduce only the valid bytes.
+                    off = chunk_idx * Int32(chunk_elems)
+                    cur_elems = D - off
+                    if cur_elems > Int32(chunk_elems):
+                        cur_elems = Int32(chunk_elems)
+                    cur_bytes = cur_elems * Int32(elem_bytes)
+
+                    dst_off = r * out_rs + Int64(off)
                     gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
-                    reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), Int32(chunk_bytes))
+                    reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
                     cute.arch.cp_async_bulk_commit_group()
                     cute.arch.cp_async_bulk_wait_group(0, read=False)
                     pipe.consumer_release(consumer_state)
 
                 producer_state.advance()
                 consumer_state.advance()
-                off = off + Int32(chunk_elems)
+                chunk_idx = chunk_idx + Int32(1)
 
             base = base + gdim_x
 
@@ -222,21 +255,29 @@ def _make_kernel(
         stream: cuda.CUstream,
         num_entries: Int32,
         D: Int32,
-        d_tile_size: Int32,
+        chunk_tile_size: Int32,
         grid_x: Int32,
         grid_y: Int32,
-        src_row_stride: Int64,
         out_row_stride: Int64,
         alpha: cute.Numeric,
     ):
-        _kernel(
+        # Build the tile-mode TMA descriptor. Shape (M_src, N) comes
+        # from mSrc; TMA clamps OOB column reads to 0, so rows with
+        # ``N % chunk_elems != 0`` are handled natively on the load.
+        tma_atom, tma_tensor_src = cpasync.make_tiled_tma_atom(
+            cpasync.CopyBulkTensorTileG2SOp(),
             mSrc,
+            cute.make_layout((1, chunk_elems)),
+            (1, chunk_elems),
+        )
+        _kernel(
+            tma_atom,
+            tma_tensor_src,
             mIndex,
             mOut,
             num_entries,
             D,
-            d_tile_size,
-            src_row_stride,
+            chunk_tile_size,
             out_row_stride,
             alpha,
         ).launch(
@@ -250,10 +291,15 @@ def _make_kernel(
 
 def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     """Compile-time ``chunk_elems``: whole row if it fits in
-    ``_MAX_CHUNK_BYTES``, else ``_MAX_CHUNK_BYTES // elem_bytes``."""
+    ``_MAX_CHUNK_BYTES``, else ``_MAX_CHUNK_BYTES // elem_bytes``.
+    Rounded down to a multiple of ``16 / elem_bytes`` so the final
+    partial chunk (if any) still satisfies the 16-byte reduce
+    alignment."""
     elem_bytes = torch.tensor([], dtype=torch_dtype).element_size()
     row_bytes = N * elem_bytes
     chunk_bytes = min(row_bytes, _MAX_CHUNK_BYTES)
+    # Ensure chunk_bytes itself is 16-aligned (true for 512, true for
+    # any small row since cond requires row_bytes % 16 == 0).
     return chunk_bytes // elem_bytes
 
 
@@ -293,16 +339,16 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
         Int32(0),
         Int32(0),
         Int64(0),
-        Int64(0),
         alpha_dtype(0.0),
         options="--enable-tvm-ffi",
     )
 
 
 def min_d_divisor_for(dtype: torch.dtype) -> int:
-    """Smallest value D must be divisible by so ``cp.async.bulk`` transfers
-    stay 16-byte-aligned: ``D * sizeof(dtype) % 16 == 0``, i.e.
-    ``D % (16 / gcd(16, sizeof(dtype))) == 0``.
+    """Smallest value D must be divisible by so ``cp.reduce.async.bulk``
+    gmem operands stay 16-byte aligned: ``D * sizeof(dtype) % 16 == 0``,
+    i.e. ``D % (16 / gcd(16, sizeof(dtype))) == 0``. fp32: %4,
+    bf16/fp16: %8.
     """
     esize = torch.tensor([], dtype=dtype).element_size()
     return 16 // math.gcd(16, esize)
@@ -311,30 +357,26 @@ def min_d_divisor_for(dtype: torch.dtype) -> int:
 def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
     """Host-side check: can the TMA kernel handle an N-element row?
 
-    chunk_bytes is chosen at compile time as ``min(row_bytes, 512)``, and
-    ``cute.copy``'s transfer size is tied to the tensor shape, so every
-    chunk must be full-sized. That means ``row_bytes`` must be a multiple
-    of ``chunk_bytes`` (always true when row_bytes < 512) and
-    ``chunk_bytes`` must itself be 16-byte aligned.
+    Only requirement is that ``row_bytes = N * elem_size`` is a multiple
+    of 16, which is the PTX operand alignment for both the tile-mode
+    TMA load (per-row stride must be 16-aligned) and
+    ``cp.reduce.async.bulk`` (gmem address + byte count must be
+    16-aligned). Rows that aren't multiples of ``chunk_elems`` are
+    handled via the TMA descriptor's OOB-clamp-to-zero behavior.
     """
     esize = torch.tensor([], dtype=dtype).element_size()
-    row_bytes = N * esize
-    chunk_bytes = min(row_bytes, _MAX_CHUNK_BYTES)
-    if chunk_bytes % 16 != 0:
-        return False
-    return row_bytes % chunk_bytes == 0
+    return (N * esize) % 16 == 0
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:
-    """Pick ``(grid_x, grid_y, d_tile_size)``.
+    """Pick ``(grid_x, grid_y, chunk_tile_size)``.
 
-    Strategy: keep the classic 1D schedule (grid_y=1, whole D per warp with
-    internal double-buffering) whenever the row-axis alone saturates the
-    GPU. When N is too small for that, split D across the y-axis so every
-    SM gets work. The y-tile size is ``chunk_elems`` so warps don't lose
-    the within-warp pipeline completely, but several chunks' worth of
-    D-tiles go to different CTAs in parallel.
+    Strategy: keep the classic 1D schedule (grid_y=1, whole chunk range
+    per CTA with internal double-buffering) whenever the row-axis alone
+    saturates the GPU. When M is too small for that, split the
+    chunk-axis across grid_y so every SM gets work.
     """
+    n_chunks = (D + chunk_elems - 1) // chunk_elems
     # 1 warp per CTA: need many more CTAs than an 8-warp layout to keep
     # occupancy up. sm*32 target with a sm*64 clamp works well across
     # uniform / high_cont / few_idx on B200.
@@ -342,20 +384,15 @@ def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int
     target_ctas = sm * 32
     if row_ctas >= target_ctas:
         grid_x = min(row_ctas, sm * 64)
-        return grid_x, 1, D
-    # Split D across y until we hit the target, but don't shrink tiles
-    # below chunk_elems (that would break the within-warp pipeline).
-    n_d_tiles = (D + chunk_elems - 1) // chunk_elems
+        return grid_x, 1, n_chunks
+    # Split the chunk axis until we hit the target.
     want_y = max(1, target_ctas // max(row_ctas, 1))
-    grid_y = min(n_d_tiles, want_y)
-    # d_tile_size rounded up to chunk_elems multiples; last tile may be
-    # shorter (handled by d_end clamp in the kernel).
-    tiles_per_y = (n_d_tiles + grid_y - 1) // grid_y
-    d_tile_size = tiles_per_y * chunk_elems
-    # Recompute grid_y now that each y-slot holds tiles_per_y chunks.
-    grid_y = (D + d_tile_size - 1) // d_tile_size
+    grid_y = min(n_chunks, want_y)
+    chunk_tile_size = (n_chunks + grid_y - 1) // grid_y
+    # Recompute grid_y now that each y-slot holds chunk_tile_size chunks.
+    grid_y = (n_chunks + chunk_tile_size - 1) // chunk_tile_size
     grid_x = row_ctas
-    return grid_x, grid_y, d_tile_size
+    return grid_x, grid_y, chunk_tile_size
 
 
 def tma_scatter_add_into(
@@ -368,8 +405,8 @@ def tma_scatter_add_into(
 
     ``out`` / ``src`` are 2D with inner-dim stride 1 (outer row stride
     can differ from N, e.g. a slice of a wider buffer). ``index_1d`` is
-    1D int64 of length M_src. N must satisfy ``row_shape_supported``;
-    the cond checks this.
+    1D int64 of length M_src. ``row_bytes = N * elem_size`` must be a
+    multiple of 16; the host cond enforces this.
 
     ``alpha == 1.0`` dispatches to the non-scaling variant (no smem
     scale pass, no proxy fence).
@@ -381,7 +418,7 @@ def tma_scatter_add_into(
     compiled = _compile_tma_scatter(src.dtype, N, contig, scale)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
 
-    grid_x, grid_y, d_tile_size = _plan_grid(M, N, chunk_elems, sm)
+    grid_x, grid_y, chunk_tile_size = _plan_grid(M, N, chunk_elems, sm)
     alpha_dtype = _alpha_dtype_for(src.dtype)
     compiled(
         src,
@@ -389,10 +426,9 @@ def tma_scatter_add_into(
         out,
         M,
         N,
-        d_tile_size,
+        chunk_tile_size,
         grid_x,
         grid_y,
-        src.stride(0),
         out.stride(0),
         alpha_dtype(float(alpha)),
     )
