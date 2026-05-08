@@ -12,6 +12,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
+    ChoiceCaller,
     FixedLayout,
     ir_node_to_tensor,
     StorageBox,
@@ -442,10 +443,9 @@ def autotune_custom_op(
     op_overload: torch._ops.OpOverload,
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None = None,
     config_patches_list: list[dict[str, Any]] | None = None,
-    return_choice: bool = False,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
-) -> TensorBox | Any | tuple[Any, Any]:
+) -> tuple[TensorBox, ChoiceCaller]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
     Currently supports SINGLE OUTPUT custom ops only.
@@ -466,7 +466,7 @@ def autotune_custom_op(
                            and return real tensors for performance measurement.
 
     Returns:
-        IR node representing the optimized operation result
+        Tuple of (IR node representing the optimized operation result, winning ChoiceCaller)
 
     Raises:
         TypeError: If decompositions is not a list/tuple
@@ -497,7 +497,7 @@ def autotune_custom_op(
     choices = template.generate_custom_op_choices(
         name=name,
         decompositions=decompositions,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
         input_gen_fns=input_gen_fns if input_gen_fns else None,
@@ -543,7 +543,6 @@ def autotune_custom_op(
         input_nodes=list(inputs),
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
-        return_choice=True,
         is_collective=is_collective,
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
@@ -574,18 +573,8 @@ def autotune_custom_op(
                 selected_result = choice.output_node()
                 break
 
-    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
+        # Always inline when winning_choice has a graph; callers extract choice metadata separately
     if winning_choice.gm is not None:
-        # Skip inlining when return_choice=True since caller only needs choice metadata
-        # (e.g., range-based dispatch builds its own torch.cond from winning choices)
-        if return_choice:
-            log.debug(
-                "Skipping inline for return_choice: %s (name=%s)",
-                getattr(winning_choice, "name", type(winning_choice).__name__),
-                name,
-            )
-            return selected_result, winning_choice
-
         log.debug(
             "Inlining winning choice: %s (name=%s)",
             getattr(winning_choice, "name", type(winning_choice).__name__),
@@ -597,21 +586,19 @@ def autotune_custom_op(
         result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
 
         # Tag inlined operations with config_patches from the winning choice
-        config_patches = getattr(winning_choice, "config_patches", None)
+        config_patches = winning_choice.config_patches
         if config_patches:
             for op in V.graph.operations[ops_before:]:
                 op.set_config_patches(config_patches.copy())
 
-        return result
+        return result, winning_choice
 
     log.debug(
         "Winning choice does not support inlining: %s (name=%s)",
         getattr(winning_choice, "name", type(winning_choice).__name__),
         name,
     )
-    if return_choice:
-        return selected_result, winning_choice
-    return selected_result
+    return selected_result, winning_choice
 
 
 def _generate_dynamic_configs(
@@ -723,7 +710,7 @@ def _standard_lowering_fn(
     if not decompositions:
         return None
 
-    result = autotune_custom_op(
+    result, _ = autotune_custom_op(
         name=name,
         decompositions=decompositions,
         inputs=tensor_inputs,
@@ -885,16 +872,12 @@ def _range_based_lowering_fn(
             non_tensor_args=non_tensor_args,
             op_overload=op_overload,
             user_input_gen_fns=range_input_gen_fns,
-            return_choice=True,
             min_speedup_threshold=min_speedup_threshold,
             benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             config_patches_list=config_patches_list,
         )
 
-        if (
-            hasattr(winning_choice, "decomposition")
-            and winning_choice.decomposition is not None
-        ):
+        if winning_choice.decomposition is not None:
             winning_impl = winning_choice.decomposition
             winning_kwargs = winning_choice.decomposition_kwargs
         else:
@@ -907,7 +890,7 @@ def _range_based_lowering_fn(
                 range_end if range_end != float("inf") else "inf",
             )
 
-        winning_config_patches = getattr(winning_choice, "config_patches", None) or {}
+        winning_config_patches = winning_choice.config_patches or {}
 
         # Create dataclass instances for cleaner code
         range_bounds = RangeBounds(range_start, range_end)

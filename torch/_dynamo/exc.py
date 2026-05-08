@@ -47,6 +47,7 @@ from .utils import counters
 if TYPE_CHECKING:
     import types
 
+    from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
     from .output_graph import DynamoTracerOutput
@@ -108,6 +109,14 @@ class AutogradGradRestartAnalysis(RestartAnalysis):
     """Raised when autograd.grad consumed grad_fns that are returned.
 
     On restart, autograd.grad will graph break instead of being traced.
+    """
+
+
+class RequiresGradRestartAnalysis(RestartAnalysis):
+    """Raised when a source-less requires_grad_() intermediate leaks as output.
+
+    On restart, requires_grad_() will graph break instead of being traced,
+    preserving partial acceleration for code before the call.
     """
 
 
@@ -174,7 +183,8 @@ class ShortenTraceback(TorchDynamoException):
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
-            assert tb is not None, "internal error, please report a bug"
+            if tb is None:
+                raise AssertionError("internal error, please report a bug")
         return self.with_traceback(tb)
 
 
@@ -219,7 +229,8 @@ class Unsupported(TorchDynamoException):
         self.logged = False
 
     def remove_from_stats(self) -> None:
-        assert self.category is not None
+        if self.category is None:
+            raise AssertionError("category must be set before removing from stats")
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
@@ -272,7 +283,8 @@ class UserError(TorchDynamoException):
         case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
         """
         if case_name is not None:
-            assert isinstance(case_name, str)
+            if not isinstance(case_name, str):
+                raise AssertionError(f"case_name must be a str, got {type(case_name)}")
             if msg.endswith("."):
                 msg += " "
             else:
@@ -418,27 +430,44 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[Any] | None = None,
-    kwargs: dict[str, Any] | None = None,
+    args: list[VariableTracker] | list[str] | None = None,
+    kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
 
+    if args:
+        args_ = [
+            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
+            for arg in args
+        ]
+    else:
+        args_: list[VariableTracker] = []
+
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx,
-        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
-        kwargs or {},
+        tx, args_, kwargs or {}
     )
-    assert isinstance(exception_vt, ExceptionVals)
+    if not isinstance(exception_vt, ExceptionVals):
+        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages
     if args:
-        raise raised_exc(*args)
+        raise raised_exc(*args_)
     raise raised_exc
+
+
+def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise a TypeError as an observed exception during tracing."""
+    raise_observed_exception(TypeError, tx, args=[msg])
+
+
+def raise_value_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise a ValueError as an observed exception during tracing."""
+    raise_observed_exception(ValueError, tx, args=[msg])
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -776,13 +805,13 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     return user_stack
 
 
-def remove_resume_prefix(name: str) -> str | None:
+def remove_resume_prefix(name: str) -> str:
     from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
     match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
     if match:
         return match.group(1)
-    return None
+    return name
 
 
 def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
@@ -814,6 +843,7 @@ def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSum
             new_stack[-1] = frame
             frame.name = name
         else:
+            frame.name = name
             new_stack.append(frame)
 
     return new_stack

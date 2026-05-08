@@ -1253,7 +1253,7 @@ else:
         pass
 
 
-def tensordot(  # noqa: F811
+def tensordot(
     a,
     b,
     dims=2,
@@ -1681,7 +1681,7 @@ else:
         pass
 
 
-def norm(  # noqa: F811
+def norm(
     input,
     p: float | str | None = "fro",
     dim=None,

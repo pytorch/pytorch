@@ -40,7 +40,7 @@ from torch.utils._pytree import (
     _deregister_pytree_node,
     _register_pytree_node,
     Context,
-    FlattenFunc,
+    FlattenFn,
     FromDumpableContextFn,
     GetAttrKey,
     KeyPath,
@@ -49,7 +49,7 @@ from torch.utils._pytree import (
     SequenceKey,
     ToDumpableContextFn,
     tree_flatten_with_path,
-    UnflattenFunc,
+    UnflattenFn,
 )
 
 
@@ -216,6 +216,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
 
 
 def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch.compiler.is_exporting():
+        return None
+
     if not torch._C._is_torch_function_mode_enabled():
         return None
 
@@ -397,7 +400,7 @@ def _check_symint(
                     path = get_keystr(keypath)
                     if i is not None:
                         path += f".shape[{i}]"
-                    raise RuntimeError(  # noqa: B904
+                    raise RuntimeError(
                         f"Expected input {path} = {arg} to be "
                         f"of the form {symint.node.expr}, where {symbol} is an integer"
                     )
@@ -472,7 +475,17 @@ def _check_input_constraints_for_graph(
                 )
 
         elif isinstance(node_val, (int, float, str)):
-            if type(arg) is not type(node_val) or arg != node_val:
+            if type(arg) is not type(node_val):
+                raise RuntimeError(
+                    f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
+                )
+            # NaN != NaN in Python, so use math.isnan for NaN-to-NaN comparison
+            if isinstance(node_val, float) and math.isnan(node_val):
+                if not isinstance(arg, float) or not math.isnan(arg):
+                    raise RuntimeError(
+                        f"Expected input at {get_keystr(key_path)} to be nan, but got {arg}",
+                    )
+            elif arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )
@@ -489,8 +502,8 @@ def _check_input_constraints_for_graph(
 
 def register_dataclass_as_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc | None = None,
-    unflatten_fn: UnflattenFunc | None = None,
+    flatten_fn: FlattenFn | None = None,
+    unflatten_fn: UnflattenFn | None = None,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
@@ -835,6 +848,14 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
+                if not isinstance(new_node.target, str):
+                    raise AssertionError(
+                        f"Expected str target for get_attr, got {type(new_node.target)}"
+                    )
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected str target for get_attr, got {type(node.target)}"
+                    )
                 new_target_name = new_node.target
                 if hasattr(gm, new_target_name):
                     # Loop through and find the "submod_{i}" that have no name collision

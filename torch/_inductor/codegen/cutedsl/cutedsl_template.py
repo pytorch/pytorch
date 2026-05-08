@@ -57,10 +57,10 @@ class CuteDSLTemplate(KernelTemplate):
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.debug("CuteDSL template choice generation failed: %s", e)  # noqa: G200
+            log.debug("CuteDSL template choice generation failed: %s", e)
             return e
         except Exception as e:
-            log.debug("CuteDSL template choice generation error: %s", e)  # noqa: G200
+            log.debug("CuteDSL template choice generation error: %s", e)
             return NotImplementedError(f"CuteDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
@@ -69,6 +69,7 @@ class CuteDSLTemplate(KernelTemplate):
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         subgraphs = kwargs.pop("subgraphs", None)
+        template_kwargs = dict(kwargs)
 
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
@@ -126,6 +127,7 @@ class CuteDSLTemplate(KernelTemplate):
                 bmreq=bmreq,
                 template=self,
                 mutated_inputs=mutated_inputs,
+                template_kwargs=template_kwargs,
             )
 
 
@@ -141,17 +143,27 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         bmreq: CuteDSLBenchmarkRequest,
         template: "CuteDSLTemplate",
         mutated_inputs: Iterable[IRNode] | None = None,
+        template_kwargs: dict[str, Any] | None = None,
     ):
+        description = self._build_description(name, template_kwargs)
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"CuteDSL template {name}",
+            description=description,
         )
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
+
+    def _build_description(
+        self, name: str, template_kwargs: dict[str, Any] | None
+    ) -> str:
+        if not template_kwargs:
+            return f"CuteDSL template {name}"
+        kwargs_desc = ", ".join(f"{k}={v}" for k, v in template_kwargs.items())
+        return f"CuteDSL template {name} ({kwargs_desc})"
 
     def __str__(self) -> str:
         return f"CuteDSLTemplateCaller({self.name})"

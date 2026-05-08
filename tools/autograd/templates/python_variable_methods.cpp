@@ -63,7 +63,7 @@ namespace torch::autograd {
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "_is_view", args);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -80,7 +80,7 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     auto args = py::make_tuple(py::handle(arg));
     return handle_torch_function(self, "apply_", args.ptr());
   }
@@ -156,7 +156,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
 static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self_)) {
+  if (has_torch_function(self_)) {
     return handle_torch_function(self_, "get_device", args, nullptr);
   }
   auto& self = THPVariable_Unpack(self_);
@@ -168,7 +168,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self_)) {
+  if (has_torch_function(self_)) {
     return handle_torch_function(self_, "data_ptr", args);
   }
   auto& self = THPVariable_Unpack(self_);
@@ -177,10 +177,24 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
-static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
+// Unlike data_ptr(), this is a read-only access that does not trigger
+// copy-on-write materialization.
+static PyObject * THPVariable_const_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self_)) {
+    return handle_torch_function(self_, "const_data_ptr", args);
+  }
+  auto& self = THPVariable_Unpack(self_);
+  return wrap(const_cast<void*>(self.const_data_ptr()));
+  END_HANDLE_TH_ERRORS
+}
+
+// implemented on the python object to avoid dispatch overhead
+static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  if (has_torch_function(self_)) {
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
@@ -192,7 +206,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
-   if (check_has_torch_function(self)) {
+   if (has_torch_function(self)) {
      return handle_torch_function(self, "dim", args);
    }
    auto& self_ = THPVariable_Unpack(self);
@@ -204,7 +218,7 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
-   if (check_has_torch_function(self)) {
+   if (has_torch_function(self)) {
      return handle_torch_function(self, "numel", args);
    }
    auto& self_ = THPVariable_Unpack(self);
@@ -302,7 +316,7 @@ static T dispatch_to(const Tensor & self) {
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "__float__", args);
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -314,7 +328,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "__complex__", args);
   }
   jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -326,7 +340,7 @@ static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "__int__", args);
   }
   jit::tracer::warn("Converting a tensor to a Python integer", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -345,7 +359,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
 // called when used as a slice.
 static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "__index__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -366,7 +380,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "__invert__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -763,7 +777,7 @@ static PyObject * THPVariable_bfloat16(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "element_size", args);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -841,7 +855,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   auto r = parser.parse(self_, args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self_, args, kwargs, PyObject_Type(self_), "torch.Tensor");
+    return handle_torch_function(r, self_, args, kwargs, reinterpret_cast<PyObject*>(Py_TYPE(self_)), "torch.Tensor");
   }
 
   auto memory_format = r.memoryformat(0);
@@ -854,7 +868,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "item", args);
   }
   jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -926,7 +940,7 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
 static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "new", args, kwargs);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -938,7 +952,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "new_tensor", args, kwargs);
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -950,7 +964,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "untyped_storage");
   }
   auto& self_ = THPVariable_Unpack(self);
@@ -1001,7 +1015,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function(self, "tolist", args);
   }
   jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -1066,7 +1080,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 ${py_methods}
 
 static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     HANDLE_TH_ERRORS
     return handle_torch_function(self, "__bool__", args);
     END_HANDLE_TH_ERRORS
@@ -1271,6 +1285,7 @@ PyMethodDef variable_methods[] = {
   {"mtia", castPyCFunctionWithKeywords(THPVariable_mtia), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"const_data_ptr", THPVariable_const_data_ptr, METH_NOARGS, nullptr},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, nullptr},
   {"dim", THPVariable_dim, METH_NOARGS, nullptr},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, nullptr},
