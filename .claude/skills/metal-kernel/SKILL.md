@@ -73,6 +73,13 @@ When migrating an existing operator from MPSGraph to native Metal, **consolidate
 
 **Key change:** Replace `MPS: my_op_out_mps` with adding `MPS` to the shared dispatch line (e.g., `CPU, CUDA, MPS: my_op_out`).
 
+**Migrate every row.** Operators usually have several rows (functional / out /
+inplace, broadcasting variants). `REGISTER_MPS_DISPATCH` only affects rows
+routing to the shared template; rows still naming the legacy `MPS: my_op_mps`
+keep the MPSGraph path and silently bypass the template's guarantees
+(broadcast, bounds checks, type promotion). Grep for the legacy function name
+and collapse every row.
+
 **Dispatch naming conventions:**
 - `MPS: function_name_mps` - MPS-specific implementation (old MPSGraph pattern)
 - `CPU, CUDA, MPS: function_name` - Shared stub implementation (native Metal pattern)
@@ -401,6 +408,82 @@ This isolates which kernel in the pipeline is broken, rather than debugging the 
 
 - **Wrong `threads` count** — `threads` is total threads, not threadgroups. For 5 threadgroups of 256, use `threads=[1280, 1, 1]`.
 - **Threadgroup memory** — `compile_shader` doesn't support `[[threadgroup(N)]]` parameters directly. If your kernel needs threadgroup memory, restructure to use `threadgroup` arrays declared inside the kernel body instead.
+
+## Working with TensorIterators
+
+`REGISTER_UNARY_OP` / `REGISTER_BINARY_OP` hide the iterator plumbing. Kernels
+with extra params or non-elementwise layouts have to drive `TensorIterator`
+directly. The non-obvious rules:
+
+- **Pass `TensorIteratorBase&`, not `Tensor&`.** `Tensor&` loses the
+  offset/shape info `with_32bit_indexing()` produces. When the stub hands you
+  a `const TensorBase&` (e.g. `bernoulli_scalar_stub`), build the iter inline
+  with `at::TensorIterator::borrowing_nullary_op(self)` rather than
+  const-casting.
+
+- **`iter.tensor(0)` returns the *whole* tensor for sub-iters.** After
+  `with_32bit_indexing()`, sub-iters still reference the original storage, so
+  binding `iter.tensor(0)` naively makes every sub-iter overwrite the same
+  prefix and leaves the tail uninitialized. Use `bind_iter_tensors`, which
+  computes the per-chunk offset and binds buffer 0 to the slice. Dispatch
+  with `iter.numel()`, never `iter.tensor(0).numel()`:
+  ```cpp
+  bind_iter_tensors(computeEncoder, iter, /*ntensors=*/1);
+  mtl_setArgs<1>(computeEncoder, params, ..., numel);
+  mtl_dispatch1DJob(computeEncoder, pso, threads);
+  ```
+
+- **Prefer `mtl_setArgs<N>` over chained `mtl_setBytes`.**
+  `mtl_setArgs<1>(encoder, a, b, c)` binds `a`/`b`/`c` at slots 1/2/3 with the
+  same overload resolution as the macros (`std::array<long,2>` →
+  `constant long2&`).
+
+- **Use `ceil_div`.** Host: `at::ceil_div` from `<ATen/ceil_div.h>`. Metal:
+  `c10::metal::ceil_div` from `<c10/metal/common.h>` (unqualified after
+  `using namespace c10::metal;`). Both wrap `(a + b - 1) / b`.
+
+- **`IF_CONSTEXPR` for Metal 3/4 portability.** Metal 4 has `if constexpr`;
+  Metal 3 doesn't. Use the macro from `<c10/metal/common.h>`, e.g.
+  `if IF_CONSTEXPR (sizeof(T) == 8) { ... }`.
+
+- **Share the CPU/CUDA stub via `REGISTER_MPS_DISPATCH`.** When the op has a
+  `DECLARE_DISPATCH` stub upstream (distributions, fused ops), wire MPS in
+  with `REGISTER_MPS_DISPATCH(stub_name, &fn)` instead of an MPS-specific
+  `native_functions.yaml` entry. The stub already takes `TensorIteratorBase&`.
+
+## Working with Large Tensors
+
+Most Metal kernels take `numel` as `uint32_t` and index in 32 bits, so anything
+past `INT32_MAX` needs host-side splitting. Drive this through `TensorIterator`
+rather than slicing manually.
+
+**Decompose via `iter.with_32bit_indexing()`:**
+
+```cpp
+if (!iter.can_use_32bit_indexing()) {
+  for (auto&& sub_iter : iter.with_32bit_indexing()) {
+    my_kernel_impl(sub_iter, ...);
+  }
+  return;
+}
+```
+
+Every yielded sub-iter satisfies `can_use_32bit_indexing()`, so recursion
+terminates after one level. The threshold is `INT32_MAX` (TensorIterator uses
+signed 32-bit offsets), not `UINT32_MAX` — a test just past `INT32_MAX`
+exercises the split but not the `uint32_t` cast; the cast itself only matters
+for `numel > 2^32`.
+
+**Use a checked cast when narrowing:**
+
+```cpp
+const uint32_t numel = c10::checked_convert<uint32_t>(iter.numel(), "uint32_t");
+```
+
+`c10::checked_convert` (`<c10/util/TypeCast.h>`) and `at::native::safe_downcast`
+(`<ATen/native/Pool.h>`) are equivalent; pick whichever the file already
+includes. The point is *some* tripwire so wraparound becomes a `TORCH_CHECK`
+failure instead of a corrupt output.
 
 ## Checklist
 
