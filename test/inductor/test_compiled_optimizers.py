@@ -61,6 +61,7 @@ from torch.testing._internal.common_optimizers import (
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
+    skipIfRocm_BUGGY,
     skipIfWindows,
     skipIfXpu,
 )
@@ -1012,7 +1013,7 @@ class CompiledOptimizerTests(TestCase):
             self.assertEqual(param, param_ref)
 
 
-@skipIfRocm(msg="ROCm may have different numerical behavior")
+@skipIfRocm_BUGGY(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
