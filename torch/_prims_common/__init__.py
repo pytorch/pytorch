@@ -185,7 +185,7 @@ def compare_tensor_meta(
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
+            a, b, allow_rhs_unbacked=allow_rhs_unbacked, only_cuda=False
         )
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"

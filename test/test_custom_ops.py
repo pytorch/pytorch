@@ -238,6 +238,24 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
+    # https://github.com/pytorch/pytorch/issues/149468
+    def test_opcheck_detects_cpu_stride_mismatch(self, device):
+        @torch.library.custom_op("test::stride_mismatch", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            # Real impl returns a permuted (non-contiguous) tensor
+            return x.clone().permute(2, 0, 1)
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            # Fake impl returns contiguous tensor with the right shape
+            # but wrong strides
+            c, h, w = x.shape[2], x.shape[0], x.shape[1]
+            return x.new_empty(c, h, w)
+
+        x = torch.randn(4, 4, 3, device=device)
+        with self.assertRaisesRegex(Exception, "Stride mismatch"):
+            torch.library.opcheck(f, args=[x])
+
     # https://github.com/pytorch/pytorch/issues/150472
     def test_single_element_tuple_output(self, device):
         # Helper function to register id_tuple custom and the fake tensor implementation

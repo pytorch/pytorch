@@ -60,6 +60,12 @@ def _rotary_embedding_23_fake_impl(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
+    if len(x.shape) == 4:
+        # The real impl permutes 4D input to (B, S, NH, HS), operates producing
+        # a contiguous tensor, then permutes back to (B, NH, S, HS). Match that
+        # stride layout.
+        b, nh, s, hs = x.shape
+        return x.new_empty(b, s, nh, hs).permute(0, 2, 1, 3)
     return x.clone()
 
 
