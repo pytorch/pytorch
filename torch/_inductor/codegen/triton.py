@@ -76,8 +76,8 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     Placeholder,
-    prefix_is_reduction,
     prefix_is_pointwise,
+    prefix_is_reduction,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -459,7 +459,7 @@ class BlockDescriptorOptions:
         # We do this before broadcasting dimensions are removed so that the check
         # below that compares the number of included dimensions to the kernel numels
         # is correct
-        included_final_shape_dims = set()
+        included_final_shape_dims = OrderedSet()
         for expr in params.block_shape:
             if isinstance(expr, sympy.Expr):
                 for sym in expr.free_symbols:
