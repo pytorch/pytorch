@@ -46,7 +46,6 @@ def register_functional_optim(key, optim):
         functional_optim_map[key] = optim
 
 
-
 def as_functional_optim(optim_cls: type, *args, **kwargs):
     try:
         functional_cls = functional_optim_map[optim_cls]
