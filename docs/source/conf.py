@@ -461,12 +461,8 @@ coverage_ignore_functions = [
     "reduce",
     "reduce_scatter",
     "unique_id",
-    "version",
     # torch.cuda.profiler
     "init",
-    "profile",
-    "start",
-    "stop",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -735,8 +731,6 @@ coverage_ignore_functions = [
     "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
     "apply_permutation",  # deprecated
-    # torch.nn.modules.utils
-    "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
     "broadcast",
     "broadcast_coalesced",
@@ -993,28 +987,22 @@ coverage_ignore_functions = [
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
-    "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
     # torch.utils.benchmark.utils.common
     "ordered_unique",
-    "select_unit",
     "set_torch_threads",
-    "trim_sigfig",
     "unit_to_english",
     # torch.utils.benchmark.utils.compare
     "optional_min",
     # torch.utils.benchmark.utils.compile
-    "bench_all",
     "bench_loop",
-    "benchmark_compile",
     # torch.utils.benchmark.utils.cpp_jit
     "compile_callgrind_template",
     "compile_timeit_template",
     "get_compat_bindings",
     # torch.utils.benchmark.utils.fuzzer
     "dtype_size",
-    "prod",
     # torch.utils.benchmark.utils.timer
     "timer",
     # torch.utils.benchmark.utils.valgrind_wrapper.timer_interface
@@ -1072,21 +1060,13 @@ coverage_ignore_functions = [
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
-    "validate_input_col",
     "validate_pathname_binary_tuple",
     # torch.utils.data.datapipes.utils.decoder
     "audiohandler",
-    "basichandlers",
     "extension_extract_fn",
-    "handle_extension",
     "imagehandler",
     "mathandler",
     "videohandler",
-    # torch.utils.data.dataset
-    "random_split",
-    # torch.utils.data.graph
-    "traverse",
-    "traverse_dps",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
