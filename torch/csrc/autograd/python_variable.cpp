@@ -1026,7 +1026,7 @@ static bool checked_istrue(PyObject* obj) {
   return result;
 }
 
-// pybind11 does not not use PyObject_Vectorcall currently; it seems
+// pybind11 does not use PyObject_Vectorcall currently; it seems
 // to materialize a tuple of args instead.
 template <std::size_t N>
 static py::object checked_vectorcall(
@@ -1301,19 +1301,21 @@ get_thread_local_native_sharding_propagator_cache() {
       thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
           py::capsule(new std::thread::id(this_thread_id), [](void* p) {
             auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            std::optional<NativeShardingPropagatorCache>* popt_cache = nullptr;
             {
               std::lock_guard<std::mutex> inner_lock(
                   native_sharding_propagator_cache_cleanup_mutex);
               auto it = all_thread_caches.find(*ptid);
               if (it != all_thread_caches.end()) {
-                // We need to both:
-                // 1) free python objects, and
-                it->second->reset();
-                // 2) make sure we don't try to come back and mess with
-                // a destroyed thread-local at module unload (e.g.,
-                // process exit) time.
+                popt_cache = it->second;
                 all_thread_caches.erase(it);
               }
+            }
+            if (popt_cache != nullptr) {
+              // Destroy cached py::object values outside the cleanup mutex
+              // since pybind/Python deallocators can re-enter Python and
+              // temporarily drop the GIL.
+              popt_cache->reset();
             }
             delete ptid;
           });
@@ -1888,7 +1890,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.ptr());
   }
   if (!comparison_key) {
     return false;
@@ -3834,13 +3836,10 @@ static int THPVariable_traverse(PyObject* self, visitproc visit, void* arg) {
       if (autograd_meta) {
         // Do NOT call grad_fn() here as that might trigger a recompute
         const auto& grad_fn = autograd_meta->grad_fn_;
-        if (grad_fn && grad_fn.use_count() == 1) {
-          // All Node can have a pyobj (stored in "pyobj_")
-          Py_VISIT(grad_fn->pyobj());
-          // PyNode are special as they also have an "obj" field
-          if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-            Py_VISIT(py_node_fn->obj);
-          }
+        // Check that this python object is the sole owner of the grad_fn.
+        // The grad_fn's PyObject holds the other reference.
+        if (grad_fn && grad_fn.use_count() == 2) {
+          Py_VISIT(grad_fn->pyobj_slot()->load_pyobj());
         }
       }
     }
