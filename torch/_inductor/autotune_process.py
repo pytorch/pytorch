@@ -104,6 +104,7 @@ class TuningProcess:
                     result = job()
                 except Exception as e:
                     result = e
+                    e.__traceback__ = None
                 TuningProcess.send(result, write_pipe)
 
         try:

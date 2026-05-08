@@ -2395,6 +2395,7 @@ def export(
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
                 constraint_violation_error = e
+                e.__traceback__ = None
         remove_from_cache(f)
 
         if (

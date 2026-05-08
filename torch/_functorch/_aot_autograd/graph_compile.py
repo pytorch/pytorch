@@ -2306,17 +2306,19 @@ def _aot_stage2b_bw_compile(
                     if aot_config.force_non_lazy_backward_lowering:
                         raise
                     exc = e
+                    exc_str = "\n".join(
+                        traceback.format_exception(
+                            type(exc), exc, exc.__traceback__
+                        )
+                    )
+                    exc.__traceback__ = None
                     trace_structured(
                         "artifact",
                         metadata_fn=lambda: {
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        payload_fn=lambda: "\n".join(
-                            traceback.format_exception(
-                                type(exc), exc, exc.__traceback__
-                            )
-                        ),
+                        payload_fn=lambda: exc_str,
                     )
                     log.warning(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",

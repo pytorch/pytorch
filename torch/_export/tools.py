@@ -121,6 +121,7 @@ def report_exportability(
                     "Failed exporting `%s` with exception: %s", module_name, short_msg
                 )
                 report[module_name] = e
+                e.__traceback__ = None
 
         for name, submod in module.named_children():
             sub_module_name = name if module_name == "" else f"{module_name}.{name}"

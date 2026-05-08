@@ -777,6 +777,7 @@ class ShardingPropagator:
                     )
                 except Exception as e:
                     decomp_exception = e
+                    e.__traceback__ = None
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):

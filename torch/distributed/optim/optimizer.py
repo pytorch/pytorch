@@ -119,6 +119,7 @@ def _wait_for_all(rpc_futs):
         except Exception as e:
             results.append(e)
             exception = e
+            e.__traceback__ = None
     if exception is not None:
         raise exception
     return results

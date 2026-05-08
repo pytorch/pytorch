@@ -6300,6 +6300,7 @@ def run_concurrently(worker_func, num_threads=None, args=(), kwargs=None):
         except Exception as e:
             nonlocal exc_value
             exc_value = e
+            e.__traceback__ = None
 
     workers = [
         threading.Thread(target=wrapper_func, args=(i, func, *args),

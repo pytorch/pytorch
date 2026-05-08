@@ -590,6 +590,7 @@ def produce_guards_and_solve_constraints(
         )
     except ConstraintViolationError as e:
         constraint_violation_error = e
+        e.__traceback__ = None
 
     shape_env.frozen = True
     dim_constraints = shape_env.dim_constraints

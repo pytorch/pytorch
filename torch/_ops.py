@@ -1309,6 +1309,7 @@ def _call_overload_packet_from_python(
             break
         except RuntimeError as e:
             exceptions[overload_name] = e
+            e.__traceback__ = None
 
     if found_op:
         return found_op(*args, **kwargs)

@@ -214,6 +214,7 @@ class PrecompileContext:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
 
                 error = e
+                e.__traceback__ = None
                 data = json.dumps(
                     {
                         "key": key,

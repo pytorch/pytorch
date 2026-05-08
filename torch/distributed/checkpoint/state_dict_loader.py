@@ -234,6 +234,7 @@ def _load_state_dict(
             metadata = storage_reader.read_metadata()
         except Exception as e:
             global_metadata_exc = e
+            e.__traceback__ = None
             logger.warning(
                 "Global metadata is not found. Falling back to rank local metadata.",
                 exc_info=True,
@@ -248,6 +249,7 @@ def _load_state_dict(
                 use_collectives = False
             except Exception as e:
                 rank_metadata_exc = e
+                e.__traceback__ = None
                 logger.warning("Rank local metadata is not found.", exc_info=True)
 
         if planner is None:

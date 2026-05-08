@@ -1897,6 +1897,7 @@ class _ExceptionRaisingThread(threading.Thread):
             super().run()
         except BaseException as e:
             self.exception = e
+            e.__traceback__ = None
 
     def join(self, timeout=None):
         super().join(timeout=timeout)

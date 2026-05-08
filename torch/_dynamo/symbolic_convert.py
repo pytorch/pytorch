@@ -762,6 +762,7 @@ def generic_jump(
             raise_jump_graph_break(value)
         except (Unsupported, UserError) as e:
             exc = e
+            e.__traceback__ = None
 
         if exc is None:
             raise AssertionError("expected exc is not None to be true")
