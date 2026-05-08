@@ -2606,9 +2606,10 @@ def calc_conv_nd_return_shape(
 
         # pyrefly: ignore [bad-index, index-error]
         padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
-        # pyrefly: ignore [bad-index, index-error]
         effective_kernel = [
-            dilation[i] * (kernel_size[i] - 1) + 1 for i in range(len(dims))
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
         ]
         torch._check(
             sym_and(
