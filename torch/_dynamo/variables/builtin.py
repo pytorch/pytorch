@@ -1692,7 +1692,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name)
+            resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
                 # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
