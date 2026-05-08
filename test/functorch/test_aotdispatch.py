@@ -8063,16 +8063,20 @@ def forward(self, primals_1, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_backward_rng_codegen(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("compiled_function_backward") as captured:
+        from torch.utils.checkpoint import checkpoint
 
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x) + x
+        with capture_codegen_source("compiled_function_backward") as captured:
 
-                x = torch.randn(4, device="cuda", requires_grad=True)
-                out = f(x)
-                out.sum().backward()
+            def gn(x):
+                return torch.rand_like(x) * x
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return checkpoint(gn, x, use_reentrant=False)
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            out = f(x)
+            out.sum().backward()
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
