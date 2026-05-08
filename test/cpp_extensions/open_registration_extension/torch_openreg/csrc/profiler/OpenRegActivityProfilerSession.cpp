@@ -2,7 +2,7 @@
 
 #include "profiler/OpenRegActivityProfilerSession.h"
 
-#include <output_base.h>   // ActivityLogger complete definition
+#include <output_base.h> // ActivityLogger complete definition
 #include <libkineto.h>
 #include <c10/util/ApproximateClock.h>
 
@@ -70,7 +70,7 @@ void OpenRegActivityProfilerSession::convertRecords(
 
   for (const auto& rec : records) {
     const int64_t startUs = rec.start / kNsPerUs;
-    const int64_t endUs   = rec.end   / kNsPerUs;
+    const int64_t endUs = rec.end / kNsPerUs;
 
     if (filter &&
         (endUs < captureWindowStartTime_ || startUs > captureWindowEndTime_)) {
@@ -87,17 +87,17 @@ void OpenRegActivityProfilerSession::convertRecords(
     traceBuffer_.emplace_activity(traceBuffer_.span, toActivityType(rec.kind), rec.name);
     auto& act = libkineto::CpuTraceBuffer::toRef(traceBuffer_.activities.back());
     act.startTime = startUs;
-    act.endTime   = endUs;
-    act.device    = rec.device_id;
-    act.resource  = rec.stream_id;
+    act.endTime = endUs;
+    act.device = rec.device_id;
+    act.resource = rec.stream_id;
 
     // correlation_id is uint64_t; Kineto's GenericTraceActivity uses int32_t
     // for act.id and uint32_t for act.flow.id — both a Kineto API constraint.
     // The casts produce identical bit patterns; safe because PyTorch correlation
-    // IDs never approach INT32_MAX in practice.    
-    act.id        = static_cast<int32_t>(rec.correlation_id);
-    act.flow.id    = static_cast<uint32_t>(rec.correlation_id);
-    act.flow.type  = libkineto::kLinkAsyncCpuGpu;
+    // IDs never approach INT32_MAX in practice.
+    act.id = static_cast<int32_t>(rec.correlation_id);
+    act.flow.id = static_cast<uint32_t>(rec.correlation_id);
+    act.flow.type = libkineto::kLinkAsyncCpuGpu;
     act.flow.start = 0; // device side = end of the async CPU→device flow
 
     if (cpuActivity_) {
@@ -122,8 +122,8 @@ void OpenRegActivityProfilerSession::processTrace(
     int64_t captureWindowStartTime,
     int64_t captureWindowEndTime) {
   captureWindowStartTime_ = captureWindowStartTime / kNsPerUs;
-  captureWindowEndTime_   = captureWindowEndTime / kNsPerUs;
-  cpuActivity_            = getLinkedActivity;
+  captureWindowEndTime_ = captureWindowEndTime / kNsPerUs;
+  cpuActivity_ = getLinkedActivity;
   processTrace(logger);
 }
 
