@@ -36,20 +36,6 @@ add_custom_target(merge_compile_commands ALL
   VERBATIM
 )
 
-# --- License concatenation ---
-# Build the bundled license file for wheel distribution.
-add_custom_target(bundle_licenses ALL
-  COMMAND "${_python_exe}"
-    "${_project_src}/tools/bundle_licenses.py"
-    "${_project_src}" "${_cmake_bindir}/LICENSES_BUNDLED.txt"
-  COMMENT "Generating bundled license file..."
-  VERBATIM
-)
-install(FILES "${_cmake_bindir}/LICENSES_BUNDLED.txt"
-  DESTINATION "."
-  RENAME "LICENSE"
-)
-
 # --- Windows export library ---
 if(WIN32 AND BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   install(CODE "
