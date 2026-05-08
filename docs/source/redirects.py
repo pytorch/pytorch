@@ -159,4 +159,6 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
+    # Redirects for cpp documentation
+    "cpp_index": "cpp_index.html",
 }
