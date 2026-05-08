@@ -4874,6 +4874,7 @@ class TestResizeStorageWithAddr(TestCase):
         t.untyped_storage()._resize_with_addr_(0, 1)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
