@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import patch
 
 import sympy
@@ -186,10 +186,12 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: Optional[str] = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
