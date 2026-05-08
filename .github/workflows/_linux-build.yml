@@ -139,6 +139,9 @@ on:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image || jobs.build-osdc.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
+      docker-image-name:
+        value: ${{ inputs.docker-image-name }}
+        description: Pass-through of the docker-image-name input, for downstream test jobs.
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix || jobs.build-osdc.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.

@@ -115,6 +115,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
@@ -163,6 +164,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
@@ -215,6 +217,7 @@ jobs:
       - get-label-type
     with:
       build-environment: linux-jammy-py3.14t-clang18
+      docker-image-name: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.test-matrix }}
@@ -316,6 +319,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
@@ -375,6 +379,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
@@ -430,6 +435,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.test-matrix }}
@@ -576,6 +582,7 @@ jobs:
     needs: [get-label-type, dynamo-cpython-build]
     with:
       build-environment: linux-jammy-py3.13-clang18
+      docker-image-name: ${{ needs.dynamo-cpython-build.outputs.docker-image-name }}
       docker-image: ${{ needs.dynamo-cpython-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.dynamo-cpython-build.outputs.test-matrix }}

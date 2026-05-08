@@ -132,6 +132,7 @@ jobs:
     with:
       timeout-minutes: 360
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
+      docker-image-name: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
@@ -358,6 +359,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.verify-cachebench-cpu-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image-name }}
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
@@ -396,6 +398,7 @@ jobs:
       - job-filter
     with:
       build-environment: ${{ needs.linux-jammy-py3-clang18-executorch-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-py3-clang18-executorch-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-py3-clang18-executorch-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-py3-clang18-executorch-build.outputs.test-matrix }}
@@ -452,6 +455,7 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
+      docker-image-name: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image-name }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}

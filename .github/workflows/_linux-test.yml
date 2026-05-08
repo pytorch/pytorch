@@ -20,6 +20,14 @@ on:
         type: string
         default: ""
         description: Git tree hash of .ci/docker, used to construct docker image tags.
+      docker-image-name:
+        required: false
+        type: string
+        default: ""
+        description: |
+          Untagged docker image name (e.g. ci-image:pytorch-linux-jammy-py3.10-clang18).
+          When provided alongside ci-docker-hash, the OSDC test path constructs the
+          container image from these instead of using the docker-image input.
       sync-tag:
         required: false
         type: string
@@ -624,7 +632,7 @@ jobs:
     environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
     runs-on: ${{ matrix.runner }}
     container:
-      image: ${{ inputs.docker-image }}
+      image: ${{ (inputs.docker-image-name != '' && inputs.ci-docker-hash != '') && format('ghcr.io/pytorch/{0}-{1}', inputs.docker-image-name, inputs.ci-docker-hash) || inputs.docker-image }}
       options: "--gpus all"
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     permissions:
