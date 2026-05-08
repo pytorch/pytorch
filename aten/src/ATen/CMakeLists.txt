@@ -295,12 +295,12 @@ if(USE_FLASH_ATTENTION)
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
 
-    # ck_sdpa is not supported on gfx9 "0x" family parts; filter them out of the
-    # per-target HIP arch list so we don't try to codegen for them.
-    set(CK_SDPA_HIP_EXCLUDE_ARCHS gfx900 gfx906 gfx90c)
+    # Only build for MI3xx series architectures as building for all targets takes too long
+    # We will selectively add supported architectures when/if needed
+    set(CK_SDPA_HIP_INCLUDE_ARCHS gfx942 gfx950)
     set(_ck_sdpa_hip_arches "")
     foreach(ARCH ${PYTORCH_ROCM_ARCH})
-      if(NOT "${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_ARCHS)
+      if("${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_ARCHS)
         list(APPEND _ck_sdpa_hip_arches ${ARCH})
       endif()
     endforeach()
