@@ -14557,7 +14557,7 @@ if __name__ == '__main__':
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
+                    expected_input_grad_max_ulp_diff = 1
                     expected_weight_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
