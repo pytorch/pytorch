@@ -4198,14 +4198,10 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def richcompare_impl(
         self, tx: "InstructionTranslator", other: VariableTracker, op: str
     ) -> VariableTracker:
-        if op == "__eq__":
-            return VariableTracker.build(tx, self.is_python_equal(other))
-        elif op == "__ne__":
-            return VariableTracker.build(tx, not self.is_python_equal(other))
-        # Ordering comparisons — delegate to base SetVariable which handles
-        # subset/superset via set_richcompare.
         if self._base_vt is None:
             raise AssertionError("expected _base_vt to be set")
+        if isinstance(other, UserDefinedSetVariable) and other._base_vt is not None:
+            other = other._base_vt
         return self._base_vt.richcompare_impl(tx, other, op)
 
     def as_python_constant(self) -> object:
@@ -4229,8 +4225,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in is_python_equal")
         if isinstance(other, UserDefinedSetVariable):
-            return self._base_vt.is_python_equal(other._base_vt)
-        return self._base_vt.is_python_equal(other)
+            other = other._base_vt
+        return self.as_python_constant() == other.as_python_constant()  # type: ignore[union-attr]
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):

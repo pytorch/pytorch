@@ -595,13 +595,16 @@ class SetVariable(VariableTracker):
 
         https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
         CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
+        We also accept SetVariable subclasses (e.g. OrderedSetVariable) which
+        are not literal set/frozenset but have compatible set_items.
         """
-        try:
-            other_type = other.python_type()
-        except NotImplementedError:
-            return ConstantVariable.create(NotImplemented)
-        if not issubclass(other_type, (set, frozenset)):
-            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other, SetVariable):
+            try:
+                other_type = other.python_type()
+            except NotImplementedError:
+                return ConstantVariable.create(NotImplemented)
+            if not issubclass(other_type, (set, frozenset)):
+                return ConstantVariable.create(NotImplemented)
 
         if op == "__eq__":
             r = self.call_method(tx, "symmetric_difference", [other], {})

@@ -1028,6 +1028,104 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             lambda: torch.Size([1, 3]),
         )
 
+    # =====================================================================
+    # Pybind11 enum comparison (DispatchKey, TransformType)
+    # =====================================================================
+
+    def test_pybind11_enum_cmp(self):
+        """Pybind11 enums with C-level __eq__: constant-folded via allowlist."""
+        dk_cpu = torch.DispatchKey.CPU
+        dk_cuda = torch.DispatchKey.CUDA
+        self._assert_all_cmp_equals(dk_cpu, dk_cpu, error_ops=self._ORDERING_OPS)
+        self._assert_all_cmp_equals(dk_cpu, dk_cuda, error_ops=self._ORDERING_OPS)
+
+    def test_pybind11_enum_non_singleton(self):
+        """Pybind11 enum values returned from C++ may not be the cached singleton."""
+        ks = torch._C.DispatchKeySet(torch.DispatchKey.CPU)
+        dk = ks.highestPriorityTypeId()
+        self._assert_all_cmp_equals(
+            dk, torch.DispatchKey.CPU, error_ops=self._ORDERING_OPS
+        )
+
+    # =====================================================================
+    # OrderedSet comparison
+    # =====================================================================
+
+    def test_ordered_set_cmp_equal(self):
+        """OrderedSet vs OrderedSet: structural equality via SetVariable."""
+        from torch.utils._ordered_set import OrderedSet
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: OrderedSet([1, 2, 3]),
+            lambda: OrderedSet([3, 2, 1]),
+        )
+
+    def test_ordered_set_cmp_subset(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: OrderedSet([1, 2]),
+            lambda: OrderedSet([1, 2, 3]),
+        )
+
+    def test_ordered_set_vs_set(self):
+        """OrderedSet vs plain set: cross-type accepted by SetVariable."""
+        from torch.utils._ordered_set import OrderedSet
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: OrderedSet([1, 2, 3]),
+            lambda: {3, 2, 1},
+        )
+
+    # =====================================================================
+    # UserDefinedSetVariable cross-type comparison
+    # =====================================================================
+
+    def test_user_defined_set_cmp(self):
+        """class MySet(set) vs MySet: unwraps to SetVariable."""
+
+        class MySet(set):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MySet({1, 2, 3}),
+            lambda: MySet({3, 2, 1}),
+        )
+
+    def test_user_defined_set_vs_plain_set(self):
+        """class MySet(set) vs set: cross-type comparison."""
+
+        class MySet(set):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MySet({1, 2, 3}),
+            lambda: {3, 2, 1},
+        )
+
+    def test_user_defined_set_vs_frozenset(self):
+        class MySet(set):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MySet({1, 2}),
+            lambda: frozenset({1, 2, 3}),
+        )
+
+    # =====================================================================
+    # IS_OP (is / is not)
+    # =====================================================================
+
+    def test_is_op(self):
+        """IS_OP dispatches directly, not through COMPARE_OP's graph-break wrapper."""
+        a = [1, 2, 3]
+
+        def fn(x, obj):
+            return obj is None, obj is not None, x is x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0), a)
+        self.assertEqual(result, (False, True, True))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
