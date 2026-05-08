@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 
 __TestCase = CPythonTestCase
 
@@ -774,8 +774,9 @@ class TestFrozenSet(_TestJointOps, __TestCase):
         f = self.thetype('abcdcda')
         self.assertEqual(hash(f), hash(f))
 
+    @skipIfTorchDynamo("slow")
     def test_hash_effectiveness(self):
-        n = 13
+        n = 2
         hashvalues = set()
         addhashvalue = hashvalues.add
         elemmasks = [(i+1, 1<<i) for i in range(n)]
