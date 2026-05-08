@@ -534,7 +534,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_tensor_subclass_propagation(self):
         """this test exercises the functionality described in
-        docs/source/notes/extending.rst#subclassing-torchtensor"""
+        docs/source/notes/extending.md#subclassing-torch-tensor"""
         t1 = torch.tensor([5])
         t2 = torch.tensor([6])
 
