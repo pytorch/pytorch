@@ -1839,7 +1839,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.set_current_node(n),
         ):
             if (
-                n.op == "call_function"
+                is_call_function
                 # this path only for built-in operators
                 and n.target
                 and isinstance(n.target, torch._ops.OpOverload)

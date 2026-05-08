@@ -8,7 +8,7 @@ Key classes include:
 - ExceptionVariable: Tracks exception objects
 - RandomVariable: Manages random number generators
 - GetAttrVariable: Tracks attribute access
-- ConstantMethodWrapperVariable: Handles method wrappers
+- MethodWrapperVariable: Handles method wrappers
 - PythonModuleVariable: Tracks Python modules
 - NumpyVariable: Handles numpy functions and types
 - StringFormatVariable: Manages string formatting
@@ -1597,31 +1597,6 @@ class ConstantMethodWrapperVariable(VariableTracker):
         )
 
 
-class GetSetDescriptorVariable(VariableTracker):
-    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.desc = desc
-
-    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
-        return self.desc
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "__get__" and self.source:
-            source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.desc.__get__, source)
-        elif name in ("__objclass__", "__name__"):
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, getattr(self.desc, name), source)
-        else:
-            return super().var_getattr(tx, name)
-
-    def is_python_constant(self) -> Literal[True]:
-        return True
-
-    def as_python_constant(self) -> types.GetSetDescriptorType:
-        return self.desc
-
-
 class PythonModuleVariable(VariableTracker):
     # PyModule_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/moduleobject.c#L1203
     _cpython_type = types.ModuleType
@@ -2019,6 +1994,9 @@ class NullVariable(VariableTracker):
                 ],
             )
         codegen.append_output(create_instruction("PUSH_NULL"))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "None"
 
 
 class DeletedVariable(VariableTracker):
