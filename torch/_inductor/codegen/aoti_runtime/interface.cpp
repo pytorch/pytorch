@@ -286,6 +286,25 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        *input_map,
+        use_inactive,
+        validate_full_update,
+        /*user_managed=*/false,
+        /*allow_h2d_copy=*/true);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
@@ -457,6 +476,25 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
     for (auto const& kv : *input_map) {
       constant_map->emplace(kv.first, kv.second);
+    }
+    model->update_constants_map(std::move(constant_map));
+  })
+}
+
+// C-ABI-safe variant: uses an array of (name, handle) pairs instead of an
+// opaque pointer to std::unordered_map, so the host and DSO can use
+// different C++ standard libraries without ABI conflicts.
+AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
+    AOTInductorModelHandle model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    int32_t num_pairs) {
+  auto model =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+    constant_map->reserve(num_pairs);
+    for (int32_t i = 0; i < num_pairs; ++i) {
+      constant_map->emplace(pairs[i].name, pairs[i].handle);
     }
     model->update_constants_map(std::move(constant_map));
   })

@@ -10,6 +10,7 @@ An aot_dispatch_* function:
 
 import copy
 import dataclasses
+import functools
 import itertools
 import logging
 import operator
@@ -257,14 +258,6 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
-            # Apply AC rematerialization to forward+loss+bwd graph
-            if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
-                from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
-                    remat_using_tags_for_fwd_loss_bwd_graph,
-                )
-
-                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
-
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
         from torch.fx.passes.regional_inductor import _needs_inductor_compile
@@ -314,28 +307,6 @@ def aot_stage2_export(
             f"expected compiled_fn to be GraphModule, got {type(compiled_fn)}"
         )
     return compiled_fn, aot_state.fw_metadata
-
-
-def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
-    return AOTConfig(
-        fw_compiler=None,
-        bw_compiler=None,
-        partition_fn=None,
-        decompositions={},
-        inference_compiler=None,
-        num_params_buffers=input.num_params_buffers,
-        aot_id=input.aot_id,
-        keep_inference_input_mutations=input.keep_inference_input_mutations,
-        is_export=input.is_export,
-        no_tangents=input.no_tangents,
-        aot_autograd_arg_pos_to_source=input.aot_autograd_arg_pos_to_source,
-        dynamic_shapes=input.dynamic_shapes,
-        enable_log=input.enable_log,
-        static_input_indices=input.static_input_indices,
-        pre_dispatch=input.pre_dispatch,
-        cache_info=None,
-        precompile_backend_id=input.precompile_backend_id,
-    )
 
 
 def _get_inner_meta(
@@ -463,6 +434,22 @@ def aot_stage2_inference(
         )
     _apply_tensorify_python_scalars(fw_module)
 
+    # When trace_autograd_ops=True, the inference graph may contain fw/bw
+    # invoke_subgraph pairs from traced torch.autograd.grad/backward calls.
+    # Partition them before the remat pass so that remat duplicates the
+    # already-partitioned fw subgraphs (which produce saved tensors for bw).
+    fw_module = run_joint_graph_passes_on_hops(fw_module, None, aot_config)
+
+    # Apply AC rematerialization after HOP partitioning. This must happen
+    # after partitioning so remat duplicates the partitioned fw subgraphs
+    # (not the original unpartitioned ones).
+    if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
+        from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
+            remat_using_tags_for_fwd_loss_bwd_graph,
+        )
+
+        fw_module = remat_using_tags_for_fwd_loss_bwd_graph(fw_module)
+
     compiled_fw = _aot_stage2b_inference_compile(
         fw_module,
         updated_flat_args,  # type: ignore[arg-type]
@@ -518,7 +505,7 @@ def _cache_inference_info(
             indices_of_inps_to_detach=[],
             forward_time_taken_ns=time_taken_ns,
             backward_time_taken_ns=0,
-            sanitized_aot_config=sanitize_aot_config(aot_config),
+            sanitized_aot_config=aot_config.to_cacheable(),
             guards_expr=guards_expr,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
@@ -727,11 +714,10 @@ def _get_partition_fn(
     See Note [InvokeSubgraphHOP Partitioner]
     """
     used_hop_custom_partition = False
-    if aot_config.partition_fn is None:
-        raise AssertionError("aot_config.partition_fn must not be None")
-    partition_fn: Callable[..., tuple[torch.fx.GraphModule, torch.fx.GraphModule]] = (
-        aot_config.partition_fn
-    )
+
+    # Check for HOP-specific partition function first. This is needed because
+    # run_joint_graph_passes_on_hops can be called before aot_config.partition_fn
+    # is set (e.g., in aot_stage1_graph_capture before the remat pass).
     if (
         fw_hop_node.target == torch._higher_order_ops.invoke_subgraph
         and "custom" in fw_hop_node.meta
@@ -740,28 +726,43 @@ def _get_partition_fn(
         hop_partition_fn = fw_hop_node.meta["custom"][
             "nested_region_config"
         ].partitioner
-        if hop_partition_fn is None:
-            # inherit the parent paritioner
-            return used_hop_custom_partition, partition_fn
-
-        if callable(hop_partition_fn):
-            partition_fn = hop_partition_fn  # pyrefly: ignore [bad-assignment]
-            used_hop_custom_partition = True
-        else:
-            if not isinstance(hop_partition_fn, str):
+        if hop_partition_fn is not None:
+            if callable(hop_partition_fn):
+                raw_partitioner = hop_partition_fn
+            elif not isinstance(hop_partition_fn, str):
                 raise AssertionError(
                     f"expected hop_partition_fn to be str, got {type(hop_partition_fn)}"
                 )
-            match hop_partition_fn:
-                case "default_partition":
-                    partition_fn = torch._functorch.partitioners.default_partition
-                case "min_cut_rematerialization_partition":
-                    partition_fn = torch._functorch.partitioners.min_cut_rematerialization_partition
-                case _:
-                    raise ValueError(
-                        f"Unknown HOP partitioner config: {hop_partition_fn}"
-                    )
-    return used_hop_custom_partition, partition_fn
+            else:
+                match hop_partition_fn:
+                    case "default_partition":
+                        raw_partitioner = (
+                            torch._functorch.partitioners.default_partition
+                        )
+                    case "min_cut_rematerialization_partition":
+                        raw_partitioner = torch._functorch.partitioners.min_cut_rematerialization_partition
+                    case _:
+                        raise ValueError(
+                            f"Unknown HOP partitioner config: {hop_partition_fn}"
+                        )
+
+            # Route through Inductor's `partition_fn` so joint-graph passes
+            # (e.g. scatter_upon_const_tensor) run on the HOP subgraph before
+            # the user-selected raw partitioner.
+            from torch._inductor.compile_fx import (
+                partition_fn as _inductor_partition_fn,
+            )
+
+            return True, functools.partial(
+                _inductor_partition_fn, partitioner_fn_override=raw_partitioner
+            )
+
+    # Fall back to the parent partitioner from aot_config. When the outer
+    # compile is Inductor this is already `compile_fx.partition_fn` so
+    # joint-graph passes run there too.
+    if aot_config.partition_fn is None:
+        raise AssertionError("aot_config.partition_fn must not be None")
+    return used_hop_custom_partition, aot_config.partition_fn
 
 
 def run_joint_graph_passes_on_hops(
@@ -792,6 +793,13 @@ def run_joint_graph_passes_on_hops(
 
     NB: This pass works for invoke_subgraph today because we took extra care in
     the Autograd.Dispatch key of invoke_subgraph to vastly simplify Step 1.
+
+    NB: This pass only matches **top-level** invoke_subgraph HOP nodes in
+    `joint_gm`. It does not recurse into subgraph modules, so when one
+    `nested_compile_region` is invoked from inside another, the inner
+    invoke_subgraph HOPs live inside the outer's subgraph module and are not
+    paired here. Top-level HOPs are still paired correctly via `call_id`;
+    recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
 
@@ -832,17 +840,69 @@ def run_joint_graph_passes_on_hops(
     if not bw_hop_nodes:
         return joint_gm
 
-    if len(fw_hop_nodes) != len(bw_hop_nodes):
-        raise AssertionError(
-            f"expected len(fw_hop_nodes) == len(bw_hop_nodes), "
-            f"got {len(fw_hop_nodes)} != {len(bw_hop_nodes)}"
-        )
+    # The fw and bw HOP counts are not necessarily equal. A fw HOP can have no
+    # corresponding bw HOP when autograd never runs backward through that call
+    # — e.g. the user does `x_d = x.detach().requires_grad_()` between two
+    # regions, or some outputs are not used in the loss. Likewise, multiple fw
+    # calls in the same compile region can share a single bw if autograd dedups
+    # or DCEs intermediate bws.
+    #
+    # Pair fw and bw HOPs by `call_id` — a per-call counter stamped by
+    # InvokeSubgraphAutogradOp's fw/bw on each FX node. This is unambiguous
+    # regardless of how autograd dispatched the backward (single outer
+    # `.backward()`, per-iter `.backward()` in a loop, interleaved regions).
+    fws_by_call_id: dict[int, torch.fx.Node] = {}
+    for fw in fw_hop_nodes:
+        cid = fw.meta.get("custom", {}).get("call_id")
+        if cid is None:
+            continue
+        if cid in fws_by_call_id:
+            raise AssertionError(
+                f"duplicate call_id={cid} on fw HOPs "
+                f"{fws_by_call_id[cid].name!r} and {fw.name!r}"
+            )
+        fws_by_call_id[cid] = fw
 
-    # Create a bw to hop node mapping. This helps us in identifying the bw and
-    # fw subgraph pairs without relying on the identifier. This is important
-    # because we can have different subgraphs for bwd for same subgraph in the
-    # fwd because of differing strides in the backward.
-    bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
+    bw_to_fw_hop_node: dict[torch.fx.Node, torch.fx.Node] = {}
+    paired_fws: set[torch.fx.Node] = set()
+    for bw in bw_hop_nodes:
+        cid = bw.meta.get("custom", {}).get("call_id")
+        if cid is None:
+            raise AssertionError(
+                f"bw HOP {bw.args[1]!r} has no call_id in meta['custom']"
+            )
+        fw = fws_by_call_id.get(cid)
+        if fw is None:
+            raise AssertionError(
+                f"could not find matching fw HOP for bw {bw.args[1]!r} "
+                f"with call_id={cid} (fw call_ids: {sorted(fws_by_call_id)})"
+            )
+        bw_to_fw_hop_node[bw] = fw
+        paired_fws.add(fw)
+
+    # Extra fws share a compile region with a paired bw but have no bw of
+    # their own (autograd may dedup or DCE the bw). They still must be
+    # rewritten to call the new partitioned fw subgraph, otherwise the output
+    # signatures diverge from the rewritten paired fws. Key by the bw
+    # identifier so the key matches `new_hop_graphs`.
+    fw_args_to_bw_identifier: dict[str, str] = {}
+    for bw, fw in bw_to_fw_hop_node.items():
+        fw_arg = fw.args[1]
+        bw_arg = bw.args[1]
+        if not (isinstance(fw_arg, str) and isinstance(bw_arg, str)):
+            raise AssertionError(
+                f"expected fw/bw invoke_subgraph HOP args[1] to be str identifiers, "
+                f"got fw={type(fw_arg)}, bw={type(bw_arg)}"
+            )
+        fw_args_to_bw_identifier.setdefault(fw_arg, bw_arg.removeprefix("bw"))
+    extra_fws_by_id: dict[str, list[torch.fx.Node]] = defaultdict(list)
+    for fw in fw_hop_nodes:
+        if fw in paired_fws:
+            continue
+        bw_ident_key = fw_args_to_bw_identifier.get(fw.args[1])
+        if bw_ident_key is None:
+            continue
+        extra_fws_by_id[bw_ident_key].append(fw)
 
     for node in bw_hop_nodes:
         identifier = node.args[1].removeprefix("bw")
@@ -854,7 +914,19 @@ def run_joint_graph_passes_on_hops(
 
         # Collect some information from the forward hop graph
         fw_hop_node = bw_to_fw_hop_node[node]
-        fw_hop_gm = getattr(joint_gm, fw_hop_node.args[0].target)
+        fw_subgraph_attr = fw_hop_node.args[0]
+        if not isinstance(fw_subgraph_attr, torch.fx.Node):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                f"got {type(fw_subgraph_attr)}"
+            )
+        fw_subgraph_attr_target = fw_subgraph_attr.target
+        if not isinstance(fw_subgraph_attr_target, str):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0].target to be str, "
+                f"got {type(fw_subgraph_attr_target)}"
+            )
+        fw_hop_gm = getattr(joint_gm, fw_subgraph_attr_target)
         if not isinstance(fw_hop_gm, torch.fx.GraphModule):
             raise AssertionError(
                 f"expected fw_hop_gm to be GraphModule, got {type(fw_hop_gm)}"
@@ -1020,10 +1092,16 @@ def run_joint_graph_passes_on_hops(
         extra_fw_outputs = []
 
         # Insert the new_fw_hop_gm into the joint_gm
+        fw_subgraph_attr = fw_node.args[0]
+        if not isinstance(fw_subgraph_attr, torch.fx.Node):
+            raise AssertionError(
+                f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                f"got {type(fw_subgraph_attr)}"
+            )
         with joint_gm.graph.inserting_after(fw_node):
             new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
-            new_fw_mod_attr.meta = copy.copy(fw_node.args[0].meta)
+            new_fw_mod_attr.meta = copy.copy(fw_subgraph_attr.meta)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
         with joint_gm.graph.inserting_after(new_fw_mod_attr):
@@ -1102,6 +1180,35 @@ def run_joint_graph_passes_on_hops(
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
+
+    # Rewrite extra (unpaired) fws to call the new partitioned fw subgraph.
+    # Their additional saved-tensor outputs become dead and are pruned by
+    # eliminate_dead_code.
+    for identifier, extras in extra_fws_by_id.items():
+        if not new_hop_graphs[identifier].partitioning_done:
+            continue
+        new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
+        if new_fw_hop_gm is None:
+            continue
+        for fw_node in extras:
+            fw_subgraph_attr = fw_node.args[0]
+            if not isinstance(fw_subgraph_attr, torch.fx.Node):
+                raise AssertionError(
+                    f"expected fw invoke_subgraph HOP args[0] to be torch.fx.Node, "
+                    f"got {type(fw_subgraph_attr)}"
+                )
+            with joint_gm.graph.inserting_after(fw_node):
+                new_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
+                new_attr = joint_gm.graph.get_attr(new_attr_name)
+                new_attr.meta = copy.copy(fw_subgraph_attr.meta)
+            with joint_gm.graph.inserting_after(new_attr):
+                new_fw_node = joint_gm.graph.call_function(
+                    the_function=invoke_subgraph,
+                    args=(new_attr, new_attr_name, *fw_node.args[2:]),
+                )
+                propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
+            fw_node.replace_all_uses_with(new_fw_node)
+            joint_gm.graph.erase_node(fw_node)
 
     joint_gm.graph.eliminate_dead_code()
     joint_gm.graph.lint()
@@ -2476,7 +2583,7 @@ def _cache_autograd_info(
                     _indices_of_inps_to_detach,
                     forward_time_taken_ns,
                     backward_time_taken_ns,
-                    sanitized_aot_config=sanitize_aot_config(aot_config),
+                    sanitized_aot_config=aot_config.to_cacheable(),
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,

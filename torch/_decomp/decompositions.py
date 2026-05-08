@@ -1446,12 +1446,10 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
-    if split_size == 0:
-        if dim_size != 0:
-            raise AssertionError(
-                f"split_size is 0 but dim_size is {dim_size}, expected 0"
-            )
+    if dim_size == 0:
         return (self.detach(),)
+    if split_size == 0:
+        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -5167,8 +5165,8 @@ def _reflection_or_replication_pad(
     inp_shape = a.shape[-dim:]
     nc_dim = a.dim() - dim
 
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
+    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
 
     result = a
     for i in range(dim):
@@ -5191,8 +5189,8 @@ def _reflection_pad_backward(grad_output, x, padding):
 
     dhw = [h - 1 for h in x.shape[-dim:]]
 
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [int(padding[2 * (dim - 1 - i)]) for i in range(dim)]
+    padding_right = [int(padding[2 * (dim - 1 - i) + 1]) for i in range(dim)]
 
     indices = []
     for i in range(x.ndim):

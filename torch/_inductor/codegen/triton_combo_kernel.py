@@ -20,6 +20,7 @@ from ..runtime.triton_heuristics import (
     SequentialFlattenComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
+from ..stream_utils import get_raw_stream_name
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
@@ -1071,7 +1072,7 @@ class ComboKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -1164,7 +1165,7 @@ class ComboKernel(Kernel):
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         """
-        Build metadata used by combo-kernel grid/disaptch/autotune helpers.
+        Build metadata used by combo-kernel grid/dispatch/autotune helpers.
         """
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
