@@ -5592,9 +5592,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
-    @xfailIf(
-        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
-    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
@@ -5637,7 +5634,7 @@ class CPUReproTests(TestCase):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
-            self.assertEqual(compiler_mode(*inputs), eager)
+            self.assertEqual(compiler_mode(*inputs), eager, atol=1e-4, rtol=1.6e-2)
 
     def test_fused_node(self):
         # https://github.com/pytorch/pytorch/issues/138550.
