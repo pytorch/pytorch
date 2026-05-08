@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -1349,8 +1350,167 @@ static PyObject* get_base_setup_context() {
   return setup_context;
 }
 
-PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
+// Given cls (a Function subclass), args, and kwargs, resolve kwargs into
+// positional arguments by inspecting the forward method's signature.
+// Returns a new reference to a tuple of positional args.
+//
+// Uses co_varnames/co_argcount directly instead of inspect.signature to
+// stay in C on this hot path. This means we don't handle *args, **kwargs,
+// defaults, or decorated/wrapped forwards correctly.
+static PyObject* resolve_kwargs_to_positional(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (!kwargs || PyDict_Size(kwargs) == 0) {
+    Py_INCREF(args);
+    return args;
+  }
+
+  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
+  if (!forward_fn)
+    return nullptr;
+
+  PyObject* func = forward_fn.get();
+  THPObjectPtr code_py(PyObject_GetAttrString(func, "__code__"));
+  if (!code_py)
+    return nullptr;
+  if (!PyCode_Check(code_py.get())) {
+    PyErr_SetString(PyExc_TypeError, "forward().__code__ is not a code object");
+    return nullptr;
+  }
+  PyCodeObject* code = (PyCodeObject*)code_py.get();
+
+  Py_ssize_t co_argcount = code->co_argcount;
+  THPObjectPtr varnames_obj(PyCode_GetVarnames(code));
+  if (!varnames_obj)
+    return nullptr;
+
+  // Determine if forward takes ctx as first arg.
+  // If setup_context is overridden, forward does NOT take ctx.
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  if (!cls_setup_context)
+    return nullptr;
+  auto orig_setup_context = get_base_setup_context();
+  if (!orig_setup_context)
+    return nullptr;
+  bool has_ctx = (cls_setup_context.get() == orig_setup_context);
+
+  // param_offset: number of leading params to skip (ctx for old-style)
+  Py_ssize_t param_offset = has_ctx ? 1 : 0;
+
+  // Number of user-visible parameters (excluding ctx)
+  Py_ssize_t num_params = co_argcount - param_offset;
+  Py_ssize_t num_positional = PyTuple_GET_SIZE(args);
+
+  // Validate kwargs and find the max positional index they map to.
+  // We do this before the count check so that "multiple values for argument"
+  // takes priority over "takes N positional arguments but M were given".
+  Py_ssize_t max_kwarg_idx = num_positional - 1;
+  {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      if (!PyUnicode_Check(key)) {
+        PyErr_SetString(PyExc_TypeError, "keywords must be strings");
+        return nullptr;
+      }
+
+      Py_ssize_t param_idx = -1;
+      for (Py_ssize_t i = param_offset; i < co_argcount; i++) {
+        PyObject* varname = PyTuple_GET_ITEM(varnames_obj.get(), i);
+        if (PyUnicode_Compare(key, varname) == 0) {
+          param_idx = i - param_offset;
+          break;
+        }
+      }
+
+      if (param_idx < 0) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "forward() got an unexpected keyword argument '%U'",
+            key);
+        return nullptr;
+      }
+
+      if (param_idx < num_positional) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "forward() got multiple values for argument '%U'",
+            key);
+        return nullptr;
+      }
+
+      if (param_idx > max_kwarg_idx) {
+        max_kwarg_idx = param_idx;
+      }
+    }
+  }
+
+  Py_ssize_t total_args = max_kwarg_idx + 1;
+  if (total_args > num_params) {
+    PyErr_Format(
+        PyExc_TypeError,
+        "forward() takes %zd positional arguments but %zd were given",
+        num_params,
+        total_args);
+    return nullptr;
+  }
+
+  // Build result tuple
+  THPObjectPtr result(PyTuple_New(total_args));
+  if (!result)
+    return nullptr;
+
+  // Copy existing positional args
+  for (Py_ssize_t i = 0; i < num_positional; i++) {
+    PyObject* item = PyTuple_GET_ITEM(args, i);
+    Py_INCREF(item);
+    PyTuple_SET_ITEM(result.get(), i, item);
+  }
+
+  // Place kwargs into their positional slots
+  {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      for (Py_ssize_t i = param_offset; i < co_argcount; i++) {
+        PyObject* varname = PyTuple_GET_ITEM(varnames_obj.get(), i);
+        if (PyUnicode_Compare(key, varname) == 0) {
+          Py_INCREF(value);
+          PyTuple_SET_ITEM(result.get(), i - param_offset, value);
+          break;
+        }
+      }
+    }
+  }
+
+  // Check for gaps (kwargs that skip over unfilled positions)
+  for (Py_ssize_t i = 0; i < total_args; i++) {
+    if (PyTuple_GET_ITEM(result.get(), i) == nullptr) {
+      PyObject* varname =
+          PyTuple_GET_ITEM(varnames_obj.get(), i + param_offset);
+      PyErr_Format(
+          PyExc_TypeError,
+          "forward() missing required argument: '%U' (position %zd)",
+          varname,
+          i);
+      return nullptr;
+    }
+  }
+
+  return result.release();
+}
+
+PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
+
+  THPObjectPtr resolved_args(resolve_kwargs_to_positional(cls, args, kwargs));
+  if (!resolved_args)
+    return nullptr;
+  PyObject* inputs = resolved_args.get();
 
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
@@ -1882,7 +2042,10 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
-    {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
+    {(char*)"apply",
+     castPyCFunctionWithKeywords(THPFunction_apply),
+     METH_CLASS | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {(char*)"_register_hook_dict",
      THPFunction__register_hook_dict,
      METH_O,

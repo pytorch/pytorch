@@ -8,7 +8,10 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Environment
 
-If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+If any tool you're trying to use (pip, python, spin, etc) is missing, check for
+a `.venv` directory in the project root or its parent directory. If found,
+activate it and retry. If no `.venv` is found, stop and ask the user if an
+environment is needed. Do NOT try to find alternatives or install these tools.
 
 # CI Docker Images
 
@@ -49,6 +52,9 @@ Only use commands provided via `spin` for linting.
 Use `spin help` to list available commands.
 Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
 
+When the user asks you to commit or amend, run `lintrunner -a` before creating
+the commit. Fix any lint errors it reports, then commit.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
@@ -63,6 +69,11 @@ the commit body (e.g., "Authored by Claude." or a similar attribution for
 whichever assistant was used). NEVER add a `Co-authored-by:` trailer
 attributing the AI assistant, as it interferes with the Linux Foundation CLA
 bot.
+
+When the user asks you to amend a commit, check whether the commit message
+still accurately describes the changes. If it doesn't and the commit is not a
+ghstack commit, update the message. For ghstack commits, amending the message
+is a no-op, so just remind the user to update the PR description if needed.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
@@ -213,3 +224,25 @@ if trace_log.handlers:
   - Local files: "FX graph dump: min_cut_failed_graph.txt"
   - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
 - Use `_get_unique_path()` pattern to avoid overwriting existing debug files
+
+# cuda::ptx
+
+When using `<cuda/ptx>` typed wrappers for PTX instructions:
+
+- **Namespace**: Inside `namespace at::native`, unqualified `cuda::ptx` resolves
+  to the sibling `at::cuda` namespace. Always use `::cuda::ptx` or alias it:
+  `namespace ptx = ::cuda::ptx;`
+- **Include conflicts**: The monolithic `<cuda/ptx>` header can fail when included
+  alongside heavy PyTorch headers (e.g. `Loops.cuh`) due to CCCL bugs in
+  transitive headers like `cp_async_bulk_tensor.h`. Workaround: put kernels using
+  `<cuda/ptx>` in a separate `.cu` file with minimal includes.
+- **mbarrier_try_wait_parity is non-blocking**: `ptx::mbarrier_try_wait_parity()`
+  returns `bool` (tries once). You must wrap it in a spin loop:
+  `while (!ptx::mbarrier_try_wait_parity(mbar, parity)) {}`
+- **Half/BFloat16 types**: `cuda::ptx` overloads use CUDA native types (`__half`,
+  `__nv_bfloat16`), not PyTorch wrappers (`c10::Half`, `c10::BFloat16`).
+  Use `reinterpret_cast` at the call site.
+- **cp_async_bulk_wait_group**: Takes a compile-time constant via
+  `ptx::n32_t<N>{}`, not a runtime integer.
+- **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
+  operations. Place mbarriers in a separate smem region from data buffers.
