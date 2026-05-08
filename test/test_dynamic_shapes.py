@@ -4166,6 +4166,31 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice_noop_with_unbacked_bindings(self):
+        # Regression test: the no-op early return in slice_ lowering
+        # (start==0, size<=end, step==1) must register DynamicSliceSize
+        # for unbacked bindings created at trace time.
+        # torch._check after the slice adds facts to ShapeEnv that make
+        # statically_known_leq(size, end) True at lowering time.
+        def f(x, n):
+            u0 = n.item()
+            result = x[:u0]
+            torch._check(u0 >= 0)
+            torch._check(u0 >= x.size(0))
+            return result
+
+        x = torch.randn(10, 16)
+        n = torch.tensor([10])
+
+        eager_result = f(x, n)
+
+        compiled_fn = torch.compile(f, fullgraph=True, backend="inductor")
+        compiled_result = compiled_fn(x, n)
+
+        self.assertEqual(eager_result, compiled_result)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_slice_with_tensor_indices(self):
         for d in [True, False]:
             # Test slicing with tensor start/stop/step on RHS (reading)
@@ -5290,6 +5315,82 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_indices triggers recompilation.
+        Uses subset match semantics: runtime indices must be a subset of compiled indices,
+        unless the runtime tensor has no attribute (unspecified = don't care).
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with unbacked indices [0, 1]
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, [0, 1])
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same unbacked indices - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, [0, 1])
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with subset [0] - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with no unbacked indices (plain tensor) - should NOT recompile
+        # (no attribute = unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with superset [0, 1, 2] - should recompile (not a subset of {0, 1})
+        x5 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x5, [0, 1, 2])
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Sixth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x6 = torch.rand(4, 3, 5)
+        torch._dynamo.decorators.mark_unbacked(x6, [])
+        self.assertFalse(hasattr(x6, "_dynamo_unbacked_indices"))
+        compiled_func(x6)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_indices_no_recompile_to_unbacked(self):
+        """
+        Test that compiling without _dynamo_unbacked_indices and then passing
+        a tensor with _dynamo_unbacked_indices DOES trigger recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call without unbacked indices
+        x1 = torch.rand(4, 3)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with unbacked indices - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_no_shape_id_then_shape_id(self):
         """
         Test that compiling without shape_id then calling with shape_id
@@ -5320,6 +5421,267 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x3, 0, shape_id="batch")
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_empty_list_is_noop(self):
+        """
+        Test that mark_unbacked(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_unbacked(x, 0), calling mark_unbacked(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_unbacked_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+        torch._dynamo.decorators.mark_unbacked(x, [])
+        self.assertEqual(x._dynamo_unbacked_indices, {0})
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_empty_list_is_noop(self):
+        """
+        Test that mark_dynamic(x, []) is a no-op:
+        - On a fresh tensor, no attribute is set.
+        - After mark_dynamic(x, 0), calling mark_dynamic(x, []) does NOT clear dim 0.
+        """
+        # Empty list on fresh tensor is a no-op
+        x0 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x0, [])
+        self.assertFalse(hasattr(x0, "_dynamo_dynamic_indices"))
+
+        # Empty list after marking a dim does not clear it
+        x = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_dynamic(x, 0)
+        self.assertIn(0, x._dynamo_dynamic_indices)
+        torch._dynamo.decorators.mark_dynamic(x, [])
+        self.assertIn(0, x._dynamo_dynamic_indices)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_unbacked and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_mark_static_to_mark_unbacked_recompilation(self):
+        """
+        Test that compiling with mark_static and then calling with mark_unbacked
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_unbacked - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_mark_dynamic_to_mark_static_recompilation(self):
+        """
+        Test that compiling with mark_dynamic and then calling with mark_static
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with mark_static - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that dynamic indices use subset match semantics.
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [0]) → no recompile (subset)
+        - Compile with mark_dynamic(x, [0, 1]) then call with mark_dynamic(x, [2]) → recompile (not subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x1, 0)
+        torch._dynamo.mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x2, 0)
+        torch._dynamo.mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("maybe_mark_dynamic is not traceable")
+    def test_weak_dynamic_indices_exact_match_recompilation(self):
+        """
+        Test that weak dynamic indices (from maybe_mark_dynamic) use subset match semantics.
+        - Compile with maybe_mark_dynamic(x, [0, 1]) then call with maybe_mark_dynamic(x, [0]) → no recompile (subset)
+        - Plain tensor (no attribute) = unspecified = don't care → no recompile
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with maybe_mark_dynamic on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x1, 0)
+        torch._dynamo.maybe_mark_dynamic(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same weak dynamic indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x2, 0)
+        torch._dynamo.maybe_mark_dynamic(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 weak dynamic - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.maybe_mark_dynamic(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_weak_dynamic_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_static is not traceable")
+    def test_static_indices_exact_match_recompilation(self):
+        """
+        Test that static indices use subset match semantics.
+        - Compile with mark_static(x, [0, 1]) then call with mark_static(x, [0]) → no recompile (subset)
+        - If you want dim 1 NOT static, explicitly mark it dynamic.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_static on dims 0 and 1
+        x1 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x1, 0)
+        torch._dynamo.mark_static(x1, 1)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same static indices - should NOT recompile (exact match)
+        x2 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x2, 0)
+        torch._dynamo.mark_static(x2, 1)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with only dim 0 static - should NOT recompile (subset of {0, 1})
+        x3 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fourth call with plain tensor (no attribute) - should NOT recompile
+        # (unspecified = don't care, reuse existing frame)
+        x4 = torch.rand(4, 3)
+        self.assertFalse(hasattr(x4, "_dynamo_static_indices"))
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Fifth call with empty list [] - should NOT recompile
+        # (empty list is a no-op, no attribute set, same as plain tensor)
+        x5 = torch.rand(4, 3)
+        torch._dynamo.mark_static(x5, [])
+        self.assertFalse(hasattr(x5, "_dynamo_static_indices"))
+        compiled_func(x5)
+        self.assertEqual(counter.frame_count, 1)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_exec_fft_reshape_no_dde(self):
@@ -5611,6 +5973,461 @@ class TestMaybeFastEvalComparison(TestCase):
         compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
 
         self.assertEqual(eager_result, compiled_result)
+
+
+class TestTransferSymbolsFromForeignShapeEnv(TestCase):
+    """Tests for ShapeEnv.transfer_symbols_from_foreign_shape_env."""
+
+    def _make_source(self, name="t"):
+        from torch._dynamo.source import ConstantSource
+
+        return ConstantSource(name)
+
+    def _create_backed_symbols(self, shape_env, tensor, source_name="foreign"):
+        """Create backed symbolic sizes/strides/offset using _create_symbolic_sizes_strides_storage_offset."""
+        src = self._make_source(source_name)
+        return shape_env._create_symbolic_sizes_strides_storage_offset(
+            tensor.size(),
+            tensor.stride(),
+            tensor.storage_offset(),
+            [True] * tensor.dim(),
+            src,
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DUCK] * tensor.dim(),
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * tensor.dim(),
+            ),
+        )
+
+    def test_backed_symbols_transferred_as_duck(self):
+        """Backed (guarding-hinted) symbols should become DUCK dims in the new env."""
+        foreign_env = ShapeEnv()
+        x = torch.randn(4, 8)
+        sizes, strides, offset = self._create_backed_symbols(foreign_env, x)
+        # Sanity: foreign sizes are symbolic
+        self.assertTrue(is_symbolic(sizes[0]))
+        self.assertTrue(is_symbolic(sizes[1]))
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                offset,
+                source=self._make_source("local"),
+            )
+        )
+        # New symbols should exist in local_env, not foreign_env
+        for s in new_sizes:
+            self.assertTrue(is_symbolic(s))
+            self.assertIs(s.node.shape_env, local_env)
+        # Hints should match the original concrete values
+        self.assertEqual(guarding_hint_or_throw(new_sizes[0].node), 4)
+        self.assertEqual(guarding_hint_or_throw(new_sizes[1].node), 8)
+
+    def test_static_dims_stay_static(self):
+        """Non-symbolic (plain int) sizes should remain static ints."""
+        local_env = ShapeEnv()
+
+        sizes = (3, 5)
+        strides = (5, 1)
+        storage_offset = 0
+
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Static dims should stay as plain ints
+        for s in new_sizes:
+            self.assertFalse(is_symbolic(s))
+        self.assertEqual(new_sizes, (3, 5))
+
+    def test_unbacked_symbols_transferred(self):
+        """Unbacked symbols should become UNBACKED dims in the new env."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        u1 = foreign_env.create_unbacked_symint()
+
+        # Use plain int strides — unbacked symbols as strides would need
+        # valid positive hints, and INFER_STRIDE handles stride creation.
+        sizes = (u0, u1)
+        strides = (1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # New symbols should be unbacked in local_env
+        for s in new_sizes:
+            self.assertTrue(is_symbolic(s))
+            self.assertIs(s.node.shape_env, local_env)
+            self.assertFalse(local_env.has_guarding_hint(s.node.expr))
+
+    def test_shared_unbacked_symbol_preserved(self):
+        """When two dims share the same unbacked symbol (e.g. size=[u0, u0]),
+        the transfer preserves that sharing."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+
+        sizes = (u0, u0)
+        strides = (u0, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Both dims should map to the same new symbol since they were
+        # the same unbacked symbol in the foreign env.
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        self.assertEqual(
+            new_sizes[0].node.expr,
+            new_sizes[1].node.expr,
+            "Shared unbacked symbol should be preserved across dims",
+        )
+        # Stride[0] should equal the shared size symbol (contiguous relationship)
+        self.assertTrue(is_symbolic(new_strides[0]))
+        self.assertEqual(
+            new_strides[0].node.expr,
+            new_sizes[0].node.expr,
+            "Stride should preserve relationship with size via substitution",
+        )
+
+    def test_foreign_stride_symbol_not_in_sizes(self):
+        """If a stride references a foreign unbacked symbol not in any size dim
+        (e.g. from as_strided), a fresh unbacked symbol should be created."""
+        foreign_env = ShapeEnv()
+        u_size = foreign_env.create_unbacked_symint()
+        u_stride = foreign_env.create_unbacked_symint()  # independent from sizes
+
+        sizes = (u_size,)
+        strides = (u_stride,)  # stride symbol not in sizes
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # Size should be unbacked in local_env
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        self.assertIs(new_sizes[0].node.shape_env, local_env)
+        # Stride should also be unbacked in local_env (fresh symbol, not foreign)
+        self.assertTrue(is_symbolic(new_strides[0]))
+        self.assertIs(new_strides[0].node.shape_env, local_env)
+        # Stride should be a different symbol than size
+        self.assertNotEqual(new_sizes[0].node.expr, new_strides[0].node.expr)
+
+    def test_derived_unbacked_expression_preserved(self):
+        """If a size is a derived expression (e.g., u0 // 2) from a base symbol
+        that appears in another dim, it should be expressed in terms of the
+        new symbol rather than creating an independent fresh symbol."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        # Create a derived expression: u0 // 2
+        u0_half = u0 // 2
+
+        sizes = (u0, u0_half)
+        strides = (1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # dim 0 should be a fresh unbacked symbol
+        self.assertTrue(is_symbolic(new_sizes[0]))
+        new_u0 = new_sizes[0].node.expr
+        # dim 1 should be derived from new_u0 (e.g., floor(new_u0/2))
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        # The derived expression should reference the new base symbol
+        self.assertIn(new_u0, new_sizes[1].node.expr.free_symbols)
+
+    def test_unbacked_hint_overrides_transferred(self):
+        """Hint overrides on unbacked symbols in the foreign env should be
+        transferred to the new env."""
+        foreign_env = ShapeEnv()
+        u0 = foreign_env.create_unbacked_symint()
+        # Set a hint override on u0 in the foreign env
+        foreign_env.var_to_hint_override[u0.node.expr] = 42
+
+        sizes = (u0,)
+        strides = (1,)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # The hint override should be transferred to local_env
+        new_sym = new_sizes[0]
+        self.assertTrue(is_symbolic(new_sym))
+        self.assertIn(new_sym.node.expr, local_env.var_to_hint_override)
+        self.assertEqual(local_env.var_to_hint_override[new_sym.node.expr], 42)
+
+    def test_mixed_static_backed_unbacked(self):
+        """A mix of static, backed, and unbacked dims should all be handled correctly."""
+        foreign_env = ShapeEnv()
+        # Create a backed symbol
+        x = torch.randn(4)
+        backed_sizes, _, _ = self._create_backed_symbols(foreign_env, x)
+        backed_sym = backed_sizes[0]  # backed, hint=4
+
+        # Create an unbacked symbol
+        unbacked_sym = foreign_env.create_unbacked_symint()
+        foreign_env.var_to_hint_override[unbacked_sym.node.expr] = 99
+
+        sizes = (7, backed_sym, unbacked_sym)  # static, backed, unbacked
+        strides = (1, 1, 1)
+        storage_offset = 0
+
+        local_env = ShapeEnv()
+        new_sizes, new_strides, new_offset = (
+            local_env.transfer_symbols_from_foreign_shape_env(
+                sizes,
+                strides,
+                storage_offset,
+                source=self._make_source("local"),
+            )
+        )
+        # dim 0: static
+        self.assertFalse(is_symbolic(new_sizes[0]))
+        self.assertEqual(new_sizes[0], 7)
+
+        # dim 1: backed/duck
+        self.assertTrue(is_symbolic(new_sizes[1]))
+        self.assertIs(new_sizes[1].node.shape_env, local_env)
+        self.assertEqual(guarding_hint_or_throw(new_sizes[1].node), 4)
+
+        # dim 2: unbacked with hint override
+        self.assertTrue(is_symbolic(new_sizes[2]))
+        self.assertIs(new_sizes[2].node.shape_env, local_env)
+        self.assertFalse(local_env.has_guarding_hint(new_sizes[2].node.expr))
+        self.assertEqual(local_env.var_to_hint_override[new_sizes[2].node.expr], 99)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_flex_attention_foreign_fake_e2e(self):
+        """E2E test: trace flex_attention with BlockMask containing unbacked dims
+        through a fresh FakeTensorMode, exercising the foreign ShapeEnv transfer path."""
+        from contextlib import contextmanager
+
+        import torch.utils._pytree as pytree
+        from torch._dynamo.decorators import mark_unbacked
+        from torch._guards import tracing, TracingContext
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import (
+            RelaxedUnspecConstraint,
+            TrackedFake,
+        )
+        from torch.fx.traceback import preserve_node_meta
+        from torch.nn.attention.flex_attention import (
+            _MaskModWrapper,
+            AuxRequest,
+            BlockMask,
+            flex_attention,
+        )
+
+        if BlockMask not in pytree.SUPPORTED_NODES:
+            pytree.register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+        if _MaskModWrapper not in pytree.SUPPORTED_NODES:
+            pytree.register_constant(_MaskModWrapper)
+
+        @contextmanager
+        def skip_nested_compile():
+            prev = torch._dynamo.config.error_on_nested_fx_trace
+            torch._dynamo.config.error_on_nested_fx_trace = False
+            try:
+                yield
+            finally:
+                torch._dynamo.config.error_on_nested_fx_trace = prev
+
+        def copy_marks(src, dst):
+            for key in (
+                "_dynamo_unbacked_indices",
+                "_dynamo_strict_unbacked_indices",
+                "_dynamo_unbacked_bounds",
+                "_dynamo_shape_ids",
+                "_dynamo_hint_overrides",
+                "_specialize_on",
+            ):
+                if hasattr(src, key):
+                    setattr(dst, key, getattr(src, key))
+            return dst
+
+        def _symbolic_context(t):
+            marked = getattr(t, "_dynamo_unbacked_indices", set())
+            strict = getattr(t, "_dynamo_strict_unbacked_indices", set())
+            if not marked and not strict:
+                return None
+            dynamic_sizes = [DimDynamic.STATIC] * t.dim()
+            constraint_sizes = [None] * t.dim()
+            for i in range(t.dim()):
+                if i in marked:
+                    dynamic_sizes[i] = DimDynamic.UNBACKED
+                elif i in strict:
+                    dynamic_sizes[i] = DimDynamic.UNBACKED
+                    constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)
+            return StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                constraint_sizes=constraint_sizes,
+                specialize_on=[[] for _ in range(t.dim())],
+                shape_ids=getattr(t, "_dynamo_shape_ids", None),
+                unbacked_bounds=getattr(t, "_dynamo_unbacked_bounds", None),
+            )
+
+        def fakeify(fake_mode, x, name):
+            if not isinstance(x, torch.Tensor):
+                return x
+            from torch._dynamo.source import LocalSource
+
+            source = LocalSource(name, is_input=True)
+            ctx = _symbolic_context(x)
+            if ctx is not None:
+                fake = fake_mode.from_tensor(x, source=source, symbolic_context=ctx)
+                fake_mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, ctx))
+                return fake
+            return fake_mode.from_tensor(x, static_shapes=True)
+
+        ntoks, block_size = 8192, 128
+        nblocks = (ntoks + block_size - 1) // block_size
+        width = 2
+
+        kv_indices = (
+            torch.arange(width, dtype=torch.int32).expand(nblocks, width).clone()
+        )
+        full_kv_indices = kv_indices.clone()
+        q_indices = kv_indices.clone()
+        full_q_indices = kv_indices.clone()
+        kv_num_blocks = torch.full((nblocks,), width, dtype=torch.int32)
+        full_kv_num_blocks = kv_num_blocks.clone()
+        q_num_blocks = kv_num_blocks.clone()
+        full_q_num_blocks = kv_num_blocks.clone()
+
+        mark_unbacked(kv_indices, 1)
+        mark_unbacked(full_kv_indices, 1)
+        mark_unbacked(q_indices, 1)
+        mark_unbacked(full_q_indices, 1)
+
+        attn_regions = torch.arange(ntoks, dtype=torch.int32, device="cuda")
+        document_ids = torch.zeros(ntoks, dtype=torch.int32, device="cuda")
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return (
+                (q_idx >= kv_idx)
+                & (attn_regions[q_idx] == attn_regions[kv_idx])
+                & (document_ids[q_idx] == document_ids[kv_idx])
+            )
+
+        block_mask = BlockMask(
+            kv_num_blocks=kv_num_blocks.to("cuda"),
+            kv_indices=copy_marks(kv_indices, kv_indices.to("cuda")),
+            full_kv_num_blocks=full_kv_num_blocks.to("cuda"),
+            full_kv_indices=copy_marks(full_kv_indices, full_kv_indices.to("cuda")),
+            q_num_blocks=q_num_blocks.to("cuda"),
+            q_indices=copy_marks(q_indices, q_indices.to("cuda")),
+            full_q_num_blocks=full_q_num_blocks.to("cuda"),
+            full_q_indices=copy_marks(full_q_indices, full_q_indices.to("cuda")),
+            BLOCK_SIZE=(block_size, block_size),
+            mask_mod=mask_mod,
+            seq_lengths=(ntoks, ntoks),
+        )
+
+        q = torch.randn(1, 4, ntoks, 128, device="cuda")
+        k = torch.randn(1, 4, ntoks, 128, device="cuda")
+        v = torch.randn(1, 4, ntoks, 128, device="cuda")
+        cflex = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+
+        flat_args, spec = pytree.tree_flatten([q, k, v, block_mask])
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(tracked_fakes=[]),
+        )
+        fake_args = tuple(
+            fakeify(fake_mode, x, f"inp_{i}") for i, x in enumerate(flat_args)
+        )
+        torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            fake_mode.shape_env,
+            fake_args,
+        )
+
+        def wrapped(*flat):
+            q1, k1, v1, mask1 = pytree.tree_unflatten(list(flat), spec)
+            out, aux = cflex(
+                q1,
+                k1,
+                v1,
+                block_mask=mask1,
+                return_aux=AuxRequest(max_scores=True),
+            )
+            return out.sum().detach(), aux.max_scores.max().detach()
+
+        # This should not raise — the fix ensures unbacked symbols from
+        # the outer FakeTensorMode are correctly transferred into the
+        # inner ShapeEnv created by torch.compile.
+        with (
+            fake_mode,
+            tracing(TracingContext(fake_mode)),
+            preserve_node_meta(),
+            skip_nested_compile(),
+            torch.compiler._non_strict_tracing_context(),
+        ):
+            gm = make_fx(
+                wrapped,
+                record_stack_traces=True,
+                record_module_stack=False,
+            )(*fake_args)
+
+        # Verify unbacked dims are preserved in the captured graph.
+        # Check placeholder shapes for unbacked symbols (u0, u1, etc.)
+        unbacked_count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                val = node.meta.get("val", None)
+                if val is not None and hasattr(val, "size"):
+                    for s in val.size():
+                        if is_symbolic(s) and not s.node.has_hint():
+                            unbacked_count += 1
+        self.assertGreaterEqual(
+            unbacked_count,
+            4,
+            f"Expected at least 4 unbacked dims but found {unbacked_count}",
+        )
 
 
 if __name__ == "__main__":
