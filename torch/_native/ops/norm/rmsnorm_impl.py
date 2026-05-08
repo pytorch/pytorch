@@ -26,7 +26,7 @@ def _fused_rms_norm_cond(
 ) -> bool:
     if not _is_supported(input):
         return False
-    # Empty inputs crash quack with cudaErrorInvalidConfiguration — the bad
+    # Empty inputs crash quack with cudaErrorInvalidConfiguration -- the bad
     # launch config poisons the CUDA context for subsequent calls. Quack's own
     # rmsnorm_bwd guards against this with `if x.numel() > 0` (rmsnorm.py:1111)
     # but the fwd path doesn't.
