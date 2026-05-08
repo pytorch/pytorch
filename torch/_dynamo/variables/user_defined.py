@@ -511,7 +511,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # produce a bound method. For everything else, defer to GetAttrVariable
         # which routes call_function through call_method at runtime.
         if meta_attr is not NO_SUCH_SUBOBJ:
-            metacls_vt = VariableTracker.build(tx, type(self.value))
+            metacls_source = TypeSource(self.source) if self.source else None
+            metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
             if isinstance(meta_attr, types.WrapperDescriptorType):
                 wd_vt = variables.WrapperDescriptorVariable(
                     meta_attr, owner=metacls_vt, source=source
