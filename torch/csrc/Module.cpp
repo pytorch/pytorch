@@ -3130,6 +3130,14 @@ Call this whenever a new thread is created in order to propagate values from
         *static_cast<const c10::OperatorHandle*>(op_ptr);
     auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
 
+    // Early return for ops we haven't adapted for C++ fake tensors.
+    {
+      const auto& name = op.operator_name().name;
+      if (name != "aten::_local_scalar_dense" && name != "aten::item") {
+        return false;
+      }
+    }
+
     py::gil_scoped_acquire gil;
 
     py::handle py_op = torch::detail::getTorchApiFunction(op);
@@ -3137,32 +3145,19 @@ Call this whenever a new thread is created in order to propagate values from
     static py::object op_impl_dict =
         py::module::import("torch._subclasses.fake_impls")
             .attr("op_implementations_dict");
-    static py::object op_impl_checks =
-        py::module::import("torch._subclasses.fake_impls")
-            .attr("op_implementations_checks");
 
     py::object handler = py::none();
 
-    // Check direct dict lookup first
     if (op_impl_dict.contains(py_op)) {
       handler = op_impl_dict[py_op];
-    } else {
-      // Check predicate-based handlers
-      for (auto& item : op_impl_checks) {
-        auto check = item.cast<py::tuple>()[0];
-        auto impl = item.cast<py::tuple>()[1];
-        if (check(py_op).cast<bool>()) {
-          handler = impl;
-          break;
-        }
-      }
     }
 
     if (handler.is_none()) {
       return false;
     }
 
-    // Get the Python FakeTensorMode from the C++ mode's shape_env
+    // Get the Python FakeTensorMode from the tracing context.
+    // need to get shape env
     auto mode = c10::impl::FakeTensorModeTLS::get_state();
     auto fake_mode_obj = py::module::import("torch._guards")
         .attr("TracingContext").attr("try_get")();
@@ -3170,18 +3165,23 @@ Call this whenever a new thread is created in order to propagate values from
     if (!fake_mode_obj.is_none()) {
       py_fake_mode = fake_mode_obj.attr("fake_mode");
     } else {
-      // Fallback: construct a minimal fake mode object
       return false;
+    }
+
+    // Fast reject: only handle ops we know are in the dict.
+    {
+      const auto& name = op.operator_name().name;
+      if (name != "aten::_local_scalar_dense" && name != "aten::item") {
+        return false;
+      }
     }
 
     const auto& schema = op.schema();
     auto arguments =
         torch::jit::pop(*stack, schema.arguments().size());
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-    // Exclude the Fake dispatch key so the handler's sub-ops don't re-enter
-    // fakeFallback.  Must use ExcludeDispatchKeyGuard (not tls_set_dispatch_key
-    // _included) because C++ fake tensors carry Fake in their tensor-local
-    // keyset; only the TLS exclude set can override that.
+    // Exclude Fake so sub-ops in the handler don't re-enter fakeFallback
+    // (prevents infinite recursion for handlers that call func() internally).
     py::object result;
     {
       c10::impl::ExcludeDispatchKeyGuard guard(

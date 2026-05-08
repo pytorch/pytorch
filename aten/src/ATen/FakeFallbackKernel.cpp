@@ -653,11 +653,16 @@ void fakeFallback(
 
   // TODO: infer fake kernel
 
-  // TODO: user registered
-  // structured kernels?
+  // TODO: user-registered fake implementations (torch.library.register_fake)
 
-  // special handling for funcs registered through `register_op_impl`
-
+  // Handlers registered via register_op_impl (e.g. local_scalar_dense for
+  // .item()). Matches Python FakeTensorMode._dispatch_impl at
+  // fake_tensor.py:2926-2930.
+  if (mode && mode->op_impl_fn_) {
+    if (mode->op_impl_fn_(&op, stack)) {
+      return;
+    }
+  }
 
   auto device_from_args = rewrite_device_args_to_meta(
       stack, arguments_begin, num_arguments, schema);

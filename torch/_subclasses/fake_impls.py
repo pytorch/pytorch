@@ -1013,14 +1013,17 @@ def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
     from torch._subclasses.fake_tensor import FakeTensor
-    print(f"DEBUG local_scalar_dense: type={type(arg)}, isinstance_FakeTensor={isinstance(arg, FakeTensor)}, is_fake_c++={torch._C._is_fake_tensor(arg)}")
-    if (r := arg.item_memo) is not None:
-        return r
+
+    is_py_fake = isinstance(arg, FakeTensor)
+
+    if is_py_fake:
+        if (r := arg.item_memo) is not None:
+            return r
+
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
         and not fake_mode.allow_scalar_outputs
     ):
-        # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
         r = fake_mode.shape_env.create_unbacked_symfloat()
@@ -1030,7 +1033,9 @@ def local_scalar_dense(
         r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
+
+    if is_py_fake:
+        arg.item_memo = r
     return r
 
 
