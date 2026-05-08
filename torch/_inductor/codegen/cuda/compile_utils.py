@@ -63,10 +63,12 @@ def _clone_cutlass_paths(build_root: str) -> list[str]:
 
 
 def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
+    cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
+        os.path.realpath(os.path.join(cutlass_root, path))
         for path in _cutlass_paths()
     ]
 
