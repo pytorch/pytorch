@@ -294,8 +294,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // Note [Reentrant Stream Context Manager]
@@ -328,8 +327,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
     if (PyList_Append(self->context, Py_None) < 0) {
       throw python_error();
     }
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // If the stream is not on the current device, switch the current device to
@@ -358,8 +356,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   if (PyList_Append(self->context, dict.get()) < 0) {
     throw python_error();
   }
-  Py_INCREF(_self);
-  return _self;
+  return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
 

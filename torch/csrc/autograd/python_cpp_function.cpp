@@ -358,8 +358,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
-  Py_INCREF(handle);
-  return handle;
+  return Py_NewRef(handle);
 }
 
 // This is almost a copy of the function above except post -> pre
@@ -381,8 +380,7 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   }
 
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
-  Py_INCREF(handle);
-  return handle;
+  return Py_NewRef(handle);
 }
 
 } // namespace torch::autograd

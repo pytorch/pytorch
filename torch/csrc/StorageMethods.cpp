@@ -102,8 +102,7 @@ static PyObject* THPStorage_copy_(
 
   at::storage_copy(self_, src, non_blocking);
 
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
 
   END_HANDLE_TH_ERRORS
 }
@@ -162,8 +161,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   } else {
     at::native::resize_bytes_nocuda(storage, newsize);
   }
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -183,8 +181,7 @@ static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
       "but got ",
       THPUtils_typename(number_arg));
   storage_fill(storage, THPByteUtils_unpackReal(number_arg));
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -482,8 +479,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
     if (!storage_impl.defined()) {
       return nullptr;
     }
-    Py_INCREF(self);
-    return self;
+    return Py_NewRef(self);
   }
 
   // file is backed by a fd
@@ -561,8 +557,7 @@ static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
       static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(new_cdata));
   self->cdata =
       c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr));
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
