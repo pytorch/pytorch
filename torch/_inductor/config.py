@@ -449,9 +449,6 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
-# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
-dedup_reduce_scatters: bool = False
-
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None

@@ -26,8 +26,9 @@ from test import support
 
 def global_function():
     def inner_function():
-        class LocalClass:
-            pass
+        with torch._dynamo.error_on_graph_break(False):
+            class LocalClass:
+                pass
         global inner_global_function
         def inner_global_function():
             def inner_function2():
