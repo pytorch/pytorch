@@ -1298,9 +1298,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 256): FlexConfig(64, 16, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 64, 3, 4),
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 192): FlexConfig(128, 32, 2, 8),
             (torch.bfloat16, 256): FlexConfig(32, 64, 3, 4),
             (torch.float16, 64): FlexConfig(128, 64, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 192): FlexConfig(128, 32, 2, 8),
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
