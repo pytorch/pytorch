@@ -123,7 +123,8 @@ static void sort_radix(const Tensor& input,
   const bool use_u16 = direct_final_write && sort_size <= 65536;
   auto opts_idx = use_u16 ? at::TensorOptions().dtype(at::kShort).device(values.device()) : opts_u32;
 
-  auto keys_0 = work_in.reshape({n_rows, sort_size}).contiguous();
+  auto work_in_view = work_in.contiguous().reshape({n_rows, sort_size});
+  auto keys_0 = at::empty({n_rows, sort_size}, opts_val);
   auto keys_1 = at::empty({n_rows, sort_size}, opts_val);
   auto idxs_0 = at::empty({n_rows, sort_size}, opts_idx);
   auto idxs_1 = at::empty({n_rows, sort_size}, opts_idx);
@@ -167,7 +168,7 @@ static void sort_radix(const Tensor& input,
         bool last_pass = (pass == n_passes - 1);
         bool use_direct = direct_final_write && last_pass;
 
-        const Tensor& k_in = ping ? keys_1 : keys_0;
+        const Tensor& k_in = first_pass ? work_in_view : (ping ? keys_1 : keys_0);
         const Tensor& i_in = ping ? idxs_1 : idxs_0;
         const Tensor& k_out_buf = ping ? keys_0 : keys_1;
         const Tensor& i_out_buf = ping ? idxs_0 : idxs_1;

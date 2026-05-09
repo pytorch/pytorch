@@ -6329,6 +6329,44 @@ class TestMPS(TestCaseMPS):
         for shape, dim in strided_cases.get(elem_size, []):
             check(make(shape)[:, ::2], dim)
 
+    @parametrize("dtype", [torch.float32, torch.int32, torch.bfloat16, torch.float16,
+                           torch.int16, torch.int8, torch.uint8, torch.bool])
+    @parametrize("descending", [False, True])
+    @parametrize("dup", [False, True])
+    def test_sort_radix(self, dtype, descending, dup):
+        # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
+        # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
+        # small_tg (RTPTG=512) variant. Strided cases exercise non-contiguous input.
+        if torch.tensor([], dtype=dtype).element_size() == 4:
+            cases = [((4, 65536), -1), ((1, 1048576), -1), ((8, 131072), -1),
+                     ((4, 8, 65536), 2), ((2, 65536, 4), 1)]
+            strided_shape = (4, 131072)
+        else:  # 1- and 2-byte share shapes
+            cases = [((4, 8192), -1), ((32, 8192), -1), ((1, 1048576), -1),
+                     ((8, 16384), -1), ((2, 8192, 4), 1)]
+            strided_shape = (4, 16384)
+
+        lo, hi = ((0, 2) if dtype == torch.bool else (0, 5) if dup else
+                  (0, 200) if dtype == torch.uint8 else (-100, 100))
+
+        def make(shape):
+            return torch.randint(lo, hi, shape).to(dtype)
+
+        def check(cpu, dim=-1):
+            mps = cpu.to("mps")
+            cv, _ = torch.sort(cpu, dim=dim, descending=descending)
+            mv, mi = torch.sort(mps, dim=dim, descending=descending)
+            self.assertEqual(cv, mv.cpu())
+            self.assertEqual(torch.gather(mps, dim, mi).cpu(), mv.cpu())
+            sorted_mi, _ = torch.sort(mi, dim=dim)
+            shape = [1] * mi.ndim
+            shape[dim] = mi.size(dim)
+            self.assertEqual(sorted_mi.cpu(), torch.arange(mi.size(dim)).view(shape).expand_as(mi))
+
+        for shape, dim in cases:
+            check(make(shape), dim)
+        check(make(strided_shape)[:, ::2], -1)
+
     def test_linalg_cholesky(self):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
