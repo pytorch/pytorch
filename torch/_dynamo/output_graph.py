@@ -543,6 +543,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         shape_env: ShapeEnv | None = None,
         export_metadata: ExportMetaData | None = None,
         tracked_fakes_id_to_source: dict[int, list[Source]] | None = None,
+        output_pycode: list[list[str] | None] | None = None,
     ) -> None:
         super().__init__(
             output_graph_guards_state.local_scope,
@@ -573,6 +574,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         self.tracked_fakes_id_to_source: dict[int, list[Source]] = (
             tracked_fakes_id_to_source or {}
         )
+        self.output_pycode = output_pycode or []
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -739,6 +741,7 @@ class OutputGraph(OutputGraphCommon):
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
+        self.output_pycode: list[list[str] | None] = []
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
@@ -2048,16 +2051,18 @@ class OutputGraph(OutputGraphCommon):
             # no side effects, so no new cells created - no need to call side_effects.codegen_save_tempvars
             cell_cg = PyCodegen(self.root_tx)
             self.codegen_cells(tx, cell_cg)
+            instructions, pycode = self.compile_and_call_fx_graph(
+                tx, list(reversed(stack_values_flat)), root
+            )
             self.add_output_instructions(
                 [
                     # load in reverse since UNPACK_SEQUENCE will reverse
-                    *self.compile_and_call_fx_graph(
-                        tx, list(reversed(stack_values_flat)), root
-                    ),
+                    *instructions,
                     *cell_cg.get_instructions(),
                     *create_swap(2),
                     create_instruction("UNPACK_SEQUENCE", arg=len(stack_values_flat)),
-                ]
+                ],
+                pycode=pycode,
             )
             # function output will be moved to the correct places below
         else:
@@ -2161,10 +2166,12 @@ class OutputGraph(OutputGraphCommon):
                         )
 
             output = []
+            subgraph_pycode = None
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                instructions, subgraph_pycode = self.compile_and_call_fx_graph(
+                    tx, pass2.graph_output_vars(), root
                 )
+                output.extend(instructions)
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
@@ -2175,7 +2182,10 @@ class OutputGraph(OutputGraphCommon):
                 # NB: Important to run compiler collective even when there is
                 # a graph break
                 self.run_compiler_collective()
-            self.add_output_instructions(output + pass2.get_instructions())
+            self.add_output_instructions(output, pycode=subgraph_pycode)
+            self.add_output_instructions(
+                pass2.get_instructions(), pycode=pass2.get_pycode()
+            )
 
         # store all stack and locals for each frame
         # current state of the stack:
@@ -2633,13 +2643,17 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
-    ) -> list[Instruction]:
+    ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
 
         Code is generated w.r.t. self.root_tx.
         tx is only used for preserving GraphModule metadata
+
+        Returns a tuple of (instructions, pycode) where pycode is a string
+        representation of the generated Python code if generate_pycode_prologue
+        is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
             from .decorators import disable
@@ -2651,7 +2665,7 @@ class OutputGraph(OutputGraphCommon):
 
             self.run_compiler_collective()
             if count_calls(self.graph) == 0 and len(rv) == 0:
-                return []
+                return [], None
 
             name = unique_id("__compiled_fn", with_uuid=True)
 
@@ -2948,7 +2962,8 @@ class OutputGraph(OutputGraphCommon):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
             cg.make_call_generated_code(name)
-            return cg.get_instructions()
+
+            return cg.get_instructions(), cg.get_pycode()
 
     @property
     def placeholders(self) -> list[fx.Node]:
@@ -3289,12 +3304,20 @@ class OutputGraph(OutputGraphCommon):
                     self.remove_node(u)
                 self.remove_node(node)
 
-    def add_output_instructions(self, prefix: list[Instruction]) -> None:
+    def add_output_instructions(
+        self, prefix: list[Instruction], pycode: list[str] | None = None
+    ) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
+        An optional pycode argument can be passed to add python codegen along with
+        the bytecode. The generated python code should match the bytecode behavior
+        from the `prefix` argument.
         """
         self.output_instructions.extend(prefix)
+        if not isinstance(pycode, (list, type(None))):
+            raise AssertionError("pycode must be a list of python code or None")
+        self.output_pycode.append(pycode)
         self.should_exit = True
 
     def install_resume_function_global(
