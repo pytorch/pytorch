@@ -9,6 +9,7 @@
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/metal/common.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -31,9 +32,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Sort_metallib.h>
 #endif
 
-// TODO: reuse DEFAULT_ILP from c10/metal/common.h
-static constexpr int TN = 4; // elements per thread
-
 // 2D (n_rows, sort_size) view of self for last-dim sort, nullopt if copy required.
 static std::optional<Tensor> try_view_as_2d_lastdim(const Tensor& self, int sort_size) {
   int64_t n_rows = self.numel() / sort_size;
@@ -46,13 +44,14 @@ static std::optional<Tensor> try_view_as_2d_lastdim(const Tensor& self, int sort
 }
 
 static int select_tptg(int sort_size, size_t elem_size, int n_rows) {
-  int potential_tptg = at::ceil_div(sort_size, TN);
+  constexpr int ILP = static_cast<int>(c10::metal::ILP_PER_THREAD);
+  int potential_tptg = at::ceil_div(sort_size, ILP);
   // Few rows: shrink TPTG to force multi-block, giving the GPU more TGs.
   if (n_rows <= 2 && sort_size > 2048) {
     constexpr int target_total_tgs = 4;
     int target_blocks_per_row = std::max(1, target_total_tgs / std::max(n_rows, 1));
     int target_elems_per_tg = std::max(2048, at::ceil_div(sort_size, target_blocks_per_row));
-    int target_tptg = target_elems_per_tg / TN;
+    int target_tptg = target_elems_per_tg / ILP;
     potential_tptg = std::min(potential_tptg, target_tptg);
   }
 
@@ -65,7 +64,7 @@ static int select_tptg(int sort_size, size_t elem_size, int n_rows) {
     tptg = std::min(tptg, 256);
   }
   // TPTG=1024 uses ~24KB tgmem which limits occupancy, drop to 512 (~12KB) when rows hide the extra merge
-  const int tptg1024_n_blocks = at::ceil_div(sort_size, 1024 * TN);
+  const int tptg1024_n_blocks = at::ceil_div(sort_size, 1024 * ILP);
   if (tptg == 1024 && tptg1024_n_blocks > 1 && n_rows >= 8) {
     tptg = 512;
   }
@@ -265,7 +264,7 @@ static void sort_multi_block(const Tensor& input,
                              int64_t stride_seg,
                              int tptg,
                              bool stable) {
-  const int elems_per_tg = tptg * TN;
+  const int elems_per_tg = tptg * static_cast<int>(c10::metal::ILP_PER_THREAD);
   const int n_rows = static_cast<int>(input.numel() / sort_size);
   const int n_blocks = at::ceil_div(sort_size, elems_per_tg);
   const bool need_permute = (dim != input.ndimension() - 1);
@@ -467,7 +466,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
 
   const int n_rows = static_cast<int>(self.numel() / sort_size);
   const int tptg = select_tptg(sort_size, self.element_size(), n_rows);
-  const int elems_per_tg = tptg * TN;
+  const int elems_per_tg = tptg * static_cast<int>(c10::metal::ILP_PER_THREAD);
   const bool is_last_dim = (dim == self.ndimension() - 1);
   const bool stable_kernel = stable.value_or(false);
 
