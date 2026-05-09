@@ -55,14 +55,14 @@ template <typename T>
 inline uint to_radix_key(T val, bool desc) {
   using U = typename radix_bits<T>::type;
   U result;
-  if constexpr (::metal::is_floating_point_v<T>) {
+  if (::metal::is_floating_point_v<T>) {
     constexpr U all_ones = U(~U(0));
     constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
     if (metal::isnan(val))
       return desc ? 0u : uint(all_ones);
     U bits = as_type<U>(val);
     result = bits ^ ((bits & sign_bit) ? all_ones : sign_bit);
-  } else if constexpr (::metal::is_signed_v<T>) {
+  } else if (::metal::is_signed_v<T>) {
     constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
     result = as_type<U>(val) ^ sign_bit;
   } else {
