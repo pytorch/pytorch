@@ -383,7 +383,9 @@ def _collect_tensors_with_sources(
     elif isinstance(var, ConstDictVariable):
         for item in var.items.values():
             results.extend(_collect_tensors_with_sources(item))
-    elif isinstance(var, UserDefinedDictVariable) and var._base_vt is not None:
+    elif isinstance(var, UserDefinedDictVariable):
+        if var._base_vt is None:
+            raise AssertionError("UserDefinedDictVariable._base_vt must not be None")
         # `OrderedDictVariable`, `DefaultDictVariable`, and other dict
         # subclass wrappers store the mapping in `_base_vt` (a
         # `ConstDictVariable`); recurse into it.
@@ -2766,6 +2768,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # underlying `ConstDictVariable`. The inner storage carries
             # `user_cls` so the OrderedDict-vs-dict distinction is preserved.
             if isinstance(inputs_var, variables.UserDefinedDictVariable):
+                if inputs_var._base_vt is None:
+                    raise AssertionError("UserDefinedDictVariable._base_vt must not be None")
                 inputs_var = inputs_var._base_vt
             elif isinstance(inputs_var, variables.MappingProxyVariable):
                 inputs_var = inputs_var.dv_dict
