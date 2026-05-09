@@ -9047,9 +9047,8 @@
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: random_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
-    MPS: random_mps_
   autogen: random.from, random.from_out
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
@@ -9057,9 +9056,8 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: random_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
-    MPS: random_mps_
   autogen: random.to, random.to_out
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
@@ -9067,8 +9065,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: random_
-    MPS: random_mps_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
   autogen: random, random.out
 
@@ -9077,8 +9074,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: uniform_
-    MPS: uniform_mps_
+    CPU, CUDA, MPS: uniform_
     Meta: uniform_meta_
   autogen: uniform, uniform.out
 
@@ -9087,8 +9083,7 @@
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: cauchy_
-    MPS: cauchy_mps_
+    CPU, CUDA, MPS: cauchy_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -9096,8 +9091,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: log_normal_
-    MPS: log_normal_mps_
+    CPU, CUDA, MPS: log_normal_
   autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -9105,8 +9099,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: exponential_
-    MPS: exponential_mps_
+    CPU, CUDA, MPS: exponential_
   autogen: exponential, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -9114,8 +9107,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: geometric_
-    MPS: geometric_mps_
+    CPU, CUDA, MPS: geometric_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out
@@ -10644,8 +10636,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: normal_
-    MPS: normal_mps_
+    CPU, CUDA, MPS: normal_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: normal_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: normal_nested_
@@ -10663,42 +10654,36 @@
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: normal_out
-    MPS: normal_mps_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: normal_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
-    MPS: normal_mps_out
   tags: nondeterministic_seeded
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: normal_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
-    MPS: normal_mps_out
   tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 

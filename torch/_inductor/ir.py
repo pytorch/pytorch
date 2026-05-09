@@ -8907,6 +8907,57 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     @classmethod
+    def _maybe_realize_symm_mem_args(
+        cls, kernel: torch._ops.OpOverload, *args: Any, **kwargs: Any
+    ) -> None:
+        """Realize symm_mem args as comm buffers based on registry metadata."""
+        from torch._library.simple_registry import singleton
+
+        qualname = kernel.__qualname__
+        entry = singleton.get(qualname)
+        if entry is None or not entry.symm_mem_args.is_registered():
+            return
+
+        from .comm_lowering import can_realize_as_comm_buffer, realize_as_comm_buffer
+
+        symm_mem_args = entry.symm_mem_args.get()
+        if symm_mem_args is None:
+            return
+
+        from torch.fx.operator_schemas import normalize_function
+
+        normalized = normalize_function(
+            kernel, args, kwargs, normalize_to_only_use_kwargs=True
+        )
+        if normalized is None:
+            log.warning(
+                "Failed to normalize arguments for symm_mem realization: %s",
+                qualname,
+            )
+            return
+
+        _, all_args = normalized
+
+        group_name = all_args.get("group_name")
+        if group_name is None:
+            return
+
+        for arg_name in symm_mem_args:
+            arg_value = all_args.get(arg_name)
+            tensors, _ = pytree.tree_flatten(arg_value)
+            for t in tensors:
+                if not isinstance(t, TensorBox):
+                    continue
+                if can_realize_as_comm_buffer(t, CommBufferType.SYMM_MEM):
+                    realize_as_comm_buffer(t, CommBufferType.SYMM_MEM, group_name)
+                else:
+                    log.warning(
+                        "Failed to realize %s as a symmetric memory buffer for %s",
+                        arg_name,
+                        qualname,
+                    )
+
+    @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
@@ -8923,6 +8974,11 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        # For ops with registered symm_mem args, realize those args as
+        # symmetric memory buffers before creating the FallbackKernel.
+        if isinstance(kernel, torch._ops.OpOverload):
+            cls._maybe_realize_symm_mem_args(kernel, *args, **kwargs)
 
         # Try to lower single output functional custom ops to their out-variant.
         if (
