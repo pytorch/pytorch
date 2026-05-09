@@ -852,6 +852,10 @@ class FSDPParam:
             raise AssertionError("Expects unsharded_accumulated_grad to not be None")
         return self._get_grad_inner_tensor(grad)
 
+    @property
+    def unsharded_zero_grad_data(self) -> torch.Tensor:
+        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
+
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
