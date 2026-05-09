@@ -56,7 +56,8 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@elainewy/workflow-level-experiment-routing
+    # DEBUG
+    uses: ./.github/workflows/_runner-determinator.yml
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
