@@ -457,11 +457,6 @@ class SubprocMain:
             # workers.  Callers must ensure no in-flight jobs exist; if this
             # invariant is violated, shutdown(wait=False) will silently cancel
             # queued futures whose results the parent is waiting on.
-            if self.pool._pending_work_items:
-                log.warning(
-                    "Scale-up with %d pending work items; these may be lost",
-                    len(self.pool._pending_work_items),
-                )
             self._quiesce()
 
         self._current_nprocs = nprocs

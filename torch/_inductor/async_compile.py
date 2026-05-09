@@ -301,19 +301,28 @@ class AsyncCompile:
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
         AsyncCompile._ready_future = None
-        nprocs = _get_compile_threads_for_memory(get_compile_threads())
-        log.info(
-            "Creating '%s' pool with %d workers (requested %d)",
-            config.worker_start_method,
-            nprocs,
-            get_compile_threads(),
-        )
 
         pool: AnyPool
         if config.worker_start_method == "subprocess":
-            # Wrapper around ProcessPoolExecutor forks in a new process we control
+            # SubprocPool gets memory-aware scaling at wakeup() time, so
+            # the constructor just uses the configured thread count.
+            nprocs = get_compile_threads()
+            log.info(
+                "Creating '%s' pool with %d workers",
+                config.worker_start_method,
+                nprocs,
+            )
             pool = SubprocPool(nprocs, quiesce=config.quiesce_async_compile_pool)
         else:
+            # Non-SubprocPool paths (fork/spawn) have no wakeup mechanism,
+            # so memory-aware scaling must happen at creation time.
+            nprocs = _get_compile_threads_for_memory(get_compile_threads())
+            log.info(
+                "Creating '%s' pool with %d workers (requested %d)",
+                config.worker_start_method,
+                nprocs,
+                get_compile_threads(),
+            )
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
                 os.environ["TORCH_WARM_POOL"] = "0"
@@ -374,6 +383,8 @@ class AsyncCompile:
             cls._ready_future = cls.process_pool().submit(cls._get_ready)
         if not cls._ready_future.done():
             return False
+        # _pool_needs_wakeup is intentionally racy: concurrent readers may
+        # both call wakeup(), but that is safe because wakeup is idempotent.
         if cls._pool_needs_wakeup:
             cls.wakeup()
         return True
@@ -385,8 +396,9 @@ class AsyncCompile:
         ProcessPoolExecutor. The worker count is capped based on available
         CPU memory to avoid OOM during compilation.
 
-        Related: quiesce_async_compile_pool controls the idle timer;
-        quiesce_async_compile_eager controls immediate quiesce after wait().
+        Note: this unconditionally starts workers even if the pool won't be
+        used (e.g. proton profiling forces synchronous compilation). This is
+        harmless -- unused workers quiesce via the idle timer.
         """
         if get_compile_threads() <= 1:
             return
