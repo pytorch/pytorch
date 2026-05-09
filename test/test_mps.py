@@ -8775,6 +8775,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(i_t * 1.5, i_t.cpu() * 1.5)
         self.assertEqual(1.5 * i_t, 1.5 * i_t.cpu())
 
+        # Regression: a float scalar that isn't exactly representable in
+        # the tensor's narrower dtype must reach the kernel at full
+        # precision. If the host-promote shortcut routes such a scalar
+        # through .to(half) on the CPU we lose precision before launch,
+        # whereas the strided cast kernel reads it via op_math_t = float
+        # at runtime. The contiguous and strided paths should agree
+        # bit-for-bit for the same data and scalar.
+        h = rand(1024, dtype=torch.float16)
+        h_strided = h.repeat_interleave(2)[::2]
+        self.assertTrue(torch.equal(h * (1.0 / 3.0), h_strided * (1.0 / 3.0)))
+        self.assertTrue(torch.equal((1.0 / 3.0) * h, (1.0 / 3.0) * h_strided))
+
         # cast cases
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.float16), "+*-")
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")

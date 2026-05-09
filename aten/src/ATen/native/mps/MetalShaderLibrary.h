@@ -142,11 +142,17 @@ class MetalShaderLibrary {
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+  // `ilp_threshold` lets callers tune when the dense ILP variant kicks in
+  // (numel >= threshold). When unspecified, the default is the same 256K
+  // crossover used by the unary path, but only for floating-point output;
+  // non-float outputs get UINT32_MAX (i.e. ILP off by default). Comparison
+  // and other ops with different memory-bandwidth profiles can override.
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
 
   template <typename T>
