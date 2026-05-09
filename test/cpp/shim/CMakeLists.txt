@@ -7,12 +7,12 @@ set(TORCH_SHIM_TEST_ROOT ${TORCH_ROOT}/test/cpp/shim)
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(TORCH_SHIM_TEST_SRCS
-  ${AOTI_TORCH_CHECK_TEST_ROOT}/main.cpp
-  ${AOTI_TORCH_CHECK_TEST_ROOT}/test_stable_ivalue.cpp
+  ${TORCH_SHIM_TEST_ROOT}/main.cpp
+  ${TORCH_SHIM_TEST_ROOT}/test_stable_ivalue.cpp
 )
 
 add_executable(test_shim
-  ${AOTI_TORCH_CHECK_TEST_SRCS}
+  ${TORCH_SHIM_TEST_SRCS}
 )
 
 # TODO temporary until we can delete the old gtest polyfills.
