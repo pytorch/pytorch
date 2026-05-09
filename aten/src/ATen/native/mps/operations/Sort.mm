@@ -72,9 +72,7 @@ static int select_tptg(int sort_size, size_t elem_size, int n_rows) {
   return tptg;
 }
 
-// returns true when multi-block merge sort would need so many merge-dispatch
-// passes that MPSGraph's sort is expected to win
-static bool should_use_mpsgraph_fallback(int sort_size, size_t elem_size, int elems_per_tg) {
+static bool should_use_radix(int sort_size, size_t elem_size, int elems_per_tg) {
   if (elem_size > 4)
     return false;
   int n_blocks_merge = at::ceil_div(sort_size, elems_per_tg);
@@ -87,49 +85,147 @@ static bool should_use_mpsgraph_fallback(int sort_size, size_t elem_size, int el
   return radix_dispatches <= 2 * merge_dispatches + 2;
 }
 
-static void sort_mpsgraph_fallback(const Tensor& self,
-                                   const Tensor& values,
-                                   const Tensor& indices,
-                                   int64_t dim,
-                                   bool descending) {
-  values.copy_(self);
-  MPSStream* stream = getCurrentMPSStream();
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *selfTensor = nil, *valuesTensor = nil, *indicesTensor = nil;
-  };
-  @autoreleasepool {
-    MPSShape* input_shape = getMPSShape(self);
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string key = std::string("sort:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":dim" +
-        std::to_string(dim) + ":descending" + std::to_string(descending);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
-      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self);
-      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
-                                                         axis:(NSInteger)dim
-                                                   descending:(BOOL)descending
-                                                         name:@"sort_out"];
-      if ([sortedTensor dataType] != getMPSDataType(values)) {
-        sortedTensor = castMPSTensor(mpsGraph, sortedTensor, values.scalar_type());
-      }
-      MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
-                                                               axis:(NSInteger)dim
-                                                         descending:(BOOL)descending
-                                                               name:@"argsort_out"];
-      if ([argSortedTensor dataType] != getMPSDataType(indices)) {
-        argSortedTensor = castMPSTensor(mpsGraph, argSortedTensor, indices.scalar_type());
-      }
-      newCachedGraph->valuesTensor = sortedTensor;
-      newCachedGraph->indicesTensor = argSortedTensor;
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->selfTensor, self);
-    Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
-    Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    auto results = dictionaryFromPlaceholders(valuesPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+static void sort_radix(const Tensor& input,
+                       const Tensor& values,
+                       const Tensor& indices,
+                       int64_t dim,
+                       bool descending,
+                       int sort_size) {
+  bool need_permute = (dim != input.ndimension() - 1);
+  Tensor work_in = input;
+  if (need_permute) {
+    work_in = input.movedim(dim, -1).contiguous();
+    sort_size = work_in.size(work_in.ndimension() - 1);
   }
+
+  int n_rows = static_cast<int>(work_in.numel() / sort_size);
+  // 16/32-bit types use 8-bit radix (256 bins) - halves global memory traffic
+  // vs 4-bit radix while keeping the same total block-local work
+  // (RBITS sub-passes x n_passes = total bits either way). 8-bit types stay on
+  // 4-bit radix since 2 passes is already the minimum meaningful pass count.
+  const size_t elem_size = values.element_size();
+  const int radix_bits = (elem_size == 1) ? 4 : 8;
+  const int radix_size = 1 << radix_bits;
+  const int n_passes = (8 * static_cast<int>(elem_size)) / radix_bits;
+  // 2-byte many-row: drop RTPTG 1024->512 to halve per-TG tgmem -> 2 TGs/core.
+  const bool small_tg = (elem_size == 2 && n_rows >= 32);
+  const int RADIX_TPTG = (elem_size == 2 && !small_tg) ? 1024 : 512;
+  const int radix_ept = (elem_size == 1) ? 8 : 4;
+  const int RADIX_ELEMS_PER_TG = RADIX_TPTG * radix_ept;
+  int n_blocks = at::ceil_div(sort_size, RADIX_ELEMS_PER_TG);
+  int n_entries = radix_size * n_blocks;
+
+  auto opts_val = values.options();
+  auto opts_u32 = at::TensorOptions().dtype(at::kInt).device(values.device());
+  const bool direct_final_write = !need_permute;
+  // Use int16 storage reinterpreted as ushort in the kernel: halves the
+  // intermediate index memory traffic. Only valid when global indices fit in
+  // 16 bits (sort_size <= 65536). The kernel never treats these as signed.
+  const bool use_u16 = direct_final_write && sort_size <= 65536;
+  auto opts_idx = use_u16 ? at::TensorOptions().dtype(at::kShort).device(values.device()) : opts_u32;
+
+  auto keys_0 = work_in.reshape({n_rows, sort_size}).contiguous();
+  auto keys_1 = at::empty({n_rows, sort_size}, opts_val);
+  auto idxs_0 = at::empty({n_rows, sort_size}, opts_idx);
+  auto idxs_1 = at::empty({n_rows, sort_size}, opts_idx);
+  auto histograms = at::empty({n_rows, n_entries}, opts_u32);
+
+  const auto type_str = scalarToMetalTypeString(values);
+  const char* tptg_suffix = small_tg ? "_tptg512" : "";
+  const char* u16_suffix = use_u16 ? "_u16" : "";
+  const auto count_kernel = fmt::format("radix_count_{}_{}bit{}", type_str, radix_bits, tptg_suffix);
+
+  constexpr int kMaxFusedBlocks = 4;
+  constexpr int kFusedWorkCap = 128;
+  const bool use_fused_count_scan = n_blocks <= kMaxFusedBlocks && !small_tg;
+  const bool use_fused_scan =
+      !use_fused_count_scan && (n_blocks <= kMaxFusedBlocks) && (n_blocks * n_blocks * n_rows <= kFusedWorkCap);
+  const char* fused_prefix = use_fused_scan ? "fused_" : "";
+  const auto scatter_kernel =
+      fmt::format("radix_scatter_{}{}_{}bit{}{}", fused_prefix, type_str, radix_bits, tptg_suffix, u16_suffix);
+  const auto scatter_final_kernel =
+      fmt::format("radix_scatter_{}final_{}_{}bit{}{}", fused_prefix, type_str, radix_bits, tptg_suffix, u16_suffix);
+  const auto count_scan_kernel =
+      use_fused_count_scan ? fmt::format("radix_count_scan_{}_{}bit_mb4", type_str, radix_bits) : std::string{};
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = mpsStream->commandEncoder();
+      auto count_pso = use_fused_count_scan ? nil : lib.getPipelineStateForFunc(count_kernel);
+      auto count_scan_pso = use_fused_count_scan ? lib.getPipelineStateForFunc(count_scan_kernel) : nil;
+      MTLComputePipelineState_t scan_pso = nil;
+      if (!use_fused_scan && !use_fused_count_scan)
+        scan_pso = lib.getPipelineStateForFunc("radix_scan");
+      auto scatter_pso = lib.getPipelineStateForFunc(scatter_kernel);
+      MTLComputePipelineState_t scatter_final_pso =
+          direct_final_write ? lib.getPipelineStateForFunc(scatter_final_kernel) : nil;
+
+      bool ping = false;
+      for (int pass = 0; pass < n_passes; pass++) {
+        int shift = pass * radix_bits;
+        bool first_pass = (pass == 0);
+        bool last_pass = (pass == n_passes - 1);
+        bool use_direct = direct_final_write && last_pass;
+
+        const Tensor& k_in = ping ? keys_1 : keys_0;
+        const Tensor& i_in = ping ? idxs_1 : idxs_0;
+        const Tensor& k_out_buf = ping ? keys_0 : keys_1;
+        const Tensor& i_out_buf = ping ? idxs_0 : idxs_1;
+
+        const auto dims = std::array<int32_t, 3>{sort_size, n_blocks, shift};
+        const auto flags = std::array<uint8_t, 2>{static_cast<uint8_t>(descending), static_cast<uint8_t>(first_pass)};
+
+        if (use_fused_count_scan) {
+          getMPSProfiler().beginProfileKernel(count_scan_pso, count_scan_kernel, {k_in});
+          [enc setComputePipelineState:count_scan_pso];
+          mtl_setArgs(enc, k_in, histograms, dims, descending);
+          [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
+          getMPSProfiler().endProfileKernel(count_scan_pso);
+        } else {
+          getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in});
+          [enc setComputePipelineState:count_pso];
+          mtl_setArgs(enc, k_in, histograms, dims, descending);
+          [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1)
+              threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
+          getMPSProfiler().endProfileKernel(count_pso);
+
+          if (!use_fused_scan) {
+            getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms});
+            [enc setComputePipelineState:scan_pso];
+            mtl_setArgs(enc, histograms, n_entries);
+            [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
+            getMPSProfiler().endProfileKernel(scan_pso);
+          }
+        }
+
+        auto pso = use_direct ? scatter_final_pso : scatter_pso;
+        const auto& kernel_name = use_direct ? scatter_final_kernel : scatter_kernel;
+        getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in});
+        [enc setComputePipelineState:pso];
+        if (use_direct) {
+          mtl_setArgs(enc, k_in, i_in, values, indices, histograms, dims, flags);
+        } else {
+          mtl_setArgs(enc, k_in, i_in, k_out_buf, i_out_buf, histograms, dims, flags);
+        }
+        [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
+        getMPSProfiler().endProfileKernel(pso);
+
+        ping = !ping;
+      }
+    }
+  });
+
+  if (direct_final_write) {
+    // Already written directly to values/indices in the last scatter.
+    return;
+  }
+
+  bool ping = (n_passes % 2 == 1);
+  const Tensor& final_keys = ping ? keys_1 : keys_0;
+  const Tensor& final_idxs = ping ? idxs_1 : idxs_0;
+  values.copy_(final_keys.view(work_in.sizes()).movedim(-1, dim));
+  indices.copy_(final_idxs.view(work_in.sizes()).movedim(-1, dim));
 }
 
 static void sort_single_block(const Tensor& input,
@@ -375,10 +471,10 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   const bool is_last_dim = (dim == self.ndimension() - 1);
   const bool stable_kernel = stable.value_or(false);
 
-  const bool use_mpsgraph = should_use_mpsgraph_fallback(sort_size, self.element_size(), elems_per_tg);
+  const bool use_radix = should_use_radix(sort_size, self.element_size(), elems_per_tg);
 
-  if (use_mpsgraph) {
-    sort_mpsgraph_fallback(self, out_vals, out_inds, dim, descending);
+  if (use_radix) {
+    sort_radix(self, out_vals, out_inds, dim, descending, sort_size);
   } else {
     // For last-dim sort, try a strided view to skip .contiguous(); the kernels
     // read with (stride_sort, stride_seg) so any view that flattens to 2D works.
