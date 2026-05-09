@@ -357,10 +357,10 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   const auto nplane = input.size(1);
   const auto input_W = input.size(2);
   const auto output_W = output_c.size(2);
-  const std::array<auto, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                         static_cast<int32_t>(output_W),
-                                         static_cast<int32_t>(padding[0]),
-                                         static_cast<int32_t>(padding[1])};
+  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
+                                            static_cast<int32_t>(output_W),
+                                            static_cast<int32_t>(padding[0]),
+                                            static_cast<int32_t>(padding[1])};
 
   auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -396,10 +396,10 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   const auto nplane = grad_input_c.size(1);
   const auto input_W = grad_input_c.size(2);
   const auto output_W = grad_output.size(2);
-  const std::array<auto, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                         static_cast<int32_t>(output_W),
-                                         static_cast<int32_t>(padding[0]),
-                                         static_cast<int32_t>(padding[1])};
+  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
+                                            static_cast<int32_t>(output_W),
+                                            static_cast<int32_t>(padding[0]),
+                                            static_cast<int32_t>(padding[1])};
 
   auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_backward_" +
                                                          scalarToMetalTypeString(grad_input_c));

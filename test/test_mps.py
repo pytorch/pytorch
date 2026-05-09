@@ -8893,6 +8893,18 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
+    @serialTest()
+    def test_replication_pad1d_issue135442(self):
+        # backward(mpsgraph) used to hang the GPU
+        # https://github.com/pytorch/pytorch/issues/135442
+        x = torch.randn(65536, 2, 4, requires_grad=True)
+        x_mps = x.detach().to("mps").requires_grad_()
+        g = torch.randn(65536, 2, 11)
+        pad = torch.nn.ReplicationPad1d((3, 4))
+        pad(x).backward(g)
+        pad(x_mps).backward(g.to("mps"))
+        self.assertEqual(x_mps.grad.cpu(), x.grad)
+
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
