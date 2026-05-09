@@ -64,15 +64,21 @@ _lib: _Library | None = None
 
 
 def _init() -> None:
-    r"""Register prims as implementation of var_mean and group_norm."""
+    r"""Register decomposition for native_group_norm_backward on MPS.
+
+    The forward path falls through to the ``CompositeExplicitAutograd``
+    ``math_group_norm`` registration, which is significantly faster on MPS
+    than the prim decomposition (it dispatches to the fused MPSGraph
+    normalization API via ``at::native_batch_norm``). Backward has no
+    composite or MPS native implementation, so it stays registered here
+    to avoid the regression in #88331.
+    """
     global _lib
 
     if _lib is not None or not is_built():
         return
 
     from torch._decomp.decompositions import native_group_norm_backward
-    from torch._refs import native_group_norm
 
     _lib = _Library("aten", "IMPL")
-    _lib.impl("native_group_norm", native_group_norm, "MPS")
     _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")
