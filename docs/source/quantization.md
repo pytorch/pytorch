@@ -11,7 +11,7 @@ We are centralizing all quantization related development to [torchao](https://gi
 
 Plan for the existing quantization flows:
 
-1. **Eager mode quantization** (`torch.ao.quantization.quantize`, `torch.ao.quantization.quantize_dynamic`): please migrate to use torchao eager mode [`quantize_`](https://docs.pytorch.org/ao/main/generated/torchao.quantization.quantize_.html#torchao.quantization.quantize_) API instead.
+1. **Eager mode quantization** (`torch.ao.quantization.quantize`, `torch.ao.quantization.quantize_dynamic`): please migrate to use torchao eager mode [`quantize_`](https://docs.pytorch.org/ao/main/api_reference/generated/torchao.quantization.quantize_.html#torchao.quantization.quantize_) API instead.
 
 2. **FX graph mode quantization** (`torch.ao.quantization.quantize_fx.prepare_fx`, `torch.ao.quantization.quantize_fx.convert_fx`): please migrate to use torchao pt2e quantization API instead (`torchao.quantization.pt2e.quantize_pt2e.prepare_pt2e`, `torchao.quantization.pt2e.quantize_pt2e.convert_pt2e`).
 
