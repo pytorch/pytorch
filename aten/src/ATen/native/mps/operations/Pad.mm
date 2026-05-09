@@ -26,7 +26,7 @@ namespace at::native {
 namespace mps {
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& replication_pad_lib = MetalShaderLibrary::getBundledLibrary();
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ReplicationPad_metallib.h>
 #endif
@@ -362,7 +362,7 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
                                             static_cast<int32_t>(padding[0]),
                                             static_cast<int32_t>(padding[1])};
 
-  auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
+  auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -401,8 +401,7 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
                                             static_cast<int32_t>(padding[0]),
                                             static_cast<int32_t>(padding[1])};
 
-  auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_backward_" +
-                                                         scalarToMetalTypeString(grad_input_c));
+  auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
