@@ -2029,8 +2029,8 @@ except RuntimeError as e:
 
         # This is a regular expression to match the error against.
         expect_re = (
-            "[^:]*: The size of tensor a \\(\\d\\) must match the size of "
-            "tensor b \\(\\d\\) at non-singleton dimension \\d$"
+            "^The size of tensor a \\(\\d\\) must match the size of "
+            "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
         )
         # Verify that an operation using STABLE_TORCH_ERROR_CHECK provides detailed errors.
         self.assertRaisesRegex(RuntimeError, expect_re, make_exception_stable)

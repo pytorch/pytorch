@@ -41,14 +41,15 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     const char* file,
     int64_t line) {
   std::stringstream ss;
-  ss << call << " API call failed at " << file << ", line " << line;
-  ss << ", with: " << torch_exception_get_what_without_backtrace();
+  ss << torch_exception_get_what_without_backtrace();
+  ss << " (originally from " << call << " API call failed at " << file
+     << ", line " << line << ")";
 
   std::time_t t = std::time(nullptr);
   std::tm tm = *std::localtime(&t);
   std::cerr << "[" << std::put_time(&tm, "%H:%M:%S") << " " << file << ":"
-            << line
-            << "] Exception in aoti_torch: " << torch_exception_get_what();
+            << line << "] Exception across libtorch C API boundary: "
+            << torch_exception_get_what();
   throw std::runtime_error(ss.str());
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
