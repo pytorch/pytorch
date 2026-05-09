@@ -263,10 +263,22 @@ class ScanOp(HigherOrderOperator):
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
 
-        # Mutation is only allowed on loop-invariant inputs (init / carry and
-        # additional_inputs). xs slices are per-iteration views, so mutating
-        # them is not meaningful and is rejected. If xs needs to be mutated as
-        # well, add it as a lifted argument.
+        # Mutation semantics for scan:
+        # - init is mutable: scan iterates sequentially, and each step's
+        #   carry is delivered via the combine_fn return, so an in-place
+        #   update to init means the final carry is the mutated init.
+        #   Matches while_loop.carried_inputs.
+        # - additional_inputs is mutable: loop-invariant tensor identity
+        #   across sequential iterations, same semantics as while_loop's
+        #   additional_inputs (CUDA-graph-friendly lifted / pre-allocated
+        #   buffers such as KV caches or workspace scratch).
+        # - xs is NOT mutable: each iteration sees a fresh, storage-disjoint
+        #   slice (xs[t] and xs[t+1] share no storage), so a mutation on
+        #   xs[t] cannot be observed by iteration t+1. The only externally-
+        #   observable effect is "write-back to xs's t-th slice", which is
+        #   already expressible via the ys output path at no extra cost.
+        #   If xs-like in-place updates are required, pass the buffer via
+        #   additional_inputs and index into it inside combine_fn.
         n_init = len(init)
         n_xs = len(xs)
         xs_mutated = [i for i in mutated_inputs if n_init <= i < n_init + n_xs]
