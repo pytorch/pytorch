@@ -1379,7 +1379,7 @@ eager_compile_pool_quiesce: bool = Config(
 # next compile gets a warm start. 0 means fully quiesce.
 compile_threads_min: int = Config(
     env_name_force="TORCHINDUCTOR_COMPILE_THREADS_MIN",
-    default=0,
+    default=1,
 )
 
 # Available-memory fraction below which we start reducing compile workers.

@@ -786,6 +786,8 @@ class AsyncCompile:
     def _eager_quiesce() -> None:
         if not config.eager_compile_pool_quiesce:
             return
+        if not AsyncCompile.process_pool.cache_info().currsize:
+            return
         try:
             pool = AsyncCompile.process_pool()
         except Exception:
