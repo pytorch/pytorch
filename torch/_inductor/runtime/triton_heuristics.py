@@ -478,6 +478,9 @@ class CachingAutotuner(KernelInterface):
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
+        # Last tolerable error from _precompile_configs_parallel; surfaced
+        # by _precompile_worker when no configs compiled successfully.
+        self._last_precompile_failure: BaseException | None = None
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
                 self.triton_meta.get("device", 0)
@@ -638,17 +641,21 @@ class CachingAutotuner(KernelInterface):
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
-        compile_results = []
-        exc = None
-        for c in self.configs:
-            try:
-                compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
+        # Per-config compile runs in the parent; reload fn.fn if it was
+        # stripped during the worker pickle round-trip.
+        self._ensure_kernel_loaded()
+        compile_results = self._precompile_configs_parallel(
+            list(self.configs), tolerate_failures=True
+        )
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            exc = self._last_precompile_failure
+            if exc is not None:
+                raise NoTritonConfigsError(
+                    f"No valid triton configs. {type(exc).__name__}: {exc}"
+                )
+            raise NoTritonConfigsError("No valid triton configs.")
+        # _precompile_config already did the per-config TritonBundler.put;
+        # the pool is in-process (ThreadPoolExecutor), so no mirror needed.
         self.compile_results = compile_results
         self.configs = None
 
@@ -853,8 +860,11 @@ class CachingAutotuner(KernelInterface):
 
     def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
-        This must be called after precompile so that these things are no longer needed.
-        Returns a tuple of old values
+
+        Safe before or after precompile; if before, parent must call
+        ``_ensure_kernel_loaded`` before driving compile.
+
+        Returns a tuple of old values.
         """
         old_values = (
             self.fn.fn,
@@ -1600,27 +1610,60 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
         return launcher
 
-    def _precompile_combo_trials(self, trial_configs: list[Config]) -> list[Any]:
-        """Precompile combo-autotune trial configs in parallel.
+    def _precompile_configs_parallel(
+        self,
+        configs: list[Config],
+        *,
+        tolerate_failures: bool = False,
+    ) -> list[CompileResult[_KernelType]]:
+        """Compile a batch of configs in parallel via AsyncCompile.pool.
 
-        Worker count honors ``config.compile_threads`` (clamped to >=1 so
-        ``TORCHINDUCTOR_COMPILE_THREADS=0`` doesn't crash the executor).
-        Falls back to serial when ``compile_threads <= 1`` (the pool asserts
-        ``> 1``) or there's only one trial. Exceptions from
-        ``_precompile_config`` propagate unchanged.
+        Falls back to serial when compile_threads <= 1 or len(configs) == 1.
+        With tolerate_failures=True, skips OutOfResources/PTXASError/
+        IntelGPUError and records the last on self._last_precompile_failure.
+        Caller must hold self.lock if shared-state atomicity matters.
         """
-        if not trial_configs:
+        if not configs:
             return []
 
         from torch._inductor.async_compile import AsyncCompile, get_compile_threads
 
-        def compile_one(cfg: Config) -> Any:
-            return self._precompile_config(cfg).make_launcher()
+        def compile_one(cfg: Config) -> CompileResult[_KernelType]:
+            return self._precompile_config(cfg)
 
+        self._last_precompile_failure = None
+        results: list[CompileResult[_KernelType]] = []
+        if get_compile_threads() <= 1 or len(configs) == 1:
+            for cfg in configs:
+                try:
+                    results.append(compile_one(cfg))
+                except (OutOfResources, PTXASError, IntelGPUError) as e:
+                    if not tolerate_failures:
+                        raise
+                    self._last_precompile_failure = e
+            return results
+
+        pool = AsyncCompile.pool()
+        futures = [pool.submit(compile_one, cfg) for cfg in configs]
+        for fut in futures:
+            try:
+                results.append(fut.result())
+            except (OutOfResources, PTXASError, IntelGPUError) as e:
+                if not tolerate_failures:
+                    raise
+                self._last_precompile_failure = e
+        return results
+
+    def _precompile_combo_trials(self, trial_configs: list[Config]) -> list[Any]:
+        """Precompile combo-autotune trial configs in parallel and return
+        their launchers. Strict: failures propagate."""
+        if not trial_configs:
+            return []
         with self.lock:
-            if get_compile_threads() <= 1 or len(trial_configs) == 1:
-                return [compile_one(cfg) for cfg in trial_configs]
-            return list(AsyncCompile.pool().map(compile_one, trial_configs))
+            return [
+                r.make_launcher()
+                for r in self._precompile_configs_parallel(trial_configs)
+            ]
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name

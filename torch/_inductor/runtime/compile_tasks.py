@@ -137,7 +137,8 @@ def _worker_compile_triton(
         try:
             start_ns = time.time_ns()
             kernel = load_kernel()
-            kernel.precompile(warm_cache_only=True)
+            # Per-config compile runs in the parent via
+            # CachingAutotuner._precompile_configs_parallel.
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()
             # We can release this memory in the compile subprocesses:

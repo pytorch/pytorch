@@ -408,7 +408,9 @@ class AsyncCompile:
 
         # Cache miss
         if is_parallel:
-            # Ensure libdevice path is set in os.environ before passing to workers
+            # Per-config compile runs in the parent now; ptxas/libdevice
+            # paths must be set here.
+            _set_triton_ptxas_path()
             _set_triton_libdevice_path()
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
@@ -452,7 +454,7 @@ class AsyncCompile:
 
             def get_result() -> CachingAutotuner:
                 try:
-                    kernel, elapsed_us = task.result()
+                    kernel, _worker_elapsed_us = task.result()
                 except SubprocException as e:
                     raise e.with_name(kernel_name) from e
 
@@ -463,11 +465,19 @@ class AsyncCompile:
 
                 kernel.restore_after_unpickle(old_values=None)
 
-                kernel.precompile(
-                    warm_cache_only=False,
-                    reload_kernel=reload_kernel_in_parent,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
+                parent_start_ns = time_ns()
+                try:
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        reload_kernel=reload_kernel_in_parent,
+                        static_triton_bundle_key=CompiledTritonKernels.key(
+                            source_code
+                        ),
+                    )
+                except Exception as e:
+                    e.add_note(f"While compiling Triton kernel: {kernel_name}")
+                    raise
+                elapsed_us = (time_ns() - parent_start_ns) // 1000
                 info = kernel.autotune_cache_info or {}
                 info["compile_time_us"] = elapsed_us
                 _add_triton_kernel_info(kernel_name, info)
