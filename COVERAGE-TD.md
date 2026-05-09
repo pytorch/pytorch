@@ -35,6 +35,125 @@ The split is deliberate: Stage A captures the easier and lower-risk wins
 investments are scoped, sequenced, and justified by Stage A's measured
 benefit.
 
+## Phase -1 — Local impact simulation
+
+Before any infrastructure investment, validate the approach against
+historical PR data. This phase is a *go/no-go gate*: if Layer 1 numbers
+look bad, the whole project's value is in question and no further work
+is justified.
+
+### Layer 1 — Co-edit proxy simulation (1-2 days)
+
+Use the existing `td_heuristic_historical_edited_files.json` (published
+to `pytorch/test-infra` `generated-stats`, fetched by
+`tools/stats/import_test_stats.py:181`) as a stand-in for coverage data.
+This file is a `file → tests` map derived from co-edit history; it is
+not coverage, but it has the same shape. Layer 1 tests whether the
+*selection model* (positive-only vs. tiered) is sound, independent of
+underlying signal quality.
+
+**Tooling.** New script `tools/testing/td_simulate.py`:
+
+1. Pull ~100 recent merged PRs from HUD: base SHA, head SHA, list of
+   tests that ran, pass/fail status. Reuse the HUD API patterns from
+   `scripts/compile_tests/download_reports.py` and
+   `tools/alerts/create_alerts.py`.
+2. For each PR, compute changed files via `git diff --name-only
+   base..head` (note `query_changed_files` semantics in
+   `tools/testing/target_determination/heuristics/utils.py:76-92`).
+3. Run the existing TD pipeline against each PR's diff. The entry point
+   `tools/testing/do_target_determination_for_s3.py` can be invoked
+   programmatically with the PR's changed files; capture the resulting
+   `td_results.json`.
+4. Layer a simulated `Coverage` heuristic on top using the co-edit map:
+   tests in `file_to_tests[changed_file]` for any changed file get
+   `+0.5`; other tests get `0` for Stage A simulation, `-0.25` for
+   Stage B simulation.
+5. Apply Stage A (top-25% via `get_top_per_tests(25)`) and Stage B
+   (simulated `get_tiered_selection(15)`).
+
+**Outputs.** Per-PR JSON plus aggregate report:
+
+- **Help**: `% tests skipped` for Stage A and Stage B vs. existing TD
+  baseline.
+- **Hurt**: `% of skipped tests that actually failed in CI` — the
+  false-skip rate. Note this is a *lower bound* on true false-skip
+  rate; passing tests we'd skip are ambiguous (see "What Phase -1
+  cannot tell us" below).
+- Distribution histograms of skip-fraction across PRs.
+- Manual review list: PRs with surprising selection deltas (>50%
+  swing vs. baseline; tests skipped that failed).
+
+### Layer 2 — Real coverage subset (~1 day + coverage build)
+
+Only run if Layer 1 looks promising. Validates whether real coverage
+data improves accuracy over the co-edit proxy.
+
+1. Build PyTorch with coverage instrumentation using the existing
+   `tools/code_coverage/oss_coverage.py` harness — the
+   per-test-attribution gap doesn't matter here because we're doing
+   one-off hand-rolled isolated runs, not the production cron.
+2. Run ~30-50 representative test files isolated (one subprocess each)
+   capturing per-test JSONs. Mix: `test_ops`, `test_nn`, `test_torch`,
+   one distributed test, one inductor test.
+3. Build a real `file_to_tests` map for those tests' coverage.
+4. Re-run Layer 1 analysis using real-coverage data for the sample
+   tests and co-edit data for the rest.
+5. Compute delta in false-skip rate, skip rate, and surprise count.
+
+If real coverage doesn't outperform co-edit, the entire nightly
+collection pipeline (sections 1, 6) is unjustified — pivot to
+investing in better co-edit signals instead.
+
+### Layer 3 — Config-skipping ceiling
+
+Manually map ~5 most-impactful configs (`default`, `distributed`,
+`inductor`, `slow`, one CUDA shard) to their test sets. From Layer
+1/2 data, compute per-PR: how many configs would Stage B's preflight
+have dropped? This is the upper bound on Stage B cost savings.
+
+### Decision gates
+
+- Layer 1 false-skip rate > 1% → Stage B is too risky as currently
+  designed; reconsider whether Stage A's positive-only model captures
+  the wins on its own.
+- Layer 2 accuracy improvement over Layer 1 < 10% → real coverage may
+  not justify the collection cost. Pivot to enhancing the co-edit map.
+- Layer 3 droppable-config rate < 20% on typical PRs → config-level
+  granularity is the bottleneck (R10); pursue config splitting before
+  building preflight.
+
+### What Phase -1 cannot tell us
+
+- **True false-skip rate.** We see which tests *failed* in CI; we
+  don't know which tests would have failed *if they had been allowed
+  to run*. Tests that ran and passed in CI but would have been
+  skip-candidates under our model: we have no signal on those. Real
+  validation requires Stage B's shadow mode.
+- **Per-test coverage collection cost at full scale.** Layer 2 uses
+  isolated runs of a few test files; full-scale isolation across all
+  ~1148 test files plus C++ instrumentation has a different cost
+  profile.
+- **Whether the test→config mapping (Phase 0 #3) is derivable
+  programmatically.** Layer 3 uses a hand-rolled mapping for a few
+  configs, deferring the maintainability question.
+
+### Outputs of Phase -1
+
+A short report with go/no-go recommendation per Stage. Plausible
+outcomes:
+
+- "Stage A signal looks good, Stage B false-skip rate too high"
+  → ship Stage A, defer Stage B until Phase 0 #3 (test→config map)
+  is built.
+- "Co-edit data is already as good as real coverage"
+  → ship Stage A on top of co-edit data, skip the coverage cron
+  entirely.
+- "Both look great"
+  → proceed to Phase 0.
+- "Skip rate too low to justify investment"
+  → close out the project.
+
 ## Phase 0 — Prerequisites
 
 These must complete before *any* implementation work starts. None ship
