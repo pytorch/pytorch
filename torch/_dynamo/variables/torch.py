@@ -2769,7 +2769,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # `user_cls` so the OrderedDict-vs-dict distinction is preserved.
             if isinstance(inputs_var, variables.UserDefinedDictVariable):
                 if inputs_var._base_vt is None:
-                    raise AssertionError("UserDefinedDictVariable._base_vt must not be None")
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None"
+                    )
                 inputs_var = inputs_var._base_vt
             elif isinstance(inputs_var, variables.MappingProxyVariable):
                 inputs_var = inputs_var.dv_dict
