@@ -29,6 +29,7 @@ from ..utils import (
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
+    make_codegen_buffer,
     XPU_KERNEL_FORMAT,
 )
 from ..virtualized import V
@@ -925,7 +926,7 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generating triton kernel callers can modify the prefix (cached dtypes),
         # so do this before running finalize_prefix(), but put the generated code
         # after the finalize_prefix() code.
-        triton_prefix = IndentedBuffer()
+        triton_prefix = make_codegen_buffer()
         with self._target_buf("prefix", triton_prefix):
             for kernel in self._triton_call_wrappers.values():
                 self.prefix.writeline("\n")
