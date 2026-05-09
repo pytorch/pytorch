@@ -107,25 +107,18 @@ def _check_and_warn_oversized_storage_copy(tensor, stacklevel=2):
     tensor_size = tensor.numel()
     if storage_size > tensor_size:
         _warn_oversized_storage_copy(
-            tensor_size, storage_size, stacklevel=stacklevel + 1
+            stacklevel=stacklevel + 1
         )
 
 
-def _warn_oversized_storage_copy(view_size, storage_size, stacklevel=2):
-    def is_first_time():
-        if not hasattr(_warn_oversized_storage_copy, "has_warned"):
-            return True
-        else:
-            return not _warn_oversized_storage_copy.__dict__["has_warned"]
-
-    if is_first_time():
-        message = (
-            f"Deepcopying or serializing this tensor view will include its full underlying storage ({storage_size} elements) "
-            f"while the tensor view contains {view_size} elements. Consider using tensor.clone() before "
-            "serialization or deepcopy if this is not intended."
-        )
-        warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
-        _warn_oversized_storage_copy.__dict__["has_warned"] = True
+def _warn_oversized_storage_copy(stacklevel=2):
+    from torch._dynamo.utils import warn_once
+    message = (
+        f"Deepcopying or serializing this tensor view will include its full underlying storage"
+        f"which may result in an oversized serialized file or copy. Consider using tensor.clone() before "
+        "serialization or deepcopy if this is not intended and preserving storage sharing is not required."
+    )
+    warn_once(message, stacklevel=stacklevel + 1)
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class

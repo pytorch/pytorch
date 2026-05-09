@@ -64,7 +64,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._import_utils import import_dill
 from pickle import UnpicklingError
-
+from torch._dynamo.utils import warn_once_cache
 
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
@@ -4586,52 +4586,50 @@ class TestSerialization(TestCase, SerializationMixin):
             _save_load(t)
 
     def test_deepcopy_warns_on_oversized_storage_view(self):
-        if hasattr(_warn_oversized_storage_copy, "has_warned"):
-            _warn_oversized_storage_copy.__dict__["has_warned"] = False
-        t = torch.randn(10)
-        t_view = t[1:3]
-        with self.assertWarnsRegex(UserWarning, "Deepcopying or serializing this tensor view will include its full underlying storage"):
-            copy.deepcopy(t_view)
+        with patch("torch._dynamo.utils.warn_once_cache", set()):
+            t = torch.randn(10)
+            t_view = t[1:3]
+            with self.assertWarnsRegex(UserWarning, "Deepcopying or serializing this tensor view will include its full underlying storage"):
+                copy.deepcopy(t_view)
 
-        if hasattr(_warn_oversized_storage_copy, "has_warned"):
-            _warn_oversized_storage_copy.__dict__["has_warned"] = False
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error", "Deepcopying or serializing this tensor view will include its full underlying storage", UserWarning)
-            copy.deepcopy(t)
+    def test_deepcopy_no_warning_on_non_view(self):
+        with patch("torch._dynamo.utils.warn_once_cache", set()):
+            t = torch.randn(10)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", "Deepcopying or serializing this tensor view will include its full underlying storage", UserWarning)
+                copy.deepcopy(t)
 
     @parametrize("skip_data_var", (True, False))
     def test_serialization_warns_on_oversized_storage_view(self, skip_data_var):
-        if hasattr(_warn_oversized_storage_copy, "has_warned"):
-            _warn_oversized_storage_copy.__dict__["has_warned"] = False
-        ctx_skip = skip_data if skip_data_var else contextlib.nullcontext
-        t = torch.randn(10)
-        t_view = t[1:3]
-        with BytesIOContext() as f:
-            with warnings.catch_warnings():
-                if skip_data_var:
-                    warnings.filterwarnings(
-                        "error",
-                        "Deepcopying or serializing this tensor view will include its full underlying storage",
-                        UserWarning,
-                    )
-                    with ctx_skip():
-                        torch.save(t_view, f)
-                else:
-                    with self.assertWarnsRegex(
-                        UserWarning,
-                        "Deepcopying or serializing this tensor view will include its full underlying storage",
-                    ):
+        with patch("torch._dynamo.utils.warn_once_cache", set()):
+            ctx_skip = skip_data if skip_data_var else contextlib.nullcontext
+            t = torch.randn(10)
+            t_view = t[1:3]
+            with BytesIOContext() as f:
+                with warnings.catch_warnings():
+                    if skip_data_var:
+                        warnings.filterwarnings(
+                            "error",
+                            "Deepcopying or serializing this tensor view will include its full underlying storage",
+                            UserWarning,
+                        )
                         with ctx_skip():
                             torch.save(t_view, f)
+                    else:
+                        with self.assertWarnsRegex(
+                            UserWarning,
+                            "Deepcopying or serializing this tensor view will include its full underlying storage",
+                        ):
+                            with ctx_skip():
+                                torch.save(t_view, f)
 
     def test_serialization_no_warning_on_non_view(self):
-        t = torch.randn(10)
-        if hasattr(_warn_oversized_storage_copy, "has_warned"):
-            _warn_oversized_storage_copy.__dict__["has_warned"] = False
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error", "Deepcopying or serializing this tensor view will include its full underlying storage", UserWarning)
-            with BytesIOContext() as f:
-                torch.save(t, f)
+        with patch("torch._dynamo.utils.warn_once_cache", set()):
+            t = torch.randn(10)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", "Deepcopying or serializing this tensor view will include its full underlying storage", UserWarning)
+                with BytesIOContext() as f:
+                    torch.save(t, f)
 
     @parametrize("force_weights_only", (True, False))
     def test_weights_only_env_variables(self, force_weights_only):
