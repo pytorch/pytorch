@@ -230,6 +230,26 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Eager NCCL communicator init via device_id, so symm_mem rendezvous
+        # does not require a separate warm-up collective.
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        os.environ["LOCAL_RANK"] = str(rank)
+        device = torch.device("cuda", rank)
+        torch.cuda.set_device(device)
+        store = c10d.FileStore(rdvz_file, world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            timeout=cls.timeout,
+            device_id=device,
+        )
+        cls.pg = c10d.distributed_c10d._get_default_group()
+
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
@@ -285,6 +305,47 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(
             result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
         )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_rendezvous_world(self):
+        symm_mem.set_backend("NCCL")
+        group_name = c10d.group.WORLD.group_name
+
+        t = symm_mem.empty(64, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+
+        self.assertEqual(handle.world_size, self.world_size)
+        self.assertEqual(handle.rank, self.rank)
+
+        t.fill_(self.rank)
+        c10d.barrier()
+
+        peer_rank = (self.rank + 1) % self.world_size
+        buf = handle.get_buffer(peer_rank, (64,), torch.float32)
+        self.assertTrue(buf.eq(peer_rank).all())
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_rendezvous_subgroup(self):
+        symm_mem.set_backend("NCCL")
+
+        subgroup = c10d.new_group(list(range(self.world_size)))
+
+        t = symm_mem.empty(64, device=self.device)
+        handle = symm_mem.rendezvous(t, group=subgroup)
+
+        self.assertEqual(handle.world_size, self.world_size)
+        self.assertEqual(handle.rank, self.rank)
+
+        t.fill_(self.rank)
+        c10d.barrier(group=subgroup)
+
+        peer_rank = (self.rank + 1) % self.world_size
+        buf = handle.get_buffer(peer_rank, (64,), torch.float32)
+        self.assertTrue(buf.eq(peer_rank).all())
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
