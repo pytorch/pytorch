@@ -83,6 +83,7 @@ jobs:
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
       OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKFLOW_NAME: ${{ github.workflow }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -120,7 +121,8 @@ jobs:
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
-            --pr-number "${PR_NUMBER}"
+            --pr-number "${PR_NUMBER}" \
+            --workflow-name "${WORKFLOW_NAME}"
 
       - name: Determine runner configuration
         id: set-runner-info
