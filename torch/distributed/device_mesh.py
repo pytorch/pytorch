@@ -383,7 +383,11 @@ else:
 
         def __setstate__(self, state: dict) -> None:
             self.__dict__.update(state)
-            # Reconstruct _pg_registry from _dim_group_names
+            # Reconstruct _pg_registry from _dim_group_names.
+            # PGs may not exist when unpickling in a different process (e.g.,
+            # async checkpoint subprocess). That's fine -- _get_pg_from_name
+            # falls back to _resolve_process_group outside torch.compile and
+            # raises a clear error if a PG is genuinely missing during compile.
             self._pg_registry = {}
             if hasattr(self, "_dim_group_names"):
                 for name in self._dim_group_names:
@@ -392,12 +396,7 @@ else:
                         if pg is not None:
                             self._pg_registry[name] = pg
                     except RuntimeError:
-                        # Note: process groups may not exist if loading in a different process
-                        logger.warning(
-                            "It seems like pickling/unpickling of the DeviceMesh "
-                            "occurred before the PGs were created. This will cause PG "
-                            "lookup to fail when torch.compile is enabled"
-                        )
+                        pass
 
         @property
         def device_type(self) -> str:
