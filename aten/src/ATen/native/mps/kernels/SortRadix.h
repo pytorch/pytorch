@@ -17,13 +17,9 @@
 // and ones, and the global prefix-sum scatter preserves cross-block order.
 // to_radix_key() maps a key to a uint whose natural order matches sort order
 // (handles float sign bits, signed-int two's-complement, and descending).
-//
-// Included from Sort.metal - no top-level includes / `using` here so the
-// includer controls them. Depends on sort_init from SortMerge.h.
 #pragma once
 
-// Unsigned bit-container of the same size as T (for bit-twiddling).
-// Default uint covers 4-byte and unsigned <=4-byte types via zero-extend.
+// Unsigned bit-container same size as T; default uint covers 4-byte types.
 template <typename T>
 struct radix_bits {
   using type = uint;
@@ -53,10 +49,8 @@ struct radix_bits<bool> {
   using type = uchar;
 };
 
-// Map a key value to a uint such that uint-order == sort-order.
-//   floats: flip sign bit on positives, flip all on negatives (NaN -> end)
-//   signed ints: flip sign bit (two's-complement -> sortable)
-//   unsigned: identity
+// Map key to uint where uint-order matches sort-order, handles floats,
+// signed/unsigned ints and descending.
 template <typename T>
 inline uint to_radix_key(T val, bool desc) {
   using U = typename radix_bits<T>::type;
@@ -145,9 +139,8 @@ kernel void radix_count(
   }
 }
 
-// Fused count + scan: single TG per row processes all blocks, scans in tgmem,
-// writes scanned histograms to global. Replaces radix_count + radix_scan with
-// one dispatch when n_blocks <= MAX_BLOCKS (gated host-side).
+// Fused count+scan: one TG per row, replaces radix_count+radix_scan when
+// n_blocks <= MAX_BLOCKS (gated host-side)
 template <typename T, ushort RTPTG, ushort EPT, ushort RBITS, ushort MAX_BLOCKS>
 kernel void radix_count_scan(
     const device T* input [[buffer(0)]],
@@ -490,15 +483,6 @@ kernel void radix_scatter(
     }
   }
 }
-
-// -----------------------------------------------------------------------------
-// Path 3 - Radix instantiations
-//
-// INSTANTIATE_RADIX:        radix_count + radix_scatter (and `_fused`,
-//                           `_final`, `_u16` variants) + radix_count_scan.
-// INSTANTIATE_RADIX_TPTG512: alt RTPTG=512 instantiations for types that
-//                           prefer the smaller block size at high n_rows.
-// -----------------------------------------------------------------------------
 
 #define INSTANTIATE_RADIX(T, RTPTG, EPT, RBITS)                                \
   template [[host_name("radix_count_" #T "_" #RBITS "bit")]]                   \
