@@ -45,11 +45,11 @@ Example config:
         rollout_perc: 0
         all_branches: true
         default: false
-        # Per-workflow overrides for this experiment, applied when no user
-        # opt-in/out matches. Comma-separated list of workflow names; a "-"
-        # prefix opts the workflow out (overrides rollout_perc), an entry
-        # without a prefix forces the experiment on for that workflow.
-        workflows: pull,trunk,-periodic
+        # Comma-separated allowlist of github.workflow names. When set, the
+        # experiment runs only for these workflows; all others are opted out
+        # (rollout_perc is ignored). Use the literal "ALL" to enable every
+        # workflow. Leave empty to use rollout_perc instead.
+        workflows: pull,trunk
     ---
 
     # Opt-ins:
@@ -95,6 +95,9 @@ OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
 
+# Sentinel in the per-experiment ``workflows`` allowlist meaning "all workflows".
+WORKFLOW_ALLOWLIST_ALL = "ALL"
+
 LF_FLEET_EXPERIMENT = "lf"
 ARC_FLEET_EXPERIMENT = "arc"
 CANARY_FLEET_SUFFIX = ".c"
@@ -113,9 +116,11 @@ class Experiment(NamedTuple):
     default: bool = (
         True  # If True, the experiment is enabled by default for all queries
     )
-    # Per-workflow overrides. Comma-separated list of github.workflow names;
-    # a "-" prefix opts the workflow out, an unprefixed name opts it in.
-    # Applied after user opt-in/out but before the global rollout_perc.
+    # Per-experiment workflow allowlist. Comma-separated github.workflow
+    # names; when set, the experiment runs only for these workflows and all
+    # others are opted out (rollout_perc is ignored). The literal "ALL" enables
+    # every workflow. Empty falls back to rollout_perc. Applied after user
+    # opt-in/out.
     workflows: str = ""
 
     # Add more fields as needed
@@ -342,26 +347,12 @@ class UserOptins(dict[str, list[UserExperimentConfig]]):
     """
 
 
-def parse_workflow_overrides(workflows: str) -> tuple[set[str], set[str]]:
+def parse_workflow_list(workflows: str) -> set[str]:
     """
-    Parse the per-experiment ``workflows`` setting into (opt_in, opt_out) sets.
-
-    Each comma-separated entry is a github.workflow name; a leading "-" marks
-    the workflow as opted out of the experiment.
+    Parse the per-experiment ``workflows`` setting into a set of allowlisted
+    workflow names. Empty entries are ignored.
     """
-    opt_in: set[str] = set()
-    opt_out: set[str] = set()
-    for entry in workflows.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        if entry.startswith("-"):
-            name = entry[1:].strip()
-            if name:
-                opt_out.add(name)
-        else:
-            opt_in.add(entry)
-    return opt_in, opt_out
+    return {entry.strip() for entry in workflows.split(",") if entry.strip()}
 
 
 def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
@@ -631,25 +622,28 @@ def get_runner_prefix(
                 )
 
         else:
-            # Per-experiment workflow override: a listed workflow forces the
-            # experiment on; a "-" prefix forces it off (overriding rollout_perc).
-            wf_opt_in, wf_opt_out = parse_workflow_overrides(
-                experiment_settings.workflows
-            )
-            if workflow_name and workflow_name in wf_opt_out:
-                log.info(
-                    f"Workflow '{workflow_name}' is opted out of experiment "
-                    f"{experiment_name}."
-                )
-                continue
-            if workflow_name and workflow_name in wf_opt_in:
-                log.info(
-                    f"Workflow '{workflow_name}' is opted into experiment "
-                    f"{experiment_name}. Enabling."
-                )
-                enabled = True
+            # Per-experiment workflow allowlist: when set, only listed
+            # workflows run the experiment; all others are opted out and
+            # rollout_perc is ignored. The literal "ALL" enables every
+            # workflow. When empty, fall back to rollout_perc.
+            workflow_list = parse_workflow_list(experiment_settings.workflows)
+            if workflow_list:
+                if WORKFLOW_ALLOWLIST_ALL in workflow_list:
+                    log.info(f"All workflows enabled for experiment {experiment_name}.")
+                    enabled = True
+                elif workflow_name and workflow_name in workflow_list:
+                    log.info(
+                        f"Workflow '{workflow_name}' is in the {experiment_name} "
+                        f"allowlist. Enabling."
+                    )
+                    enabled = True
+                else:
+                    log.info(
+                        f"Workflow '{workflow_name}' is not in the {experiment_name} "
+                        f"allowlist. Skipping."
+                    )
+                    continue
             elif experiment_settings.rollout_perc:
-                # Otherwise randomly enable based on the global rollout percentage
                 if random.uniform(0, 100) <= experiment_settings.rollout_perc:
                     log.info(
                         f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."

@@ -934,7 +934,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_workflow_opt_in_enables_experiment(self) -> None:
+    def test_workflow_in_allowlist_enables_experiment(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -951,12 +951,30 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("lf.", result.prefix)
 
-    def test_workflow_opt_out_skips_experiment(self) -> None:
+    def test_workflows_all_enables_every_workflow(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+                workflows: ALL
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        for wf in ("pull", "trunk", "periodic", "anything-else"):
+            result = rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name=wf
+            )
+            self.assertEqual("lf.", result.prefix, f"failed for workflow {wf}")
+
+    def test_workflow_unlisted_skipped_even_with_rollout_perc(self) -> None:
         settings_text = """
         experiments:
             lf:
                 rollout_perc: 100
-                workflows: -periodic
+                workflows: pull,trunk
         ---
 
         Users:
@@ -968,12 +986,14 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("", result.prefix)
 
-    def test_workflow_unlisted_falls_back_to_rollout_perc(self) -> None:
+    @patch("random.uniform", return_value=10)
+    def test_workflows_empty_falls_back_to_rollout_perc(
+        self, mock_uniform: Mock
+    ) -> None:
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 100
-                workflows: pull,-periodic
+                rollout_perc: 25
         ---
 
         Users:
@@ -981,16 +1001,16 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="trunk"
+            settings_text, ["User1"], USER_BRANCH, workflow_name="anything"
         )
         self.assertEqual("lf.", result.prefix)
 
-    def test_user_opt_in_overrides_workflow_opt_out(self) -> None:
+    def test_user_opt_in_bypasses_workflow_allowlist(self) -> None:
         settings_text = """
         experiments:
             lf:
                 rollout_perc: 0
-                workflows: -pull
+                workflows: trunk
         ---
 
         Users:
@@ -1002,7 +1022,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("lf.", result.prefix)
 
-    def test_user_opt_out_overrides_workflow_opt_in(self) -> None:
+    def test_user_opt_out_overrides_workflow_allowlist(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -1027,7 +1047,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
                 rollout_perc: 0
                 all_branches: true
                 default: false
-                workflows: pull,trunk,-periodic
+                workflows: pull,trunk
         ```
         ---
         """
@@ -1037,19 +1057,17 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
                 rollout_perc=0,
                 all_branches=True,
                 default=False,
-                workflows="pull,trunk,-periodic",
+                workflows="pull,trunk",
             ),
             settings.experiments["arc"],
         )
 
-    def test_parse_workflow_overrides_helper(self) -> None:
-        opt_in, opt_out = rd.parse_workflow_overrides("pull, trunk , -periodic, ")
-        self.assertEqual({"pull", "trunk"}, opt_in)
-        self.assertEqual({"periodic"}, opt_out)
-
-        empty_in, empty_out = rd.parse_workflow_overrides("")
-        self.assertEqual(set(), empty_in)
-        self.assertEqual(set(), empty_out)
+    def test_parse_workflow_list_helper(self) -> None:
+        self.assertEqual(
+            {"pull", "trunk", "periodic"},
+            rd.parse_workflow_list("pull, trunk , periodic, "),
+        )
+        self.assertEqual(set(), rd.parse_workflow_list(""))
 
 
 if __name__ == "__main__":
