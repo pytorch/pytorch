@@ -2699,7 +2699,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
             isinstance_type_tuple = (isinstance_type,)
         elif isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = isinstance_type.__args__
+            isinstance_type_tuple = typing.get_args(isinstance_type)
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
             for tp in isinstance_type
