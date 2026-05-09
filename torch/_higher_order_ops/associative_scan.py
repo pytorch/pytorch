@@ -119,11 +119,19 @@ class AssociativeScanOp(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
-        if len(mutated_inputs) > 0:
+
+        # Mutation is only allowed on loop-invariant inputs (additional_inputs).
+        # xs slots (both left and right operands of combine_fn) are fed with
+        # per-step tensors that appear in multiple combine calls across the
+        # O(T log T) reduction, so mutating them is unsafe.
+        n_xs = len(xs)
+        xs_mutated = [i for i in mutated_inputs if i < 2 * n_xs]
+        if xs_mutated:
             raise RuntimeError(
-                "For associative_scan, combine_fn cannot have in-place mutations but found "
-                f"{mutated_inputs}-th inputs are mutated."
+                "For associative_scan, combine_fn cannot mutate xs inputs but found "
+                f"{[i % n_xs for i in xs_mutated]}-th xs inputs are mutated."
             )
+        mutated_set = set(mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
@@ -135,6 +143,7 @@ class AssociativeScanOp(HigherOrderOperator):
             schema_gen.add_arg(
                 f"additional_input{idx}",
                 arg,
+                is_mutated=(2 * n_xs + idx) in mutated_set,
             )
 
         for out in outputs:

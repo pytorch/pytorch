@@ -10447,6 +10447,52 @@ class TestHopSchema(TestCase):
             """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
         )
 
+    def test_associative_scan_gen_schema_with_additional_input_mutation(self):
+        def combine_fn(x, y, buf):
+            buf.add_(x)
+            return x * y
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor(a2!) additional_input0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_with_multiple_additional_input_mutation(self):
+        def combine_fn(x1, x2, y1, y2, buf1, buf2):
+            buf1.add_(x1)
+            buf2.sub_(x2)
+            return x1 + y1, x2 * y2
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (torch.randn(3, 4), torch.randn(2, 3)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1, Tensor(a3!) additional_input0, Tensor(a4!) additional_input1) -> (Tensor, Tensor)""",
+        )
+
+    def test_associative_scan_gen_schema_xs_mutation_raises(self):
+        def combine_fn(x, y):
+            x.add_(1)
+            return x + y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For associative_scan, combine_fn cannot mutate xs inputs",
+        ):
+            torch.ops.higher_order.associative_scan.gen_schema(
+                combine_fn,
+                (torch.randn(5, 3, 4),),
+                (),
+            )
+
     def test_while_loop_gen_schema_with_int_carries(self):
         def cond_fn(x, y, z, c):
             return x < y
