@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor import config
@@ -7,6 +7,7 @@ from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
+    CachingAutotuner,
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -152,6 +153,133 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].kwargs, autotune_config.kwargs)
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
+
+    @requires_gpu()
+    @requires_triton()
+    def test_non_combo_parallel_precompile(self):
+        # Reductions reliably produce multiple Triton configs from heuristics,
+        # which forces the parallel-pool branch in
+        # CachingAutotuner._precompile_configs_parallel.
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        invocations: list[tuple[int, bool]] = []
+        orig = CachingAutotuner._precompile_configs_parallel
+
+        def wrap(self, configs, *, tolerate_failures=False):
+            invocations.append((len(configs), tolerate_failures))
+            return orig(self, configs, tolerate_failures=tolerate_failures)
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=4),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=4,
+            ),
+            patch.object(CachingAutotuner, "_precompile_configs_parallel", wrap),
+        ):
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertGreater(
+            len(invocations), 0, "_precompile_configs_parallel was never called"
+        )
+        # The non-combo path (_precompile_worker) calls with tolerate_failures=True;
+        # at least one of those calls must have multiple configs to exercise the
+        # parallel pool branch.
+        multi_cfg_strict = [n for (n, tol) in invocations if n > 1 and tol is True]
+        self.assertGreater(
+            len(multi_cfg_strict),
+            0,
+            f"Expected at least one parallel call with len(configs) > 1 and "
+            f"tolerate_failures=True; got {invocations}",
+        )
+
+    @requires_gpu()
+    @requires_triton()
+    def test_compile_threads_one_serial_fallback(self):
+        # With compile_threads=1, _precompile_configs_parallel must take the
+        # serial branch and not touch AsyncCompile.pool().
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        pool_mock = MagicMock(name="AsyncCompile.pool")
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=1),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=1,
+            ),
+            patch("torch._inductor.async_compile.AsyncCompile.pool", pool_mock),
+        ):
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        # Pool must never be invoked on the serial fallback branch.
+        self.assertEqual(
+            pool_mock.call_count,
+            0,
+            "AsyncCompile.pool() was invoked under compile_threads=1; the "
+            "serial fallback branch should not touch the pool.",
+        )
+
+    @requires_gpu()
+    @requires_triton()
+    def test_no_duplicate_bundler_puts(self):
+        # _precompile_config calls TritonBundler.put once per successful
+        # compile (in the parent thread, since pool() is a ThreadPoolExecutor).
+        # _precompile_worker must not redundantly put on top of that; the
+        # early-return branch is the only legitimate post-loop put path.
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        from torch._inductor.runtime import triton_heuristics as th
+
+        put_calls: list[tuple] = []
+        orig_put = th.TritonBundler.put
+
+        def counting_put(key, device):
+            put_calls.append((key, device))
+            return orig_put(key, device)
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=4),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=4,
+            ),
+            patch.object(th.TritonBundler, "put", staticmethod(counting_put)),
+        ):
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        seen_keys: set = set()
+        duplicates: list = []
+        for key, device in put_calls:
+            ident = (key, device)
+            if ident in seen_keys:
+                duplicates.append(ident)
+            seen_keys.add(ident)
+        self.assertEqual(
+            duplicates,
+            [],
+            f"TritonBundler.put was called with duplicate (key, device) entries; "
+            f"the post-compile mirror loop in _precompile_worker should be removed "
+            f"under ThreadPoolExecutor pool. Duplicates: {duplicates}",
+        )
 
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within
