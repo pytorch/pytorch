@@ -10,13 +10,10 @@
 // one bundled section), so Attention.mm only needs a single library handle.
 #pragma once
 
+#include <c10/metal/common.h>
+
 #define PREFILL_CONST static constant constexpr const
 #define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
-#if __METAL_VERSION__ >= 400
-#define IF_CONSTEXPR constexpr
-#else
-#define IF_CONSTEXPR
-#endif
 
 template <typename T>
 struct pointer_element {};
