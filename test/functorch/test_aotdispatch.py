@@ -8063,6 +8063,9 @@ def forward(self, primals_1, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_compiled_backward_rng_codegen(self):
+        # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
+        # requires recomputable RNG ops (e.g. from activation checkpointing),
+        # not functionalize_rng_ops (a separate mechanism using seed/offset).
         from torch.utils.checkpoint import checkpoint
 
         with capture_codegen_source("compiled_function_backward") as captured:
