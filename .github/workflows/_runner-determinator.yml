@@ -83,6 +83,7 @@ jobs:
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
       OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKFLOW_NAME: ${{ github.workflow }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -110,6 +111,18 @@ jobs:
           curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
+          # The workflow YAML is loaded from main (via @main in callers) but the
+          # script is checked out from the PR head, so PRs that predate a newly
+          # added optional flag will reject it. Probe --help and only pass flags
+          # the checked-out script supports.
+          extra_args=()
+          help_text="$(python3 .github/scripts/runner_determinator.py --help 2>&1 || true)"
+          if grep -q -- '--workflow-name' <<<"$help_text"; then
+            extra_args+=(--workflow-name "${WORKFLOW_NAME}")
+          else
+            echo "::warning::runner_determinator.py on this branch is missing --workflow-name; skipping. Rebase the PR onto main to pick it up."
+          fi
+
           python3 .github/scripts/runner_determinator.py \
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
@@ -120,7 +133,8 @@ jobs:
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
-            --pr-number "${PR_NUMBER}"
+            --pr-number "${PR_NUMBER}" \
+            "${extra_args[@]}"
 
       - name: Determine runner configuration
         id: set-runner-info
