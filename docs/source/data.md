@@ -339,34 +339,42 @@ decision guide before tuning it.
 
 **Use `num_workers=0` (default) when:**
 
-- Your dataset is already in CPU memory as a `torch.Tensor` or `numpy` array.
-  Worker IPC overhead exceeds any parallelism benefit when data is in RAM.
+- Your `__getitem__` does minimal work per sample — for example, returning a
+  row from a pre-loaded `torch.Tensor` or `numpy` array with no preprocessing.
+  Worker IPC overhead can exceed any parallelism benefit when `__getitem__` is
+  cheap.
 - You are debugging: single-process mode gives cleaner error traces.
 
 **Use `num_workers > 0` when:**
 
-- Each {meth}`__getitem__` call reads from disk, network, or a database.
-  Multiple workers overlap I/O with GPU computation, hiding per-sample latency.
-- CPU-heavy transforms (image decoding, augmentation) can run in parallel.
+- `__getitem__` does significant work per sample — such as image decoding,
+  random augmentation, or feature extraction. Workers run these operations in
+  parallel, overlapping CPU preprocessing with GPU computation and keeping the
+  GPU fed.
 
-For in-memory tensors, DataLoader calls `__getitem__` once per sample index
-and then runs `collate_fn` to assemble the batch — even with `num_workers=0`.
-Direct slicing bypasses both:
-
-```python
-# Faster for in-memory data
-for i in range(0, len(X), batch_size):
-    batch = X[i : i + batch_size].to(device)
-
-# Slower — per-sample __getitem__ + collation overhead applies
-for batch in DataLoader(X, batch_size=batch_size):
-    batch = batch.to(device)
-```
-
-The gap widens on fast GPUs (including Apple MPS) because the GPU finishes
-each batch before DataLoader finishes preparing the next one. See
+For plain `torch.Tensor` or `numpy` datasets with no per-sample preprocessing,
+direct slicing (`X[i : i + batch_size].to(device)`) bypasses DataLoader
+overhead entirely and is typically 3-10x faster — see
 [GitHub issue #154318](https://github.com/pytorch/pytorch/issues/154318)
-for benchmarks across tensor, numpy, CSV, HDF5, and image-like datasets.
+for benchmarks across tensor, numpy, CSV, and image-like datasets.
+
+**Finding the right num_workers value**
+
+When workers help, there is no single correct value — it depends on your
+specific hardware and pipeline. The right approach is to benchmark:
+
+- Start with `num_workers=0` as your baseline
+- Increase by one step at a time: try 1, 2, 4, 8
+- Measure training throughput (samples per second) at each value
+- Stop increasing when throughput stops improving — adding more workers beyond
+  this point wastes memory without speeding things up
+
+Two resources are consumed as you increase `num_workers`:
+
+- **CPU time**: Workers run `__getitem__` in parallel. Throughput improves
+  until your CPU cores are fully utilized.
+- **CPU memory**: Each worker holds its own prefetched data. If RAM is
+  limited, keep `num_workers` low to avoid out-of-memory errors.
 
 :::{note}
 {attr}`pin_memory=True` only benefits discrete GPU setups (NVIDIA, AMD) where
