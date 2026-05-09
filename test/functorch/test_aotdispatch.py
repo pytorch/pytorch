@@ -9053,6 +9053,128 @@ def forward(self, primals_1, tangents_1):
         compiled_f(a, b, c)
         self.assertEqual(a, a_ref * 2)
 
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_base_is_none(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.add_(1)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6].detach()
+        b = base[2:].detach()
+        self.assertIsNone(a._base)
+        self.assertIsNone(b._base)
+
+        a_ref = a.clone()
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a, b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("torch.empty((0,)", source)
+        self.assertIn("set_", source)
+        self.assertEqual(a, a_ref + 1)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_metadata_mutation_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            b.t_()
+            return a + 1
+
+        base = torch.randn(4, 4)
+        a = base[:3, :]
+        b = base[1:, :]
+
+        a_ref = a.clone()
+        b_shape_before = b.shape
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+
+        self.assertEqual(a, a_ref * 2)
+        self.assertEqual(b.shape, (b_shape_before[1], b_shape_before[0]))
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_multiple_groups_correctness(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        base1 = torch.randn(8)
+        base2 = torch.randn(8)
+        a1 = base1[:6]
+        a2 = base1[2:]
+        b1 = base2[:6]
+        b2 = base2[2:]
+
+        def f(a1, a2, b1, b2):
+            a1.mul_(2)
+            b1.mul_(3)
+            return a1 + a2 + b1 + b2
+
+        a1_ref = a1.clone()
+        b1_ref = b1.clone()
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(a1, a2, b1, b2)
+
+        self.assertEqual(a1, a1_ref * 2)
+        self.assertEqual(b1, b1_ref * 3)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_all_aliased_no_others(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+
+        a_ref = a.clone()
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled_f = aot_function(f, nop)
+            compiled_f(a, b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("_bases + []", source)
+        self.assertEqual(a, a_ref * 2)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_non_aliased_before_aliased(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(c, a, b):
+            a.mul_(2)
+            return a + b + c
+
+        c = torch.randn(6)
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+
+        c_ref = c.clone()
+        a_ref = a.clone()
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(c, a, b)
+
+        self.assertEqual(a, a_ref * 2)
+        self.assertEqual(c, c_ref)
+
     # --- Compiled autograd adaptation test ---
 
     def test_compiled_autograd_uses_codegen_prologue(self):

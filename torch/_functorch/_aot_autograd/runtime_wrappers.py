@@ -1790,7 +1790,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
     base_groups: dict[int, list[int]] = field(default_factory=dict)
-    other_arg_map: list[tuple[int, int]] = field(default_factory=list)
+    other_arg_indices: list[int] = field(default_factory=list)
 
     def pre_compile(
         self,
@@ -1864,7 +1864,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         # torch.Tensors which are not picklable by the autograd cache.
         for orig_idx, entry in enumerate(synthetic_base_info):
             if isinstance(entry, int):
-                self.other_arg_map.append((orig_idx, entry))
+                self.other_arg_indices.append(orig_idx)
             else:
                 base_idx, _ = entry
                 self.base_groups.setdefault(base_idx, []).append(orig_idx)
@@ -1962,7 +1962,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         from .subclass_codegen import _compile_and_exec_source
 
         base_groups = self.base_groups
-        other_map = self.other_arg_map
+        other_indices = self.other_arg_indices
 
         num_bases = len(base_groups)
         aliased_meta_mut_indices = self.aliased_arg_idx_with_metadata_mutations
@@ -1983,7 +1983,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         _b.set_(_a.untyped_storage())
         _bases[{base_idx}] = _b""")
 
-        other_items = ", ".join(f"args[{orig}]" for orig, _ in other_map)
+        other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
         lines.append(f"    _new_args = _bases + [{other_items}]")
 
         if num_meta_mut > 0:
@@ -3288,7 +3288,6 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
-
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
