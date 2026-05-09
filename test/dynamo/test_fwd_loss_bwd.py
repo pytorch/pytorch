@@ -3,6 +3,8 @@
 import copy
 import re
 import textwrap
+from collections import defaultdict, OrderedDict
+from types import MappingProxyType
 
 import torch
 import torch._dynamo
@@ -167,6 +169,83 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(e, c)
 
     @skipIfCrossRef
+    def test_autograd_grad_ordered_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = OrderedDict(mod.named_parameters())
+            grads = torch.autograd.grad(loss, params)
+            return loss.detach(), grads
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager_loss, eager_grads = fn(x)
+        compiled_loss, compiled_grads = compiled_fn(x)
+
+        # Exercises the `result_cls = OrderedDict` branch in
+        # `torch._dynamo.variables.torch` — the compiled grads must be an
+        # OrderedDict, not a plain dict.
+        self.assertIs(type(eager_grads), OrderedDict)
+        self.assertIs(type(compiled_grads), OrderedDict)
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(list(eager_grads.keys()), list(compiled_grads.keys()))
+        for k in eager_grads:
+            self.assertEqual(eager_grads[k], compiled_grads[k])
+
+    @skipIfCrossRef
+    def test_autograd_grad_default_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            # defaultdict is a dict subclass but not OrderedDict, so the
+            # result is a plain dict (default_factory is not propagated).
+            params = defaultdict(lambda: None, mod.named_parameters())
+            grads = torch.autograd.grad(loss, params)
+            return loss.detach(), grads
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager_loss, eager_grads = fn(x)
+        compiled_loss, compiled_grads = compiled_fn(x)
+
+        self.assertIs(type(eager_grads), dict)
+        self.assertIs(type(compiled_grads), dict)
+        self.assertEqual(eager_loss, compiled_loss)
+        for k in eager_grads:
+            self.assertEqual(eager_grads[k], compiled_grads[k])
+
+    @skipIfCrossRef
+    def test_autograd_grad_mapping_proxy_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            # MappingProxyType is read-only and not OrderedDict, so the
+            # result is a plain dict.
+            params = MappingProxyType(dict(mod.named_parameters()))
+            grads = torch.autograd.grad(loss, params)
+            return loss.detach(), grads
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager_loss, eager_grads = fn(x)
+        compiled_loss, compiled_grads = compiled_fn(x)
+
+        self.assertIs(type(eager_grads), dict)
+        self.assertIs(type(compiled_grads), dict)
+        self.assertEqual(eager_loss, compiled_loss)
+        for k in eager_grads:
+            self.assertEqual(eager_grads[k], compiled_grads[k])
+
+    @skipIfCrossRef
     def test_backward_dict_inputs(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -185,6 +264,66 @@ class <lambda>(torch.nn.Module):
 
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_backward_ordered_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = OrderedDict(mod.named_parameters())
+            loss.backward(inputs=params)
+            return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
+
+        eager_result = fn(x)
+        mod.weight.grad = None
+        mod.bias.grad = None
+        compiled_result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_backward_default_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = defaultdict(lambda: None, mod.named_parameters())
+            loss.backward(inputs=params)
+            return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
+
+        eager_result = fn(x)
+        mod.weight.grad = None
+        mod.bias.grad = None
+        compiled_result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_backward_mapping_proxy_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = MappingProxyType(dict(mod.named_parameters()))
+            loss.backward(inputs=params)
+            return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
+
+        eager_result = fn(x)
+        mod.weight.grad = None
+        mod.bias.grad = None
+        compiled_result = torch.compile(fn, backend="eager", fullgraph=True)(x)
 
         for e, c in zip(eager_result, compiled_result):
             self.assertEqual(e, c)

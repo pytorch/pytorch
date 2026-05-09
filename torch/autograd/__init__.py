@@ -416,6 +416,20 @@ def grad(
 @overload
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
+    inputs: OrderedDict[str, torch.Tensor],
+    grad_outputs: _TensorOrOptionalTensors | None = ...,
+    retain_graph: bool | None = ...,
+    create_graph: bool = ...,
+    only_inputs: bool = ...,
+    allow_unused: bool | None = ...,
+    is_grads_batched: bool = ...,
+    materialize_grads: bool = ...,
+) -> OrderedDict[str, torch.Tensor]: ...
+
+
+@overload
+def grad(
+    outputs: _TensorOrTensorsOrGradEdge,
     inputs: Mapping[str, torch.Tensor],
     grad_outputs: _TensorOrOptionalTensors | None = ...,
     retain_graph: bool | None = ...,
@@ -511,13 +525,18 @@ def grad(
         outputs = tuple(outputs)
 
     inputs_tuple: tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...]
+    inputs_mapping_keys: tuple[str, ...] | None = None
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs_tuple = cast(
             tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...], (inputs,)
         )
     elif isinstance(inputs, Mapping):
+        # Iterate `items()` once and unzip into keys/values. Some `Mapping`
+        # subclasses do not guarantee that separate `.keys()` and `.values()`
+        # iterations agree on order, so a single snapshot keeps them aligned.
+        items = list(inputs.items())
         # pyrefly: ignore [bad-argument-type]
-        inputs_tuple = tuple(inputs.values())
+        inputs_mapping_keys, inputs_tuple = tuple(zip(*items)) if items else ((), ())
     else:
         # pyrefly: ignore [bad-argument-type]
         inputs_tuple = tuple(inputs)
@@ -541,10 +560,10 @@ def grad(
             is_grads_batched=is_grads_batched,
             materialize_grads=materialize_grads,
         )
-        if isinstance(inputs, Mapping):
+        if inputs_mapping_keys is not None:
             if isinstance(inputs, OrderedDict):
-                return OrderedDict(zip(inputs.keys(), result_tuple, strict=True))
-            return dict(zip(inputs.keys(), result_tuple, strict=True))
+                return OrderedDict(zip(inputs_mapping_keys, result_tuple, strict=True))
+            return dict(zip(inputs_mapping_keys, result_tuple, strict=True))
         return result_tuple
 
     if not only_inputs:
@@ -609,10 +628,10 @@ def grad(
                 strict=True,
             )
         )
-    if isinstance(inputs, Mapping):
+    if inputs_mapping_keys is not None:
         if isinstance(inputs, OrderedDict):
-            return OrderedDict(zip(inputs.keys(), result, strict=True))
-        return dict(zip(inputs.keys(), result, strict=True))
+            return OrderedDict(zip(inputs_mapping_keys, result, strict=True))
+        return dict(zip(inputs_mapping_keys, result, strict=True))
     return result
 
 
