@@ -255,6 +255,22 @@ Below table is showing the stability status for fused implementations:
     :class:`SGD`;beta;beta;beta
 ```
 
+### Helpers for parameter partitioning
+
+Some optimizers like {class}`Muon` are designed for matrix-shaped hidden-layer
+parameters and typically optimize biases, normalization scales, embeddings, and
+the final LM head with a standard optimizer such as {class}`AdamW`. The helper
+{func}`torch.optim.param_groups_for_muon` splits a {class}`~torch.nn.Module`'s
+parameters into a Muon group and a non-Muon group. Biases and 1D norm scales
+(``ndim < 2``) are always routed to the non-Muon group; to additionally exclude
+embeddings and the final LM head, pass ``exclude_name_patterns`` (typically
+``("embed", "lm_head")``) — since naming conventions vary across models, the
+helper does not apply this exclusion by default:
+
+```{eval-rst}
+.. autofunction:: param_groups_for_muon
+```
+
 ## How to adjust learning rate
 
 {class}`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning

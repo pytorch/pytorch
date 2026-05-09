@@ -897,19 +897,19 @@ def optim_error_inputs_func_muon(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
     complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
     complex_param.grad = torch.rand_like(complex_param)
-    non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
-    non_2d_param.grad = torch.rand_like(non_2d_param)
+    low_ndim_param = torch.rand(5, device=device, dtype=dtype)
+    low_ndim_param.grad = torch.rand_like(low_ndim_param)
     param = torch.rand(2, 3, device=device, dtype=dtype)
     param.grad = torch.rand_like(param)
     error_inputs += [
         ErrorOptimizerInput(
             OptimizerInput(
-                params=[non_2d_param],
+                params=[low_ndim_param],
                 kwargs=dict(),
-                desc="only support 2D parameters",
+                desc="requires ndim >= 2 parameters",
             ),
             error_type=ValueError,
-            error_regex="Muon only supports 2D parameters",
+            error_regex="Muon requires parameters with ndim >= 2",
             error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
         ),
         ErrorOptimizerInput(

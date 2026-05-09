@@ -2534,5 +2534,165 @@ class TestOptimRenewed(TestCase):
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
 
+def _make_mixed_module():
+    """Small module mixing matrix, conv, embedding, norm, bias, and a named lm_head."""
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed = torch.nn.Embedding(10, 4)
+            self.linear = torch.nn.Linear(4, 8)
+            self.conv = torch.nn.Conv2d(3, 6, 3)
+            self.norm = torch.nn.LayerNorm(8)
+            self.lm_head = torch.nn.Linear(8, 10, bias=False)
+
+    return Model()
+
+
+class TestParamGroupsForMuon(TestCase):
+    """CPU-only tests for the ``param_groups_for_muon`` partitioning helper."""
+
+    def test_defaults(self):
+        # Pin the documented default: exclude_name_patterns=None means only
+        # ndim<2 params (biases, norms) are routed to other_params; matrix
+        # embeddings and lm_head weights go to Muon unless the caller opts in.
+        model = _make_mixed_module()
+        muon_params, other_params = torch.optim.param_groups_for_muon(model)
+        muon_ids = {id(p) for p in muon_params}
+        other_ids = {id(p) for p in other_params}
+
+        self.assertIn(id(model.linear.weight), muon_ids)
+        self.assertIn(id(model.conv.weight), muon_ids)
+        self.assertIn(id(model.embed.weight), muon_ids)
+        self.assertIn(id(model.lm_head.weight), muon_ids)
+        self.assertIn(id(model.linear.bias), other_ids)
+        self.assertIn(id(model.conv.bias), other_ids)
+        self.assertIn(id(model.norm.weight), other_ids)
+        self.assertIn(id(model.norm.bias), other_ids)
+
+        self.assertEqual(muon_ids & other_ids, set())
+        self.assertEqual(muon_ids | other_ids, {id(p) for p in model.parameters()})
+
+    def test_conventional_partition(self):
+        # Passing the conventional patterns routes 2D embed and lm_head to other.
+        model = _make_mixed_module()
+        muon_params, other_params = torch.optim.param_groups_for_muon(
+            model, exclude_name_patterns=("embed", "lm_head")
+        )
+        muon_ids = {id(p) for p in muon_params}
+        other_ids = {id(p) for p in other_params}
+        self.assertIn(id(model.linear.weight), muon_ids)
+        self.assertIn(id(model.conv.weight), muon_ids)
+        self.assertIn(id(model.embed.weight), other_ids)
+        self.assertIn(id(model.lm_head.weight), other_ids)
+
+    def test_empty_exclude_patterns(self):
+        # Explicit () behaves the same as the None default: no name-based excludes.
+        model = _make_mixed_module()
+        muon_params, _ = torch.optim.param_groups_for_muon(
+            model, exclude_name_patterns=()
+        )
+        muon_ids = {id(p) for p in muon_params}
+        self.assertIn(id(model.embed.weight), muon_ids)
+        self.assertIn(id(model.lm_head.weight), muon_ids)
+
+    def test_custom_predicate(self):
+        model = _make_mixed_module()
+        muon_params, other_params = torch.optim.param_groups_for_muon(
+            model,
+            exclude_predicate=lambda name, p: "conv" in name,
+        )
+        self.assertIn(id(model.conv.weight), {id(p) for p in other_params})
+        self.assertIn(id(model.linear.weight), {id(p) for p in muon_params})
+
+    def test_skips_frozen(self):
+        model = _make_mixed_module()
+        model.linear.weight.requires_grad_(False)
+        muon_params, other_params = torch.optim.param_groups_for_muon(model)
+        self.assertNotIn(
+            id(model.linear.weight), {id(p) for p in muon_params + other_params}
+        )
+
+
+class TestMuon(TestCase):
+    """Device-generic tests for Muon's ``ndim >= 2`` support."""
+
+    def test_muon_rejects_1d_param(self, device):
+        p = torch.nn.Parameter(torch.randn(5, device=device))
+        with self.assertRaisesRegex(
+            ValueError, "Muon requires parameters with ndim >= 2"
+        ):
+            torch.optim.Muon([p], lr=0.01)
+
+    def test_muon_accepts_conv2d_weight(self, device):
+        torch.manual_seed(0)
+        conv = torch.nn.Conv2d(3, 8, 3).to(device)
+        original = conv.weight.detach().clone()
+        opt = torch.optim.Muon([conv.weight], lr=0.01)
+
+        x = torch.randn(2, 3, 5, 5, device=device)
+        for _ in range(2):
+            opt.zero_grad()
+            conv(x).sum().backward()
+            opt.step()
+
+        self.assertFalse(torch.equal(conv.weight, original))
+        self.assertEqual(conv.weight.shape, original.shape)
+
+    def test_muon_accepts_3d_param(self, device):
+        torch.manual_seed(0)
+        p = torch.nn.Parameter(torch.randn(4, 6, 7, device=device))
+        p.grad = torch.randn_like(p)
+        original = p.detach().clone()
+        opt = torch.optim.Muon([p], lr=0.01)
+        opt.step()
+
+        self.assertEqual(p.shape, original.shape)
+        self.assertFalse(torch.equal(p, original))
+        self.assertEqual(opt.state[p]["momentum_buffer"].shape, original.shape)
+
+    def test_muon_flatten_equivalence(self, device):
+        """A 4D update equals the 2D update on the flattened grad, reshaped back."""
+        torch.manual_seed(0)
+        shape_4d = (4, 3, 5, 5)
+        p_nd = torch.nn.Parameter(torch.randn(*shape_4d, device=device))
+        p_nd.grad = torch.randn(*shape_4d, device=device)
+        p_2d = torch.nn.Parameter(p_nd.detach().reshape(shape_4d[0], -1).clone())
+        p_2d.grad = p_nd.grad.reshape(shape_4d[0], -1).clone()
+
+        opt_nd = torch.optim.Muon([p_nd], lr=0.02, weight_decay=0.0)
+        opt_2d = torch.optim.Muon([p_2d], lr=0.02, weight_decay=0.0)
+        opt_nd.step()
+        opt_2d.step()
+
+        self.assertEqual(p_nd.detach().reshape(shape_4d[0], -1), p_2d.detach())
+
+    def test_muon_state_dict_round_trip_mixed(self, device):
+        torch.manual_seed(0)
+        lin = torch.nn.Linear(4, 8, bias=False).to(device)
+        conv = torch.nn.Conv2d(3, 6, 3).to(device)
+        lin.weight.grad = torch.randn_like(lin.weight)
+        conv.weight.grad = torch.randn_like(conv.weight)
+
+        opt = torch.optim.Muon([lin.weight, conv.weight], lr=0.01)
+        opt.step()
+        state = opt.state_dict()
+
+        lin2 = torch.nn.Linear(4, 8, bias=False).to(device)
+        conv2 = torch.nn.Conv2d(3, 6, 3).to(device)
+        opt2 = torch.optim.Muon([lin2.weight, conv2.weight], lr=0.01)
+        opt2.load_state_dict(state)
+
+        buf_lin = opt2.state[lin2.weight]["momentum_buffer"]
+        buf_conv = opt2.state[conv2.weight]["momentum_buffer"]
+        self.assertEqual(buf_lin.shape, lin.weight.shape)
+        self.assertEqual(buf_conv.shape, conv.weight.shape)
+        self.assertEqual(buf_lin, opt.state[lin.weight]["momentum_buffer"])
+        self.assertEqual(buf_conv, opt.state[conv.weight]["momentum_buffer"])
+
+
+instantiate_device_type_tests(TestMuon, globals(), allow_mps=True)
+
+
 if __name__ == "__main__":
     run_tests()
