@@ -29,7 +29,7 @@ def get_gomp_thread():
     # Get the additional ABI flags (if any); it may be an empty string.
     abiflags = getattr(sys, "abiflags", "")
 
-    # Construct the Python directory name correctly (e.g., "python3.13t").
+    # Construct the Python directory name correctly (e.g., "python3.14t").
     python_version = (
         f"python{sys.version_info.major}.{sys.version_info.minor}{abiflags}"
     )
