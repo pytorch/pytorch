@@ -27,7 +27,6 @@ from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     create_epilogue_with_attr,
-    DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
@@ -54,12 +53,15 @@ extern "C" {{export_declaration}}
     #pragma omp parallel num_threads({{num_threads}})
     {%- endif %}
     {
-        {{ template.codegen_multi_threads_params()|indent(8, false) }}
+        {{ micro_gemm.codegen_init(kernel) }}
+        #pragma omp for schedule(static, 1)
+        for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+            {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
-{%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- endif %}
 {%- set acc_buf_name_list=[] %}
 {%- set acc_buf_name_prefix = "local_acc_buf_" %}
 {%- for gemm_idx in range(0, gemm_grouped_num, 1) %}
@@ -139,8 +141,14 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+{%- if num_threads > 1 %}
+        }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
+{%- else %}
+        {{ micro_gemm.codegen_finalize(kernel) }}
+    }
+{%- endif %}
 }
 """
 
@@ -498,7 +506,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             acc_buf_dtype=torch.float,
-            DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             config=config,
