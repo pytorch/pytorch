@@ -1692,7 +1692,6 @@ class SliceVariable(VariableTracker):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            breakpoint()
             raise AssertionError
 
         # Convert TensorVariable to SymIntVariable by calling .item()
