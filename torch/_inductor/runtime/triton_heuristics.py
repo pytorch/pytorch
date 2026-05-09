@@ -459,6 +459,9 @@ class CachingAutotuner(KernelInterface):
         self.optimize_mem = optimize_mem
         cached_config = lookup_autotune_config(size_hints, fn)
         self.configs = [cached_config] if cached_config else configs
+        # For distributed autotuning; so we can easily identify the kernels
+        # that won't be autotuned:
+        self.initial_num_configs = len(self.configs)
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -538,9 +541,14 @@ class CachingAutotuner(KernelInterface):
 
         self._plugins = get_caching_autotuner_plugins(self)
 
-        # Compile-time info included in runtime logginging
+        # Compile-time info included in runtime logging
         self.compile_id: CompileId | None = None
         self.is_backward = False
+
+        # To skip distributed autotuning as fast as possible after first attempt
+        self._distributed_autotune_checked = False
+        # To avoid local coord desc tuning if a distributed result was found
+        self._distributed_autotune_applied = False
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
@@ -595,6 +603,18 @@ class CachingAutotuner(KernelInterface):
     def set_compile_info(self, compile_id: CompileId | None, is_backward: bool) -> None:
         self.compile_id = compile_id
         self.is_backward = is_backward
+
+        # If we're doing distributed autotuning, the distributed tuner needs to
+        # be able to look up CachingAutotuners to perform the tuning.
+        if torch._inductor.config.distributed_runtime_autotune:
+            from torch._inductor.runtime.distributed_runtime_autotune import (
+                register_autotuner,
+            )
+
+            kernel_name = self.inductor_meta.get("kernel_name")
+            assert kernel_name
+            assert compile_id
+            register_autotuner(str(compile_id), is_backward, kernel_name, self)
 
     def precompile(
         self,
@@ -1842,6 +1862,78 @@ class CachingAutotuner(KernelInterface):
         log.debug("Function hash %s has best config %s", fn_hash, best_config)
         return winner
 
+    def _try_distributed_autotune(self) -> None:
+        """
+        Try distributed autotuning. If a coordinator exists and autotuning succeeds,
+        results are applied directly to all CachingAutotuners by the coordinator.
+        On any outcome (success, failure, no coordinator), we fall back to local
+        autotuning for any kernel that didn't get a distributed result.
+        """
+        self._distributed_autotune_checked = True
+
+        if not torch._inductor.config.distributed_runtime_autotune:
+            return
+
+        from torch._inductor.runtime.distributed_runtime_autotune import get_coordinator
+
+        with dynamo_timed(
+            "CachingAutotuner.distributed_autotune",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
+            log_waitcounter=True,
+            waitcounter_name_override="triton_autotuner",
+        ):
+            assert self.compile_id
+            coordinator = get_coordinator(str(self.compile_id), self.is_backward)
+            if coordinator is None:
+                return
+
+            coordinator.run_autotuning()
+
+    def _apply_distributed_autotune_result(self, result: Config | None) -> None:
+        """
+        Called by the distributed autotuner to apply the winning config.
+        """
+        # First, try to find the launcher with matching config among existing
+        # launchers. Note that it could be the launcher that was tuned locally
+        # if this rank was responsible for this kernel.
+        assert result is not None
+        for launcher in self.launchers:
+            if launcher.config == result:
+                self.launchers = [launcher]
+                break
+        else:
+            # Config not found - this can happen with coordinate descent tuning
+            # which creates new configs dynamically. Create a new launcher.
+            # Load the kernel if needed (for parent process after worker compilation)
+            if self.fn.fn is None:
+                assert hasattr(self, "_reload_kernel")
+                assert callable(self._reload_kernel)
+                self.fn = self._reload_kernel().fn
+
+            # Precompile and create launcher for the new config
+            self.launchers = [self._precompile_config(result).make_launcher()]
+
+        assert len(self.launchers) == 1
+        self.launchers[0].config.found_by_coordesc = bool(
+            getattr(self.launchers[0].config, "found_by_coordesc", False)
+            or getattr(result, "found_by_coordesc", False)
+        )
+
+        self._distributed_autotune_applied = True
+
+        if self.save_cache_hook:
+            self.save_cache_hook(
+                self.launchers[0].config,
+                0,
+                found_by_coordesc=getattr(
+                    self.launchers[0].config, "found_by_coordesc", False
+                ),
+                triton_cache_hash=self.launchers[0].cache_hash,
+            )
+
     def get_profiler_kwargs(self, stream, launcher):
         kernel_kwargs_str = ",".join(
             f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
@@ -1961,22 +2053,23 @@ class CachingAutotuner(KernelInterface):
             ) is not DEFER:
                 return result
 
-        if len(self.launchers) != 1:
-            if len(self.launchers) == 0:
-                start_time = time.time_ns()
-                self.precompile()
-                self.precompile_time_taken_ns = time.time_ns() - start_time
+        if len(self.launchers) == 0:
+            start_time = time.time_ns()
+            self.precompile()
+            self.precompile_time_taken_ns = time.time_ns() - start_time
+
+        if not self._distributed_autotune_checked:
+            self._try_distributed_autotune()
+
+        if len(self.launchers) > 1:
+            for plugin in self._plugins:
+                if (
+                    result := plugin.pre_autotune(self, *args, stream=stream, **kwargs)
+                ) is not DEFER:
+                    return result
+            # Re-check: a plugin may have mutated launchers down to one.
             if len(self.launchers) > 1:
-                for plugin in self._plugins:
-                    if (
-                        result := plugin.pre_autotune(
-                            self, *args, stream=stream, **kwargs
-                        )
-                    ) is not DEFER:
-                        return result
-                # Re-check: a plugin may have mutated launchers down to one.
-                if len(self.launchers) > 1:
-                    self.autotune_to_one_config(*args, **kwargs)
+                self.autotune_to_one_config(*args, **kwargs)
 
         if self.inductor_meta.get("combo_tuning_groups") and not getattr(
             self.launchers[0].config, "found_by_combo_autotune", False
@@ -1995,9 +2088,11 @@ class CachingAutotuner(KernelInterface):
                     self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
                 ]
 
-        if not getattr(
-            self.launchers[0].config, "found_by_coordesc", False
-        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
+        if (
+            not getattr(self.launchers[0].config, "found_by_coordesc", False)
+            and self.inductor_meta.get("coordinate_descent_tuning", False)
+            and not self._distributed_autotune_applied
+        ):
             self.launchers = [
                 self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
             ]
