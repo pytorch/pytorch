@@ -7859,44 +7859,6 @@ class UserDefinedTritonKernel(ExternKernel):
         ]
         V.graph.register_operation(self)
 
-    @override
-    def get_read_writes(self) -> dependencies.ReadWrites:
-        # Limit the new `get_read_writes` to `epilogue_fusion_user_defined_triton_kernel`
-        # to avoid potential regression to existing models.
-        if not config.epilogue_fusion_user_defined_triton_kernel:
-            return super().get_read_writes()
-
-        # maps formal arg name to actual arg name
-        read_renames = {
-            formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
-            for formal_arg_dep in self.arg_accesses.read_writes.reads
-        }
-
-        formal_arg_writes = list(self.arg_accesses.read_writes.writes)
-        write_renames = {
-            formal_arg_dep.name: mut_output.get_name()
-            for formal_arg_dep, mut_output in zip(
-                formal_arg_writes, self.mutation_outputs
-            )
-        }
-
-        read_writes = dependencies.ReadWrites(
-            reads=OrderedSet(
-                [
-                    dep.rename(read_renames)
-                    for dep in self.arg_accesses.read_writes.reads
-                ]
-            ),
-            writes=OrderedSet(
-                [
-                    dep.rename(write_renames)
-                    for dep in self.arg_accesses.read_writes.writes
-                ]
-            ),
-            index_exprs=OrderedSet(),
-        )
-        return read_writes
-
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)
 
