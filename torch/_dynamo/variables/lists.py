@@ -106,6 +106,46 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def is_python_constant(self) -> bool:
+        """Check if this container is a python constant without realizing lazy constants.
+
+        Uses try_peek_constant() to check each item without realizing lazy constants.
+        Returns False if any item is an unrealized lazy constant - this forces
+        the codegen path to use reconstruct() instead of loading as a constant,
+        which avoids installing guards on the lazy constants.
+        """
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        # Return False if any item is unrealized to avoid as_python_constant()
+        # being called, which would realize lazy constants and install guards
+        return can_peek and not is_unrealized
+
+    def _try_peek_items(
+        self,
+    ) -> tuple[bool, bool, list[Any]]:
+        """Peek at items without triggering realization.
+
+        Returns (can_peek, any_unrealized, values). Subclasses use this
+        in try_peek_constant() and apply their own constructor.
+        """
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            if item is self:
+                return (False, False, [])
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, [])
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        return (True, any_unrealized, values)
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, self.python_type()(values))
+
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
             raise AssertionError(
@@ -154,6 +194,14 @@ class BaseListVariable(VariableTracker):
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
+
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+        # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
+        # implement PyObject_RichCompare
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def call_tree_map_branch(
         self,
@@ -282,16 +330,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__contains__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
-        elif name == "index":
+        if name == "index":
             if not len(args):
                 raise_args_mismatch(
                     tx,
@@ -590,6 +629,12 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, range(*values))
+
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
@@ -680,6 +725,12 @@ class RangeVariable(BaseListVariable):
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
         return self.getitem_const(tx, key)
 
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
+        return VariableTracker.build(tx, self.range_count(item))
+
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
         if not all(var.is_python_constant() for var in self.items):
@@ -711,7 +762,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name in ("count", "__contains__"):
+        if name == "count":
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
             x = args[0].as_python_constant()
@@ -1086,10 +1137,10 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if not all(k.is_python_constant() for k in keys):
+            if not all(k.try_peek_constant()[0] for k in keys):
                 first_non_constant_key = None
                 for k in keys:
-                    if not k.is_python_constant():
+                    if not k.try_peek_constant()[0]:
                         first_non_constant_key = k
                 if first_non_constant_key is None:
                     raise AssertionError(
@@ -1129,7 +1180,11 @@ class ListVariable(CommonListMethodsVariable):
                 )
                 self.items[:] = [x for x, *_ in sorted_items_with_keys]
             except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=[VariableTracker.build(tx, a) for a in e.args],
+                )
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1231,6 +1286,20 @@ class DequeVariable(CommonListMethodsVariable):
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
         )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        # Also check maxlen
+        can_peek_maxlen, is_unrealized_maxlen, maxlen_value = (
+            self.maxlen.try_peek_constant()
+        )
+        if not can_peek_maxlen:
+            return (False, False, None)
+        if is_unrealized_maxlen:
+            any_unrealized = True
+        return (True, any_unrealized, self.python_type()(values, maxlen=maxlen_value))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
@@ -1404,6 +1473,12 @@ class TupleVariable(BaseListVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
+
+    def reconstruct_pycode(self, codegen):
+        if len(self.items) == 0:
+            return "()"
+        else:
+            return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__class__":
