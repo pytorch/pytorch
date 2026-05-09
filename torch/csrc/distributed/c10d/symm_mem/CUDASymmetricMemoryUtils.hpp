@@ -1,13 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <cstdint>
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -106,9 +106,7 @@ class StoreExchange {
     std::vector<std::string> peer_keys;
     peer_keys.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
-      std::ostringstream oss;
-      oss << store_prefix_ << '/' << seq_id_ << '/' << r;
-      peer_keys.push_back(oss.str());
+      peer_keys.push_back(fmt::format("{}/{}/{}", store_prefix_, seq_id_, r));
     }
     ++seq_id_;
 
@@ -149,10 +147,7 @@ class StoreExchange {
         world_size,
         ".");
 
-    std::ostringstream oss;
-    oss << store_prefix_ << '/' << seq_id_ << '/' << src_rank;
-    ++seq_id_;
-    auto key = oss.str();
+    auto key = fmt::format("{}/{}/{}", store_prefix_, seq_id_++, src_rank);
 
     if (rank == src_rank) {
       store->set(key, to_payload(val));
@@ -166,10 +161,7 @@ class StoreExchange {
       int rank,
       int world_size) {
     (void)rank;
-    std::ostringstream oss;
-    oss << store_prefix_ << '/' << seq_id_;
-    ++seq_id_;
-    store->barrier(oss.str(), world_size);
+    store->barrier(fmt::format("{}/{}", store_prefix_, seq_id_++), world_size);
   }
 
  private:
