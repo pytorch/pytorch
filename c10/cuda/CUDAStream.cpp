@@ -15,7 +15,6 @@ namespace c10::cuda {
 namespace {
 
 // Global stream state and constants
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -128,7 +127,7 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   } else if (s.isExt()) {
     stream << "EXT";
   } else {
-    stream << "PRIORITY " << int(s.getStreamType());
+    stream << "PRIORITY " << static_cast<int>(s.getStreamType());
   }
   return stream;
 }
@@ -226,7 +225,10 @@ void initDeviceStreamState(DeviceIndex device_index) {
 // Init front-end to ensure initialization only occurs once
 void initCUDAStreamsOnce() {
   // Inits default streams (once, globally)
-  c10::call_once(init_flag, initGlobalStreamState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalStreamState();
+    return true;
+  }();
 
   if (current_streams) {
     return;
@@ -268,6 +270,27 @@ CUDAStream CUDAStreamForId(DeviceIndex device_index, StreamId stream_id) {
 }
 
 } // anonymous namespace
+
+bool CUDAStream::query() const {
+  DeviceGuard guard{stream_.device()};
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream()));
+
+  if (err == cudaSuccess) {
+    return true;
+  } else if (err != cudaErrorNotReady) {
+    C10_CUDA_CHECK(err);
+  } else {
+    // ignore and clear the error if not ready
+    (void)cudaGetLastError();
+  }
+
+  return false;
+}
+
+void CUDAStream::synchronize() const {
+  DeviceGuard guard{stream_.device()};
+  c10::cuda::stream_synchronize(stream());
+}
 
 // See Note [StreamId assignment]
 cudaStream_t CUDAStream::stream() const {

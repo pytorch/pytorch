@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=0
-#     disables the FBGEMM GenAI build
+#   USE_MSLK=0
+#     disables the MSLK build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -270,17 +270,13 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import filecmp
-import glob
 import importlib
 import itertools
-import json
 import shutil
 import subprocess
 import sysconfig
 import tempfile
 import textwrap
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -315,15 +311,10 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
+from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
-from tools.setup_helpers.env import (
-    BUILD_DIR,
-    build_type,
-    IS_DARWIN,
-    IS_LINUX,
-    IS_WINDOWS,
-)
+from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 
 
 def str2bool(value: str | None) -> bool:
@@ -399,56 +390,45 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
-CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None)) or "--cmake" in sys.argv
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None)) or "--cmake-only" in sys.argv
 filtered_args = []
 for i, arg in enumerate(sys.argv):
-    if arg == "--cmake":
-        RERUN_CMAKE = True
-        continue
-    if arg == "--cmake-only":
-        # Stop once cmake terminates. Leave users a chance to adjust build
-        # options.
-        CMAKE_ONLY = True
+    if arg in ("--cmake", "--cmake-only"):
         continue
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
-    if arg == "develop":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                ".",
-                "-v",
-                "--no-build-isolation",
-            ],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
-    if arg == "install":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
+    if arg in ("develop", "install"):
+        # CMAKE_ONLY only runs cmake and exits (via sys.exit in build_deps)
+        # before setup() is called, so there's no need to go through pip.
+        # Replace the command with "build" so setuptools doesn't complain
+        # about an unrecognized command if we somehow reach setup().
+        if CMAKE_ONLY:
+            arg = "build"
+        else:
+            editable = arg == "develop"
+            print(
+                (
+                    f"WARNING: Redirecting 'python setup.py {arg}' to "
+                    f"'pip install {'-e ' if editable else ''}. -v --no-build-isolation',"
+                    " for more info see https://github.com/pytorch/pytorch/issues/152276"
+                ),
+                file=sys.stderr,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *(("-e", ".") if editable else (".",)),
+                    "-v",
+                    "--no-build-isolation",
+                ],
+                env={**os.environ},
+            )
+            sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -514,120 +494,6 @@ TORCH_VERSION = get_torch_version()
 report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
-
-
-def get_submodule_folders() -> list[Path]:
-    git_modules_file = CWD / ".gitmodules"
-    default_modules_path = [
-        THIRD_PARTY_DIR / name
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "onnx",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
-    if not git_modules_file.exists():
-        return default_modules_path
-    with git_modules_file.open(encoding="utf-8") as f:
-        return [
-            CWD / line.partition("=")[-1].strip()
-            for line in f
-            if line.strip().startswith("path")
-        ]
-
-
-def check_submodules() -> None:
-    def check_for_files(folder: Path, files: list[str]) -> None:
-        if not any((folder / f).exists() for f in files):
-            report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    def not_exists_or_empty(folder: Path) -> bool:
-        return not folder.exists() or (
-            folder.is_dir() and next(folder.iterdir(), None) is None
-        )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
-    folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
-    for folder in folders:
-        check_for_files(
-            folder,
-            [
-                "CMakeLists.txt",
-                "Makefile",
-                "setup.py",
-                "LICENSE",
-                "LICENSE.md",
-                "LICENSE.txt",
-            ],
-        )
-    check_for_files(
-        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
-        ["CMakeLists.txt"],
-    )
-
-
-# Windows has very bad support for symbolic links.
-# Instead of using symlinks, we're going to copy files over
-def mirror_files_into_torchgen() -> None:
-    # (new_path, orig_path)
-    # Directories are OK and are recursively mirrored.
-    paths = [
-        (
-            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
-            CWD / "aten/src/ATen/native/native_functions.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/native/tags.yaml",
-            CWD / "aten/src/ATen/native/tags.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/templates",
-            CWD / "aten/src/ATen/templates",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd",
-            CWD / "tools/autograd",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd/templates",
-            CWD / "tools/autograd/templates",
-        ),
-    ]
-    for new_path, orig_path in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -787,7 +653,7 @@ def get_latest_nightly_version(variant: str = "cpu") -> str:
 def download_and_extract_nightly_wheel(version: str) -> None:
     """Download and extract nightly PyTorch wheel for USE_NIGHTLY=VERSION builds."""
 
-    # Extract variant from version (e.g., cpu, cu121, cu118, rocm5.7)
+    # Extract variant from version (e.g., cpu, cu121, cu118, rocm6.2)
     variant = extract_variant_from_version(version)
     nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
 
@@ -996,7 +862,6 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -1014,28 +879,6 @@ def build_deps() -> None:
             '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
-
-    # Use copies instead of symbolic files.
-    # Windows has very poor support for them.
-    sym_files = [
-        CWD / "tools/shared/_utils_internal.py",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
-    ]
-    orig_files = [
-        CWD / "torch/_utils_internal.py",
-        CWD / "third_party/valgrind-headers/callgrind.h",
-        CWD / "third_party/valgrind-headers/valgrind.h",
-    ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
-        same = False
-        if sym_file.exists():
-            if filecmp.cmp(sym_file, orig_file):
-                same = True
-            else:
-                sym_file.unlink()
-        if not same:
-            shutil.copyfile(orig_file, sym_file)
 
 
 ################################################################################
@@ -1077,12 +920,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
         for idx, line in enumerate(otool_cmds):
             if line.strip() == "cmd LC_LOAD_DYLIB":
                 lib_name = otool_cmds[idx + 2].strip()
-                assert lib_name.startswith("name ")
+                if not lib_name.startswith("name "):
+                    raise AssertionError(
+                        f"Expected lib_name to start with 'name ', got: {lib_name}"
+                    )
                 libs.append(lib_name.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
             if line.strip() == "cmd LC_RPATH":
                 rpath = otool_cmds[idx + 2].strip()
-                assert rpath.startswith("path ")
+                if not rpath.startswith("path "):
+                    raise AssertionError(
+                        f"Expected rpath to start with 'path ', got: {rpath}"
+                    )
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
         omplib_path: str = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]  # type: ignore[assignment]
@@ -1106,7 +955,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [
@@ -1245,44 +1094,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
-    def build_extensions(self) -> None:
-        self.create_compile_commands()
-
-        super().build_extensions()
-
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report(f"setup.py::get_outputs returning {outputs}")
         return outputs
-
-    def create_compile_commands(self) -> None:
-        def load(file: Path) -> list[dict[str, Any]]:
-            return json.loads(file.read_text(encoding="utf-8"))
-
-        ninja_files = (CWD / BUILD_DIR).glob("*compile_commands.json")
-        cmake_files = (CWD / "torch" / "lib" / "build").glob("*/compile_commands.json")
-        all_commands = [
-            entry
-            for f in itertools.chain(ninja_files, cmake_files)
-            for entry in load(f)
-        ]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command["command"].startswith("gcc "):
-                command["command"] = "g++ " + command["command"][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ""
-        compile_commands_json = CWD / "compile_commands.json"
-        if compile_commands_json.exists():
-            contents = compile_commands_json.read_text(encoding="utf-8")
-        if contents != new_contents:
-            compile_commands_json.write_text(new_contents, encoding="utf-8")
 
 
 class concat_license_files:
@@ -1335,7 +1151,8 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
         super().write_wheelfile(*args, **kwargs)
 
         if BUILD_LIBTORCH_WHL:
-            assert self.bdist_dir is not None
+            if self.bdist_dir is None:
+                raise AssertionError("self.bdist_dir must not be None")
             bdist_dir = Path(self.bdist_dir)
             # Remove extraneneous files in the libtorch wheel
             for file in itertools.chain(
@@ -1360,21 +1177,7 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        for wildcard in filter(None, ignores.splitlines()):
-            if wildcard.strip().startswith("#"):
-                if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                    # Marker is found and stop reading .gitignore.
-                    break
-                # Ignore lines which begin with '#'.
-            else:
-                # Don't remove absolute paths from the system
-                wildcard = wildcard.lstrip("./")
-                for filename in glob.iglob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
+        _clean()
 
 
 # Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
@@ -1554,7 +1357,7 @@ def configure_extension_build() -> tuple[
     if cmake_cache_vars["USE_DISTRIBUTED"]:
         # Only enable fr_trace command if distributed is enabled
         entry_points["console_scripts"].append(
-            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
@@ -1592,7 +1395,7 @@ def main() -> None:
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
-        'setuptools ; python_version >= "3.12"',
+        "setuptools<82",
         "sympy>=1.13.3",
         "networkx>=2.5.1",
         "jinja2",
@@ -1612,7 +1415,6 @@ def main() -> None:
         print(e, file=sys.stderr)
         sys.exit(1)
 
-    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
 
@@ -1628,6 +1430,7 @@ def main() -> None:
     torch_package_data = [
         "py.typed",
         "bin/*",
+        "bin/**/*",
         "test/*",
         "*.pyi",
         "**/*.pyi",
@@ -1649,6 +1452,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
+        "_inductor/kernel/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",

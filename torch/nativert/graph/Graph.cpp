@@ -3,7 +3,6 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <limits>
-#include <queue>
 
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
@@ -194,6 +193,9 @@ std::ostream& operator<<(std::ostream& out, const Type& ty) {
               break;
             case Type::Kind::TensorList:
               out << "TensorList";
+              break;
+            case Type::Kind::NestedTensorList:
+              out << "NestedTensorList";
               break;
             case Type::Kind::OptionalTensorList:
               out << "OptionalTensorList";
@@ -418,6 +420,10 @@ Node* Graph::createListPack(std::vector<Value*> inputs, const Type& inputType) {
     node->addOutput(name, Type::Kind::TensorList);
   } else if (inputType == Type::Kind::SymInt) {
     node->addOutput(name, Type::Kind::SymIntList);
+  } else if (inputType == Type::Kind::TensorList) {
+    // For nested tensor lists (List[List[Tensor]]), the inner lists are
+    // TensorList type. We output a NestedTensorList type.
+    node->addOutput(name, Type::Kind::NestedTensorList);
   }
 
   return node;
@@ -547,6 +553,24 @@ bool Graph::cleanupDeadNodes() {
 
   const bool mutated = !toRemove.empty();
 
+  if (mutated && VLOG_IS_ON(1)) {
+    c10::FastMap<std::string_view, int> removedByTarget;
+    for (const auto* n : toRemove) {
+      removedByTarget[n->target()]++;
+    }
+    VLOG(1) << "cleanupDeadNodes: removing " << toRemove.size()
+            << " dead nodes. Breakdown by op:";
+    // Sort by count descending for readability
+    std::vector<std::pair<std::string_view, int>> sorted(
+        removedByTarget.begin(), removedByTarget.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    for (const auto& [target, count] : sorted) {
+      VLOG(1) << "  " << target << ": " << count;
+    }
+  }
+
   // Remove nodes in reverse order to handle input/output dependencies
   for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
     removeNode(*it);
@@ -606,7 +630,23 @@ void Graph::finalize() {
       userOutputs_.emplace_back(getValue(*outputName));
     } else {
       if (constantIndex < constantOutputs_.size()) {
-        userOutputs_.emplace_back(std::move(constantOutputs_[constantIndex]));
+        // Copy the constant rather than moving it, because finalize() may be
+        // called multiple times (e.g. after constant folding). Moving would
+        // leave constantOutputs_ entries in a moved-from state, causing
+        // subsequent calls to produce empty strings/vectors.
+        // Constant is non-copyable due to unique_ptr<Graph>, so we use
+        // std::visit to copy each alternative individually.
+        userOutputs_.emplace_back(std::visit(
+            [](const auto& val) -> Constant {
+              using T = std::decay_t<decltype(val)>;
+              if constexpr (is_same_v<T, std::unique_ptr<Graph>>) {
+                TORCH_CHECK(false, "Graph constant outputs cannot be copied");
+                return Constant(None{});
+              } else {
+                return Constant(val);
+              }
+            },
+            constantOutputs_[constantIndex]));
         constantIndex++;
       } else {
         TORCH_CHECK(false, "No more constant outputs available");
@@ -924,10 +964,7 @@ void Value::addUser(Node* node) {
 }
 
 void Value::eraseUser(Node* node) {
-  users_.erase(
-      std::remove_if(
-          users_.begin(), users_.end(), [&](Node* el) { return el == node; }),
-      users_.end());
+  std::erase(users_, node);
 }
 
 std::vector<const Value*> Value::getListElements() const {
@@ -1031,9 +1068,27 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
         } else if constexpr (is_same_v<T, c10::Layout>) {
           out << kLayoutPrefix << arg;
         } else if constexpr (is_same_v<T, c10::Device>) {
-          out << kDevicePrefix << "{" << arg << "}";
+          out << kDevicePrefix << '{' << arg << '}';
         } else if constexpr (is_same_v<T, vector<string>>) {
           out << fmt::format("[{}]", fmt::join(arg, ","));
+        } else if constexpr (is_same_v<T, vector<vector<int64_t>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
+        } else if constexpr (is_same_v<T, vector<vector<double>>>) {
+          out << '[';
+          for (const auto& [idx, inner_list] : c10::enumerate(arg)) {
+            if (idx > 0) {
+              out << ", ";
+            }
+            out << fmt::format("{}", fmt::streamed(inner_list));
+          }
+          out << ']';
         } else if constexpr (is_same_v<T, unique_ptr<Graph>>) {
           out << fmt::format("<subgraph>");
           VLOG(0) << "Subgraph pretty print is not implemented";
@@ -1054,16 +1109,16 @@ void printValue(std::ostream& out, const Value* v) {
 }
 
 void printNamedArgument(std::ostream& out, const NamedArgument& nv) {
-  out << nv.name << "=" << *nv.value;
+  out << nv.name << '=' << *nv.value;
 }
 
 void printAttribute(std::ostream& out, const Attribute& nv) {
-  out << nv.name << "=" << nv.value;
+  out << nv.name << '=' << nv.value;
 }
 } // namespace
 
 std::ostream& operator<<(std::ostream& out, const Value& v) {
-  out << "%" << v.name();
+  out << '%' << v.name();
   // If a list, distinguish it by adding a []
   // Looks like %my_list[]
   if (v.type() == Type::Kind::TensorList) {
@@ -1085,14 +1140,14 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
     printList(out, false, node.inputs(), [](std::ostream& out, const auto& nv) {
       out << *nv.value;
     });
-    out << ")";
+    out << ')';
     return out;
   }
 
   printList(out, false, node.outputs_, printValue);
 
   out << " = ";
-  out << node.target_ << "(";
+  out << node.target_ << '(';
   printList(out, false, node.inputs_, printNamedArgument);
   if (!node.inputs_.empty() && !node.attributes_.empty()) {
     // Emit a connective ',' between inputs and attributes.
@@ -1100,13 +1155,13 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
   }
 
   printList(out, false, node.attributes_, printAttribute);
-  out << ")";
+  out << ')';
   return out;
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& graph) {
   for (const auto& node : graph.nodes_) {
-    out << node << "\n";
+    out << node << '\n';
   }
   return out;
 }

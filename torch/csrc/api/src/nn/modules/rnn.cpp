@@ -374,7 +374,7 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (options_base.proj_size() > 0) {
     stream << ", proj_size=" << options_base.proj_size();
   }
-  stream << ")";
+  stream << ')';
 }
 
 template <typename Derived>
@@ -619,7 +619,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
          max_batch_size,
          options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
-    hx = std::make_tuple(h_zeros, c_zeros);
+    hx = std::make_tuple(std::move(h_zeros), std::move(c_zeros));
   } else {
     hx = hx_opt.value();
     // Each batch of the hidden state should match the input sequence that
@@ -632,7 +632,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   if (!batch_sizes.defined()) {
     result = torch::lstm(
         input,
-        {std::get<0>(hx), std::get<1>(hx)},
+        {std::move(std::get<0>(hx)), std::move(std::get<1>(hx))},
         flat_weights_,
         options.bias(),
         options.num_layers(),
@@ -644,7 +644,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     result = torch::lstm(
         input,
         batch_sizes,
-        {std::get<0>(hx), std::get<1>(hx)},
+        {std::move(std::get<0>(hx)), std::move(std::get<1>(hx))},
         flat_weights_,
         options.bias(),
         options.num_layers(),
@@ -652,10 +652,11 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
         this->is_training(),
         options.bidirectional());
   }
-  auto output = std::get<0>(result);
-  auto hidden = std::make_tuple(std::get<1>(result), std::get<2>(result));
+  auto output = std::move(std::get<0>(result));
+  auto hidden = std::make_tuple(
+      std::move(std::get<1>(result)), std::move(std::get<2>(result)));
 
-  return std::make_tuple(output, hidden);
+  return std::make_tuple(std::move(output), std::move(hidden));
 }
 
 std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
@@ -837,7 +838,7 @@ template <typename Derived>
 void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name = this->name();
   const std::string name_without_impl = name.substr(0, name.size() - 4);
-  stream << name_without_impl << "(" << options_base.input_size() << ", "
+  stream << name_without_impl << '(' << options_base.input_size() << ", "
          << options_base.hidden_size();
   if (!options_base.bias()) {
     stream << ", bias=" << std::boolalpha << false;
@@ -846,7 +847,7 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (!nonlinearity_str.empty() && nonlinearity_str != "kTanh") {
     stream << ", nonlinearity=" << nonlinearity_str;
   }
-  stream << ")";
+  stream << ')';
 }
 
 template <typename Derived>

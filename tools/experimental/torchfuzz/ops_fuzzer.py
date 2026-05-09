@@ -2,7 +2,6 @@
 
 import random
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 
@@ -31,7 +30,7 @@ def _get_cached_operators():
 
 
 def _get_template_filtered_operators(
-    template: str = "default", supported_ops: Optional[list[str]] = None
+    template: str = "default", supported_ops: list[str] | None = None
 ):
     """Get operators filtered by template's supported_ops, with user override.
 
@@ -39,19 +38,9 @@ def _get_template_filtered_operators(
     registry. Otherwise, the template's supported_ops are used. If neither are
     specified, all operators are returned.
     """
-    # Instantiate template
-    if template == "dtensor":
-        from torchfuzz.codegen import DTensorFuzzTemplate
+    from torchfuzz.codegen import make_template
 
-        fuzz_template = DTensorFuzzTemplate()
-    elif template == "unbacked":
-        from torchfuzz.codegen import UnbackedFuzzTemplate
-
-        fuzz_template = UnbackedFuzzTemplate()
-    else:
-        from torchfuzz.codegen import DefaultFuzzTemplate
-
-        fuzz_template = DefaultFuzzTemplate()
+    fuzz_template = make_template(template)
 
     all_operators = _get_cached_operators()
 
@@ -60,6 +49,9 @@ def _get_template_filtered_operators(
 
     # If no supported_ops specified, return all operators
     if not allowed_ops:
+        for operator in all_operators.values():
+            if hasattr(operator, "set_template"):
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
         return all_operators
 
     # Filter operators based on allowed_ops
@@ -72,7 +64,7 @@ def _get_template_filtered_operators(
         if torch_op is None:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
             continue
 
@@ -92,7 +84,7 @@ def _get_template_filtered_operators(
         if should_include:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)  # type: ignore[attr-defined]
+                operator.set_template(fuzz_template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
 
     return filtered_ops
@@ -236,19 +228,9 @@ def fuzz_spec(template: str = "default") -> Spec:
     """
     # Try to use template's custom distribution if available
     try:
-        # Instantiate template
-        if template == "dtensor":
-            from torchfuzz.codegen import DTensorFuzzTemplate
+        from torchfuzz.codegen import make_template
 
-            fuzz_template = DTensorFuzzTemplate()
-        elif template == "unbacked":
-            from torchfuzz.codegen import UnbackedFuzzTemplate
-
-            fuzz_template = UnbackedFuzzTemplate()
-        else:
-            from torchfuzz.codegen import DefaultFuzzTemplate
-
-            fuzz_template = DefaultFuzzTemplate()
+        fuzz_template = make_template(template)
 
         # Use template's custom spec generation
         return fuzz_template.fuzz_spec_custom()
@@ -274,7 +256,7 @@ def fuzz_op(
     depth,
     stack_size,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
+    supported_ops: list[str] | None = None,
 ) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
@@ -429,9 +411,9 @@ def _get_arg_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
 def fuzz_operation_graph(
     target_spec: Spec,
     max_depth: int = 7,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
+    supported_ops: list[str] | None = None,
 ) -> OperationGraph:
     """
     Generate a graph of operations that produces the target specification.

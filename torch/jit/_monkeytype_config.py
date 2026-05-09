@@ -6,7 +6,6 @@ from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from types import CodeType
-from typing import Optional
 
 import torch
 
@@ -15,7 +14,7 @@ _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
 
-    # pyrefly: ignore  # import-error
+    # pyrefly: ignore [import-error, missing-import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -85,11 +84,8 @@ if _IS_MONKEYTYPE_INSTALLED:
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
 
-        def __init__(self, store: CallTraceStore):
-            super().__init__(store)
-
         def log(self, trace: CallTrace) -> None:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
@@ -100,7 +96,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # value is list of all CallTrace
             self.trace_records: dict[str, list] = defaultdict(list)
 
-        def add(self, traces: Iterable[CallTrace]):
+        def add(self, traces: Iterable[CallTrace]) -> None:
             for t in traces:
                 qualified_name = get_qualified_name(t.func)
                 self.trace_records[qualified_name].append(t)
@@ -108,7 +104,7 @@ if _IS_MONKEYTYPE_INSTALLED:
         def filter(
             self,
             qualified_name: str,
-            qualname_prefix: Optional[str] = None,
+            qualname_prefix: str | None = None,
             limit: int = 2000,
         ) -> list[CallTraceThunk]:
             return self.trace_records[qualified_name]
@@ -145,19 +141,19 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
-        def __init__(self, s: JitTypeTraceStore):
+        def __init__(self, s: JitTypeTraceStore) -> None:
             super().__init__()
             self.s = s
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
-            # pyrefly: ignore  # bad-argument-count
+            # pyrefly: ignore [bad-argument-count]
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:
             return self.s
 
-        def code_filter(self) -> Optional[CodeFilter]:
+        def code_filter(self) -> CodeFilter | None:
             return jit_code_filter
 
 else:
@@ -175,7 +171,7 @@ else:
         def __init__(self) -> None:
             pass
 
-    monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811
+    monkeytype_trace = None  # type: ignore[assignment]
 
 
 def jit_code_filter(code: CodeType) -> bool:

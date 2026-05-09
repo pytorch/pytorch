@@ -21,7 +21,7 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -39,7 +39,7 @@ void SELUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -55,7 +55,7 @@ void HardshrinkImpl::reset() {}
 
 void HardshrinkImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::Hardshrink(" << options.lambda()
-         << ")";
+         << ')';
 }
 
 // ============================================================================
@@ -86,7 +86,7 @@ void HardtanhImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -107,7 +107,7 @@ void LeakyReLUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -129,7 +129,7 @@ SoftmaxImpl::SoftmaxImpl(const SoftmaxOptions& options_) : options(options_) {}
 void SoftmaxImpl::reset() {}
 
 void SoftmaxImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softmax(dim=" << options.dim() << ")";
+  stream << "torch::nn::Softmax(dim=" << options.dim() << ')';
 }
 
 Tensor SoftmaxImpl::forward(const Tensor& input) {
@@ -143,7 +143,7 @@ SoftminImpl::SoftminImpl(const SoftminOptions& options_) : options(options_) {}
 void SoftminImpl::reset() {}
 
 void SoftminImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softmin(dim=" << options.dim() << ")";
+  stream << "torch::nn::Softmin(dim=" << options.dim() << ')';
 }
 
 Tensor SoftminImpl::forward(const Tensor& input) {
@@ -158,7 +158,7 @@ LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
 void LogSoftmaxImpl::reset() {}
 
 void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ")";
+  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ')';
 }
 
 Tensor LogSoftmaxImpl::forward(const Tensor& input) {
@@ -197,7 +197,7 @@ void PReLUImpl::reset() {
 
 void PReLUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PReLU(num_parameters=" << options.num_parameters()
-         << ")";
+         << ')';
 }
 
 // ============================================================================
@@ -215,7 +215,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -233,7 +233,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << "inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -257,7 +257,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -275,7 +275,7 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================
@@ -289,7 +289,7 @@ Tensor GLUImpl::forward(const Tensor& input) {
 void GLUImpl::reset() {}
 
 void GLUImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::GLU(dim=" << options.dim() << ")";
+  stream << "torch::nn::GLU(dim=" << options.dim() << ')';
 }
 
 // ============================================================================
@@ -355,7 +355,7 @@ void SoftplusImpl::reset() {}
 
 void SoftplusImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softplus(beta=" << options.beta()
-         << ", threshold=" << options.threshold() << ")";
+         << ", threshold=" << options.threshold() << ')';
 }
 
 // ============================================================================
@@ -370,7 +370,7 @@ Tensor SoftshrinkImpl::forward(const Tensor& input) {
 void SoftshrinkImpl::reset() {}
 
 void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Softshrink(" << options.lambda() << ")";
+  stream << "torch::nn::Softshrink(" << options.lambda() << ')';
 }
 
 // ============================================================================
@@ -430,7 +430,7 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
   if (options.inplace()) {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
-  stream << ")";
+  stream << ')';
 }
 
 // ============================================================================

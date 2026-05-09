@@ -159,7 +159,10 @@ class TestFXNodeSource(TestCase):
         # node decomposed from same ancestor node should have same from_node info
         for node in decomposed_ep.graph.nodes:
             if node.op not in {"placeholder", "output"}:
-                assert "from_node" in node.meta
+                if "from_node" not in node.meta:
+                    raise AssertionError(
+                        f"Expected 'from_node' in node.meta for node {node.name}"
+                    )
 
         node_name_to_from_node = {
             node.name: node.meta["from_node"]
@@ -225,7 +228,7 @@ class TestFXNodeSource(TestCase):
         check_node_source(
             key_provenance,
             "x",
-            "Interpreter_FlattenInputOutputSignature",
+            "Interpreter_DynamoGraphTransformer",
             CREATE_STR,
         )
 
@@ -274,7 +277,7 @@ class TestFXNodeSource(TestCase):
             check_node_source(
                 key_provenance,
                 "x",
-                "Interpreter_FlattenInputOutputSignature",
+                "Interpreter_DynamoGraphTransformer",
                 CREATE_STR,
             )
 

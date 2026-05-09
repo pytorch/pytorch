@@ -154,7 +154,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         model_list = [SingleLayerLinearDynamicModel(qengine)]
         for model in model_list:
@@ -178,7 +178,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         for model in model_list:
@@ -200,7 +200,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         model_list = [
             AnnotatedConvModel(qengine),
@@ -235,7 +235,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
@@ -260,7 +260,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
@@ -314,7 +314,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         for v in ob_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == val.shape)
 
     @override_qengines
     def test_compare_model_stub_linear_dynamic(self):
@@ -328,7 +328,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -357,7 +357,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
@@ -411,7 +411,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         model_list = [AnnotatedSingleLayerLinearModel(qengine)]
@@ -447,7 +447,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         for v in act_compare_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == val.shape)
 
     @override_qengines
     def test_compare_model_outputs_linear_dynamic(self):
@@ -464,7 +464,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -493,18 +493,12 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(len(v["float"][i]) == len(v["quantized"][i]))
+                    self.assertTrue(len(v["float"][i]) == len(val))
                     if i == 0:
-                        self.assertTrue(
-                            v["float"][i][0].shape == v["quantized"][i][0].shape
-                        )
+                        self.assertTrue(v["float"][i][0].shape == val[0].shape)
                     else:
-                        self.assertTrue(
-                            v["float"][i][0].shape == v["quantized"][i][0].shape
-                        )
-                        self.assertTrue(
-                            v["float"][i][1].shape == v["quantized"][i][1].shape
-                        )
+                        self.assertTrue(v["float"][i][0].shape == val[0].shape)
+                        self.assertTrue(v["float"][i][1].shape == val[1].shape)
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))

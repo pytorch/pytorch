@@ -17,6 +17,19 @@ aten = torch.ops.aten
 
 
 class TestRegisterSharding(DTensorTestBase):
+    def tearDown(self):
+        super().tearDown()
+        # Clean up any custom ops registered during tests to avoid test pollution
+        # This addresses the concern about proper deregistration of custom ops
+        import torch._custom_op
+
+        keys = list(torch._custom_op.impl.global_registry.keys())
+        for key in keys:
+            if key.startswith("test_dtensor::"):
+                torch._custom_op.impl.global_registry[key]._destroy()
+        if hasattr(torch.ops, "test_dtensor"):
+            delattr(torch.ops, "test_dtensor")
+
     @with_comms
     def test_softmax_fwd(self):
         # After registering the custom softmax sharding strategy,
@@ -115,6 +128,60 @@ class TestRegisterSharding(DTensorTestBase):
 
         self.assertTrue(dist_y.placements[0].is_shard(dim=0))
         self.assertEqual(dist_y.full_tensor(), local_y)
+
+    @with_comms
+    def test_register_sharding_for_tensor_kwargs(self):
+        mesh = self.build_device_mesh()
+        x = torch.randn(4, 4, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Replicate()])
+
+        @register_sharding(aten.min.dim_min)
+        def min_dim_strategy(x, dim, keepdim, min, min_indices):
+            all_replicate = (
+                [Replicate(), Replicate()],
+                [Replicate(), None, None, Replicate(), Replicate()],
+            )
+            return [all_replicate]
+
+        value = torch.randn(4, 1, device=self.device_type)
+        indices = torch.randn(4, 1, device=self.device_type).long()
+        value_dt = distribute_tensor(value, mesh, [Replicate()])
+        indices_dt = distribute_tensor(indices, mesh, [Replicate()])
+
+        result = torch.min(x_dt, dim=1, keepdim=True, out=(value_dt, indices_dt))
+
+        self.assertIsInstance(result[0], DTensor)
+        self.assertIsInstance(result[1], DTensor)
+
+        expected_values, expected_indices = torch.min(x, dim=1, keepdim=True)
+        self.assertEqual(result[0].full_tensor(), expected_values)
+        self.assertEqual(result[1].full_tensor(), expected_indices)
+
+    @with_comms
+    def test_register_sharding_non_tensor_first_arg(self):
+        # Test that get_mesh_from_args works when the first arg is not a DTensor
+        # Regression test for https://github.com/pytorch/pytorch/issues/167915
+        @torch.library.custom_op("test_dtensor::scalar_first_arg", mutates_args=())
+        def scalar_first_arg(name: str, x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @scalar_first_arg.register_fake
+        def _(name, x):
+            return x.clone()
+
+        @register_sharding(torch.ops.test_dtensor.scalar_first_arg.default)
+        def scalar_first_arg_sharding(name, x):
+            return [([Replicate()], [None, Replicate()])]
+
+        mesh = self.build_device_mesh()
+        x = torch.randn(4, 4, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Replicate()])
+
+        # This should not raise "Cannot find device mesh from args"
+        result = torch.ops.test_dtensor.scalar_first_arg("test", x_dt)
+
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(result.full_tensor(), x)
 
 
 if __name__ == "__main__":

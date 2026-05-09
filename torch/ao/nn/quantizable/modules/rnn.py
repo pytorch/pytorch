@@ -7,7 +7,6 @@ into its building blocks to be able to observe.
 
 import numbers
 import warnings
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -101,7 +100,7 @@ class LSTMCell(torch.nn.Module):
         self.cell_state_dtype: torch.dtype = torch.quint8
 
     def forward(
-        self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None
+        self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None
     ) -> tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
             hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
@@ -172,7 +171,8 @@ class LSTMCell(torch.nn.Module):
             wi, wh: Weights for the input and hidden layers
             bi, bh: Biases for the input and hidden layers
         """
-        assert (bi is None) == (bh is None)  # Either both None or both have values
+        if (bi is None) != (bh is None):
+            raise AssertionError("bi and bh must both be None or both have values")
         input_size = wi.shape[1]
         hidden_size = wh.shape[1]
         cell = cls(
@@ -203,8 +203,12 @@ class LSTMCell(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
-        assert type(other) is cls._FLOAT_MODULE
-        assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
+        if type(other) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                f"Expected module type {cls._FLOAT_MODULE}, got {type(other)}"
+            )
+        if not hasattr(other, "qconfig"):
+            raise AssertionError("The float module must have 'qconfig'")
         observed = cls.from_params(
             other.weight_ih,
             other.weight_hh,
@@ -247,7 +251,7 @@ class _LSTMSingleLayer(torch.nn.Module):
             input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
         )
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         result = []
         seq_len = x.shape[0]
         for i in range(seq_len):
@@ -297,14 +301,14 @@ class _LSTMLayer(torch.nn.Module):
                 **factory_kwargs,
             )
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         if self.batch_first:
             x = x.transpose(0, 1)
         if hidden is None:
             hx_fw, cx_fw = (None, None)
         else:
             hx_fw, cx_fw = hidden
-        hidden_bw: Optional[tuple[Tensor, Tensor]] = None
+        hidden_bw: tuple[Tensor, Tensor] | None = None
         if self.bidirectional:
             if hx_fw is None:
                 hx_bw = None
@@ -359,7 +363,8 @@ class _LSTMLayer(torch.nn.Module):
         mimic the behavior of the `prepare` within the `torch.ao.quantization`
         flow.
         """
-        assert hasattr(other, "qconfig") or (qconfig is not None)
+        if not hasattr(other, "qconfig") and qconfig is None:
+            raise AssertionError("other must have qconfig or qconfig must be provided")
 
         input_size = kwargs.get("input_size", other.input_size)
         hidden_size = kwargs.get("hidden_size", other.hidden_size)
@@ -369,14 +374,19 @@ class _LSTMLayer(torch.nn.Module):
         split_gates = kwargs.get("split_gates", False)
 
         layer = cls(
+            # pyrefly: ignore [bad-argument-type]
             input_size,
+            # pyrefly: ignore [bad-argument-type]
             hidden_size,
+            # pyrefly: ignore [bad-argument-type]
             bias,
+            # pyrefly: ignore [bad-argument-type]
             batch_first,
+            # pyrefly: ignore [bad-argument-type]
             bidirectional,
             split_gates=split_gates,
         )
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         layer.qconfig = getattr(other, "qconfig", qconfig)
         wi = getattr(other, f"weight_ih_l{layer_idx}")
         wh = getattr(other, f"weight_hh_l{layer_idx}")
@@ -455,7 +465,6 @@ class LSTM(torch.nn.Module):
 
         if (
             not isinstance(dropout, numbers.Number)
-            # pyrefly: ignore  # unsupported-operation
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
@@ -464,19 +473,21 @@ class LSTM(torch.nn.Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
-        # pyrefly: ignore  # unsupported-operation
+
         if dropout > 0:
             warnings.warn(
                 "dropout option for quantizable LSTM is ignored. "
                 "If you are training, please, use nn.LSTM version "
-                "followed by `prepare` step."
+                "followed by `prepare` step.",
+                stacklevel=2,
             )
             if num_layers == 1:
                 warnings.warn(
                     "dropout option adds dropout after all but last "
                     "recurrent layer, so non-zero dropout expects "
                     f"num_layers greater than 1, but got dropout={dropout} "
-                    f"and num_layers={num_layers}"
+                    f"and num_layers={num_layers}",
+                    stacklevel=2,
                 )
 
         layers = [
@@ -504,7 +515,7 @@ class LSTM(torch.nn.Module):
         )
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         if self.batch_first:
             x = x.transpose(0, 1)
 
@@ -564,8 +575,12 @@ class LSTM(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, qconfig=None, split_gates=False):
-        assert isinstance(other, cls._FLOAT_MODULE)
-        assert hasattr(other, "qconfig") or qconfig
+        if not isinstance(other, cls._FLOAT_MODULE):
+            raise AssertionError(
+                f"Expected module type {cls._FLOAT_MODULE}, got {type(other)}"
+            )
+        if not hasattr(other, "qconfig") and not qconfig:
+            raise AssertionError("other must have qconfig or qconfig must be provided")
         observed = cls(
             other.input_size,
             other.hidden_size,
@@ -576,7 +591,7 @@ class LSTM(torch.nn.Module):
             other.bidirectional,
             split_gates=split_gates,
         )
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         observed.qconfig = getattr(other, "qconfig", qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(

@@ -37,7 +37,7 @@ def _writeback_to_local_shard(
     writeback_grad: bool,
 ):
     """
-    For the handle, writes back the this rank's shard of the unsharded
+    For the handle, writes back this rank's shard of the unsharded
     flattened parameter to the sharded flattened parameter. If
     ``writeback_grad=True``, then writes back to the sharded gradient as
     well.
@@ -153,7 +153,8 @@ def _validate_unshard_params_args(
             "offload_to_cpu=True and rank0_only=False may result in the"
             "unsharded parameters being redundantly copied to CPU memory for "
             "GPUs sharing the same CPU memory, which risks CPU OOM. We "
-            "recommend using offload_to_cpu=True with rank0_only=True."
+            "recommend using offload_to_cpu=True with rank0_only=True.",
+            stacklevel=2,
         )
 
 

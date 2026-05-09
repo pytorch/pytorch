@@ -3,8 +3,9 @@ import json
 import logging
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import torch
 from torch._dynamo.package import (
@@ -107,9 +108,15 @@ class PrecompileContext:
         """
         Records a backend artifact to be used with dynamo cache entries
         """
-        cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
-            artifact
-        )
+        # Temporarily disable all dispatch modes (including FakeTensorMode) during
+        # deepcopy to avoid issues with cloning fake tensors (e.g., device mesh
+        # with meta tensors that fail when cloning due to device mismatches)
+        from torch.utils._mode_utils import no_dispatch
+
+        with no_dispatch():
+            cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
+                artifact
+            )
 
     @classmethod
     def record_dynamo_cache_entry(
@@ -122,12 +129,13 @@ class PrecompileContext:
         """
         Edit the content of an existing artifact
         """
-        assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
+        if key not in cls._backend_artifacts_by_key:
+            raise AssertionError(f"Key {key} not found in artifacts")
         artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
-    def serialize_artifact_by_key(cls, key: str) -> Optional[BackendCacheArtifact[Any]]:
+    def serialize_artifact_by_key(cls, key: str) -> BackendCacheArtifact[Any] | None:
         """
         Return the backend cache artifact with the associated key
         """

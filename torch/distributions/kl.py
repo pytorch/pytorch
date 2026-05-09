@@ -133,6 +133,7 @@ def _dispatch_kl(type_p, type_q):
             f"Ambiguous kl_divergence({type_p.__name__}, {type_q.__name__}). "
             f"Please register_kl({left_p.__name__}, {right_q.__name__})",
             RuntimeWarning,
+            stacklevel=2,
         )
     return left_fun
 
@@ -969,4 +970,5 @@ def _add_kl_info():
         )
     kl_info = "\n\t".join(rows)
     if kl_divergence.__doc__:
+        # pyrefly: ignore [missing-attribute]
         kl_divergence.__doc__ += kl_info

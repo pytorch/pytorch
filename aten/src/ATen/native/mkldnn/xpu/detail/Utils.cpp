@@ -18,6 +18,13 @@ dnnl::memory make_onednn_memory(
       ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
 }
 
+dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr) {
+  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
+}
+
 dnnl::memory::format_tag get_dnnl_default_format(
     int ndims,
     bool is_channels_last,
@@ -78,6 +85,10 @@ dnnl::memory::data_type get_onednn_dtype(
       return dnnl::memory::data_type::f32;
     case at::ScalarType::BFloat16:
       return dnnl::memory::data_type::bf16;
+    case at::ScalarType::Float8_e4m3fn:
+      return dnnl::memory::data_type::f8_e4m3;
+    case at::ScalarType::Float8_e5m2:
+      return dnnl::memory::data_type::f8_e5m2;
     default:
       if (!allow_undef) {
         TORCH_CHECK(
@@ -127,40 +138,40 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
 bool onednn_strides_check(const Tensor& src) {
   auto adims = get_onednn_dims(src);
   int ndims = (int)adims.size();
-  auto dims = adims.data();
   auto data_type = static_cast<dnnl_data_type_t>(
       get_onednn_dtype_include_double(src, /*allow_undef*/ false));
   auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
   dnnl_memory_desc_t md;
-  dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
+  dnnl_memory_desc_create_with_strides(
+      &md, ndims, adims.data(), data_type, strides);
   dnnl_format_kind_t md_fmt_kind;
   int md_ndims = 0;
   int md_inner_nblks = 0;
   dnnl_dims_t* md_padded_dims = nullptr;
 
-  dnnl_memory_desc_query(md, dnnl_query_inner_nblks_s32, &md_inner_nblks);
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
+  dnnl_memory_desc_query(md, dnnl_query_inner_nblks_s32, &md_inner_nblks);
   dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
-  auto block_size = 1;
-  // const auto& blk = md->format_desc.blocking;
-  dnnl_dims_t md_inner_blks;
-  dnnl_dims_t md_blk_inner_idxs;
-  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
-  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
   dnnl_memory_desc_destroy(md);
 
   if (strides == nullptr || md_ndims == 0 ||
       md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
     return true;
 
-  dnnl_dims_t blocks = {0};
-  int perm[DNNL_MAX_NDIMS] = {0};
+  // XPU does not support inner-block formats (e.g. nChw16c);
+  TORCH_INTERNAL_ASSERT(
+      md_inner_nblks == 0,
+      "XPU backend does not support block format. But found inner blocks: ",
+      md_inner_nblks);
+
+  // Plain blocked format: verify strides are non-overlapping.
+  std::array<int, DNNL_MAX_NDIMS> perm = {0};
   for (int d = 0; d < md_ndims; ++d) {
     // no strides check needed for empty tensor
-    if (md_padded_dims[d] == nullptr)
+    if ((*md_padded_dims)[d] == 0)
       return true;
 
     // no strides verification for runtime dims
@@ -168,26 +179,21 @@ bool onednn_strides_check(const Tensor& src) {
       return true;
 
     perm[d] = d;
-    blocks[d] = 1;
-  }
-
-  for (int iblk = 0; iblk < md_inner_nblks; ++iblk) {
-    blocks[md_blk_inner_idxs[iblk]] *= md_inner_blks[iblk];
-    block_size *= md_inner_blks[iblk];
   }
 
   // A custom comparator to yield linear order on perm
   auto idx_sorter = [&](const int a, const int b) -> bool {
-    if (strides[a] == strides[b] && md_padded_dims[a] == md_padded_dims[b])
+    if (strides[a] == strides[b] &&
+        (*md_padded_dims)[a] == (*md_padded_dims)[b])
       return a < b;
     else if (strides[a] == strides[b])
-      return md_padded_dims[a] < md_padded_dims[b];
+      return (*md_padded_dims)[a] < (*md_padded_dims)[b];
     else
       return strides[a] < strides[b];
   };
-  std::sort(perm, perm + md_ndims, idx_sorter);
+  std::sort(perm.begin(), perm.begin() + md_ndims, idx_sorter);
 
-  auto min_stride = block_size;
+  int64_t min_stride = 1;
   for (int idx = 0; idx < md_ndims; ++idx) {
     const int d = perm[idx];
 
@@ -199,9 +205,9 @@ bool onednn_strides_check(const Tensor& src) {
       return false;
 
     // update min_stride for next iteration
-    const auto padded_dim = *md_padded_dims[d];
-    min_stride = block_size * strides[d] * (padded_dim / blocks[d]);
+    min_stride = strides[d] * (*md_padded_dims)[d];
   }
+
   return true;
 }
 
@@ -281,6 +287,27 @@ void undo_broadcast(at::Tensor& tensor) {
   return;
 }
 
+bool is_64_bytes_aligned(const at::Tensor& tensor) {
+  constexpr uintptr_t alignment_byte = 64;
+  auto data_ptr = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
+  return (data_ptr % alignment_byte) == 0;
+}
+
+at::Tensor make_contiguous_and_aligned(
+    const at::Tensor& tensor,
+    std::optional<at::MemoryFormat> memory_format) {
+  at::Tensor out = memory_format.has_value() ? tensor.contiguous(*memory_format)
+                                             : tensor.contiguous();
+  if (!is_64_bytes_aligned(out)) {
+    TORCH_WARN(
+        "Tensor is not 64-byte aligned. Cloning to ensure alignment for oneDNN "
+        "operations, which incurs a device-to-device copy.");
+    out = out.clone();
+  }
+
+  return out;
+}
+
 bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
@@ -294,14 +321,11 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor.is_contiguous())
     return true;
 
-  if (tensor.storage_offset() > 0) {
-    // currently onednn asks 64 byte alignment
-    constexpr int alignment_byte = 64;
-    if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte > 0)
-      return false;
+  if (tensor.storage_offset() > 0 && !is_64_bytes_aligned(tensor)) {
+    return false;
   }
 
-  // the overlaped cases are not supported
+  // the overlapped cases are not supported
   dnnl::memory::dims strides = get_onednn_strides(tensor);
   int64_t storage_size = 1;
   for (size_t dim = 0; dim < tensor_dim; ++dim)

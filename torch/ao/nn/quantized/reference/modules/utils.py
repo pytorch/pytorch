@@ -18,17 +18,18 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 "scale": 1.0,
                 "zero_point": 0,
             }
-        # pyrefly: ignore  # bad-assignment
+
         self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
-        assert self.weight_qscheme in [
+        if self.weight_qscheme not in [
             None,
             torch.per_tensor_affine,
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
-        ], (
-            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
-        )
+        ]:
+            raise AssertionError(
+                f"qscheme: {self.weight_qscheme} is not supported in reference quantized {self._get_name()}"
+            )
         if self.weight_dtype in [
             torch.quint8,
             torch.qint8,
@@ -81,15 +82,15 @@ class ReferenceQuantizedModule(torch.nn.Module):
             self.register_buffer(
                 "weight_axis", torch.tensor(0, dtype=torch.int, device=device)
             )
-        # pyrefly: ignore  # bad-assignment
+
         self.is_decomposed: bool = weight_qparams.get("is_decomposed", False)
         # store weight_axis as weight_axis_int due to some constraints of torchdynamo.export
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
-        # pyrefly: ignore  # bad-assignment
-        self.weight_quant_min: typing.Optional[int] = weight_qparams.get("quant_min")
-        # pyrefly: ignore  # bad-assignment
-        self.weight_quant_max: typing.Optional[int] = weight_qparams.get("quant_max")
+
+        self.weight_quant_min: int | None = weight_qparams.get("quant_min")
+
+        self.weight_quant_max: int | None = weight_qparams.get("quant_max")
 
     def get_weight(self):
         """
@@ -99,13 +100,14 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
+        if not isinstance(self.weight_scale, torch.Tensor):
+            raise AssertionError("weight_scale must be a Tensor")
+        if not isinstance(self.weight_zero_point, torch.Tensor):
+            raise AssertionError("weight_zero_point must be a Tensor")
         if self.is_decomposed:
             return _quantize_and_dequantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -117,7 +119,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_and_dequantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -126,14 +127,15 @@ class ReferenceQuantizedModule(torch.nn.Module):
 
     def get_quantized_weight(self):
         # suppress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
+        if not isinstance(self.weight_scale, torch.Tensor):
+            raise AssertionError("weight_scale must be a Tensor")
+        if not isinstance(self.weight_zero_point, torch.Tensor):
+            raise AssertionError("weight_zero_point must be a Tensor")
         # assert isinstance(self.weight_axis, torch.Tensor)
         if self.is_decomposed:
             return _quantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -145,7 +147,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -196,13 +197,13 @@ def _quantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: ((-(2**31)), (2**31 - 1)),
+        torch.int32: (-2147483648, 2147483647),  # torch.jit interprets 2**31 as a float
     }
 
     # TODO: add an util function for converting qdtype to dtype
@@ -258,14 +259,14 @@ def _dequantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     # TODO: get the quant_min and quant_max from activation_post_process
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: ((-(2**31)), (2**31 - 1)),
+        torch.int32: (-2147483648, 2147483647),  # torch.jit interprets 2**31 as a float
     }
     # TODO: add an util function for converting qdtype to dtype
     _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE = {
@@ -343,8 +344,8 @@ def _quantize_and_dequantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis_int: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     """Quantize and then dequantize the weight based on
     the quantization parameters

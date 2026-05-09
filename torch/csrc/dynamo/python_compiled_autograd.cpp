@@ -1,12 +1,9 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -47,7 +44,7 @@ at trace time.
 
 Notes:
   - We require hooks to not change shapes of tensors.
-  - We require non-hook autograd nodes to be tracable.
+  - We require non-hook autograd nodes to be traceable.
 */
 
 namespace torch::dynamo::autograd {
@@ -434,10 +431,10 @@ struct VerboseLogger : public PythonLogger {
       }
       oss << it->key_size;
       if (std::next(it) != cached_keys.end()) {
-        oss << ",";
+        oss << ',';
       }
     }
-    oss << "]";
+    oss << ']';
     std::string compile_reason = oss.str();
     log(PythonLogger::DEBUG, compile_reason);
     return compile_reason;
@@ -454,7 +451,7 @@ struct VerboseLogger : public PythonLogger {
     }
     oss << "sizes["
         << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
-        << "]";
+        << ']';
     std::string recompile_reason = oss.str();
     log(PythonLogger::DEBUG, recompile_reason);
     return recompile_reason;
@@ -659,7 +656,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
     throw_python_error();
   }
 
-  if (logger == Py_None) {
+  if (Py_IsNone(logger)) {
     python_verbose_logger = nullptr;
   } else {
     python_verbose_logger = logger;
@@ -889,7 +886,7 @@ static SizeInput::DynType get_default_dyn_type() {
 
 // Only call this function while holding GIL
 static CacheNode* _compiled_autograd_impl(
-    const std::shared_ptr<Node>& graph_root,
+    const c10::intrusive_ptr<Node>& graph_root,
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges,
@@ -903,7 +900,7 @@ static CacheNode* _compiled_autograd_impl(
   std::unordered_map<Node*, int> visited_dependencies;
   visited_dependencies.reserve(dependencies.size());
 
-  std::vector<std::shared_ptr<Node>> worklist{graph_root};
+  std::vector<c10::intrusive_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
@@ -922,7 +919,7 @@ static CacheNode* _compiled_autograd_impl(
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   std::optional<std::string> compile_reason;
   while (!worklist.empty()) {
-    std::shared_ptr<Node> fn = std::move(worklist.back());
+    c10::intrusive_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     ordered_calls.emplace_back(&call);
@@ -980,7 +977,7 @@ static CacheNode* _compiled_autograd_impl(
     // cache miss, need to capture FX graph
     TORCH_INTERNAL_ASSERT(!vlogger.has_value() || compile_reason.has_value());
     ClosingTHPObjectPtr py_compiler(
-        check(PyObject_CallNoArgs((the_autograd_compiler))));
+        check(PyObject_CallNoArgs(the_autograd_compiler)));
     PyCompilerGuard py_compiler_guard(
         std::make_unique<PyCompilerInterfaceImpl>());
 
@@ -1003,8 +1000,8 @@ static CacheNode* _compiled_autograd_impl(
       THPObjectPtr set_node_origin(
           PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
       PyObject* pyobj = Py_None;
-      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
-        pyobj = pynode->obj;
+      if (auto pynode = dynamic_cast<PyNode*>(call.node.get())) {
+        pyobj = pynode->pyobj();
       }
       check(PyObject_CallFunction(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
@@ -1201,7 +1198,7 @@ struct LockGuardWithErrorLogs {
 };
 
 static variable_list compiled_autograd(
-    const std::shared_ptr<Node>& graph_root,
+    const c10::intrusive_ptr<Node>& graph_root,
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
@@ -1264,7 +1261,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   PyObject* prior_compiler = the_autograd_compiler;
   PyObject* prior_dynamic = default_dyn_type_int == 0 ? Py_False : Py_True;
   default_dyn_type_int = b;
-  if (obj == Py_None) { // disable
+  if (Py_IsNone(obj)) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`
     Engine::set_compiled_autograd(nullptr);
   } else { // enable

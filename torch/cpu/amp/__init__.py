@@ -1,3 +1,3 @@
-# pyrefly: ignore  # deprecated
+# pyrefly: ignore [deprecated]
 from .autocast_mode import autocast
 from .grad_scaler import GradScaler

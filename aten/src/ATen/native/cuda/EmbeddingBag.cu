@@ -31,8 +31,6 @@
 
 #include <c10/macros/Macros.h>
 
-#include <thrust/iterator/reverse_iterator.h>
-
 namespace at::native {
 
 
@@ -78,9 +76,18 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       scalar_t weightFeatMax = 0;
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
+
+      // Separate validation loop reduces register pressure in the main loop below.
+      // No early exit (break) on invalid input as benchmarking shows it degrades performance.
+      bool has_invalid_index = false;
+      for (int64_t emb = begin; emb < end; emb++) {
+        index_t input_idx = input[emb];
+        has_invalid_index = has_invalid_index || (input_idx < 0 || input_idx >= numRows);
+      }
+      CUDA_KERNEL_ASSERT(!has_invalid_index && "Invalid input index in EmbeddingBag: index out of range [0, numRows)");
+
       for (int64_t emb = begin; emb < end; emb++) {
         bool pad = (input[emb] == padding_idx);
-        CUDA_KERNEL_ASSERT(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         if (bag_size_ == 0 || weightValue > weightFeatMax) {
@@ -129,10 +136,19 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       CUDA_KERNEL_ASSERT(end >= begin);
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
+
+      // Separate validation loop reduces register pressure in the main loop below.
+      // No early exit (break) on invalid input as benchmarking shows it degrades performance.
+      bool has_invalid_index = false;
+      for (int64_t emb = begin; emb < end; emb++) {
+        index_t input_idx = input[emb];
+        has_invalid_index = has_invalid_index || (input_idx < 0 || input_idx >= numRows);
+      }
+      CUDA_KERNEL_ASSERT(!has_invalid_index && "Invalid input index in EmbeddingBag: index out of range [0, numRows)");
+
       for (int64_t emb = begin; emb < end; emb++) {
         index_t input_idx = input[emb];
         bool pad = (input_idx == padding_idx);
-        CUDA_KERNEL_ASSERT(0 <= input_idx && input_idx < numRows);
         const int64_t weightRow = input_idx * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
@@ -212,9 +228,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 3 3 3 2 2 1 2 2
       cuda::cub::inclusive_scan_by_key(
-        thrust::make_reverse_iterator(sorted_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
+        cccl_make_reverse_iterator(sorted_data + num_indices),
+        cccl_make_reverse_iterator(count_data + num_indices),
+        cccl_make_reverse_iterator(count_data + num_indices),
         ATEN_CUB_MAXIMUM(),
         num_indices
       );

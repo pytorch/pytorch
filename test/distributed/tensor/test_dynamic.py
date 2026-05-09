@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -60,6 +61,15 @@ class TestDynamic(DTensorTestBase):
 
 instantiate_parametrized_tests(TestDynamic)
 
+TestDynamicWithLocalTensor = create_local_tensor_test_class(
+    TestDynamic,
+    # LocalTensorMode is a non-infra dispatch mode that causes Dynamo to skip
+    # frames, which is incompatible with fullgraph=True.
+    skipped_tests=[
+        "test_embedding_fake_tensor_cache_enabled_False",
+        "test_embedding_fake_tensor_cache_enabled_True",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()

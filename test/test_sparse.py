@@ -19,16 +19,17 @@ from numbers import Number
 from typing import Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
+    (SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
-     expectedFailureMPSComplex, largeTensorTest)
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_mps_types, all_types_and_complex_and, floating_and_complex_types,
-    floating_and_complex_types_and, integral_types, floating_types_and,
+    floating_and_complex_types_and, highest_precision_complex, highest_precision_float,
+    integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from torch.testing._internal.opinfo.refs import (
@@ -59,10 +60,71 @@ if TEST_SCIPY:
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
+
+def _make_lowp_aware_gradcheck(gradcheck_fn):
+    """
+    Wraps a gradcheck function to handle low precision dtypes
+
+    For float64/complex128 inputs: runs gradcheck directly
+    For lower precision inputs: compares backward() on device against
+    backward() on CPU in float64/complex128
+    """
+    HIGHP_DTYPES = (torch.float64, torch.complex128)
+
+    def needs_backward_comparison(inputs):
+        return any(inp.dtype not in HIGHP_DTYPES for inp in inputs)
+
+    def clone_inputs_cpu(inputs):
+        cloned = []
+        for inp in inputs:
+            if not isinstance(inp, torch.Tensor):
+                cloned.append(inp)
+                continue
+            gradcheck_dtype = torch.complex128 if inp.dtype.is_complex else torch.float64
+            c = inp.detach().clone().to("cpu").to(gradcheck_dtype)
+            if c.is_sparse:
+                c = c.coalesce()
+            c = c.requires_grad_(inp.requires_grad)
+            cloned.append(c)
+        return tuple(cloned)
+
+    def compute_grads(fn, inputs):
+        grad_inputs = [x for x in inputs if isinstance(x, torch.Tensor) and x.requires_grad]
+        out = fn(*inputs)
+        grads = torch.autograd.grad(out, grad_inputs, torch.ones_like(out), allow_unused=True)
+        return grads, grad_inputs
+
+    @functools.wraps(gradcheck_fn)
+    def wrapped(fn, inputs, *args, **kwargs):
+        inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
+        if not needs_backward_comparison(inputs):
+            return gradcheck_fn(fn, inputs, *args, **kwargs)
+
+        ref_grads, ref_inputs = compute_grads(fn, clone_inputs_cpu(inputs))
+        orig_grads, orig_inputs = compute_grads(fn, inputs)
+
+        for i, (og, rg, o_inp, r_inp) in enumerate(zip(orig_grads, ref_grads, orig_inputs, ref_inputs)):
+            og_dense = og.to_dense() if og.is_sparse else og
+            rg_dense = rg.to_dense() if rg.is_sparse else rg
+            og_dense = og_dense.to('cpu')
+            rg_dense = rg_dense.to(device='cpu', dtype=og_dense.dtype)
+            if not torch.allclose(og_dense, rg_dense):
+                max_diff = (og_dense - rg_dense).abs().max()
+                raise AssertionError(
+                    f"Gradient mismatch for input {i}:\n"
+                    f"  input dtype/device: orig={o_inp.dtype}/{o_inp.device}, ref={r_inp.dtype}/{r_inp.device}\n"
+                    f"  shapes: {tuple(og_dense.shape)} vs {tuple(rg_dense.shape)}\n"
+                    f"  max abs diff: {max_diff}"
+                )
+        return True
+    if hasattr(gradcheck_fn, 'masked'):
+        wrapped.masked = gradcheck_fn.masked
+    return wrapped
 
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+gradcheck = _make_lowp_aware_gradcheck(gradcheck)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
@@ -83,6 +145,8 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
     gradcheck_masked = functools.partial(gradcheck, masked=True)
+    gradcheck_sparse = _make_lowp_aware_gradcheck(gradcheck_sparse)
+    gradcheck_masked = _make_lowp_aware_gradcheck(gradcheck_masked)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -178,7 +242,7 @@ class TestSparseBase(TestCase):
 class TestSparse(TestSparseBase):
 
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
@@ -207,7 +271,8 @@ class TestSparse(TestSparseBase):
         Test if a CPU tensor is uncoalesced.  This is used to ensure
         correctness of the uncoalesced tensor generation algorithm.
         """
-        assert not x.is_coalesced()
+        if x.is_coalesced():
+            raise AssertionError("expected tensor to be uncoalesced")
         existing_indices = set()
         indices = x._indices()
         for i in range(x._nnz()):
@@ -269,7 +334,7 @@ class TestSparse(TestSparseBase):
             if values.dtype == torch.double:
                 dtypes.append(torch.float)
             else:
-                dtypes.append(torch.double if values.device != torch.device("mps:0") else torch.float32)
+                dtypes.append(highest_precision_float(values.device))
             for dtype in dtypes:
                 printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
@@ -385,6 +450,18 @@ class TestSparse(TestSparseBase):
         values = torch.randn(NNZ, dtype=dtype, device=device)
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
+
+    @dtypes(torch.float32)
+    @onlyCPU
+    # test_warn_on_sparse_tensor_invariant_checks_disabled must be called exactly once
+    def test_warn_on_sparse_tensor_invariant_checks_disabled(self, device, dtype):
+        indices = torch.tensor([[0, 1, 2], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        with torch.sparse.check_sparse_tensor_invariants(None):
+            msg = "Sparse invariant checks are implicitly disabled."
+            with self.assertWarnsRegex(UserWarning, msg):
+                x = torch.sparse_coo_tensor(indices, values, shape)
 
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -507,7 +584,7 @@ class TestSparse(TestSparseBase):
             x.requires_grad_(True)
             gradcheck(fn, (x,))
 
-        values_types = [torch.double, torch.cdouble] if device != "mps:0" else [torch.float32, torch.complex64]
+        values_types = [highest_precision_float(device), highest_precision_complex(device)]
         for value_type in values_types:
             i = self.index_tensor([
                 [0, 1, 2, 2],
@@ -552,7 +629,7 @@ class TestSparse(TestSparseBase):
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
         max_nnz = 1
-        dtypes = [torch.double, torch.cdouble] if device != "mps:0" else [torch.float32, torch.complex64]
+        dtypes = [highest_precision_float(device), highest_precision_complex(device)]
         for value_type in dtypes:
             for dim, dim_sz in enumerate(shape, 1):
                 max_nnz *= dim_sz
@@ -624,7 +701,6 @@ class TestSparse(TestSparseBase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -888,7 +964,7 @@ class TestSparse(TestSparseBase):
         x1.copy_(x2)
         self.assertEqual(x1_dtype, x1.dtype)
 
-        x2 = x2.to(torch.float64) if device != "mps:0" else x2.to(torch.float32)
+        x2 = x2.to(highest_precision_float(device))
         x1_dtype = x1.dtype
         x1.copy_(x2)
         self.assertEqual(x1_dtype, x1.dtype)
@@ -989,7 +1065,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
@@ -1251,7 +1326,6 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.dtype, t[0, 0].dtype)
             self.assertEqual(t.dtype, t[1, 1].dtype)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1305,7 +1379,6 @@ class TestSparse(TestSparseBase):
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1313,7 +1386,6 @@ class TestSparse(TestSparseBase):
         # will trigger brute-force algo
         self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1321,7 +1393,6 @@ class TestSparse(TestSparseBase):
         # will trigger more sophisticated algos
         self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1333,7 +1404,7 @@ class TestSparse(TestSparseBase):
         res_sparse = t.to_sparse().index_select(0, idx_empty)
         self.assertEqual(res_dense, res_sparse)
 
-        # non-contigous index
+        # non-contiguous index
         idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
 
         def run_test(sizes):
@@ -1385,9 +1456,9 @@ class TestSparse(TestSparseBase):
         # case nnz > size[d]
         run_test(tlen, tlen // 2)
 
-    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -1427,7 +1498,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0]
                 b_mat = torch.randn([dim_j, dim_k], dtype=dtype, device=device)
                 a_list.append(a_mat)
@@ -1455,12 +1526,16 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
         a = torch.rand([10, 23, 32], dtype=dtype, device=device)
-        a[3] = torch.zeros(23, 32, dtype=dtype, device=device)
-        a[6] = torch.zeros(23, 32, dtype=dtype, device=device)
+        a[3].zero_()
+        a[6].zero_()
+        a[7].tril_()
+        a[8].zero_().diagonal().fill_(1)
         a = a.to_sparse()
         b = torch.rand([10, 32, 10], dtype=dtype, device=device)
-        b[4] = torch.zeros(32, 10, dtype=dtype, device=device)
-        b[6] = torch.zeros(32, 10, dtype=dtype, device=device)
+        b[4].zero_()
+        b[6].zero_()
+        b[7].tril_()
+        b[8].zero_().diagonal().fill_(1)
         ab = a.bmm(b)
         for mat_idx in range(ab.size(0)):
             ab_mat = ab[mat_idx]
@@ -1483,7 +1558,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0])
                 b_list.append(torch.randn([dim_j, dim_k], dtype=dtype, device=device))
 
@@ -1546,6 +1621,42 @@ class TestSparse(TestSparseBase):
                 RuntimeError,
                 "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    def test_bmm_coo_row_index_alignment(self, device, dtype):
+        # See https://github.com/pytorch/pytorch/issues/167901
+        # cuSPARSE SpMV has a bug before cuda 13.1 which assumes
+        # 16-byte alignment for COO row index array.
+        batch = 5
+        nrows = 291105
+
+        m1 = torch.randn(batch, nrows, 1, device=device, dtype=dtype)
+        m2 = torch.randn(batch, 1, 1, device=device, dtype=dtype)
+        ref = torch.bmm(m1, m2)
+
+        m1_sparse = m1.to_sparse()
+        row_indices = m1_sparse.indices()[1]
+        del m1
+
+        # Row indices ptr for odd matrices should be 16-byte aligned
+        for i in range(1, batch, 2):
+            self.assertTrue(
+                (row_indices[i * nrows].data_ptr() % 16) == 0
+            )
+        # Row indices ptr for even matrices should be 8-byte aligned
+        for i in range(0, batch, 2):
+            self.assertTrue(
+                (row_indices[i * nrows].data_ptr() % 16) == 8
+            )
+
+        res = torch.bmm(m1_sparse, m2)
+        self.assertEqual(ref, res)
 
     @onlyCPU
     @coalescedonoff
@@ -1631,6 +1742,25 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
+    @onlyCPU
+    @dtypes(torch.double, torch.cdouble)
+    def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
+        m, k, n = 2, 2, 2
+        self_sp = self._gen_sparse(2, 4, [m, n], dtype, device, True)[0]
+        mat1_dense = torch.randn(m, k, dtype=dtype, device=device)
+        mat2_dense = torch.randn(k, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout Strided"):
+            self_sp.sspaddmm(mat1_dense, mat2_dense)
+
+        mat1_sparse = self._gen_sparse(2, 3, [m, k], dtype, device, True)[0]
+        mat2_sparse = self._gen_sparse(2, 3, [k, n], dtype, device, True)[0]
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
+            self_sp.sspaddmm(mat1_sparse, mat2_sparse)
+
     @coalescedonoff
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
@@ -1674,7 +1804,6 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -1692,6 +1821,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
+
             gradcheck(fn, (S, D), masked=True)
 
         test_shape(7, 8, 9, 20, False)
@@ -1703,23 +1833,29 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
+        # check_batched_grad=False: slow gradcheck's batched/vmap Jacobian
+        # path calls aten::view which is unsupported for sparse tensors.
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b], eps=1e-4)
+        gradcheck(
+            lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked),
+            [a, b],
+            check_batched_grad=False,
+        )
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
-            gradcheck(lambda x, y: (x * y).to_dense(), [a, b], eps=1e-4)
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
+            gradcheck(lambda x, y: (x * y).to_dense(), [a, b], check_batched_grad=False)
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, eps=1e-4)
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, check_batched_grad=False)
 
-        # TODO: Re-enable these
-        # test_shape(2, 3, [2, 3, 4, 5])
-        # test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [2, 3, 4, 5])
+        test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [4, 5])
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -1851,7 +1987,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     @coalescedonoff
-    @expectedFailureMPSComplex
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_norm(self, device, dtype, coalesced):
@@ -1881,7 +2016,6 @@ class TestSparse(TestSparseBase):
                 x.norm(**kwargs)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
@@ -2078,7 +2212,8 @@ class TestSparse(TestSparseBase):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
         values = torch.tensor([1.], dtype=dtype, device=device).expand(2, 3, 4, 5)
         x = self.sparse_tensor(indices, values, dtype=dtype, device=device)
-        assert not x._values().is_contiguous()
+        if x._values().is_contiguous():
+            raise AssertionError("expected values to be non-contiguous")
         y = x + x
         expected = self.safeToDense(x) + self.safeToDense(x)
         self.assertEqual(self.safeToDense(y), expected)
@@ -2230,7 +2365,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
         from itertools import product, repeat
@@ -2240,8 +2374,6 @@ class TestSparse(TestSparseBase):
         nnzs = (0, 5, 15, 25)
 
         lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-        rhs_data = lhs_data.clone()
-
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
                 lhs = torch.sparse_coo_tensor(
@@ -2260,8 +2392,31 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
+
+                def op_masked(x):
+                    m, r = lhs_mask, rhs
+                    if x.device != m.device:
+                        m = m.to(device=x.device)
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(m).sparse_mask(r).to_dense(masked_grad=True)
+
+                gradcheck(
+                    op_masked,
+                    (lhs,),
+                    masked=True
+                )
+
+                def op_unmasked(x):
+                    r = rhs
+                    if x.device != r.device:
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(r).to_dense(masked_grad=False)
+
+                gradcheck(
+                    op_unmasked,
+                    (lhs, ),
+                    masked=False
+                )
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -2668,7 +2823,6 @@ class TestSparse(TestSparseBase):
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_mv(self, device, dtype, coalesced):
@@ -3243,12 +3397,14 @@ class TestSparse(TestSparseBase):
             torch.sparse_coo_tensor(([0, 1],), torch.empty(2, 0), (4, 0), device=device).is_nonzero()
         self.assertTrue(torch.sparse_coo_tensor(([0],), 2.3 - 4.5j, (1,), dtype=torch.cfloat, device=device)
                         .is_nonzero())
-        self.assertTrue(torch.sparse_coo_tensor(([0],), 2.3 - 4.5j, (1,), dtype=torch.cdouble, device=device)
-                        .is_nonzero())
+        if device != 'mps:0':
+            self.assertTrue(torch.sparse_coo_tensor(([0],), 2.3 - 4.5j, (1,), dtype=torch.cdouble, device=device)
+                            .is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0. + 0j, (1,), dtype=torch.cfloat, device=device)
                          .is_nonzero())
-        self.assertFalse(torch.sparse_coo_tensor(([0],), 0. + 0j, (1,), dtype=torch.cdouble, device=device)
-                         .is_nonzero())
+        if device != 'mps:0':
+            self.assertFalse(torch.sparse_coo_tensor(([0],), 0. + 0j, (1,), dtype=torch.cdouble, device=device)
+                             .is_nonzero())
 
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -3381,7 +3537,6 @@ class TestSparse(TestSparseBase):
         self.assertRaises(TypeError, lambda: t.numpy())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_softmax(self, device, dtype, coalesced):
@@ -3552,7 +3707,7 @@ class TestSparse(TestSparseBase):
                         values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
                     else:
                         ranges = []
-                        for j, sz in enumerate(shape[:sparse_dim]):
+                        for sz in shape[:sparse_dim]:
                             ranges.append(list(range(sz)))
                         indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
                         values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
@@ -3628,8 +3783,10 @@ class TestSparse(TestSparseBase):
                 # check softmax Jacobian definition for dense input
                 x1 = to_dense(x, fill_value=float('-inf'))
                 J = softmax_jacobian_analytic(x1, dim)
-                assert J.shape[0] == x.shape[dim]
-                assert J.shape[dim + 1] == x.shape[dim]
+                if J.shape[0] != x.shape[dim]:
+                    raise AssertionError(f"J.shape[0] mismatch: {J.shape[0]} != {x.shape[dim]}")
+                if J.shape[dim + 1] != x.shape[dim]:
+                    raise AssertionError(f"J.shape[{dim + 1}] mismatch: {J.shape[dim + 1]} != {x.shape[dim]}")
 
                 # check softmax Jacobian from autograd, dense input
                 J2 = softmax_jacobian_autograd(x1, dim)
@@ -3696,7 +3853,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
@@ -3704,18 +3860,18 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
     @dtypes(torch.float)
-    @expectedFailureMPS
     def test_log_softmax_float(self, device, dtype):
+        # float16 -> float32 comparison for mps since mps doesn't have float64
+        dtype = torch.float16 if device == "mps:0" else dtype
         x = (torch.rand(4, 3, dtype=dtype, device=device) - 10000000.0).to_sparse()
         out = torch.sparse.log_softmax(x, dim=1).to_dense()
-        x_double = x.double()
+        x_double = x.double() if device != "mps:0" else x.float()
         out_double = torch.sparse.log_softmax(x_double, dim=1).to_dense()
         self.assertEqual(out, out_double.to(dtype=dtype))
 
@@ -3723,8 +3879,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
-    @expectedFailureMPS
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
                                       *[torch.complex128]
@@ -3820,9 +3975,9 @@ class TestSparse(TestSparseBase):
             def different_dtypes():
                 a, i_a, v_a = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
                 b, i_b, v_b = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
-                r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
+                r2 = torch.sparse.mm(a.to(torch.float32), a.to(torch.float16))
 
-            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
+            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Float does not match mat2 dtype Half', different_dtypes)
 
         def test_backward_noncontiguous():
             # Sparse.mm backward used to wrong with non-contiguous grads,
@@ -3915,7 +4070,6 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    @expectedFailureMPS
     # NOTE: addcmul_out is not implemented for bool.
     @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @dtypesIfMPS(*all_mps_types())
@@ -4101,6 +4255,12 @@ class TestSparse(TestSparseBase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
+            # zero-dimension shapes (regression test for issue #171505)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4))
+            yield (make_diags((1, 3)), make_offsets([0]), (4, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csr)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csc)
             # non-contiguous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
             # non-contiguous offsets
@@ -4238,12 +4398,15 @@ class TestSparseUnaryUfuncs(TestCase):
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
         sample = first_sample(self, op.sample_inputs(device, dtype))
-        assert isinstance(sample.input, torch.Tensor)
+        if not isinstance(sample.input, torch.Tensor):
+            raise AssertionError(f"expected sample.input to be Tensor, got {type(sample.input)}")
 
         expected = op(sample.input, *sample.args, **sample.kwargs)
-        assert torch.is_tensor(expected)
+        if not torch.is_tensor(expected):
+            raise AssertionError(f"expected tensor, got {type(expected)}")
         output = op(sample.input.to_sparse(), *sample.args, **sample.kwargs)
-        assert torch.is_tensor(output)
+        if not torch.is_tensor(output):
+            raise AssertionError(f"expected tensor, got {type(output)}")
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
@@ -4850,7 +5013,8 @@ class TestSparseAny(TestCase):
                                         f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
                                         f' nontrivial_blocksize={nontrivial_blocksize},'
                                         f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
-        assert not untested_combinations, untested_combinations
+        if untested_combinations:
+            raise AssertionError(f"untested combinations: {untested_combinations}")
 
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_autograd(self, device, layout):
@@ -4997,7 +5161,7 @@ class TestSparseAny(TestCase):
                 elif to_layout is torch.sparse_bsc:
                     return x.to_sparse_bsc(blocksize)
                 else:
-                    assert 0  # unreachable
+                    raise AssertionError(f"unreachable: to_layout={to_layout}")
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
@@ -5071,7 +5235,7 @@ class TestSparseAny(TestCase):
                     self.assertEqual(r._indices().dtype, torch.int64)
                     self.assertEqual(r._values().dtype, dtype)
                 else:
-                    assert 0  # unreachable
+                    raise AssertionError("unreachable")
 
                 # Finally, we'll test tensor equality:
                 self.assertEqual(r, t)
@@ -5179,7 +5343,8 @@ class TestSparseAny(TestCase):
         inp = torch.tensor([[1, 2], [3, 4]], device=device).to_sparse(
             layout=layout,
             blocksize=(1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None)
-        assert inp.layout is layout
+        if inp.layout is not layout:
+            raise AssertionError(f"expected layout {layout}, got {inp.layout}")
 
         expected_behaviour = dict(
             # <mth name> = (<supported layouts>, <exception message on other layouts>)
@@ -5503,7 +5668,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
@@ -5552,7 +5717,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
 
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
@@ -5582,7 +5747,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
@@ -5620,6 +5785,46 @@ class TestSparseAny(TestCase):
                     RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
                 generic_constructor(*args2, **kwargs)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    def test_view_as_real(self, device, dtype):
+        for xs in self.generate_simple_inputs(torch.sparse_coo, device=device, dtype=dtype):
+            res = torch.view_as_real(xs)
+            self.assertEqual(res.layout, torch.sparse_coo)
+            self.assertEqual(res._indices(), xs._indices())
+            self.assertEqual(res.shape, xs.shape + (2,))
+            self.assertEqual(res._values()[..., 0], xs._values().real)
+            self.assertEqual(res._values()[..., 1], xs._values().imag)
+            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
+                # ComplexHalf to_dense() is not supported on CPU.
+                self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
+            self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    def test_view_as_complex(self, device, dtype):
+        for xs in self.generate_simple_inputs(torch.sparse_coo, device=device, dtype=dtype):
+            try:
+                res = torch.view_as_complex(xs)
+            except RuntimeError as e:
+                if xs.shape[-1] != 2 or xs.dense_dim() == 0:
+                    self.assertIn(
+                        "view_as_complex_sparse is only supported for sparse tensors with the last dim == 2 and dense_dim > 0.",
+                        str(e))
+                elif xs._values().stride()[-1] != 1:
+                    self.assertIn("Tensor must have a last dimension with stride 1", str(e))
+                else:
+                    raise
+                continue
+            self.assertEqual(res.layout, torch.sparse_coo)
+            self.assertEqual(res._indices(), xs._indices())
+            self.assertEqual(res.shape, xs.shape[:-1])
+            self.assertEqual(res._values().real, xs._values()[..., 0])
+            self.assertEqual(res._values().imag, xs._values()[..., 1])
+            if not (dtype is torch.float16 and torch.device(device).type == "cpu"):
+                # ComplexHalf to_dense() is not supported on CPU.
+                self.assertEqual(res.to_dense(), torch.view_as_complex(xs.to_dense()))
+            self.assertEqual(torch.view_as_real(torch.view_as_complex(xs)), xs)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')

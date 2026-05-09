@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._export
@@ -148,10 +148,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def compile(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         example_inputs: tuple[torch.Tensor, ...],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         if not isinstance(model, torch.nn.Module):
             # This should really be the default behavior of torch.export.export
@@ -176,10 +176,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         example_inputs: tuple[torch.Tensor, ...],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -192,10 +192,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run_multiple(
-        model: Union[torch.nn.Module, types.FunctionType],
+        model: torch.nn.Module | types.FunctionType,
         list_example_inputs: list[tuple[torch.Tensor, ...]],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -218,6 +218,7 @@ def check_model(
     dynamic_shapes=None,
     atol=None,
     rtol=None,
+    move_model_to_device=True,
 ):
     with (
         torch.no_grad(),
@@ -229,7 +230,7 @@ def check_model(
         ),
     ):
         torch.manual_seed(0)
-        if not isinstance(model, types.FunctionType):
+        if not isinstance(model, types.FunctionType) and move_model_to_device:
             model = model.to(self.device)
 
         # For non mixed device inputs with default "cpu",set the device manually.

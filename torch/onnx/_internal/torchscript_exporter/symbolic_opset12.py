@@ -330,7 +330,8 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
         )
 
         ndim = symbolic_helper._get_tensor_rank(input)
-        assert ndim is not None
+        if ndim is None:
+            raise AssertionError("ndim must be non-None")
         perm = list(range(ndim))
         perm.append(perm.pop(dimension))
 
@@ -365,7 +366,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
         cond_out = loop_context.op(
             "Cast",
             loop_condition,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             _C_onnx.TensorProtoDataType.BOOL,
         )
         utils._add_output_to_block(loop_block, cond_out)

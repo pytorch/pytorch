@@ -10,7 +10,7 @@ namespace at::cuda {
 //
 // A caching allocator for CUDA host allocations (pinned memory).
 //
-// This provides a drop-in replacement for THCudaHostAllocator, which re-uses
+// This provides a drop-in replacement for THCudaHostAllocator, which reuses
 // freed pinned (page-locked) memory allocations. This avoids device
 // synchronizations due to cudaFreeHost calls.
 //
@@ -26,7 +26,7 @@ inline TORCH_CUDA_CPP_API at::HostAllocator* getCachingHostAllocator() {
 }
 
 // Records an event in the specified stream. The allocation corresponding to the
-// input `ptr`/`ctx` will not be re-used until the event has occurred.
+// input `ptr`/`ctx` will not be reused until the event has occurred.
 C10_DEPRECATED_MESSAGE(
   "at::cuda::CachingHostAllocator_recordEvent(...) is deprecated. Please use at::getHostAllocator(at::kCUDA)->record_event(...) instead.")
 inline TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(

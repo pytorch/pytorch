@@ -73,7 +73,10 @@ def get_torch_version(sha: str | None = None) -> str:
     else:
         sdist_version = None
     if os.getenv("PYTORCH_BUILD_VERSION"):
-        assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
+        if os.getenv("PYTORCH_BUILD_NUMBER") is None:
+            raise AssertionError(
+                "PYTORCH_BUILD_NUMBER must be set when PYTORCH_BUILD_VERSION is set"
+            )
         build_number = int(os.getenv("PYTORCH_BUILD_NUMBER", ""))
         version = os.getenv("PYTORCH_BUILD_VERSION", "")
         if build_number > 1:
@@ -83,7 +86,7 @@ def get_torch_version(sha: str | None = None) -> str:
         version = sdist_version
         origin = "PKG-INFO"
     else:
-        version = open(pytorch_root / "version.txt").read().strip()
+        version = Path(pytorch_root / "version.txt").read_text().strip()
         origin = "version.txt"
         if sdist_version is None and sha != UNKNOWN:
             if sha is None:
@@ -100,10 +103,11 @@ def get_torch_version(sha: str | None = None) -> str:
         else:
             # local version is absent or platform tag
             source_version = version.partition("+")[0]
-        assert sdist_version == source_version, (
-            f"Source part '{source_version}' of version '{version}' from "
-            f"{origin} does not match version '{sdist_version}' from PKG-INFO"
-        )
+        if sdist_version != source_version:
+            raise AssertionError(
+                f"Source part '{source_version}' of version '{version}' from "
+                f"{origin} does not match version '{sdist_version}' from PKG-INFO"
+            )
     return version
 
 
@@ -119,13 +123,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)
     parser.add_argument("--hip-version", "--hip_version", type=str)
+    parser.add_argument("--rocm-version", "--rocm_version", type=str)
     parser.add_argument("--xpu-version", "--xpu_version", type=str)
 
     args = parser.parse_args()
 
-    assert args.is_debug is not None
+    if args.is_debug is None:
+        raise AssertionError("is_debug argument must be provided")
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
+    args.rocm_version = None if args.rocm_version == "" else args.rocm_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
 
     pytorch_root = Path(__file__).parent.parent
@@ -141,7 +148,7 @@ if __name__ == "__main__":
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
         f.write(
-            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', 'xpu']\n"
         )
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
@@ -151,4 +158,5 @@ if __name__ == "__main__":
         f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
         f.write(f"git_version = {repr(sha)}\n")
         f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
+        f.write(f"rocm: Optional[str] = {repr(args.rocm_version)}\n")
         f.write(f"xpu: Optional[str] = {repr(args.xpu_version)}\n")

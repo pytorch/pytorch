@@ -47,6 +47,11 @@ class TestModules(__TestCase):
             self.assertEqual(getattr(c_heapq, fname).__module__, '_heapq')
 
 
+@torch._dynamo.disable
+def randrange(*args):
+    return random.randrange(*args)
+
+
 class _TestHeap:
 
     def test_push_pop(self):
@@ -93,7 +98,7 @@ class _TestHeap:
         self.assertRaises(TypeError, self.module.heapify, None)
 
     def test_naive_nbest(self):
-        data = [random.randrange(2000) for i in range(1000)]
+        data = [randrange(2000) for i in range(1000)]
         heap = []
         for item in data:
             self.module.heappush(heap, item)
@@ -116,7 +121,7 @@ class _TestHeap:
         # heap instead of a min heap, it could go faster still via
         # heapify'ing all of data (linear time), then doing 10 heappops
         # (10 log-time steps).
-        data = [random.randrange(2000) for i in range(1000)]
+        data = [randrange(2000) for i in range(1000)]
         heap = data[:10]
         self.module.heapify(heap)
         for item in data[10:]:
@@ -129,7 +134,7 @@ class _TestHeap:
         self.assertRaises(IndexError, self.module.heapreplace, [], None)
 
     def test_nbest_with_pushpop(self):
-        data = [random.randrange(2000) for i in range(1000)]
+        data = [randrange(2000) for i in range(1000)]
         heap = data[:10]
         self.module.heapify(heap)
         for item in data[10:]:
@@ -166,8 +171,8 @@ class _TestHeap:
     def test_heapsort(self):
         # Exercise everything with repeated heapsort checks
         for trial in range(100):
-            size = random.randrange(50)
-            data = [random.randrange(25) for i in range(size)]
+            size = randrange(50)
+            data = [randrange(25) for i in range(size)]
             if trial & 1:     # Half of the time, use heapify
                 heap = data[:]
                 self.module.heapify(heap)
@@ -180,10 +185,10 @@ class _TestHeap:
 
     def test_merge(self):
         inputs = []
-        for i in range(random.randrange(25)):
+        for i in range(randrange(25)):
             row = []
-            for j in range(random.randrange(100)):
-                tup = random.choice('ABC'), random.randrange(-500, 500)
+            for j in range(randrange(100)):
+                tup = random.choice('ABC'), randrange(-500, 500)
                 row.append(tup)
             inputs.append(row)
 
@@ -216,8 +221,8 @@ class _TestHeap:
             pass
         inputs = [[], [], [], []]
         for i in range(20000):
-            stream = random.randrange(4)
-            x = random.randrange(500)
+            stream = randrange(4)
+            x = randrange(500)
             obj = Int(x)
             obj.pair = (x, stream)
             inputs[stream].append(obj)
@@ -227,22 +232,22 @@ class _TestHeap:
         self.assertEqual(result, sorted(result))
 
     def test_nsmallest(self):
-        data = [(random.randrange(2000), i) for i in range(1000)]
+        data = [(randrange(2000), i) for i in range(1000)]
         for f in (None, lambda x:  x[0] * 547 % 2000):
             for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
                 self.assertEqual(list(self.module.nsmallest(n, data)),
-                                 sorted(data)[:n])
+                                sorted(data)[:n])
                 self.assertEqual(list(self.module.nsmallest(n, data, key=f)),
-                                 sorted(data, key=f)[:n])
+                                sorted(data, key=f)[:n])
 
     def test_nlargest(self):
-        data = [(random.randrange(2000), i) for i in range(1000)]
+        data = [(randrange(2000), i) for i in range(1000)]
         for f in (None, lambda x:  x[0] * 547 % 2000):
             for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
                 self.assertEqual(list(self.module.nlargest(n, data)),
-                                 sorted(data, reverse=True)[:n])
+                                sorted(data, reverse=True)[:n])
                 self.assertEqual(list(self.module.nlargest(n, data, key=f)),
-                                 sorted(data, key=f, reverse=True)[:n])
+                                sorted(data, key=f, reverse=True)[:n])
 
     def test_comparison_operator(self):
         # Issue 3051: Make sure heapq works with both __lt__
@@ -405,8 +410,8 @@ class _TestErrorHandling:
 
     def test_arg_parsing(self):
         for f in (self.module.heapify, self.module.heappop,
-                  self.module.heappush, self.module.heapreplace,
-                  self.module.nlargest, self.module.nsmallest):
+                self.module.heappush, self.module.heapreplace,
+                self.module.nlargest, self.module.nsmallest):
             self.assertRaises((TypeError, AttributeError), f, 10)
 
     def test_iterable_args(self):

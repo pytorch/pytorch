@@ -57,6 +57,10 @@ inline void check_inputs_nll_loss2d(
       "but got input of dimension: ",
       input.dim());
   TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
+  TORCH_CHECK(
       !weight.defined() || weight.numel() == input.size(1),
       "weight tensor should be defined either for all or no classes");
 
@@ -129,7 +133,7 @@ void nll_loss2d_forward_out_frame(
       for (const auto b : c10::irange(start, end)) {
         for (const auto h : c10::irange(H)) {
           for (const auto w : c10::irange(W)) {
-            const int64_t cur_target = (int64_t)target_acc[b][h][w];
+            const int64_t cur_target = target_acc[b][h][w];
 
             if (cur_target == ignore_index) {
               output_acc[b][h][w] = static_cast<scalar_t>(0);
@@ -188,7 +192,7 @@ void nll_loss2d_forward_out_frame(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
@@ -428,7 +432,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
   auto total_weight = at::empty({0}, self.options());
   at::native::nll_loss2d_forward_out_cpu(
       self, target, weight_opt, reduction, ignore_index, output, total_weight);
-  return std::make_tuple(output, total_weight);
+  return std::make_tuple(std::move(output), std::move(total_weight));
 }
 
 Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,

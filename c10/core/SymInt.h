@@ -54,13 +54,9 @@ class C10_API SymInt {
   // the negative value is -1; i.e., not user controlled)
   SymInt(Unchecked /*unused*/, int64_t d) : data_(d) {}
 
-  // TODO: these implementations are not optimal because they allocate a
-  // temporary and then use the move constructor/assignment
-  SymInt(const SymInt& s) : data_(0) {
+  SymInt(const SymInt& s) : data_(s.data_) {
     if (s.is_heap_allocated()) {
-      *this = SymInt(s.toSymNode());
-    } else {
-      data_ = s.data_;
+      c10::raw::intrusive_ptr::incref(s.toSymNodeImplUnowned());
     }
   }
   SymInt(SymInt&& s) noexcept : data_(s.data_) {
@@ -69,10 +65,10 @@ class C10_API SymInt {
 
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
+      release_();
+      data_ = s.data_;
       if (s.is_heap_allocated()) {
-        *this = SymInt(s.toSymNode());
-      } else {
-        data_ = s.data_;
+        c10::raw::intrusive_ptr::incref(s.toSymNodeImplUnowned());
       }
     }
     return *this;
@@ -556,3 +552,26 @@ inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
 }
 
 } // namespace c10
+
+#include <limits>
+
+namespace std {
+
+template <>
+class numeric_limits<c10::SymInt> {
+ public:
+  static constexpr bool is_specialized = true;
+
+  static constexpr int64_t max() noexcept {
+    return std::numeric_limits<int64_t>::max();
+  }
+
+  static constexpr int64_t min() noexcept {
+    return std::numeric_limits<int64_t>::min();
+  }
+
+  static constexpr bool is_signed = true;
+  static constexpr bool is_integer = true;
+};
+
+} // namespace std

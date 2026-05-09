@@ -7,7 +7,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
@@ -93,14 +93,14 @@ def init_fake_distributed(device="cpu"):
 
 def init_module_bw_hooks(allow_eager):
     def bw_pre_hook(mod, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
-        assert mod.weight.size() == (10, 10)
+        assert allow_eager or torch._dynamo.is_compiling()  # noqa: S101
+        assert mod.weight.size() == (10, 10)  # noqa: S101
         mod.hook_count_pre.add_(1)
         return (torch.sin(gO[0] + 1.2),)
 
     def bw_post_hook(mod, gI, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
-        assert mod.weight.size() == (10, 10)
+        assert allow_eager or torch._dynamo.is_compiling()  # noqa: S101
+        assert mod.weight.size() == (10, 10)  # noqa: S101
         mod.hook_count_post.add_(1)
         return (torch.sin(gI[0] + 3.4),)
 
@@ -214,7 +214,7 @@ class DistributedPatternTests(TestCase):
         @torch.compile(fullgraph=True)
         def fn(x, out):
             y = torch.sin(x)
-            assert out.untyped_storage().size() == 0
+            assert out.untyped_storage().size() == 0  # noqa: S101
             out.untyped_storage().resize_(x.untyped_storage().size())
             out.copy_(y.cos())
 
@@ -483,7 +483,6 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
-    @skipIfXpu
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):

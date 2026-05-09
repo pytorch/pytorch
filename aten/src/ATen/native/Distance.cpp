@@ -31,6 +31,7 @@
 #include <ATen/ops/pdist_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
@@ -102,8 +103,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
-    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X1 got: ", device1);
-    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X2 got: ", device2);
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU || device1 == kPrivateUse1, "cdist only supports CPU, XPU, CUDA and PrivateUse1 devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU || device2 == kPrivateUse1, "cdist only supports CPU, XPU, CUDA and PrivateUse1 devices, X2 got: ", device2);
   }
 
   auto dim1 = x1.dim();
@@ -228,9 +229,9 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
   auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X1 got: ", device1);
+  TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU || device1 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X1 got: ", device1);
   auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X2 got: ", device2);
+  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU || device2 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X2 got: ", device2);
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -244,7 +245,7 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
 Tensor _pdist_forward(const Tensor& self, const double p) {
   TORCH_CHECK(self.is_contiguous(), "_pdist_forward requires contiguous input");
   auto device = self.device().type();
-  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU, "_pdist_forward only supports CPU, XPU and CUDA devices, got: ", device);
+  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU || device == kPrivateUse1, "_pdist_forward only supports CPU, XPU, CUDA and PrivateUse1 devices, got: ", device);
   Tensor result = at::empty({0}, self.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (self.size(0) <= 1) {
     result.resize_({0});
@@ -265,7 +266,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   TORCH_CHECK(self.is_contiguous(), "_pdist_backward requires self to be contiguous");
   TORCH_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
   auto device = self.device().type();
-  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU, "_pdist_backward only supports CPU, XPU and CUDA devices, got: ", device);
+  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU || device == kPrivateUse1, "_pdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, got: ", device);
   Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   pdist_backward_stub(device, result, grad, self, p, pdist);
   return result;
@@ -304,6 +305,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
 
   auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
+  TORCH_CHECK(eps >= 0, "eps must be non-negative, got: ", eps);
 
   // We accept integral types (and bools lol) but vector_norm does not
   auto x1_is_int = c10::isIntegralType(x1_.scalar_type(), /*încludeBool=*/true);
@@ -320,10 +322,18 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
+  // Convert eps to a scalar tensor to ensure consistent CPU/CUDA behavior when eps overflows the dtype.
+  // Use float32 if commonDtype is a reduced floating type (float16/bfloat16), otherwise use commonDtype.
+  // This avoids CUDA errors when creating a scalar_tensor with reduced types if the eps value overflows,
+  // while CPU would convert to inf. The eps_tensor is then used to clamp the norms to prevent division by zero.
+  auto common_is_reduced = at::isReducedFloatingType(commonDtype);
+  auto eps_dtype = common_is_reduced ? at::kFloat : commonDtype;
+  auto eps_tensor = at::scalar_tensor(eps, at::TensorOptions().dtype(eps_dtype).device(x1_norm.device()));
+
   {
     at::NoGradGuard guard;
-    x1_norm.clamp_min_(eps);
-    x2_norm.clamp_min_(eps);
+    x1_norm.clamp_min_(eps_tensor);
+    x2_norm.clamp_min_(eps_tensor);
   }
 
   return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);

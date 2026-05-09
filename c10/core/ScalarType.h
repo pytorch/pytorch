@@ -21,29 +21,19 @@
 #include <cstddef>
 #include <limits>
 #include <ostream>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
 #include <torch/headeronly/core/ScalarType.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace c10 {
 
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
 // regarding macros.
-
-template <typename T>
-struct CppTypeToScalarType;
-
-#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                  \
-  struct CppTypeToScalarType<cpp_type>                                         \
-      : std::                                                                  \
-            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
-
-#undef SPECIALIZE_CppTypeToScalarType
 
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
@@ -51,19 +41,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 // NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
-
-inline const char* toString(ScalarType t) {
-#define DEFINE_CASE(_, name) \
-  case ScalarType::name:     \
-    return #name;
-
-  switch (t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    default:
-      return "UNKNOWN_SCALAR";
-  }
-#undef DEFINE_CASE
-}
 
 inline size_t elementSize(ScalarType t) {
 #define CASE_ELEMENTSIZE_CASE(ctype, name) \
@@ -76,6 +53,31 @@ inline size_t elementSize(ScalarType t) {
       TORCH_CHECK(false, "Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
+}
+
+inline ScalarType opaqueScalarType(ScalarType t) {
+  auto esize = elementSize(t);
+  ScalarType result;
+  switch (esize) {
+    case 1:
+      result = kByte;
+      break;
+    case 2:
+      result = kUInt16;
+      break;
+    case 4:
+      result = kUInt32;
+      break;
+    case 8:
+      result = kUInt64;
+      break;
+    case 16:
+      result = kComplexDouble;
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown ScalarType");
+  }
+  return result;
 }
 
 inline bool isIntegralType(ScalarType t, bool includeBool) {
@@ -116,13 +118,6 @@ inline bool isComplexType(ScalarType t) {
       t == ScalarType::ComplexDouble);
 }
 
-inline bool isQIntType(ScalarType t) {
-  // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
-      t == ScalarType::QUInt2x4;
-}
-
 inline bool isBitsType(ScalarType t) {
   return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
       t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
@@ -145,22 +140,6 @@ inline ScalarType toQIntType(ScalarType t) {
       return ScalarType::QInt8;
     case ScalarType::Int:
       return ScalarType::QInt32;
-    default:
-      return t;
-  }
-}
-
-inline ScalarType toUnderlying(ScalarType t) {
-  switch (t) {
-    case ScalarType::QUInt8:
-    case ScalarType::QUInt4x2:
-      [[fallthrough]];
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
-    case ScalarType::QInt8:
-      return ScalarType::Char;
-    case ScalarType::QInt32:
-      return ScalarType::Int;
     default:
       return t;
   }
@@ -232,6 +211,12 @@ inline bool isSignedType(ScalarType t) {
       break;
       // Do not add default here, but rather define behavior of every new entry
       // here.  `-Wswitch-enum` would raise a warning in those cases.
+      // TODO: get PyTorch to adopt exhaustive switches by default with a way to
+      // opt specific switches to being non-exhaustive.
+      // Exhaustive:
+      // `-Wswitch-enum`, `-Wswitch-default`, `-Wno-covered-switch-default`
+      // Non-Exhaustive:
+      // `-Wno-switch-enum`, `-Wswitch-default`, `-Wcovered-switch-default`
   }
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
@@ -308,18 +293,16 @@ inline bool canCast(const ScalarType from, const ScalarType to) {
 
 C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
 
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    at::ScalarType scalar_type) {
-  return stream << toString(scalar_type);
-}
-
 // Returns a pair of strings representing the names for each dtype.
 // The returned pair is (name, legacy_name_if_applicable)
-C10_API std::pair<std::string, std::string> getDtypeNames(
+C10_API std::pair<std::string_view, std::string_view> getDtypeNames(
     c10::ScalarType scalarType);
+
+C10_API std::string_view getScalarTypeAbbr(ScalarType scalarType);
 
 // Returns a map of string name to dtype.
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

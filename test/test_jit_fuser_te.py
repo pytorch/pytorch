@@ -5,6 +5,7 @@ import contextlib
 import math
 import operator
 import os
+import sys
 import unittest
 import warnings
 
@@ -60,7 +61,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     slowTest,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.jit_utils import (
@@ -94,7 +94,7 @@ def strip_profiling_nodes(nodes):
 
 
 def warmup_forward(f, *args, profiling_count=2):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -1682,11 +1682,8 @@ class TestTEFuser(JitTestCase):
         ]
         dtypes = ["int", "float", "bool"]
         values = {"int": [10, 3], "float": [12.34, 2.78], "bool": [True, False]}
-        devices = self.devices
-        for dtype_x, dtype_y, op, device in product(
-            dtypes, dtypes, binary_ops, devices
-        ):
-            code = ir_template.format(**locals())
+        for dtype_x, dtype_y, op in product(dtypes, dtypes, binary_ops):
+            code = ir_template.format(dtype_x=dtype_x, dtype_y=dtype_y, op=op)
 
             # Interpret the graph
             try:
@@ -1701,9 +1698,7 @@ class TestTEFuser(JitTestCase):
             try:
                 k = torch._C._te.TensorExprKernel(graph)
             except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Compilation failed:", device, str(code)])
-                ) from e
+                raise RuntimeError(" ".join(["Compilation failed:", str(code)])) from e
 
             # Run the graph
             for x, y in product(values[dtype_x], values[dtype_y]):
@@ -1713,9 +1708,7 @@ class TestTEFuser(JitTestCase):
                     self.assertEqual(ref, res)
                 except Exception as e:
                     raise RuntimeError(
-                        " ".join(
-                            ["Failed at runtime:", device, str(x), str(y), str(code)]
-                        )
+                        " ".join(["Failed at runtime:", str(x), str(y), str(code)])
                     ) from e
 
     def test_matmul(self):
@@ -2096,7 +2089,8 @@ class TestTEFuser(JitTestCase):
                 w = t1 - t2
                 h = t3 - t4
                 k = (w > t) & (h > t)
-                assert k.dtype == torch.bool
+                if k.dtype != torch.bool:
+                    raise AssertionError("k.dtype should be bool")
                 if t > 0.5:
                     # Putting a use of k in a never-executed conditional prevents
                     # profiling its type, which leaves it as "Tensor".  If we
@@ -2284,7 +2278,7 @@ class TestTEFuser(JitTestCase):
         x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         script = torch.jit.script(fn)
-        for i in range(11):
+        for _ in range(11):
             y = fn(x)
             g0 = torch.rand_like(y)
             y.backward(g0)
@@ -2411,32 +2405,34 @@ class TestTEFuser(JitTestCase):
 
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_ASAN, "takes 10+ minutes on asan")
-    @unittest.skipIf(TEST_WITH_ROCM, "Tensor-likes are not close for nans")
     def test_batch_norm(self):
         def test(fn, args):
             trace = torch.jit.trace(fn, args)
             self.assertAllFused(trace.graph_for(*args))
-            # TODO: Are `NaN`'s actually ok here or did this pass silently before, because `equal_nan=True` was the
-            #  default?
             torch.testing.assert_close(fn(*args), trace(*args), equal_nan=True)
 
-        def bn(i, x):
-            return torch.batch_norm(i, x, x, x, x, False, 0.1, 1e-4, False).relu()
+        def bn(i, x, rv):
+            return torch.batch_norm(i, x, x, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_no_weight(i, x):
-            return torch.batch_norm(i, None, x, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_no_weight(i, x, rv):
+            return torch.batch_norm(i, None, x, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_no_bias(i, x):
-            return torch.batch_norm(i, x, None, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_no_bias(i, x, rv):
+            return torch.batch_norm(i, x, None, x, rv, False, 0.1, 1e-4, False).relu()
 
-        def bn_neither(i, x):
-            return torch.batch_norm(i, None, None, x, x, False, 0.1, 1e-4, False).relu()
+        def bn_neither(i, x, rv):
+            return torch.batch_norm(
+                i, None, None, x, rv, False, 0.1, 1e-4, False
+            ).relu()
 
         for device in self.devices:
             i = torch.randn(4, 16, 32, 40, device=device)
             x = torch.randn(16, device=device)
+            rv = torch.randn(
+                16, device=device
+            ).abs()  # running_var must be non-negative
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
-                test(fn, (i, x))
+                test(fn, (i, x, rv))
 
     def test_profiler(self):
         @torch.jit.script
@@ -2514,7 +2510,7 @@ class TestTEFuser(JitTestCase):
                                 x, y, z = gen(n), gen(n), gen(n)
                                 func_s(x, y, z)
 
-                            for incr in range(3):
+                            for _incr in range(3):
                                 func_s(*[gen(n + 1) for _ in range(3)])
 
                             g = torch.jit.last_executed_optimized_graph()
@@ -2678,7 +2674,7 @@ class TestTEFuser(JitTestCase):
 
             f_traced = torch.jit.trace(f, (x, y))
 
-            for i in range(4):
+            for _ in range(4):
                 # make sure this doesn't error out
                 res = f_traced(x, y)
 
@@ -2697,7 +2693,7 @@ class TestTEFuser(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _ in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)
@@ -3047,11 +3043,13 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
 
         ref = fn(x, y)
         res = traced_fn(x, y)
-        assert torch.allclose(ref, res)
+        if not torch.allclose(ref, res):
+            raise AssertionError("traced function output does not match reference")
 
 
 instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("cpu"))
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

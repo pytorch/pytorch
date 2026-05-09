@@ -302,8 +302,226 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         # NYI!
         self.assertEqual(cnts.frame_count, 0)
 
+    def test_hook_on_intermediate(self):
+        def fn(x):
+            y = x * 2
+            y.register_hook(lambda grad: grad + 1)
+            return y.sum()
+
+        x_compiled = torch.randn(4, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        x_eager = x_compiled.detach().clone().requires_grad_(True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        self.assertEqual(x_compiled.grad, x_eager.grad)
+
+    def test_hook_on_intermediate_with_container(self):
+        glb_list = []
+        glb_dict = {}
+
+        def fn(x):
+            y = x * 2
+            glb_list.append(y)
+            glb_dict["tensor"] = y
+            a = glb_list[0] * 3  # Should use output of register_hook
+            b = glb_dict["tensor"]
+            y.register_hook(lambda grad: grad + 1)
+            return (a + b).sum()
+
+        glb_list.clear()
+        glb_dict.clear()
+        x_eager = torch.ones(4, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        glb_list.clear()
+        glb_dict.clear()
+        x_compiled = torch.ones(4, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_compiled.grad, x_eager.grad)
+        # Without hook: dloss/dy = 4, dloss/dx = 8
+        # With hook (+1): hooked = 5, dloss/dx = 10
+        self.assertEqual(x_compiled.grad, torch.full_like(x_compiled, 10.0))
+
+        glb_list.clear()
+        glb_dict.clear()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.ones(4, requires_grad=True)
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    y = l_x_ * 2;  l_x_ = None
+    a = y * 3
+    hook_body_0 = self.hook_body_0
+    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
+    add = a + register_hook;  a = None
+    sum_1 = add.sum();  add = None
+    return (sum_1, register_hook)""",
+        )
+
+    def test_hook_on_intermediate_used_before_and_after(self):
+        def fn(x):
+            y = x * 2
+            z = y + 1  # Use y BEFORE hook
+            y.register_hook(lambda g: g * 2)
+            w = y * 3  # Use y AFTER hook
+            return (z + w).sum()
+
+        x_eager = torch.ones(2, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(2, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
+    def test_hook_on_intermediate_with_higher_order_op(self):
+        def fn(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 2)
+
+            def true_fn(t):
+                return t + 1
+
+            def false_fn(t):
+                return t - 1
+
+            z = torch.cond(x.sum() > 0, true_fn, false_fn, (y,))
+            return z.sum()
+
+        x_eager = torch.ones(3, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(3, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
+    def test_hook_on_intermediate_returns_none(self):
+        def fn(x):
+            y = x * 2
+            y.register_hook(lambda g: None)
+            return y.sum()
+
+        x_eager = torch.ones(4, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(4, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+        self.assertEqual(x_compiled.grad, torch.full_like(x_compiled, 2.0))
+
+    def test_hook_has_side_effect(self):
+        def fn(x):
+            y = x * 2
+            z = y + 1  # Use y BEFORE hook
+            y.register_hook(lambda g: g * 2)
+            w = y * 3  # Use y AFTER hook
+            return (z + w).sum()
+
+        x_eager = torch.ones(2, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(2, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
+    def test_hook_bwd_inside_side_effects(self):
+        global_list = []
+
+        def fn(x):
+            y = x * 2
+
+            def _hook(grad):
+                global_list.append(grad)
+                return grad * 2
+
+            y.register_hook(_hook)
+            z = y + x
+            return z.sum()
+
+        x_eager = torch.ones(3, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        global_list.clear()
+
+        x_compiled = torch.ones(3, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsafe side effect"
+        ):
+            _ = compiled_fn(x_compiled)
+
+    def test_hook_on_intermediate_from_split(self):
+        def fn(x):
+            splits = x.split(2)
+            result = torch.cat(splits)  # use splits before register_hook
+            y = splits[0]
+            y.register_hook(lambda g: g + 1)
+            return result.sum() + y.sum()
+
+        x_eager = torch.ones(6, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(6, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.ones(6, requires_grad=True)
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    split = l_x_.split(2);  l_x_ = None
+    y = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    result = torch.cat((y, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    hook_body_0 = self.hook_body_0
+    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
+    sum_1 = result.sum();  result = None
+    sum_2 = register_hook.sum();  register_hook = None
+    add = sum_1 + sum_2;  sum_1 = sum_2 = None
+    return (add,)""",
+        )
+
     def test_intermediary_hooks(self):
-        # Graph breaks because compiled_autograd is not set
         def simple_hook(g):
             return g * 2
 
@@ -315,11 +533,10 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         out = torch.randn(1, requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = torch.compile(f, backend=cnts, fullgraph=False)
+        fn = torch.compile(f, backend=cnts, fullgraph=True)
         res = fn(out)
         res.backward()
         self.assertEqual(res, f(out))
-        self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(out.grad, torch.Tensor([2.0]))
 
     def test_intermediary_hooks_same_on_aot_eager(self):
@@ -694,7 +911,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             comp_out[0].backward(torch.ones(4))
 
             self.assertEqual(cnts.frame_count, 1)
-            my_hook = my_hook2  # noqa: F811
+            my_hook = my_hook2
             self.assertEqual(x0.grad, x1.grad)
 
             eager_out = mod(x0)
@@ -796,7 +1013,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     x.grad = None
                     run(i).sum().backward()
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_no_recompile_on_same_hook(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -807,7 +1023,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for i in range(10):
+                for _ in range(10):
                     layer = torch.nn.Linear(16, 16)
                     layer.register_forward_pre_hook(lambda _, inp: fw_hook(inp))
                     layer = torch.compile(layer, backend=cnts)
@@ -918,6 +1134,86 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         finally:
             hook_handle.remove()
+
+    def test_register_hook_on_intermediate_stride_dependent(self):
+        def hook(grad):
+            if grad.is_contiguous():
+                return grad.sin()
+            else:
+                return grad.cos()
+
+        def fn(x):
+            y = x * 2
+            y.register_hook(hook)
+            return y.sum()
+
+        # Hooks that branch on grad metadata (e.g. is_contiguous)
+        # graph break because grad properties are unknown at trace time.
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_on_intermediate_autograd_cache(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 0.5)
+            return y.sum()
+
+        torch._functorch.config.enable_autograd_cache = True
+        try:
+            # First compile
+            torch._dynamo.reset()
+            counters.clear()
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x).backward()
+
+            # Second compile (force recompile to test cache)
+            torch._dynamo.reset()
+            x2 = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x2).backward()
+
+            aot_counters = counters["aot_autograd"]
+            self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self):
+        from torch._dynamo.utils import counters
+
+        def fn_a(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 0.5)
+            return y.sum()
+
+        def fn_b(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 3.0)
+            return y.sum()
+
+        torch._functorch.config.enable_autograd_cache = True
+        try:
+            torch._dynamo.reset()
+            counters.clear()
+
+            # Compile fn_a
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn_a, fullgraph=True)(x).backward()
+
+            # Compile fn_b (different hook — must NOT cache hit from fn_a)
+            x2 = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn_b, fullgraph=True)(x2).backward()
+
+            # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
+            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
+            self.assertEqual(
+                counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
+            )
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
 
 
 if __name__ == "__main__":

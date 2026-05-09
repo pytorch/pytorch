@@ -152,8 +152,7 @@ def _get_valid_constant(attr, v, owner_type):
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len):
-        super().__init__(source, filename, file_lineno, leading_whitespace_len)
+    pass
 
 
 def get_annotations(obj):
@@ -242,7 +241,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in user_annotated_ignored_attributes:
             continue
 
-        assert item is None or isinstance(item, torch.Tensor)
+        if not (item is None or isinstance(item, torch.Tensor)):
+            raise AssertionError(
+                f"Expected parameter '{name}' to be None or Tensor, got {type(item)}"
+            )
         attr_type, _ = infer_type(name, item)
         # We currently have the invariant in various places in our code
         # that parameters must be Tensors. However, the nn.Module API also
@@ -256,7 +258,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in user_annotated_ignored_attributes:
             continue
 
-        assert item is None or isinstance(item, torch.Tensor)
+        if not (item is None or isinstance(item, torch.Tensor)):
+            raise AssertionError(
+                f"Expected buffer '{name}' to be None or Tensor, got {type(item)}"
+            )
         attr_type, _ = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type.type(), False, True)
         added_names.add(name)
@@ -272,7 +277,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
         if attr_type.success():
-            assert attr_type.type().is_interface_type()
+            if not attr_type.type().is_interface_type():
+                raise AssertionError(
+                    f"Expected inferred type to be interface type for '{name}'"
+                )
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(
                 attr_type.type()
@@ -309,7 +317,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
             warnings.warn(
                 f"'{name}' was found in ScriptModule constants, "
-                f" but it is a non-constant {hint}. Consider removing it."
+                f" but it is a non-constant {hint}. Consider removing it.",
+                stacklevel=2,
             )
             continue
         if not hasattr(nn_module, name):
@@ -318,7 +327,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             warnings.warn(
                 f"'{name}' was found in ScriptModule constants, "
                 "but was not actually set in __init__. "
-                "Consider removing it."
+                "Consider removing it.",
+                stacklevel=2,
             )
             continue
         value = getattr(nn_module, name)
@@ -452,7 +462,7 @@ concrete_type_store = ConcreteTypeStore()
 
 def create_methods_and_properties_from_stubs(
     concrete_type, method_stubs, property_stubs
-):
+) -> None:
     method_defs = [m.def_ for m in method_stubs]
     method_rcbs = [m.resolution_callback for m in method_stubs]
     method_defaults = [get_default_args(m.original_method) for m in method_stubs]
@@ -465,7 +475,7 @@ def create_methods_and_properties_from_stubs(
     )
 
 
-def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
+def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs) -> None:
     hook_defs = [h.def_ for h in hook_stubs]
     hook_rcbs = [h.resolution_callback for h in hook_stubs]
 
@@ -489,7 +499,8 @@ def get_module_concrete_type(nn_module, share_types=True):
     Returns:
         A concrete type for nn_module.
     """
-    assert isinstance(nn_module, Module)
+    if not isinstance(nn_module, Module):
+        raise AssertionError(f"Expected Module, got {type(nn_module)}")
     if isinstance(nn_module, torch.jit.ScriptModule) and hasattr(
         nn_module, "_concrete_type"
     ):
@@ -546,7 +557,8 @@ def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False
                 attributes will be baked as constant in the tracing graph. In addition,
                 this check significantly slows down the traced modules when the module size is big.
     """
-    assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
+    if isinstance(nn_module, torch.jit.RecursiveScriptModule):
+        raise AssertionError("Cannot script a RecursiveScriptModule (already compiled)")
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
     if not is_tracing:
@@ -569,10 +581,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
     ignored_properties = jit_ignored_properties(nn_module)
 
-    def init_fn(script_module):
+    def init_fn(script_module) -> None:
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name in concrete_type.get_attributes().keys():
+        for name in concrete_type.get_attributes():
             orig_value = getattr(nn_module, name)
             orig_value = (
                 orig_value.value
@@ -585,9 +597,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module), (
-                f"Expected Module but got {type(orig_value)}"
-            )
+            if not isinstance(orig_value, Module):
+                raise AssertionError(f"Expected Module but got {type(orig_value)}")
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -723,7 +734,7 @@ def script_model_defines_attr(script_model, attr):
     return script_attr != default_attr
 
 
-def add_python_attr_to_scripted_model(script_model, orig, attr):
+def add_python_attr_to_scripted_model(script_model, orig, attr) -> None:
     if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
         setattr(script_model, attr, getattr(orig, attr))
 
@@ -747,7 +758,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(
@@ -775,7 +786,7 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 
-def _check_no_signature(func):
+def _check_no_signature(func) -> None:
     signature = torch.jit.annotations.get_signature(
         func, None, fake_range(), inspect.ismethod(func)
     )
@@ -805,8 +816,9 @@ def make_stubs_for_overloads(overload_info):
     return overload_stubs
 
 
-def check_module_initialized(mod):
-    assert isinstance(mod, torch.nn.Module)
+def check_module_initialized(mod) -> None:
+    if not isinstance(mod, torch.nn.Module):
+        raise AssertionError(f"Expected torch.nn.Module, got {type(mod)}")
     if not hasattr(mod, "_parameters"):
         raise RuntimeError(
             f"'{torch.typename(type(mod))}' has not been initialized, did you forget to call 'super()'?"
@@ -1000,7 +1012,7 @@ def wrap_cpp_class(cpp_class):
 def wrap_cpp_module(cpp_module):
     """Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules."""
 
-    def init_fn(script_module):
+    def init_fn(script_module) -> None:
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(
@@ -1035,7 +1047,7 @@ def lazy_bind(concrete_type, unbound_method):
     """
 
     def lazy_binding_method(cpp_module, *args):
-        def init_fn(script_module):
+        def init_fn(script_module) -> None:
             orig_class = concrete_type.py_class
 
             # Copy @ignored/@unused methods from the original module to the new one.

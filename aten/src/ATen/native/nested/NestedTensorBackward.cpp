@@ -7,7 +7,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/DeviceType.h>
 
@@ -31,7 +30,7 @@ std::tuple<Tensor, Tensor> matmul_backward_nested(
   if (grad_input_mask[1]) {
     grad_other = at::matmul(self.transpose(-1, -2), grad);
   }
-  return std::make_tuple(grad_self, grad_other);
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
@@ -270,7 +269,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   }
   if (M > 0) {
     LayerNormBackwardKernel(
-        input_buffer.is_cuda() ? kCUDA : kCPU,
+        input_buffer.device().type(),
         grad_buffer,
         input_buffer,
         mean,

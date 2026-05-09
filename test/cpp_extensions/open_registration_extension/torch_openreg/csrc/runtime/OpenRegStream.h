@@ -11,7 +11,8 @@
 
 namespace c10::openreg {
 
-static constexpr int max_compile_time_stream_priorities = 1;
+// Derive compile-time priority count from shared openreg backend constant.
+static constexpr int max_compile_time_stream_priorities = 2;
 
 class OpenRegStream {
  public:

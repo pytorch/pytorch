@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import NoTest, run_tests, skipIfRocm, 
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -24,6 +24,7 @@ class TestCudaPrimaryCtx(TestCase):
     )
 
     def setUp(self):
+        super().setUp()
         for device in range(torch.cuda.device_count()):
             # Ensure context has not been created beforehand
             self.assertFalse(

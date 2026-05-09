@@ -1,7 +1,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -323,6 +322,15 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
   return (
       !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
       torch::torch_function_enabled() && has_torch_function_attr(obj));
+}
+
+bool has_torch_function(c10::ArrayRef<PyObject*> args) {
+  for (const auto obj : args) {
+    if (has_torch_function(obj)) {
+      return true;
+    }
+  }
+  return false;
 }
 } // namespace torch
 

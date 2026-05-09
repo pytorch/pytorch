@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <ATen/core/symbol.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
@@ -517,7 +516,6 @@ void unmergeNode(Node* n, Node* subgraphNode) {
         false,
         "all inputs should've been mapped. Couldn't map %",
         v->debugName());
-    return v;
   };
 
   for (auto i : c10::irange(subgraph->outputs().size())) {
@@ -612,7 +610,7 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
       (maxlen > hash_str.size() + 1) ? (maxlen - hash_str.size() - 1) : maxlen;
   std::stringstream truncated;
   truncated << s.substr(0, trunc_len);
-  truncated << "_" << hash_str;
+  truncated << '_' << hash_str;
   return truncated.str();
 }
 
@@ -626,7 +624,7 @@ std::string generateNameForGraph(
     if (!node->kind().is_aten()) {
       continue;
     }
-    graph_name << "_" << node->kind().toUnqualString();
+    graph_name << '_' << node->kind().toUnqualString();
   }
   return truncateStrWithHash(graph_name.str(), maxlen);
 }

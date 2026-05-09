@@ -1,11 +1,11 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
-# ruff: noqa: TCH001,TCH002
-# flake8: noqa: B950
+# pyrefly: ignore-errors
+# ruff: noqa: TC001
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -14,7 +14,7 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 )
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
@@ -24,16 +24,13 @@ if TYPE_CHECKING:
 
 aten = torch.ops.aten
 
-_INT64_MAX = 9223372036854775807
-_INT64_MIN = -9223372036854775808
-
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
 def aten_gelu_opset20(
     self: TReal,
     approximate: str = "none",
 ) -> TReal:
-    """gelu(Tensor self, *, bool approximate=False) -> Tensor"""
+    """gelu(Tensor self, *, str approximate="none") -> Tensor"""
     return op20.Gelu(self, approximate=approximate)
 
 
@@ -41,8 +38,8 @@ def aten_gelu_opset20(
 def aten_group_norm(
     input: TFloat,
     num_groups: int,
-    weight: Optional[TFloat] = None,
-    bias: Optional[TFloat] = None,
+    weight: TFloat | None = None,
+    bias: TFloat | None = None,
     eps: float = 1e-05,
     cudnn_enabled: bool = True,
 ) -> TFloat:
@@ -50,11 +47,9 @@ def aten_group_norm(
 
     c = op21.Shape(input, start=1, end=2)
     if weight is None:
-        # pyrefly: ignore  # missing-attribute
-        weight = op21.ConstantOfShape(c, value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        # pyrefly: ignore  # missing-attribute
-        bias = op21.ConstantOfShape(c, value=ir.tensor(0.0, dtype=input.dtype))
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
@@ -63,9 +58,9 @@ def aten_group_norm(
 @onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
 def aten_rms_norm(
     input: TFloat,
-    normalized_shape: list[int],
-    weight: Optional[TFloat] = None,
-    eps: Optional[float] = None,
+    normalized_shape: Sequence[int],
+    weight: TFloat | None = None,
+    eps: float | None = None,
 ) -> TFloat:
     """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
 
@@ -82,8 +77,9 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        # pyrefly: ignore  # missing-attribute
-        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op23.ConstantOfShape(
+            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
+        )
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 
@@ -95,10 +91,10 @@ def aten_scaled_dot_product_attention_23(
     query: TFloat,
     key: TFloat,
     value: TFloat,
-    attn_mask: Optional[TFloat] = None,
+    attn_mask: TFloat | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     enable_gqa: bool = False,
 ) -> TFloat:
     """scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor
@@ -120,7 +116,7 @@ def aten_scaled_dot_product_attention_23(
             else attn_mask
         )
         attn_weight = torch.softmax(
-            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
+            (Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1
         )
         attn_weight = torch.dropout(attn_weight, dropout_p)
         return attn_weight @ V
@@ -128,30 +124,25 @@ def aten_scaled_dot_product_attention_23(
     where Q, K, V are the query, key, and value tensors, respectively.
     L is the target sequence length, S is the source sequence length, and E is the embedding size.
     """
-    assert (not is_causal) or (is_causal and attn_mask is None), (
-        "is_causal and attn_mask cannot be set at the same time"
-    )
-    # pyrefly: ignore  # missing-attribute
-    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
-        "only 4D query, key, and value are supported"
-    )
+    if is_causal and attn_mask is not None:
+        raise AssertionError("is_causal and attn_mask cannot be set at the same time")
+    if not (len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4):
+        raise AssertionError("only 4D query, key, and value are supported")
 
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
         if enable_gqa:
-            assert (
-                # pyrefly: ignore  # index-error
+            if not (
                 query.shape[1] > key.shape[1] == value.shape[1]
-                # pyrefly: ignore  # index-error
                 and query.shape[1] % key.shape[1] == 0
-            ), (
-                "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
-            )
+            ):
+                raise AssertionError(
+                    "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & "
+                    "q_num_heads % kv_num_heads == 0"
+                )
         else:
-            # pyrefly: ignore  # index-error
-            assert query.shape[1] == key.shape[1] == value.shape[1], (
-                "SDPA (MHA) requires q_num_heads = kv_num_heads"
-            )
+            if not (query.shape[1] == key.shape[1] == value.shape[1]):
+                raise AssertionError("SDPA (MHA) requires q_num_heads = kv_num_heads")
 
         # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
         # They are not populated with 4D inputs because this information directly comes from input shapes:
@@ -205,17 +196,17 @@ def _attention_repeat_kv_for_group_query(
     Returns:
         Tuple of (expanded_key, expanded_value) where:
             - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
-            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E]
     """
 
-    assert (
-        # pyrefly: ignore  # missing-attribute
+    if not (
         query.shape[1] > key.shape[1] == value.shape[1]
-        # pyrefly: ignore  # missing-attribute
         and query.shape[1] % key.shape[1] == 0
-    ), (
-        "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
-    )
+    ):
+        raise AssertionError(
+            "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & "
+            "q_num_heads % kv_num_heads == 0"
+        )
 
     # NOTE: QKV are expected to be 4D tensors
 

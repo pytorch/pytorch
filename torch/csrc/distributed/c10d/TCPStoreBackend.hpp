@@ -36,6 +36,8 @@ enum class QueryType : uint8_t {
   QUEUE_PUSH,
   QUEUE_POP,
   QUEUE_LEN,
+  LIST_KEYS,
+  BARRIER,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };

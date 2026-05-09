@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import itertools
 from collections import namedtuple
 from collections.abc import Sequence
 
@@ -195,16 +196,14 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 )
             if input_.dim() != 2:
                 raise RuntimeError(
-                    "1D target tensor expects 2D input tensors, "
-                    "but found inputs with size",
-                    input_.size(),
+                    f"1D target tensor expects 2D input tensors, "
+                    f"but found inputs with size {input_.size()}"
                 )
         elif targ_dim == 0:
             if input_.dim() != 1:
                 raise RuntimeError(
-                    "0D target tensor expects 1D input tensors, "
-                    "but found inputs with size",
-                    input_.size(),
+                    f"0D target tensor expects 1D input tensors, "
+                    f"but found inputs with size {input_.size()}"
                 )
         else:
             raise RuntimeError(
@@ -273,7 +272,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         out[:, : self.shortlist_size] = head_logprob[:, : self.shortlist_size]
 
-        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
+        for i, (start_idx, stop_idx) in enumerate(itertools.pairwise(self.cutoffs)):
             cluster_output = self.tail[i](input)
             cluster_logprob = F.log_softmax(cluster_output, dim=1)
             output_logprob = cluster_logprob + head_logprob[

@@ -78,6 +78,10 @@ PegasusForCausalLM,pass,0
 
 
 
+Qwen/Qwen3-0.6B,fail_to_run,0
+
+
+
 RobertaForCausalLM,pass,0
 
 
@@ -106,28 +110,12 @@ YituTechConvBert,pass,0
 
 
 
-meta-llama/Llama-3.2-1B,fail_to_run,0
-
-
-
 google/gemma-2-2b,fail_to_run,0
 
 
 
-google/gemma-3-4b-it,fail_to_run,0
+meta-llama/Llama-3.2-1B,fail_to_run,0
 
 
 
 openai/whisper-tiny,fail_to_run,0
-
-
-
-Qwen/Qwen3-0.6B,fail_to_run,0
-
-
-
-mistralai/Mistral-7B-Instruct-v0.3,fail_to_run,0
-
-
-
-openai/gpt-oss-20b,fail_to_run,0

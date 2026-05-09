@@ -168,6 +168,20 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, p.__contains__)
         self.assertRaises(TypeError, p.__contains__, 1, 2)
 
+    @make_dynamo_test
+    def test___iter__(self):
+        p = self.thetype([1])
+        it = p.__iter__()
+        self.assertEqual(next(it), 1)
+        it = p.__iter__().__iter__()
+        self.assertEqual(next(it), 1)
+
+    @make_dynamo_test
+    def test_list_mul_constant_tuple(self):
+        tree = (1, 2)
+        result = [tree] * 2
+        self.assertEqual(result, [tree, tree])
+
 
 class ListTests(TupleTests):
     # List methods
@@ -247,7 +261,8 @@ class ListTests(TupleTests):
         p = self.thetype("abcd")
         self.assertEqual(p.pop(), "d")
         self.assertEqual(p.pop(1), "b")
-        self.assertRaises(IndexError, p.pop, 10)
+        # The length of p is now 2, valid indices are 0, 1
+        self.assertRaises(IndexError, p.pop, 2)
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)

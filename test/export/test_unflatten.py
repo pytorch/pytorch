@@ -178,6 +178,48 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    def test_unflatten_shared_submodule_reorder(self):
+        """Test that _reorder_submodules handles @N-suffixed FQNs correctly.
+
+        When modules are shared (aliased), PyTorch assigns @N suffixes to
+        duplicate entries in _modules. The fqn_order dict (built from
+        fqn_list) filters out @N entries, so _reorder_submodules must fall
+        back to the base FQN for ordering.
+        """
+
+        class Block(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                shared_block = Block()
+                self.blocks = torch.nn.Sequential(
+                    shared_block,
+                    torch.nn.ReLU(),
+                    shared_block,
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.blocks(x)
+
+        eager_module = Model()
+        inps = (torch.rand(2, 10),)
+        export_module = export(eager_module, inps, {}, strict=True)
+        unflattened_module = unflatten(export_module)
+        self.compare_outputs(eager_module, unflattened_module, inps)
+        # Verify shared identity is preserved
+        self.assertEqual(
+            id(getattr(unflattened_module.blocks, "0")),
+            id(getattr(unflattened_module.blocks, "2")),
+        )
+
     def test_assert_tensor_metadata_stack(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -1058,6 +1100,27 @@ def forward(self, x):
         )
         unf = torch.export.unflatten(ep)
         inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+    def test_unflatten_root_module_type(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + x
+
+        class M1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.m(x)
+
+        inp = (torch.randn(3),)
+        ep = torch.export.export(M1(), inp)
+        unf = torch.export.unflatten(ep)
+        self.assertIsNotNone(unf.type_name())
+        self.assertEqual(unf.type_name().split(".")[-1], "M1")
+        self.assertEqual(unf.m.type_name().split(".")[-1], "M")
         self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
 

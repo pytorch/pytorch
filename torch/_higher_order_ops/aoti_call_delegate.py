@@ -50,6 +50,7 @@ class AOTICallDelegate(HigherOrderOperator):
         weight_args: list[torch.Tensor],
         input_args: list[torch.Tensor],
     ) -> list[torch.Tensor]:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(lowered_module, original_gm, weight_args, input_args)
 
 

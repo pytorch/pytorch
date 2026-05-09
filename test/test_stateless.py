@@ -186,7 +186,7 @@ class TestStatelessFunctionalAPI(TestCase):
         cur_rm = module.running_mean
         self.assertEqual(cur_rm, prev_rm)
         self.assertEqual(rm, torch.full((10,), 12.8))
-        # Now run functional without reparametrization and check that the module has
+        # Now run functional without reparameterization and check that the module has
         # been updated
         functional_call(module, {}, x)
         self.assertEqual(module.running_mean, torch.full((10,), 12.8))
@@ -678,7 +678,8 @@ class TestStatelessFunctionalAPI(TestCase):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                assert not hasattr(self, 'extra')
+                if hasattr(self, 'extra'):
+                    raise AssertionError("self should not have 'extra' attribute")
 
             def forward(self, x):
                 return x + self.extra

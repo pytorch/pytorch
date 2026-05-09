@@ -2,7 +2,17 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
-#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+// Include CPython header files here (.c file) as MSVC C++ compiler cannot
+// compile pycore_stackref.h. See PyTorch issue #160647
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define Py_BUILD_CORE
+#include <internal/pycore_stackref.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
+#undef Py_BUILD_CORE
+#endif
+
+#if IS_PYTHON_3_15_PLUS
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
@@ -18,6 +28,12 @@ void init_THPCaches() {}
 
 #if IS_PYTHON_3_11_PLUS
 
+// Rename opcode table symbols to avoid multiple definition conflict
+// with the identical tables in libpython at link time.
+#define _PyOpcode_Caches _torch_PyOpcode_Caches
+#define _PyOpcode_Jump _torch_PyOpcode_Jump
+#define _PyOpcode_Deopt _torch_PyOpcode_Deopt
+
 #define Py_BUILD_CORE
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 
@@ -32,6 +48,9 @@ void init_THPCaches() {}
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#undef _PyOpcode_Deopt
+#undef _PyOpcode_Jump
+#undef _PyOpcode_Caches
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this
 // check forces us to manually re-check that the function didn't change on the
@@ -242,7 +261,7 @@ static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
     PyErr_SetRaisedException(exc);
   }
   if (!_PyObject_GC_IS_TRACKED((PyObject*)f)) {
-    _PyObject_GC_TRACK((PyObject*)f);
+    PyObject_GC_Track((PyObject*)f);
   }
   Py_END_CRITICAL_SECTION();
 }
@@ -487,8 +506,8 @@ const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
 void init_THPCaches() {
 #if IS_PYTHON_3_11_PLUS
-  THP_PyOpcode_Caches = _PyOpcode_Caches;
-  THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
+  THP_PyOpcode_Caches = _torch_PyOpcode_Caches;
+  THP_PyOpcode_Caches_size = sizeof(_torch_PyOpcode_Caches) / sizeof(uint8_t);
 #endif
 }
 

@@ -41,6 +41,17 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
     {at::kChar, MPI_CHAR},
     {at::kDouble, MPI_DOUBLE},
     {at::kFloat, MPI_FLOAT},
+// FP16 is generally supported if MPIX_C_FLOAT16 exists
+// for now the NVIDIA hpc sdk is built without (OpenMPI)
+#if defined(MPIX_C_FLOAT16)
+    {at::kHalf, MPIX_C_FLOAT16},
+#endif
+#if defined(MPIX_C_BF16)
+    {at::kBFloat16, MPIX_C_BF16},
+#endif
+#if defined(MPIX_BFLOAT16)
+    {at::kBFloat16, MPIX_BFLOAT16},
+#endif
     {at::kInt, MPI_INT},
     {at::kLong, MPI_LONG},
     {at::kShort, MPI_SHORT},
@@ -56,7 +67,15 @@ bool cudaAwareMpiCheck() {
   } else {
     return false;
   }
-#else // !defined(MPIX_CUDA_AWARE_SUPPORT)
+// Recognize that Cray MPICH is CUDA-aware (used on Cray/HPE supercomputers)
+#elif defined(MPIX_GPU_SUPPORT_CUDA)
+  const char* cray_gpu_support = std::getenv("MPICH_GPU_SUPPORT_ENABLED");
+  if (cray_gpu_support != nullptr && std::string(cray_gpu_support) == "1") {
+    return true;
+  } else {
+    return false;
+  }
+#else // !defined(MPIX_CUDA_AWARE_SUPPORT) && !defined(MPIX_GPU_SUPPORT_CUDA)
   return false;
 #endif // MPIX_CUDA_AWARE_SUPPORT
 }
@@ -316,7 +335,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
-    : Backend(rank, size), stop_(false), pgComm_(pgComm) {
+    : Backend(rank, size), pgComm_(pgComm) {
   if (pgComm_ == MPI_COMM_NULL) {
     TORCH_CHECK(false, "pgComm_ must not be MPI_COMM_NULL");
   }

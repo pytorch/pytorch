@@ -16,14 +16,11 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_copy.h>
-#include <ATen/ops/to_native.h>
 #include <ATen/ops/lift.h>
 #include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
-#include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
-#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
 
 #include <utility>
@@ -115,6 +112,21 @@ namespace {
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
           (*stack)[arguments_begin + idx] = t_new;
         }
+      } else if (ivalue.isList()) {
+        // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+        auto list = ivalue.toList();
+        for (const auto i : c10::irange(list.size())) {
+          const auto& elem = list.get(i);
+          if (elem.isTensorList()) {
+            any_tensor_inputs = true;
+            auto tensors = elem.toTensorList();
+            if (at::functionalization::impl::isFunctionalTensor(tensors)) {
+              any_functional_inputs = true;
+              at::functionalization::impl::sync(tensors);
+              list.set(i, c10::IValue(at::functionalization::impl::from_functional_tensor(tensors)));
+            }
+          }
+        }
       }
     }
     // we should wrap the output if any inputs were wrapped,
@@ -145,6 +157,16 @@ namespace {
         auto opt_tensors = ivalue.toOptionalTensorList();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
         (*stack)[returns_begin + idx] = t_new;
+      } else if (ivalue.isList() && should_wrap_outputs) {
+        // Handle nested lists containing tensor lists (e.g., Tensor[][]).
+        auto list = ivalue.toList();
+        for (const auto i : c10::irange(list.size())) {
+          const auto& elem = list.get(i);
+          if (elem.isTensorList()) {
+            auto tensors = elem.toTensorList();
+            list.set(i, c10::IValue(at::functionalization::impl::to_functional_tensor(tensors)));
+          }
+        }
       }
     }
   }

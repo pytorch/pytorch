@@ -49,26 +49,26 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
+  if [[ $PYTHON_FREETHREADED == "1" ]]
+  then
+    PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
+  else
+    PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
+  fi
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
+  # NB: pip is no longer pulled in transitively by conda-forge's python
+  # package, so request it explicitly. Without it, `python3 -m pip` in the
+  # env fails and `conda run -n env pip` silently falls back to base.
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
-
-  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
-  # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
+             ${PYTHON_DEP} \
+             ${SYSROOT_DEP} \
+             pip \
+             "icu<78"
 
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     conda_install sqlite
-  fi
-
-  # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) != "aarch64" ]]; then
-    pip_install mkl==2024.2.0
-    pip_install mkl-static==2024.2.0
-    pip_install mkl-include==2024.2.0
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -86,6 +86,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install_through_forge libstdcxx-ng=14
   fi
 
+  # Needs to be installed here so pip can build 3.14t wheels
+  conda_install cmake=3.31.6
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
@@ -96,6 +99,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
   fi
+
+  # Clean conda package cache
+  as_jenkins conda clean -ya
 
   popd
 fi

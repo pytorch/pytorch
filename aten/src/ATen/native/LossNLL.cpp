@@ -47,6 +47,10 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
   if (self.dim() == 1 && target.dim() == 1) {
       TORCH_CHECK_VALUE(
           target.size(0) == 1,
@@ -235,7 +239,7 @@ void nll_loss_out_frame(
 
   constexpr int64_t cascade_sum_num_levels = 8;
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(batch_size) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
@@ -682,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",

@@ -1,18 +1,9 @@
-#include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/Storage.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/utils/cuda_enabled.h>
-#include <torch/csrc/utils/device_lazy_init.h>
-#include <torch/csrc/utils/object_ptr.h>
-
-#include <ATen/ATen.h>
-#include <ATen/FunctionalStorageImpl.h>
 
 #include <array>
 #include <stdexcept>
@@ -122,7 +113,7 @@ std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
       "'");
 
   auto storage = THPStorage_Unpack(untyped_storage_obj);
-  return std::make_tuple(storage, scalar_type, is_typed_storage);
+  return std::make_tuple(std::move(storage), scalar_type, is_typed_storage);
 }
 
 at::Storage createStorage(PyObject* obj) {

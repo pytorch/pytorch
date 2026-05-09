@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,6 +16,8 @@ from torch.utils._ordered_set import OrderedSet
 
 # Prevent circular import
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.triton_compat import Config
     from torch._inductor.scheduler import BaseSchedulerNode
 
@@ -51,9 +53,13 @@ num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
 
 num_loop_reordering = 0
+num_auto_chunking: int = 0
 
 # counter for parallel reduction.
 parallel_reduction_count = 0
+
+codegen_mix_order_reduction = 0
+rejected_mix_order_reduction_fusion = 0
 
 
 # reset all counters
@@ -68,6 +74,9 @@ def reset() -> None:
     global num_matches_for_scatter_upon_const_tensor
     global num_loop_reordering
     global parallel_reduction_count
+    global codegen_mix_order_reduction
+    global rejected_mix_order_reduction_fusion
+    global num_auto_chunking
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -81,6 +90,9 @@ def reset() -> None:
     num_matches_for_scatter_upon_const_tensor = 0
     num_loop_reordering = 0
     parallel_reduction_count = 0
+    codegen_mix_order_reduction = 0
+    rejected_mix_order_reduction_fusion = 0
+    num_auto_chunking = 0
 
 
 @dataclass
@@ -137,9 +149,7 @@ class MetricTable:
 
     num_rows_added: int = 0
 
-    def add_row(
-        self, row_fn: Callable[[], dict[str, Optional[Union[str, float]]]]
-    ) -> None:
+    def add_row(self, row_fn: Callable[[], dict[str, str | float | None]]) -> None:
         if self.table_name not in enabled_metric_tables():
             return
 
@@ -299,7 +309,7 @@ def _parse_kernel_line_of_code(proper_kernel_fn_code: str) -> int:
     return len(proper_kernel_fn_code.splitlines())
 
 
-def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> Optional[str]:
+def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> str | None:
     if kernel_category == "foreach":
         # foreach kernel does not have size_hints
         return None
@@ -308,9 +318,7 @@ def _parse_size_hints(kernel_module_code: str, kernel_category: str) -> Optional
     return m.group(1)
 
 
-def _parse_reduction_hint(
-    kernel_category: str, kernel_module_code: str
-) -> Optional[str]:
+def _parse_reduction_hint(kernel_category: str, kernel_module_code: str) -> str | None:
     if kernel_category not in ("reduction", "persistent_reduction"):
         return None
     m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
@@ -340,7 +348,7 @@ def _parse_proper_kernel_fn_code(kernel_fn_code: str) -> str:
     return kernel_fn_code[start_pos:]
 
 
-def _parse_numel(proper_kernel_fn_code: str, numel_arg_name: str) -> Optional[int]:
+def _parse_numel(proper_kernel_fn_code: str, numel_arg_name: str) -> int | None:
     m = re.search(f"{numel_arg_name} = ([\\d]+)", proper_kernel_fn_code)
     if m:
         return int(m.group(1))
@@ -350,7 +358,7 @@ def _parse_numel(proper_kernel_fn_code: str, numel_arg_name: str) -> Optional[in
 
 def _parse_kernel_args_num_gb(
     kernel_fn_code: str, kernel_category: str
-) -> Optional[float]:
+) -> float | None:
     """
     inductor meta looks like:
         inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},

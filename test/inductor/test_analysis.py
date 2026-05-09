@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
+from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -21,7 +22,13 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    TEST_XPU,
+    TestCase,
+    xfailIfNoAcceleratorTriton,
+)
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -266,9 +273,23 @@ class TestUtils(TestCase):
         res2 = zip_dicts(d1, d2)
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
+    def test_device_mapping_keys_are_upper_case(self):
+        self.assertTrue(all(k == k.upper() for k in _device_mapping))
+
+    def test_lookup_device_info_is_case_insensitive(self):
+        upper = lookup_device_info("AMD INSTINCT MI300X")
+        self.assertIsNotNone(upper)
+        self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
+        self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
+
+def has_supported_gpu():
+    """Check if any GPU platform with Triton support is available."""
+    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
+
 
 class TestAnalysis(TestCase):
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -277,8 +298,9 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_diff(self, device, dtype):
         """
         diff, testing out the nruns feature too.
@@ -321,14 +343,14 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not (SM80OrLater or TEST_XPU), "Requires SM80 or XPU")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -382,7 +404,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -393,6 +415,7 @@ class TestAnalysis(TestCase):
             (True, "TRITON"),
         ],
     )
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
@@ -467,6 +490,7 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
+                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name
@@ -493,7 +517,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -543,8 +567,9 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
+    @xfailIfNoAcceleratorTriton
     def test_combine_profiles(self, device, dtype):
         """
         Test combining multiple profiles into a single profile.
@@ -619,7 +644,10 @@ class TestAnalysis(TestCase):
 
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
-        self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+        # XPU currently does not have the deviceProperties like CUDA.
+        # See https://github.com/intel/torch-xpu-ops/issues/2247
+        if torch.cuda.is_available():
+            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
         # Verify some trace events from each original profile are present
         combined_event_names = {
@@ -637,7 +665,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(profile3_event_names.intersection(combined_event_names))
 
 
-instantiate_device_type_tests(TestAnalysis, globals())
+instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

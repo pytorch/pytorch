@@ -221,12 +221,12 @@ enum class DispatchKey : uint16_t {
   // correct backend.
   BackendSelect,
 
-  Python,
-
-  // Out-of-core key for Fake Tensor in torchdistx.
-  // See https://pytorch.org/torchdistx/latest/fake_tensor.html
-  // TODO: delete this in favor of Python-implemented fake tensor
+  // Fake dispatch key for C++ FakeTensor mode. Must be BELOW Python so that
+  // TorchDispatchModes (e.g. ProxyTorchDispatchMode, FakeTensorMode) fire
+  // first, matching the Python FakeTensor dispatch order.
   Fake,
+
+  Python,
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
@@ -738,7 +738,7 @@ struct hash<c10::DispatchKey> {
   typedef size_t result_type;
   typedef c10::DispatchKey argument_type;
 
-  size_t operator()(c10::DispatchKey x) const {
+  size_t operator()(c10::DispatchKey x) const noexcept {
     return static_cast<size_t>(x);
   }
 };

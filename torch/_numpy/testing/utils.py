@@ -200,14 +200,15 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             return True
 
     if isinstance(desired, str) and isinstance(actual, str):
-        assert actual == desired
+        if actual != desired:
+            raise AssertionError(f"Strings not equal: {actual!r} != {desired!r}")
         return
 
     if isinstance(desired, dict):
         if not isinstance(actual, dict):
             raise AssertionError(repr(type(actual)))
         assert_equal(len(actual), len(desired), err_msg, verbose)
-        for k in desired.keys():
+        for k in desired:
             if k not in actual:
                 raise AssertionError(repr(k))
             assert_equal(actual[k], desired[k], f"key={k!r}\n{err_msg}", verbose)
@@ -1305,7 +1306,8 @@ def assert_allclose(
     header = f"Not equal to tolerance rtol={rtol:g}, atol={atol:g}"
 
     if check_dtype:
-        assert actual.dtype == desired.dtype
+        if actual.dtype != desired.dtype:
+            raise AssertionError(f"dtype mismatch: {actual.dtype} != {desired.dtype}")
 
     assert_array_compare(
         compare,

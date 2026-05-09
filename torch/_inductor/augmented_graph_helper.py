@@ -1,9 +1,13 @@
+import logging
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx as fx
+from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 class AugmentedGraphHelper:
@@ -18,7 +22,7 @@ class AugmentedGraphHelper:
     def __init__(
         self,
         graph: fx.Graph,
-        node_ancestors: Optional[dict[fx.Node, OrderedSet[fx.Node]]] = None,
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         # Each node starts in its own singleton set
         self.graph = graph
@@ -26,6 +30,8 @@ class AugmentedGraphHelper:
 
         # Extra dependencies: node depends on dep (dep must come before node)
         self.extra_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        # Extra uses: reverse of extra_deps (node is used by user)
+        self.extra_uses: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         # Note: only reflect original ancestors, not maintained through additional deps
         # or merge sets
         self.node_ancestors = node_ancestors
@@ -33,6 +39,12 @@ class AugmentedGraphHelper:
     def add_extra_dep(self, *, n: fx.Node, dep: fx.Node) -> None:
         """Add extra dependency: node depends on dep."""
         self.extra_deps[n].add(dep)
+        self.extra_uses[dep].add(n)
+
+    def remove_extra_dep(self, *, n: fx.Node, dep: fx.Node) -> None:
+        if dep in self.extra_deps[n]:
+            self.extra_deps[n].discard(dep)
+            self.extra_uses[dep].discard(n)
 
     def merge_to_set(self, existing_node: fx.Node, new_node: fx.Node) -> None:
         """
@@ -82,8 +94,22 @@ class AugmentedGraphHelper:
         return deps
 
     def has_cycle(self) -> bool:
-        merged_deps = {n: self.get_merged_deps(n) for n in self.graph.nodes}
-        return torch._dynamo.graph_deduplication._has_cycle(self.graph, merged_deps)
+        return torch._dynamo.graph_deduplication._has_cycle(
+            self.graph, self.get_all_extra_deps()
+        )
+
+    def _get_all_ancestors(self, node: fx.Node) -> OrderedSet[fx.Node]:
+        """Transitive ancestors through both data deps and extra deps."""
+        ancestors: OrderedSet[fx.Node] = OrderedSet()
+        stack: list[fx.Node] = list(node.all_input_nodes)
+        stack.extend(self.extra_deps.get(node, ()))
+        while stack:
+            n = stack.pop()
+            if n not in ancestors:
+                ancestors.add(n)
+                stack.extend(n.all_input_nodes)
+                stack.extend(self.extra_deps.get(n, ()))
+        return ancestors
 
     def has_path(self, source: fx.Node, target: fx.Node) -> bool:
         """Check if there's a path from source to target."""
@@ -123,3 +149,128 @@ class AugmentedGraphHelper:
                 queue.append(dep)
 
         return False
+
+    def transfer_erased_node_deps(
+        self, erased_to_new: dict[fx.Node, fx.Node | None]
+    ) -> None:
+        """
+        Transfer all extra dependencies from erased nodes to their replacements, handling
+        cross-dependencies between erased nodes correctly.
+
+        Skips deps where both endpoints resolve to replacement nodes from the
+        same erasure batch — these are intra-bucket deps that would create
+        cycles (e.g. new_start <-> new_wait within the same bucket).
+        """
+        erased_merge_sets: dict[fx.Node, fx.Node | None] = {}
+
+        for replaced, new in erased_to_new.items():
+            for equiv in self.merge_sets[replaced]:
+                erased_merge_sets[equiv] = new
+
+        # Transfer dependencies
+        for old_node, new_node in erased_merge_sets.items():
+            if new_node is None:
+                # Clean up references to removed node
+                for extra_use in list(self.extra_uses[old_node]):
+                    updated_use = erased_merge_sets.get(extra_use, extra_use)
+                    if updated_use is not None:
+                        self.extra_deps[updated_use].discard(old_node)
+                for extra_dep in list(self.extra_deps[old_node]):
+                    updated_dep = erased_merge_sets.get(extra_dep, extra_dep)
+                    if updated_dep is not None:
+                        self.extra_uses[updated_dep].discard(old_node)
+            else:
+                # Transfer dependencies FROM old_node (what old_node depended on)
+                for extra_dep in self.extra_deps[old_node]:
+                    updated_dep = erased_merge_sets.get(extra_dep, extra_dep)
+                    if updated_dep is not None and updated_dep != new_node:
+                        # Skip if reverse dep already exists (extra or data)
+                        if new_node in self.extra_deps.get(
+                            updated_dep, ()
+                        ) or new_node in OrderedSet(updated_dep.all_input_nodes):
+                            continue
+                        self.extra_deps[new_node].add(updated_dep)
+                        self.extra_uses[updated_dep].discard(old_node)
+                        self.extra_uses[updated_dep].add(new_node)
+
+                # Transfer dependencies TO old_node (what depended on old_node)
+                for extra_use in self.extra_uses[old_node]:
+                    updated_use = erased_merge_sets.get(extra_use, extra_use)
+                    if updated_use is not None and updated_use != new_node:
+                        # Skip if reverse dep already exists (extra or data)
+                        if updated_use in self.extra_deps.get(
+                            new_node, ()
+                        ) or updated_use in OrderedSet(new_node.all_input_nodes):
+                            continue
+                        self.extra_deps[updated_use].discard(old_node)
+                        self.extra_deps[updated_use].add(new_node)
+                        self.extra_uses[new_node].add(updated_use)
+
+        # Clean up erased nodes
+        for old_node in erased_merge_sets:
+            self.extra_deps[old_node].clear()
+            self.extra_uses[old_node].clear()
+            del self.merge_sets[old_node]
+
+    def remove_erased_extra_deps(self) -> None:
+        """Remove extra deps referencing erased nodes."""
+        for node in list(self.extra_deps):
+            if node._erased:
+                for dep in list(self.extra_deps[node]):
+                    self.remove_extra_dep(n=node, dep=dep)
+                continue
+            for dep in list(self.extra_deps[node]):
+                if dep._erased:
+                    self.remove_extra_dep(n=node, dep=dep)
+
+    def check_and_maybe_autofix_cyclic_extra_deps(
+        self, *, autofix: bool = False
+    ) -> None:
+        """Check for and optionally remove extra deps that create cycles.
+
+        Args:
+            autofix: If True, silently remove cyclic deps.  If False (default),
+                raise an error so the root cause gets investigated.
+        """
+        if not self.has_cycle():
+            return
+        removed = []
+        for node in list(self.extra_deps):
+            for dep in list(self.extra_deps[node]):
+                ancestors = self._get_all_ancestors(dep)
+                if node in ancestors:
+                    removed.append((node.name, dep.name))
+                    self.remove_extra_dep(n=node, dep=dep)
+        if not removed:
+            return
+        msg = (
+            f"Overlap scheduling: detected {len(removed)} cyclic extra "
+            f"dep(s): {removed}. Please report this to the overlap "
+            f"scheduling developers."
+        )
+        log.warning(msg)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_overlap_cyclic_extra_deps",
+                "encoding": "string",
+            },
+            payload_fn=lambda: msg,
+        )
+        if not autofix:
+            raise RuntimeError(
+                f"{msg}\nTo unblock, set "
+                f"torch._inductor.config.aten_distributed_optimizations"
+                f".overlap_scheduling_autofix_cycles = True"
+            )
+
+    def get_all_extra_deps(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """
+        Get all extra dependencies in a format suitable for topological sort.
+        Returns a copy to avoid external modifications.
+        """
+        return {
+            node: OrderedSet(deps)
+            for node, deps in self.extra_deps.items()
+            if deps  # Only include nodes with non-empty deps
+        }

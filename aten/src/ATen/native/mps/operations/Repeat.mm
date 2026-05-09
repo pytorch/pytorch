@@ -10,6 +10,14 @@
 #include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
+#endif
+
 namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
@@ -36,7 +44,13 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-  TORCH_CHECK(!self.is_complex(), "repeat(): Not supported for complex yet!");
+
+  if (self.is_complex()) {
+    std::vector<int64_t> repeats_real = repeats.vec();
+    repeats_real.push_back(1);
+    auto self_real = at::view_as_real(self);
+    return at::view_as_complex(repeat_mps(self_real, repeats_real));
+  }
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
@@ -91,25 +105,30 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Repeat_metallib.h>
 #endif
 
-template <typename index_t>
-void computeRepeatIndices(const index_t* repeat_ptr,
-                          const int64_t* cumsum_ptr,
-                          index_t* result_ptr,
-                          int64_t size,
-                          int64_t result_size) {
-  id<MTLBuffer> repeatBuffer = reinterpret_cast<id<MTLBuffer>>(repeat_ptr);
-  id<MTLBuffer> cumsumBuffer = reinterpret_cast<id<MTLBuffer>>(cumsum_ptr);
-  id<MTLBuffer> resultBuffer = reinterpret_cast<id<MTLBuffer>>(result_ptr);
-  TORCH_CHECK(repeatBuffer && cumsumBuffer && resultBuffer);
-
+Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output_size) {
+  TORCH_CHECK(repeat.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   std::string scalar_type;
-  if constexpr (std::is_same_v<index_t, int32_t>) {
+  if (repeat.scalar_type() == kInt) {
     scalar_type = "int32_t";
-  } else if constexpr (std::is_same_v<index_t, int64_t>) {
+  } else if (repeat.scalar_type() == kLong) {
     scalar_type = "int64_t";
   } else {
-    TORCH_CHECK(false, "repeat_interleave: unsupported indexing data type");
+    TORCH_CHECK(false, "repeats has to be Long or Int tensor");
   }
+  if (repeat.size(0) == 0) {
+    return at::empty_like(repeat, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  Tensor repeat_ = repeat.contiguous();
+  Tensor cumsum = repeat.cumsum(0);
+  int64_t total = 0;
+  if (output_size.has_value()) {
+    total = output_size.value();
+  } else {
+    total = cumsum[-1].item<int64_t>();
+    TORCH_CHECK((repeat >= 0).all().item<uint8_t>(), "repeats can not be negative");
+  }
+
+  auto result = at::empty({total}, repeat.options());
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
@@ -121,20 +140,13 @@ void computeRepeatIndices(const index_t* repeat_ptr,
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
 
       [computeEncoder setComputePipelineState:pipelineState];
-      mps::mtl_setArgs(computeEncoder, repeatBuffer, cumsumBuffer, resultBuffer, size);
-      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
+      mps::mtl_setArgs(computeEncoder, repeat_, cumsum, result, repeat.size(0));
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, repeat.size(0));
 
       getMPSProfiler().endProfileKernel(pipelineState);
     }
   });
-}
-
-Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output_size) {
-  Tensor output;
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {
-    output = repeat_interleave_common<index_t, computeRepeatIndices<index_t>>(repeat, output_size);
-  });
-  return output;
+  return result;
 }
 
 } // namespace at::native

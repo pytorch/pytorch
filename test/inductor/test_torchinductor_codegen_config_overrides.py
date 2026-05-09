@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import importlib
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 from unittest import skipIf
 
 import torch
@@ -30,8 +30,8 @@ class CodegenInductorTest(InductorTestCase):
         self,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        config_patches: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
+        config_patches: dict | None = None,
         atol: float | None = 1e-05,
         rtol: float | None = 1e-08,
     ):
@@ -59,7 +59,7 @@ class CodegenInductorTest(InductorTestCase):
 
         return result, code
 
-    def count_code(self, substr: str, code: list[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: int | None):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)
@@ -118,6 +118,34 @@ class CodegenInductorTest(InductorTestCase):
         )
         self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
         self.count_code("= tl.load(block_ptr", code, 2)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @parametrize("disable_welford_reduction", [True, False])
+    def test_disable_welford_reduction(self, disable_welford_reduction: bool):
+        def func(x):
+            return torch.var_mean(x, dim=1)
+
+        # Use a large number to force codegen to prefer welford reduction,
+        # in order to test effectiveness of config flag disable_welford_reduction
+        # This test should run fine on GPU as the configuration is not specific to MTIA backend.
+        x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
+        config_patches = {
+            "mtia.disable_welford_reduction": disable_welford_reduction,
+        }
+        _, code = self.run_and_compare(
+            func,
+            x,
+            config_patches=config_patches,
+            atol=1e-2,
+            rtol=1e-4,
+        )
+
+        welford_count = sum(prog.count("triton_helpers.welford") for prog in code)
+        if disable_welford_reduction:
+            self.assertEqual(welford_count, 0)
+        else:
+            self.assertGreater(welford_count, 0)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")

@@ -4,7 +4,6 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec128/vec128_convert.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_reduced_precision_common_neon.h>
 #include <ATen/cpu/vec/vec_base.h>
@@ -207,7 +206,7 @@ class Vectorized<c10::Half> : public Vectorized16<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float16_t*>(ptr),
-        count * sizeof(float16_t));
+        std::min<int64_t>(count, size()) * sizeof(float16_t));
     return vld1q_f16(reinterpret_cast<const float16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
@@ -217,7 +216,10 @@ class Vectorized<c10::Half> : public Vectorized16<
     } else {
       float16_t tmp_values[size()];
       vst1q_f16(reinterpret_cast<float16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float16_t));
+      std::memcpy(
+          ptr,
+          tmp_values,
+          std::min<int64_t>(count, size()) * sizeof(float16_t));
     }
   }
   int zero_mask() const {
@@ -234,7 +236,7 @@ class Vectorized<c10::Half> : public Vectorized16<
         vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
     return vaddvq_u16(bits_vec);
 #else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    // use known working implmentation.
+    // use known working implementation.
     __at_align__ value_type tmp[size()];
     store(tmp);
     int mask = 0;
@@ -568,46 +570,6 @@ inline Vectorized<c10::Half> Vectorized<c10::Half>::le(
     const Vectorized<c10::Half>& other) const {
   return (*this <= other) & Vectorized<c10::Half>(1);
 }
-
-// These are global functions, so the defaults in vec_base.h should
-// work fine if __ARM_FEATURE_FP16_VECTOR_ARITHMETIC is not available.
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-template <>
-inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_s16(dst + i, vcvtq_s16_f16(vld1q_f16(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int16_t>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const int16_t* src, float16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_f16(dst + i, vcvtq_f16_s16(vld1q_s16(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float16_t>(src[i]);
-  }
-}
-#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 
 template <>
 Vectorized<c10::Half> inline fmadd(

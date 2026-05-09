@@ -3,9 +3,11 @@
 import logging
 import operator
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.experimental import local_map
 from torch.fx.node import map_aggregate
 from torch.nn.attention.flex_attention import BlockMask
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -135,9 +137,10 @@ def _split_block_mask(
     if block_mask.kv_num_blocks.size(0) == 1:
         return [block_mask] * num_chunks
 
-    assert block_mask.kv_num_blocks.size(0) >= num_chunks, (
-        "Block mask has fewer batch size than the number of chunks. "
-    )
+    if not block_mask.kv_num_blocks.size(0) >= num_chunks:
+        raise AssertionError(
+            "Block mask has fewer batch size than the number of chunks. "
+        )
 
     batch_dim = 0
     kv_num_blocks_chunks = torch.tensor_split(
@@ -197,29 +200,64 @@ def _split_tensor(
         chunk_tensors: List of chunked tensors
     """
 
-    assert tensor.size(spec.split_dim) >= num_chunks, (
-        f"Tensor size {tensor.size(spec.split_dim)} is smaller than num_chunks"
-    )
-    chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
+    if not tensor.size(spec.split_dim) >= num_chunks:
+        raise AssertionError(
+            f"Tensor size {tensor.size(spec.split_dim)} is smaller than num_chunks"
+        )
+
+    _is_dtensor = isinstance(tensor, DTensor)
+
+    if _is_dtensor:
+        # Use local_map to split locally and preserve placements.
+        # Going through DTensor dispatch would convert Shard(split_dim) to
+        # Replicate() via an implicit all-gather, which is both wasteful and
+        # semantically wrong for PP microbatch splitting.
+        placements = tensor.placements
+        split_fn = local_map(
+            lambda t: torch.tensor_split(t, num_chunks, spec.split_dim),
+            out_placements=(placements,) * num_chunks,
+            in_placements=(placements,),
+        )
+        chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)  # type: ignore[assignment]
+    else:
+        chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
+
+    # tensor_split on a leaf tensor produces non-leaf views that won't
+    # accumulate .grad during torch.autograd.backward().  Call retain_grad()
+    # on those views so that stage_backward() can read .grad from them.
+    if tensor.requires_grad and tensor.is_leaf:
+        for chunk in chunk_tensors:
+            chunk.retain_grad()
 
     if not _debug_mask_minibatches:
         return chunk_tensors
 
-    expanded_chunks = []
-    split_dim_idx = 0
-    for chunk_tensor in chunk_tensors:
-        new_val = torch.zeros_like(tensor)
-        upper_idx = split_dim_idx + chunk_tensor.size(spec.split_dim)
+    def _expand_chunks(
+        orig: torch.Tensor, *chunks: torch.Tensor
+    ) -> tuple[torch.Tensor, ...]:
+        expanded = []
+        idx = 0
+        for chunk in chunks:
+            new_val = torch.zeros_like(orig)
+            upper = idx + chunk.size(spec.split_dim)
+            slices: list[slice] = [slice(None)] * new_val.ndim
+            slices[spec.split_dim] = slice(idx, upper)
+            new_val[slices] = chunk
+            expanded.append(new_val)
+            idx += chunk.size(spec.split_dim)
+        return tuple(expanded)
 
-        slice_indices = [slice(None, None, None)] * new_val.ndim
-        slice_indices[spec.split_dim] = slice(split_dim_idx, upper_idx)
-        new_val[slice_indices] = chunk_tensor
-
-        expanded_chunks.append(new_val)
-
-        split_dim_idx += chunk_tensor.size(spec.split_dim)
-
-    return expanded_chunks
+    if _is_dtensor:
+        placements = tensor.placements
+        n = len(chunk_tensors)
+        expand_fn = local_map(
+            _expand_chunks,
+            out_placements=(placements,) * n,
+            in_placements=(placements,) + (placements,) * n,
+        )
+        return list(expand_fn(tensor, *chunk_tensors))  # type: ignore[arg-type]
+    else:
+        return list(_expand_chunks(tensor, *chunk_tensors))
 
 
 def _shard_dict_of_args(
@@ -243,14 +281,20 @@ def _shard_dict_of_args(
     if not args_dict:
         return [{} for _ in range(num_chunks)]
 
-    assert len(args_dict) == len(args_chunk_spec), (
-        f"args_dict.keys() = {list(args_dict.keys())} "
-        f"args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
-    )
-    assert args_chunk_spec is not None  # Should have been set by caller
+    if not len(args_dict) == len(args_chunk_spec):
+        raise AssertionError(
+            f"args_dict.keys() = {list(args_dict.keys())} "
+            f"args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+        )
+    if args_chunk_spec is None:
+        raise AssertionError("args_chunk_spec should have been set by caller")
 
-    values, tree_spec = tree_flatten(args_dict)
-    chunk_specs, _ = tree_flatten(args_chunk_spec)
+    values, tree_spec = tree_flatten(
+        args_dict, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
+    chunk_specs, _ = tree_flatten(
+        args_chunk_spec, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
 
     # First check and find the actual number of chunks
     split_sizes = []
@@ -260,11 +304,14 @@ def _shard_dict_of_args(
         if spec is _Replicate or isinstance(spec, _Replicate):
             split_sizes.append(num_chunks)
         elif isinstance(v, torch.Tensor):
-            assert isinstance(spec, TensorChunkSpec)
+            if not isinstance(spec, TensorChunkSpec):
+                raise AssertionError(f"Expected TensorChunkSpec, got {type(spec)}")
             split_sizes.append(v.size(spec.split_dim))
         elif isinstance(v, BlockMask):
-            assert isinstance(spec, TensorChunkSpec)
-            assert spec.split_dim == 0, "BlockMask only supports split_dim=0"
+            if not isinstance(spec, TensorChunkSpec):
+                raise AssertionError(f"Expected TensorChunkSpec, got {type(spec)}")
+            if not spec.split_dim == 0:
+                raise AssertionError("BlockMask only supports split_dim=0")
             # BlockMask will broadcast if B is 1.
             if v.kv_num_blocks.size(0) == 1:
                 split_sizes.append(num_chunks)
@@ -290,7 +337,6 @@ def _shard_dict_of_args(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
 
-        # pyrefly: ignore  # no-matching-overload
         for _flat_split_result, _v_split in zip(
             flat_split_results, v_splits, strict=True
         ):
@@ -304,10 +350,10 @@ def _shard_dict_of_args(
 
 def split_args_kwargs_into_chunks(
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]],
+    kwargs: dict[str, Any] | None,
     chunks: int,
-    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
-    kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
+    args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+    kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
 ) -> tuple[list[tuple], list[dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks
@@ -328,7 +374,7 @@ def split_args_kwargs_into_chunks(
     # the constituent Tensor values have been sharded/replicated according to the `args_chunk_spec`
     # and `kwargs_chunk_spec` specifications. The steps are as follows:
     #
-    # 1. Use pytree.tree_flatten to flatten each arg and its spec into nto a 1d array of values.
+    # 1. Use pytree.tree_flatten to flatten each arg and its spec into a 1d array of values.
     #    To use a running example: suppose our inputs look like
     #
     #       args = ([A, [B, C]], D) args_spec = ([None, [None, TensorChunkSpec]], None)
@@ -370,10 +416,14 @@ def split_args_kwargs_into_chunks(
             return _Replicate()
 
     if args_chunk_spec is None:
-        args_chunk_spec = tree_map(default_spec, args)
+        args_chunk_spec = tree_map(
+            default_spec, args, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     if kwargs_chunk_spec is None:
-        kwargs_chunk_spec = tree_map(default_spec, kwargs)
+        kwargs_chunk_spec = tree_map(
+            default_spec, kwargs, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     args_split_dict = _shard_dict_of_args(
         dict(enumerate(args)),
@@ -492,7 +542,10 @@ def merge_chunks(
                 # Infer size of individual chunks by running `tensor_split` again
                 overall_shape = partial_values[0].shape
                 for val in partial_values[1:]:
-                    assert val.shape == overall_shape
+                    if not val.shape == overall_shape:
+                        raise AssertionError(
+                            f"Expected shape {overall_shape}, got {val.shape}"
+                        )
                 meta_chunks = torch.tensor_split(
                     torch.empty(*overall_shape, device="meta"),
                     sections=len(partial_values),
@@ -501,8 +554,14 @@ def merge_chunks(
 
                 values_to_cat = []
                 chunk_start_idx = 0
-                assert len(partial_values) == len(meta_chunks)
-                for partial_value, meta_chunk in zip(partial_values, meta_chunks):
+                if not len(partial_values) == len(meta_chunks):
+                    raise AssertionError(
+                        f"Expected len(partial_values) == len(meta_chunks), got {len(partial_values)} != {len(meta_chunks)}"
+                    )
+
+                for partial_value, meta_chunk in zip(
+                    partial_values, meta_chunks, strict=True
+                ):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
                     slice_indices = [slice(None, None, None)] * partial_value.ndim
@@ -515,7 +574,31 @@ def merge_chunks(
             else:
                 values_to_cat = partial_values
 
-            args_flattened.append(torch.cat(values_to_cat, dim=arg.split_dim))
+            # Validate DTensor consistency: either all values are DTensors
+            # or none are. A mix indicates a bug in the pipeline stage.
+            dtensor_flags = [isinstance(v, DTensor) for v in values_to_cat]
+            if any(dtensor_flags):
+                if not all(dtensor_flags):
+                    raise AssertionError(
+                        "merge_chunks: expected all values to be DTensors or "
+                        "none to be DTensors, got a mix"
+                    )
+                # All DTensors must have matching placements.
+                placements = values_to_cat[0].placements
+                for i, v in enumerate(values_to_cat[1:], 1):
+                    if v.placements != placements:
+                        raise AssertionError(
+                            f"merge_chunks: placement mismatch at chunk {i}: "
+                            f"expected {placements}, got {v.placements}"
+                        )
+                cat_fn = local_map(
+                    lambda *chunks: torch.cat(chunks, dim=arg.split_dim),
+                    out_placements=(placements,),
+                    in_placements=tuple(placements for _ in range(len(values_to_cat))),
+                )
+                args_flattened.append(cat_fn(*values_to_cat))
+            else:
+                args_flattened.append(torch.cat(values_to_cat, dim=arg.split_dim))
         elif isinstance(arg, _CustomReducer):
             reduced_val = arg.init_value
 
@@ -528,7 +611,10 @@ def merge_chunks(
         else:
             value = chunks_flattened[0][arg_idx]
             for chunk_idx in range(1, len(chunks_flattened)):
-                assert chunks_flattened[chunk_idx][arg_idx] == value
+                if not chunks_flattened[chunk_idx][arg_idx] == value:
+                    raise AssertionError(
+                        f"Expected {value}, got {chunks_flattened[chunk_idx][arg_idx]}"
+                    )
             args_flattened.append(value)
 
     # Stage 4: Unflatten combined args

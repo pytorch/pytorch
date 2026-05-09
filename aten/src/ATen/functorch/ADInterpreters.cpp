@@ -198,7 +198,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 6
-  stack->erase(stack->end() - std::ptrdiff_t(args_size + ret_size), stack->end() - std::ptrdiff_t(ret_size));
+  stack->erase(stack->end() - static_cast<std::ptrdiff_t>(args_size + ret_size), stack->end() - static_cast<std::ptrdiff_t>(ret_size));
 }
 
 void GradInterpreterPtr::processImpl(

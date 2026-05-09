@@ -1,7 +1,5 @@
 """Unique operator implementation."""
 
-from typing import Optional
-
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
@@ -13,7 +11,7 @@ class UniqueOperator(Operator):
         super().__init__("unique")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.unique"
 

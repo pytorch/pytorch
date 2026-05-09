@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
@@ -1522,7 +1520,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        // a vector recoding whether each output is observed or not
+        // a vector recording whether each output is observed or not
         std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {

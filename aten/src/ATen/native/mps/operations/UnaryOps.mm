@@ -3,6 +3,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/ScanKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -12,7 +13,6 @@
 #include <ATen/ops/_copy_from_and_resize.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
-#include <ATen/ops/angle_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
@@ -32,7 +32,6 @@
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/real.h>
-#include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
@@ -191,7 +190,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
     });                                                                                                          \
   }
 
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
@@ -202,23 +200,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
     return [mpsGraph notWithTensor:inputTensor name:nil];
   });
   return output;
-}
-
-Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
-    auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
-    return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
-  });
-  return output;
-}
-
-Tensor angle_mps(const Tensor& self) {
-  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)
-      ? c10::typeMetaToScalarType(c10::get_default_dtype())
-      : c10::toRealValueType(self.scalar_type());
-  Tensor result = at::empty({0}, self.options().dtype(float_type));
-  return angle_out_mps(self, result);
 }
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
@@ -353,8 +334,21 @@ static void cumulative_op_impl(const Tensor& self,
               "(original dim is ",
               dim,
               ")");
-  TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  if (input.is_complex()) {
+    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
+      auto input_real = at::view_as_real(input.dim() == 0 ? input.view({1}) : input);
+      auto result_real = at::view_as_real(result.dim() == 0 ? result.view({1}) : result);
+      return cumulative_op_impl(
+          input_real, wrapped_dim, std::nullopt, result_real, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
+    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
+      auto input_view = input.dim() == 0 ? input.view({1}) : input;
+      auto result_view = result.dim() == 0 ? result.view({1}) : result;
+      return mps::scan_simple_mps_impl(input_view, result_view, wrapped_dim, "cumprod");
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
+  }
 
   // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
   // int32 fixed in macOS 13.3

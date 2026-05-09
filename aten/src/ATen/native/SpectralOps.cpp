@@ -58,7 +58,6 @@
 #include <ATen/ops/view_as_complex.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>
@@ -81,9 +80,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   }
 
   const bool maybe_support_half = (
-    // Only CUDA supports half precision, but since meta tensors don't have a
+    // CUDA and XPU support half precision, but since meta tensors don't have a
     // device we err on the side of accepting it
-    device.is_cuda() || device.is_meta()
+    device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
@@ -847,7 +846,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \
@@ -1046,7 +1045,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \

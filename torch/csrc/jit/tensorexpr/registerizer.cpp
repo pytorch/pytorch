@@ -131,17 +131,17 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
 }
 
 void AccessInfo::print() const {
-  std::cout << "Access: " << *buf_ << "{";
+  std::cout << "Access: " << *buf_ << '{';
   for (const auto& i : indices_) {
-    std::cout << *i << " ";
+    std::cout << *i << ' ';
   }
   std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
-  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ")";
+  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ')';
   if (conditionId_) {
     std::cout << " cond: " << conditionId_;
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 // Scope
@@ -161,17 +161,12 @@ AccessHashMap& Scope::getAccessMapByBuf(const BufPtr& b) {
 }
 
 void Scope::filterClosed() {
-  closedAccesses_.erase(
-      std::remove_if(
-          closedAccesses_.begin(),
-          closedAccesses_.end(),
-          [](auto info) {
-            return info->store_cost()->isConstant() &&
-                immediateAs<int>(info->store_cost()) <= 1 &&
-                info->load_cost()->isConstant() &&
-                immediateAs<int>(info->load_cost()) <= 1;
-          }),
-      closedAccesses_.end());
+  std::erase_if(closedAccesses_, [](auto info) {
+    return info->store_cost()->isConstant() &&
+        immediateAs<int>(info->store_cost()) <= 1 &&
+        info->load_cost()->isConstant() &&
+        immediateAs<int>(info->load_cost()) <= 1;
+  });
 }
 
 // RegisterizerAnalysis
@@ -522,7 +517,7 @@ void RegisterizerAnalysis::mergeHiddenScope(bool allowClosed) {
   }
 }
 
-// Merge currentScope_ into it's parent, and make parent the new currentScope_.
+// Merge currentScope_ into its parent, and make parent the new currentScope_.
 void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
   auto parent = currentScope_->parent();
 

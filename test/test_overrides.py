@@ -11,7 +11,7 @@ import collections
 import unittest
 import os
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -350,7 +350,8 @@ def generate_tensor_like_torch_implementations():
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
-    assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
+    if len(untested_funcs) != 0:
+        raise AssertionError(msg.format(pprint.pformat(untested_funcs)))
     for func, override in testing_overrides.items():
         # decorate the overrides with implements_tensor_like if it's not a
         # torch.Tensor method
@@ -533,7 +534,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_tensor_subclass_propagation(self):
         """this test exercises the functionality described in
-        docs/source/notes/extending.rst#subclassing-torchtensor"""
+        docs/source/notes/extending.md#subclassing-torch-tensor"""
         t1 = torch.tensor([5])
         t2 = torch.tensor([6])
 
@@ -932,7 +933,7 @@ def generate_tensor_like_override_tests(cls):
                 return [""]
             elif arg_type.startswith("int"):
                 return 0
-            elif arg_type in {"Stream"}:
+            elif arg_type == "Stream":
                 return torch.Stream()
             elif arg_type.startswith("float") or arg_type == "double":
                 return 1.0
@@ -1087,7 +1088,8 @@ class Wrapper:
                 args_of_this_cls.append(a)
             elif isinstance(a, collections.abc.Sequence):
                 args_of_this_cls.extend(el for el in a if isinstance(el, cls))
-        assert len(args_of_this_cls) > 0
+        if len(args_of_this_cls) <= 0:
+            raise AssertionError("expected args_of_this_cls to be non-empty")
         for a in args_of_this_cls:
             a.used_calls.add(func)
         args = unwrap(tuple(args))
@@ -1448,6 +1450,7 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182317")
     def test_factory_override(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1644,7 +1647,8 @@ class TestTorchFunctionMode(TestCase):
                 if func is torch.sub:
                     with self:
                         input, other = args
-                        assert not kwargs
+                        if kwargs:
+                            raise AssertionError(f"expected kwargs to be empty, got {kwargs}")
                         return torch.add(input, other, alpha=-1)
                 return func(*args, **kwargs)
 
@@ -1801,6 +1805,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertFalse(called)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182318")
     def test_disable_enable_subclass(self):
         class A(torch.Tensor):
             pass

@@ -23,7 +23,7 @@
 namespace torch::jit {
 
 static inline bool PyNone_Check(PyObject* o) {
-  return o == Py_None;
+  return Py_IsNone(o);
 }
 
 std::pair<TypePtr, bool> MergeInferredType(
@@ -2414,8 +2414,8 @@ static size_t ONNXAssignOutputShape(
     }
   } else {
     std::string msg =
-        ("Model output has unsupported type. See "
-         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
+        "Model output has unsupported type. See "
+        "https://pytorch.org/docs/stable/onnx.html#types. Got type: ";
     msg += THPUtils_typename(output_obj);
     throw std::runtime_error(msg);
   }

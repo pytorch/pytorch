@@ -284,7 +284,7 @@ def binary_folding_init():
         if binary_node.args[0].target in _computation_ops:
             computation_node = binary_node.args[0]
             other = binary_node.args[1]
-        elif binary_node.args[0].target == aten.reshape.default:
+        elif binary_node.args[0].target is aten.reshape.default:
             computation_node = binary_node.args[0].args[0]
             other = binary_node.args[1]
             has_reshape = True
@@ -295,7 +295,7 @@ def binary_folding_init():
             computation_node = binary_node.args[1].args[0]
             other = binary_node.args[0]
             has_reshape = False
-        if computation_node.target == aten.convolution.default:
+        if computation_node.target is aten.convolution.default:
             return _check_conv_and_broadcast_op(computation_node, other)
         elif computation_node.target in [aten.addmm.default, aten.mm.default]:
             return (
@@ -344,7 +344,7 @@ def binary_folding_init():
         return res
 
     def _create_new_conv_node(graph, conv_node, binary_node, other):
-        assert conv_node.target == aten.convolution.default
+        assert conv_node.target is aten.convolution.default
         conv_args = list(conv_node.args)
         weight_meta_value = conv_node.args[1].meta.get("val")
         bias = conv_args[2]
@@ -472,7 +472,7 @@ def binary_folding_init():
             reshape_node = None
             if binary_node.args[0].target in _computation_ops:
                 computation_node = binary_node.args[0]
-            elif binary_node.args[0].target == aten.reshape.default:
+            elif binary_node.args[0].target is aten.reshape.default:
                 computation_node = binary_node.args[0].args[0]
                 reshape_node = binary_node.args[0]
             elif binary_node.args[1].target in _computation_ops:
@@ -483,7 +483,7 @@ def binary_folding_init():
             graph = match.graph
             with graph.inserting_before(reshape_node if reshape_node else binary_node):
                 assert computation_node.target in _computation_ops
-                if computation_node.target == aten.convolution.default:
+                if computation_node.target is aten.convolution.default:
                     counters["inductor"]["binary_folding_conv"] += 1
                     new_computation_node = _create_new_conv_node(
                         graph, computation_node, binary_node, other
@@ -494,7 +494,7 @@ def binary_folding_init():
                     )
                 new_computation_node.meta.update(computation_node.meta)
                 if reshape_node:
-                    assert reshape_node.target == aten.reshape.default
+                    assert reshape_node.target is aten.reshape.default
                     computation_node.replace_all_uses_with(new_computation_node)
                     binary_node.replace_all_uses_with(reshape_node)
                 else:

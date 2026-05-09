@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import random
 from collections.abc import Iterator, Sized
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -35,15 +35,16 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
         self,
         datapipe: IterDataPipe,
         sampler: type[Sampler] = SequentialSampler,
-        sampler_args: Optional[tuple] = None,
-        sampler_kwargs: Optional[dict] = None,
+        sampler_args: tuple | None = None,
+        sampler_kwargs: dict | None = None,
     ) -> None:
+        # pyrefly: ignore [unsafe-overlap]
         if not isinstance(datapipe, Sized):
             raise AssertionError(
                 "Sampler class requires input datapipe implemented `__len__`"
             )
         super().__init__()
-        # pyrefly: ignore  # bad-assignment
+
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
@@ -99,7 +100,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     buffer_size: int
     _buffer: list[_T_co]
     _enabled: bool
-    _seed: Optional[int]
+    _seed: int | None
     _rng: random.Random
 
     def __init__(
@@ -148,6 +149,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
                 yield self._buffer.pop(idx)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
@@ -189,5 +191,5 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         self._rng = random.Random()
         self._rng.setstate(rng_state)
 
-    def __del__(self):
+    def __del__(self) -> None:
         self._buffer.clear()

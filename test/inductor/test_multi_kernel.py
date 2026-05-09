@@ -70,7 +70,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     """
 
     @config.patch("cpp_wrapper", True)
-    @skipIfXpu(msg="cpp wrapper doesn't currently work on the XPU stack")
+    @config.patch("triton.autotune_at_compile_time", True)
     def fn(self):
         # The same kernel may have been compiled by previous tests with
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
@@ -112,6 +112,7 @@ class MultiKernelTest(TestCase):
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -136,6 +137,7 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
+    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm

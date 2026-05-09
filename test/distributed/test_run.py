@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class RunTest(TestCase):
     def setUp(self):
+        super().setUp()
         # Save original environment variable if it exists
         self.original_signals_env = os.environ.get(
             "TORCHELASTIC_SIGNALS_TO_HANDLE", None
@@ -84,6 +85,43 @@ class RunTest(TestCase):
         self.assertEqual(
             os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"], "SIGTERM,SIGUSR1,SIGUSR2"
         )
+
+    def _parse_args(self, args):
+        parser = run.get_args_parser()
+        return parser.parse_args(args)
+
+    @patch("torch.distributed.run.elastic_launch")
+    def test_single_node_defaults_to_free_port(self, mock_launch):
+        """Single-node with no explicit port should auto-switch to c10d with localhost:0."""
+        args = self._parse_args(["dummy_script.py"])
+        self.assertIsNone(args.master_port)
+        run.run(args)
+        self.assertEqual(args.rdzv_backend, "c10d")
+        self.assertEqual(args.rdzv_endpoint, "localhost:0")
+
+    @patch("torch.distributed.run.elastic_launch")
+    def test_single_node_explicit_port_uses_static(self, mock_launch):
+        """Single-node with explicit --master-port should keep static backend."""
+        args = self._parse_args(["--master-port=12345", "dummy_script.py"])
+        self.assertEqual(args.master_port, 12345)
+        run.run(args)
+        self.assertEqual(args.rdzv_backend, "static")
+
+    @patch("torch.distributed.run.elastic_launch")
+    def test_multi_node_defaults_to_static(self, mock_launch):
+        """Multi-node should keep static backend with default port 29500."""
+        args = self._parse_args(["--nnodes=2", "dummy_script.py"])
+        run.run(args)
+        self.assertEqual(args.rdzv_backend, "static")
+        self.assertEqual(args.master_port, 29500)
+
+    @patch("torch.distributed.run.elastic_launch")
+    def test_standalone_still_works(self, mock_launch):
+        """--standalone should still use c10d with localhost:0."""
+        args = self._parse_args(["--standalone", "dummy_script.py"])
+        run.run(args)
+        self.assertEqual(args.rdzv_backend, "c10d")
+        self.assertEqual(args.rdzv_endpoint, "localhost:0")
 
 
 if __name__ == "__main__":

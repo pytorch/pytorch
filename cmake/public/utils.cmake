@@ -265,7 +265,7 @@ endfunction()
 #
 macro(torch_cuda_based_add_library cuda_target)
   if(USE_ROCM)
-    hip_add_library(${cuda_target} ${ARGN})
+    add_library(${cuda_target} ${ARGN})
   elseif(USE_CUDA)
     add_library(${cuda_target} ${ARGN})
   else()
@@ -337,7 +337,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 20)
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -384,9 +384,26 @@ function(torch_compile_options libname)
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       list(APPEND private_compile_options -Wredundant-move)
+      # -Wno-interference-size only exists in GCC 12+
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+        list(APPEND private_compile_options -Wno-interference-size)
+      endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wmove)
+      if(NOT USE_CUDA)
+        # NS: One can not compile CUDA code with extra-semi flag as nvcc generates code like
+        # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
+        list(APPEND private_compile_options -Wextra-semi)
+      else()
+        # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
+        list(APPEND private_compile_options -Wno-deprecated-copy)
+        # NVCC + clang18  reports spurious deprecated deprecated literal operator declaration when there were none
+        # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
+        # but if one to look at the source code, there are no space there
+        list(APPEND private_compile_options -Wno-deprecated-literal-operator)
+
+      endif()
+      list(APPEND private_compile_options -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -405,7 +422,10 @@ function(torch_compile_options libname)
         -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+        list(APPEND private_compile_options -Werror=unused-but-set-variable -Werror=cpp)
+      endif()
+      if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND private_compile_options -Werror=macro-redefined -Werror=deprecated-copy-with-dtor)
       endif()
     endif()
   endif()
@@ -478,6 +498,7 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckCCompilerFlag)
 include(CheckLinkerFlag)
 
 ##############################################################################
@@ -495,6 +516,24 @@ function(append_cxx_flag_if_supported flag outputvar)
       set(new_flag ${flag})
     endif()
     check_cxx_compiler_flag("${new_flag}" ${_FLAG_NAME})
+    if(${_FLAG_NAME})
+        string(APPEND ${outputvar} " ${flag}")
+        set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(append_c_flag_if_supported flag outputvar)
+    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+
+    # GCC silences unknown -Wno-XXX flags, so test the corresponding -WXXX.
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        string(REGEX REPLACE "^Wno-" "W" new_flag "${flag}")
+    else()
+        set(new_flag "${flag}")
+    endif()
+
+    check_c_compiler_flag("${new_flag}" ${_FLAG_NAME})
     if(${_FLAG_NAME})
         string(APPEND ${outputvar} " ${flag}")
         set(${outputvar} "${${outputvar}}" PARENT_SCOPE)

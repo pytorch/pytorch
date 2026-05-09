@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -22,6 +22,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 class TestConverter(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         self.torch_bind_ops = [
@@ -37,10 +38,10 @@ class TestConverter(TestCase):
         self,
         M,
         tracing_inputs,
-        option: Optional[list[str]] = None,
+        option: list[str] | None = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: Optional[list[Any]] = None,
+        runtime_inputs: list[Any] | None = None,
     ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -873,7 +874,7 @@ class TestConverter(TestCase):
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype == torch.int8
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
@@ -1366,12 +1367,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # noqa: F841
+        def func2(x):
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # noqa: F841
+        def func3(x):
             while x.sum() < 10:
                 x += x.sin()
             return x
@@ -1405,7 +1406,7 @@ class TestConverter(TestCase):
     )
     # qnnpack not supported on s390x
     @xfailIfS390X
-    def test_ts2ep_convert_quantized_model(self):
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()

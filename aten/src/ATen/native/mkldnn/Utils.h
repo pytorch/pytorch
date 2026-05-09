@@ -39,7 +39,7 @@ void check_mkldnn_binary_fusion_inputs(
 inline std::vector<int64_t> padding_r(
     IntArrayRef padding, IntArrayRef output_padding)
 {
-  // ConvTranpose padding adjustment
+  // ConvTranspose padding adjustment
   //
   // PyTorch uses padding/output_padding:
   //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
@@ -90,6 +90,10 @@ inline bool mkldnn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
 
+inline bool mkldnn_fp16_device_check_arm() {
+  return cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
+}
+
 inline bool is_arm_neoverse() {
   return (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 &&
           (cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1 ||
@@ -99,6 +103,10 @@ inline bool is_arm_neoverse() {
 }
 #else
 constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+
+inline bool mkldnn_fp16_device_check_arm() {
   return false;
 }
 
@@ -121,7 +129,7 @@ inline bool mkldnn_fp16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   return ideep::has_fp16_type_support();
 #else
-  return false;
+  return mkldnn_fp16_device_check_arm();
 #endif
 }
 

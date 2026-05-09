@@ -34,7 +34,7 @@ class Vectorized<int16_t> {
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized() {}
+  Vectorized() = default;
   C10_ALWAYS_INLINE Vectorized(vint16 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool16 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vint16 v1, vint16 v2) : _vec0{v1}, _vec1{v2} {}
@@ -202,7 +202,7 @@ class Vectorized<int16_t> {
       const Vectorized<int16_t>& a,
       const Vectorized<int16_t>& b,
       const Vectorized<int16_t>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
     // assuming this we can use the same mask directly with vec_sel
     // warning intel style mask will not work properly
     return {

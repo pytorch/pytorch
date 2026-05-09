@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RMSprop algorithm."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -27,21 +27,21 @@ from .optimizer import (
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):  # noqa: D101
+class RMSprop(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         alpha: float = 0.99,
         eps: float = 1e-8,
         weight_decay: float = 0,
         momentum: float = 0,
         centered: bool = False,
         capturable: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -69,7 +69,7 @@ class RMSprop(Optimizer):  # noqa: D101
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -149,7 +149,7 @@ class RMSprop(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -280,7 +280,7 @@ def _single_tensor_rmsprop(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -290,12 +290,13 @@ def _single_tensor_rmsprop(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -356,22 +357,24 @@ def _multi_tensor_rmsprop(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 
@@ -480,7 +483,7 @@ def rmsprop(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
@@ -492,7 +495,7 @@ def rmsprop(
     weight_decay: float,
     momentum: float,
     centered: bool,
-):
+) -> None:
     r"""Functional API that performs rmsprop algorithm computation.
 
     See :class:`~torch.optim.RMSProp` for details.

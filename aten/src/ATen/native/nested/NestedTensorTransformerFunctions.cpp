@@ -6,6 +6,8 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <c10/util/Exception.h>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -193,7 +195,7 @@ Tensor NestedTensor_softmax_dropout_cuda(const Tensor& self, const Tensor& query
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
-  int64_t* const sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t* const sizes_ptr = sizes.const_data_ptr<int64_t>();
   Tensor offsets = at::empty({1 + sizes.size(0) + extra_elements}, at::kInt);
   int32_t* const offsets_ptr = offsets.mutable_data_ptr<int32_t>();
   offsets_ptr[0] = 0;
@@ -234,7 +236,7 @@ Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, s
   auto result = at::ones({sizes.sizes()[0], result_size_1}, at::kBool);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   auto* result_data = result.data_ptr<bool>();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const auto sizes_size_1 = sizes.sizes()[1];
   for (const auto ii : c10::irange(sizes.sizes()[0])) {
     auto length = sizes_ptr[ii * sizes_size_1];
@@ -270,7 +272,19 @@ Tensor _jagged_to_padded_dense_forward_cpu(
   padded_shape.push_back(batch_size);
   padded_shape.push_back(max_length);
   padded_shape.insert(padded_shape.end(), values_shape.begin() + 1, values_shape.end());
-  Tensor padded = values.new_full(padded_shape, padding_value);
+
+  // We must clamp infinite sentinels to dtype min/max and use the typed value
+  // directly to avoid double->int overflow (e.g., int64_max as double overflows).
+  Tensor padded;
+  AT_DISPATCH_V2(
+      values.scalar_type(),
+      "_jagged_to_padded_dense_forward_cpu",
+      AT_WRAP([&] {
+        scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());
+        padded = values.new_full(padded_shape, fill_value);
+      }),
+      AT_EXPAND(AT_ALL_TYPES),
+      kBool, kHalf, kBFloat16);
 
   // copy data to padded tensor
   for (auto i : c10::irange(batch_size)) {

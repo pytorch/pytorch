@@ -24,6 +24,11 @@ if HAS_GPU:
 
     from torch.library import wrap_triton
     from torch.utils._triton import has_triton
+else:
+
+    def has_triton():
+        return False
+
 
 import torch
 import torch._dynamo as torchdynamo
@@ -38,6 +43,7 @@ from torch._export.serde.serialize import (
     _to_json_bytes,
     canonicalize,
     deserialize,
+    deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
     GraphModuleSerializer,
@@ -563,6 +569,59 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_multi_return_list_tensor_unused(self) -> None:
+        """
+        Make sure serialization handles unused List[Tensor] outputs in
+        multi-return ops. The getitem node for the unused list output is
+        removed by DCE, so the serializer must synthesize names.
+        """
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            lib.define(
+                "tensor_and_list(Tensor x) -> (Tensor, Tensor[])",
+            )
+
+            @torch.library.impl(lib, "tensor_and_list", "CPU")
+            def tensor_and_list_impl(x):
+                return x * 2, [x, x + 1]
+
+            @torch.library.impl(lib, "tensor_and_list", "Meta")
+            def tensor_and_list_meta(x):
+                return x * 2, [x, x + 1]
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    # Only use the first (Tensor) output; the List[Tensor] is unused
+                    return torch.ops.mylib.tensor_and_list(x)[0]
+
+            exported_module = export(MyModule(), (torch.ones(3),), strict=True)
+            # Simulate the scenario where DCE removes the getitem for the
+            # unused List[Tensor] output (as happens in real serialization
+            # pipelines like package_sigmoid_model).
+            exported_module.graph.eliminate_dead_code()
+            exported_module.graph_module.recompile()
+
+            serialized = ExportedProgramSerializer().serialize(exported_module)
+            node = serialized.exported_program.graph_module.graph.nodes[-1]
+            self.assertEqual(node.target, "torch.ops.mylib.tensor_and_list.default")
+            self.assertEqual(len(node.outputs), 2)
+
+            # First output is a single tensor
+            self.assertTrue(node.outputs[0].as_tensor.name != "")
+            # Second output is the unused list -- should still have tensor entries
+            self.assertTrue(len(node.outputs[1].as_tensors) > 0)
+            for t in node.outputs[1].as_tensors:
+                self.assertIn("_unused_", t.name)
+
+            # Roundtrip: deserialize and verify functional correctness
+            deserialized_ep = deserialize(serialize(exported_module))
+            inp = torch.randn(3)
+            self.assertTrue(
+                torch.allclose(
+                    exported_module.module()(inp),
+                    deserialized_ep.module()(inp),
+                )
+            )
+
     def test_rational_ranges(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -573,7 +632,10 @@ def forward(self, x):
         )
 
         range_constraints = list(ep.range_constraints.keys())
-        assert len(range_constraints) == 1
+        if len(range_constraints) != 1:
+            raise AssertionError(
+                f"Expected 1 range constraint, got {len(range_constraints)}"
+            )
         symint = range_constraints[0]
 
         import sympy
@@ -600,6 +662,8 @@ def forward(self, x):
             in_ptr1,
             out_ptr,
             n_elements,
+            fval,
+            ival,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -608,7 +672,7 @@ def forward(self, x):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            output = x + y + fval + ival
             tl.store(out_ptr + offsets, output, mask=mask)
 
         def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -618,7 +682,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16
+            )
 
             return output
 
@@ -633,7 +699,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16, num_warps=8)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16, num_warps=8
+            )
 
             return output
 
@@ -647,7 +715,10 @@ def forward(self, x):
             args = (torch.randn(3, device=device), torch.randn(3, device=device))
             ep = torch.export.export(m, args=args)
             ep = ep.run_decompositions(decompose_custom_triton_ops=False)
-            assert torch.allclose(m(*args), ep.module()(*args))
+            if not torch.allclose(m(*args), ep.module()(*args)):
+                raise AssertionError(
+                    "Exported model output does not match eager output"
+                )
 
             serialized = ExportedProgramSerializer().serialize(ep)
 
@@ -661,34 +732,67 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
-            kwargs = []
+            arg_names = []
+            kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
+                    arg_names.append(arg.name)
                 elif arg.kind == ArgumentKind.KEYWORD:
-                    kwargs.append(arg.arg)
+                    kwargs[arg.name] = arg.arg
 
-            self.assertEqual(len(args), 4)
-            self.assertEqual(len(kwargs), 5)
+            self.assertEqual(len(args), 6)
+            # Positional args carry kernel parameter names
+            expected_param_names = [
+                "in_ptr0",
+                "in_ptr1",
+                "out_ptr",
+                "n_elements",
+                "fval",
+                "ival",
+            ]
+            self.assertEqual(arg_names, expected_param_names)
+            # Always: name, grid, output_indices, num_warps,
+            # kernel_param_names, kernel_param_types
+            # Triton version dependent: num_cpu_threads, shared_memory_bytes
+            self.assertTrue(len(kwargs) >= 6)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
 
             self.assertEqual(args[3].as_int, 3)
-
-            self.assertEqual(kwargs[0].as_string, "add_kernel")  # name
-            self.assertEqual(kwargs[1].as_ints, [1, 1, 1])  # grid
-            self.assertEqual(kwargs[2].as_ints, [2])  # output indices
+            self.assertAlmostEqual(args[4].as_float, 3.14, places=2)
+            self.assertEqual(args[5].as_int, 42)
+            kernel_name = kwargs["name"].as_string
+            symbol_name = kernel_name.rpartition("_")[0]
+            self.assertEqual(symbol_name, "add_kernel")
+            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual(kwargs["output_indices"].as_ints, [2])
             self.assertEqual(
-                kwargs[3].as_int, 8 if isinstance(m, MyModelAutotune) else 4
-            )  # num warps
-            self.assertEqual(kwargs[4].as_int, 0)  # shared mem bytes
+                kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
+            )
+
+            if "num_cpu_threads" in kwargs:
+                self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
+            if "shared_memory_bytes" in kwargs:
+                self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
+
+            self.assertIn("kernel_param_names", kwargs)
+            self.assertEqual(
+                kwargs["kernel_param_names"].as_strings, expected_param_names
+            )
+            self.assertIn("kernel_param_types", kwargs)
+            self.assertEqual(
+                len(kwargs["kernel_param_types"].as_strings),
+                len(expected_param_names),
+            )
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
             self.assertEqual(
-                len(triton_node.outputs[0].as_tensors), len(kwargs[2].as_ints)
+                len(triton_node.outputs[0].as_tensors),
+                len(kwargs["output_indices"].as_ints),
             )
             self.assertEqual(triton_node.outputs[0].as_tensors[0].name, "getitem")
 
@@ -702,6 +806,74 @@ def forward(self, x):
                     serialized.constants,
                     serialized.example_inputs,
                 )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or not has_triton(), "requires cuda and triton"
+    )
+    def test_triton_constexpr_matching(self) -> None:
+        """Test that constexpr values are properly matched during serialization.
+
+        This tests the normalization logic that handles various constexpr types
+        (bool, int, float, string) when matching kernel cache entries. The kernel
+        signature stores constexprs as strings which are parsed back to Python types.
+        """
+
+        @triton.jit
+        def kernel_with_constexprs(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            USE_FAST_PATH: "tl.constexpr",  # bool constexpr
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        def custom_op(x: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrap_triton(kernel_with_constexprs)[grid](
+                x,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+                USE_FAST_PATH=True,  # bool constexpr
+            )
+            return output
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return custom_op(x)
+
+        device = "cuda"
+        m = Model().to(device)
+        args = (torch.randn(1024, device=device),)
+
+        # Run the model in eager mode first to warm up the Triton cache
+        eager_result = m(*args)
+
+        ep = torch.export.export(m, args=args)
+        ep = ep.run_decompositions(decompose_custom_triton_ops=False)
+        if not torch.allclose(eager_result, ep.module()(*args)):
+            raise AssertionError("Exported model output does not match eager result")
+
+        # This should not raise - constexpr matching should work for bool values
+        serialized = ExportedProgramSerializer().serialize(ep)
+
+        # Verify the triton node was serialized
+        triton_node = None
+        for node in serialized.exported_program.graph_module.graph.nodes:
+            if node.target == "torch.ops.higher_order.triton_kernel_wrapper_functional":
+                triton_node = node
+                break
+        self.assertIsNotNone(triton_node)
 
     def test_kwargs_default(self) -> None:
         """
@@ -1144,6 +1316,7 @@ class TestDeserialize(TestCase):
                 if isinstance(orig, torch.Tensor) and orig.dtype not in [
                     torch.float8_e4m3fn,
                     torch.float8_e5m2,
+                    torch.float8_e8m0fnu,
                 ]:
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
@@ -1231,12 +1404,12 @@ class TestDeserialize(TestCase):
                 super().__init__()
 
             def forward(self, x, y):
-                z = x[:, -y.shape[0] :, :]
+                z = x[:, -((y.shape[0] >> 1) << 1) :, :]
                 return z
 
         inputs = (torch.ones(4, 5, 10), torch.ones(3))
         dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
-        # Compile with dynamic_shapes set to get operator.neg involved
+        # Compile with dynamic_shapes set to get operator.neg/shifts involved
         self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_auto_functionalize(self):
@@ -1401,7 +1574,7 @@ class TestDeserialize(TestCase):
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
-                assert x.size(0) in y
+                assert x.size(0) in y  # noqa: S101
                 return x + y
 
         f = Module()
@@ -1681,9 +1854,9 @@ class TestDeserialize(TestCase):
             deserialized_ep.graph_module.code.strip("\n"),
             """\
 def forward(self, x):
-    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
-    getitem = topk_default[0]
-    getitem_1 = topk_default[1];  topk_default = None
+    topk = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk[0]
+    getitem_1 = topk[1];  topk = None
     mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
     mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
     return (mul, getitem_1)
@@ -1806,8 +1979,14 @@ def forward(self, x):
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
-    def test_serialize_float8(self):
-        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
+    def test_serialize_dtypes(self):
+        for dtype in [
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
+            torch.float8_e8m0fnu,
+            torch.uint32,
+            torch.uint64,
+        ]:
 
             class MyModule(torch.nn.Module):
                 def forward(self, x):
@@ -1887,6 +2066,16 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+
+    def test_deserialize_torch_artifact_dict(self):
+        data = {"key": torch.tensor([1, 2, 3])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+        result = deserialize_torch_artifact(serialized)
+
+        self.assertIsInstance(result, dict)
+        self.assertTrue(torch.equal(result["key"], torch.tensor([1, 2, 3])))
 
     @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
@@ -1994,13 +2183,12 @@ class TestSaveLoad(TestCase):
         save(ep, buffer)
         buffer.seek(0)
         loaded_ep = load(buffer)
-
         inp = (torch.tensor(1),)
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_load_with_multiple_empty_tensors(self) -> None:
         # Test scenario where models have multiple empty tensors
-        # but with differnt data types.
+        # but with different data types.
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2043,6 +2231,59 @@ class TestSaveLoad(TestCase):
         self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
         self.assertEqual(unf.float_buffer.dtype, torch.float32)
 
+    def test_from_node_metadata_serialization(self):
+        """Test that from_node metadata is properly serialized and deserialized."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_layer = torch.nn.Conv2d(
+                    in_channels=1, out_channels=64, kernel_size=3, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_layer(x)
+
+        m = Model()
+        inputs = (torch.randn(1, 1, 32, 32),)
+
+        ep = export(m, inputs, strict=True)
+        reexported_ep = export(
+            ep.module(), inputs, strict=True
+        )  # for generating more complex from_node metadata
+        serialized = serialize(reexported_ep)
+        reexported_ep_loaded = deserialize(serialized)
+
+        # Verify that node names and from_node metadata are preserved after serialization/deserialization
+        self.assertEqual(
+            len(list(reexported_ep.graph_module.graph.nodes)),
+            len(list(reexported_ep_loaded.graph_module.graph.nodes)),
+        )
+        for node, node_loaded in zip(
+            reexported_ep.graph_module.graph.nodes,
+            reexported_ep_loaded.graph_module.graph.nodes,
+        ):
+            # Verify node name consistency
+            self.assertEqual(node.name, node_loaded.name)
+            self.assertEqual(node.op, node_loaded.op)
+            self.assertEqual(node.target, node_loaded.target)
+
+            if node.op not in {"placeholder", "output"}:
+                from_node_orig = node.meta.get("from_node")
+                from_node_loaded = node_loaded.meta.get("from_node")
+
+                if from_node_orig is None:
+                    self.assertIsNone(from_node_loaded)
+                else:
+                    self.assertIsNotNone(from_node_loaded)
+                    self.assertEqual(len(from_node_orig), len(from_node_loaded))
+                    for node_source_orig, node_source_loaded in zip(
+                        from_node_orig, from_node_loaded
+                    ):
+                        self.assertEqual(
+                            node_source_orig.to_dict(), node_source_loaded.to_dict()
+                        )
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
@@ -2081,8 +2322,12 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
 
         ep_str = serialized_vals.exported_program.decode("utf-8")
-        assert "class_fqn" in ep_str
-        assert custom_obj._type().qualified_name() in ep_str
+        if "class_fqn" not in ep_str:
+            raise AssertionError("'class_fqn' not found in serialized output")
+        if custom_obj._type().qualified_name() not in ep_str:
+            raise AssertionError(
+                f"'{custom_obj._type().qualified_name()}' not found in serialized output"
+            )
 
         deserialized_ep = deserialize(serialized_vals)
 
@@ -2315,6 +2560,96 @@ def forward(self, x):
         ).shape_env
         s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
         self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestPredispatchSerialization(TestCase):
+    def test_predispatch_jvp_serialize_roundtrip(self):
+        """Test that JVP predispatch wrapper functions survive serialization round-trip."""
+        from torch._functorch.predispatch import (
+            _jvp_decrement_nesting,
+            _jvp_increment_nesting,
+        )
+
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        ep = export(JVP(), inp, strict=False)
+
+        graph_str = str(ep.graph)
+        self.assertIn("_jvp_increment_nesting", graph_str)
+        self.assertIn("_jvp_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_jvp_increment_nesting", loaded_graph_str)
+        self.assertIn("_jvp_decrement_nesting", loaded_graph_str)
+
+        # Verify the deserialized targets are the actual functions
+        for node in loaded_ep.graph.nodes:
+            if node.op == "call_function":
+                if "increment" in node.name:
+                    self.assertIs(node.target, _jvp_increment_nesting)
+                elif "decrement" in node.name:
+                    self.assertIs(node.target, _jvp_decrement_nesting)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out[0], actual_out[0]))
+        self.assertTrue(torch.allclose(exp_out[1], actual_out[1]))
+
+    def test_predispatch_vmap_serialize_roundtrip(self):
+        """Test that vmap predispatch wrapper functions survive serialization round-trip."""
+        from torch.export._trace import _export
+
+        class Vmap(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (x * y + 1).sum(dim=0)  # noqa: E731
+                return torch.vmap(f)(x, y).sum(dim=0)
+
+        inp = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
+
+        ep = _export(Vmap(), inp, pre_dispatch=True)
+
+        # Verify predispatch vmap nodes are in the graph
+        graph_str = str(ep.graph)
+        self.assertIn("_vmap_increment_nesting", graph_str)
+        self.assertIn("_vmap_decrement_nesting", graph_str)
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        # Verify predispatch nodes survive round-trip
+        loaded_graph_str = str(loaded_ep.graph)
+        self.assertIn("_vmap_increment_nesting", loaded_graph_str)
+        self.assertIn("_vmap_decrement_nesting", loaded_graph_str)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertTrue(torch.allclose(exp_out, actual_out))
 
 
 if __name__ == "__main__":

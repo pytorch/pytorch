@@ -1,12 +1,12 @@
 import itertools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import torch
 import torch.fx as fx
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -144,7 +144,7 @@ class GraphAliasTracker:
 
 
 def _size_of_default(num_bytes: int | torch.SymInt) -> int:
-    return hint_int(num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback)
+    return optimization_hint(num_bytes)
 
 
 def device_filter(device: torch.device) -> bool:
@@ -202,6 +202,7 @@ def build_memory_profile(
         memory_profile.append(current_memory)
 
         # Process deallocations
+        # pyrefly: ignore [bad-assignment]
         for storage_key in alias_info.get_storages_last_used(node):
             allocator = alias_info.storage_to_allocator[storage_key]
             if is_releasable(allocator):
@@ -384,9 +385,7 @@ class MemoryTracker:
     def _get_storage_size(self, storage_key: StorageKey) -> int:
         """Get the size of a storage in bytes, handling symbolic shapes."""
         size_bytes = storage_key.storage.nbytes()
-        return hint_int(
-            size_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
-        )
+        return optimization_hint(size_bytes)
 
     def _get_storages_freed_by_node(self, node: fx.Node) -> OrderedSet[StorageKey]:
         """Get storages that would be freed if we schedule this node."""

@@ -1,10 +1,20 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
+#include <ATen/core/TensorBody.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+
+#include <torch/nativert/graph/Graph.h>
 
 namespace torch::nativert {
 
@@ -16,10 +26,67 @@ struct GridDims {
   int z;
 };
 
-struct LaunchParams {
-  int num_warps = 4;
-  int shared_memory_bytes = 0;
+// Parameters for kernel inputs, used for backend-specific initialization.
+// MTIA uses kernel_param_names and kernel_param_types for fatbin compilation
+// and proper scalar type casting. Other backends can ignore this struct.
+struct KernelInputParams {
+  std::vector<std::string> kernel_param_names;
+  std::vector<std::string> kernel_param_types;
+  std::vector<int64_t> output_indices;
+};
+
+// Helper to extract a value from an Attribute and assign to target.
+// Checks if attr.name matches the given name, then extracts VariantT from
+// the variant and assigns to target. Returns true if successful.
+// Optional validator function can be provided to validate the value before
+// assignment.
+template <typename VariantT, typename TargetT, typename Validator>
+bool set_from_variant(
+    TargetT& target,
+    const std::string& name,
+    const Attribute& attr,
+    Validator validator) {
+  if (attr.name == name) {
+    if (auto* ptr = std::get_if<VariantT>(&attr.value)) {
+      if (validator(*ptr)) {
+        target = *ptr;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Overload without validator - always assigns if name matches and type is
+// correct.
+template <typename VariantT, typename TargetT>
+bool set_from_variant(
+    TargetT& target,
+    const std::string& name,
+    const Attribute& attr) {
+  if (attr.name == name) {
+    if (auto* ptr = std::get_if<VariantT>(&attr.value)) {
+      target = *ptr;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Virtual base class for kernel launch parameters.
+// Target-specific implementations (CpuLaunchParams, CudaLaunchParams,
+// MtiaLaunchParams) inherit from this and add their own parameters.
+// The base class provides grid dimensions which are common to all kernels.
+class LaunchParams {
+ public:
+  LaunchParams() = default;
+  virtual ~LaunchParams() = default;
+
+  // Common to all kernels - grid dimensions
   GridDims grid_dims;
+
+  // Parse common attributes (grid) from node
+  void parseCommonAttributes(const Node* node);
 };
 
 class KernelInputs {
@@ -27,7 +94,9 @@ class KernelInputs {
   KernelInputs(size_t num_args, size_t num_attrs)
       : num_args_(num_args),
         inputs_(num_args + num_attrs),
-        num_attrs_(num_attrs) {}
+        num_attrs_(num_attrs) {
+    scalar_values_.reserve(num_args + num_attrs);
+  }
   virtual ~KernelInputs() = default;
 
   virtual void add_arg(void* arg) {
@@ -35,21 +104,39 @@ class KernelInputs {
     inputs_[arg_idx_++] = arg;
   }
 
-  void add_attribute(void* attr) {
+  // Add a tensor argument. The default implementation just uses data_ptr(),
+  // this option allows any custom logic to take the tensor directly instead
+  // of just the data pointer if needed.
+  virtual void add_tensor_arg(const at::Tensor& tensor) {
+    add_arg(tensor.data_ptr());
+  }
+
+  virtual void add_scalar_arg(
+      const c10::IValue& value,
+      std::string_view param_type) {
+    add_arg(store_scalar_arg(value, param_type));
+  }
+
+  virtual void add_attribute(void* attr) {
     TORCH_CHECK(attr_idx_ < num_attrs_, "Too many attributes");
     inputs_[num_args_ + attr_idx_++] = attr;
   }
 
-  void** as_void() {
+  virtual void** as_void() {
     return inputs_.data();
   }
 
  protected:
+  void* store_scalar_arg(const c10::IValue& value, std::string_view param_type);
+
   size_t num_args_;
   size_t arg_idx_ = 0;
   std::vector<void*> inputs_;
 
  private:
+  using ScalarValue = std::variant<bool, int32_t, int64_t, float, double>;
+
+  std::vector<ScalarValue> scalar_values_;
   size_t num_attrs_;
   size_t attr_idx_ = 0;
 };
@@ -62,9 +149,17 @@ class TritonKernelManager {
   virtual ~TritonKernelManager() = default;
   virtual std::unique_ptr<KernelInputs> create_inputs(
       size_t num_args,
-      size_t num_attrs) const {
+      size_t num_attrs,
+      const KernelInputParams& /*params*/) const {
     return std::make_unique<KernelInputs>(num_args, num_attrs);
   }
+
+  // Create and parse launch parameters from the node.
+  // Each target-specific manager overrides this to create its own LaunchParams
+  // subclass with the appropriate parameters parsed from the node.
+  virtual std::unique_ptr<LaunchParams> createLaunchParams(
+      const Node* node) const;
+
   virtual void launch(const LaunchParams& launch_params, void** args) = 0;
 
  protected:

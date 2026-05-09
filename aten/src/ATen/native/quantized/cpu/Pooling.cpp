@@ -360,7 +360,7 @@ Tensor q_maxpool_3d(
   TORCH_CHECK(kT > 0 && kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sT > 0 && sH > 0 && sW > 0, "strides should be greater than zero.");
   TORCH_CHECK(
-      dT && dH > 0 && dW > 0,
+      dT > 0 && dH > 0 && dW > 0,
       "dilation should be greater than zero. "
       "Got (",
       dT,
@@ -593,7 +593,7 @@ void check_maxpool3d_params(
            batch_size /* batch size */,
            inH /* input height */,
            inW /* input width */,
-           (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input */,
            inC /* input_pixel_stride */,
            (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
            outC /* output_pixel_stride */,

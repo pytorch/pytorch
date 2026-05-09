@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -36,17 +36,17 @@ def get_type_a_related_to_b(
     return type_a_related_to_b
 
 
-NSFusionElType = Union[
-    Callable,  # call_function or call_module type, example: F.linear or nn.Conv2d
-    str,  # call_method name, example: "dequantize"
-    tuple[
+NSFusionElType = (
+    Callable  # call_function or call_module type, example: F.linear or nn.Conv2d
+    | str  # call_method name, example: "dequantize"
+    | tuple[
         str, Any
-    ],  # call_method name and first argument, example: ("to", torch.float16)
-]
-NSFusionType = Union[
-    tuple[NSFusionElType, NSFusionElType],
-    tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType],
-]
+    ]  # call_method name and first argument, example: ("to", torch.float16)
+)
+NSFusionType = (
+    tuple[NSFusionElType, NSFusionElType]
+    | tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType]
+)
 
 
 def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
@@ -72,7 +72,7 @@ def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
     all_quant_patterns = _get_pattern_to_quantize_handlers(get_native_backend_config())
 
     default_base_op_idx = 0
-    for quant_pattern in all_quant_patterns.keys():
+    for quant_pattern in all_quant_patterns:
         # TODO: this is a temporary hack to flatten the patterns from quantization so
         # that it works with the ns matcher function, maybe we should use `_is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns
@@ -97,6 +97,7 @@ def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
         #   having multiple output observers.
         for cls in (ObserverBase, FakeQuantizeBase):
             if isinstance(quant_pattern, tuple):
+                # pyrefly: ignore [not-iterable]
                 new_pattern = (cls, *quant_pattern)
             else:
                 new_pattern = (cls, quant_pattern)
@@ -167,7 +168,8 @@ def end_node_matches_reversed_fusion(
         elif cur_node.op == "call_module":
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
-                assert isinstance(cur_node.target, str)
+                if not isinstance(cur_node.target, str):
+                    raise AssertionError(f"Expected str, got {type(cur_node.target)}")
                 target_mod = getattr_from_fqn(gm, cur_node.target)
                 if not isinstance(cur_fusion_el, type):
                     return False
@@ -190,7 +192,10 @@ def end_node_matches_reversed_fusion(
                     if cur_node.target != cur_fusion_el:
                         return False
                 else:
-                    assert isinstance(cur_fusion_el, tuple)
+                    if not isinstance(cur_fusion_el, tuple):
+                        raise AssertionError(
+                            f"Expected tuple, got {type(cur_fusion_el)}"
+                        )
                     if cur_node.target != cur_fusion_el[0]:
                         return False
                     elif len(cur_node.args) < 2:

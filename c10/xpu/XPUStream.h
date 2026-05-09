@@ -44,7 +44,7 @@ class C10_XPU_API XPUStream {
   }
 
   /// Construct a XPUStream from a Stream with no error checking.
-  explicit XPUStream(Unchecked, Stream stream) : stream_(stream) {}
+  explicit XPUStream(Unchecked /*unused*/, Stream stream) : stream_(stream) {}
 
   bool operator==(const XPUStream& other) const noexcept {
     return unwrap() == other.unwrap();
@@ -107,6 +107,11 @@ class C10_XPU_API XPUStream {
       (*interp)->trace_gpu_stream_synchronization(
           c10::kXPU, reinterpret_cast<uintptr_t>(&queue()));
     }
+  }
+
+  bool is_capturing() const {
+    return queue().ext_oneapi_get_state() ==
+        sycl::ext::oneapi::experimental::queue_state::recording;
   }
 
   /// Return the priority that this stream is associated with. Lower numbers

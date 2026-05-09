@@ -3,7 +3,6 @@
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 
-#include <c10/util/C++17.h>
 #include <type_traits>
 
 namespace c10 {
@@ -114,25 +113,25 @@ inline typename remove_symint<T>::type unpackSymInt(T x) {
 }
 
 template <>
-inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
+inline remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
   return x.guard_int(__FILE__, __LINE__);
 }
 
 template <>
-inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(
+inline remove_symint<c10::SymIntArrayRef>::type unpackSymInt(
     c10::SymIntArrayRef x) {
   return C10_AS_INTARRAYREF_SLOW(x);
 }
 
 template <>
-inline typename remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(
+inline remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(
     std::optional<c10::SymInt> x) {
   return x.has_value() ? std::make_optional(x->guard_int(__FILE__, __LINE__))
                        : std::nullopt;
 }
 
 template <>
-inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(
+inline remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(
     at::OptionalSymIntArrayRef x) {
   return x.has_value() ? std::make_optional(C10_AS_INTARRAYREF_SLOW(*x))
                        : std::nullopt;

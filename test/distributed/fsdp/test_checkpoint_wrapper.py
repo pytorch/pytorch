@@ -73,7 +73,7 @@ class CheckpointWrapperTest(TestCase):
         ]:
             with self.subTest(wrapper=wrapper):
                 model = wrapper(MyModel())
-                if wrapper == offload_wrapper:
+                if wrapper is offload_wrapper:
                     self.assertTrue(isinstance(model, OffloadWrapper))
                 else:
                     self.assertTrue(isinstance(model, CheckpointWrapper))
@@ -303,7 +303,7 @@ class CheckpointWrapperTest(TestCase):
                     )
 
                 inp = torch.randn(4, 10, requires_grad=True)
-                for i in range(6):
+                for _ in range(6):
                     # Kwarg input
                     loss = model(x=inp).sum()
                     self.assertTrue(loss.requires_grad)
@@ -388,6 +388,34 @@ class CheckpointWrapperTest(TestCase):
         self.assertTrue(offload_verified)
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_checkpoint_wrapper_with_block_mask(self):
+        """Test that BlockMask can be passed through checkpoint_wrapper."""
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, B=1, H=1, Q_LEN=128, KV_LEN=128
+        )
+
+        class Block(nn.Module):
+            def forward(self, x, mask):
+                return x * 2
+
+        model = checkpoint_wrapper(Block()).cuda()
+        x = torch.randn(4, 128, device="cuda")
+        result = model(x, block_mask)
+        self.assertEqual(result, x * 2)
 
 
 if __name__ == "__main__":

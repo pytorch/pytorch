@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -33,7 +34,6 @@
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
-#include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
 namespace at::native {
@@ -77,8 +77,8 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
 
 
   // Fill sortedOrigIndices with sequential indices
-  thrust::counting_iterator<int64_t> countIterI(0);
-  thrust::counting_iterator<int64_t> countIterO(0);
+  cccl_counting_iterator<int64_t> countIterI(0ll);
+  cccl_counting_iterator<int64_t> countIterO(0ll);
 
   thrust::copy(policy, countIterI, countIterI + nnz, origIndicesIter);
   thrust::copy(policy, countIterO, countIterO + nnz, uniqueOffsetsIter);
@@ -89,7 +89,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  thrust::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  auto newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );

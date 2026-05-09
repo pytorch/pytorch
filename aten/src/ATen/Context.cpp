@@ -3,12 +3,10 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <stdexcept>
 #include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
@@ -22,8 +20,6 @@ C10_DIAGNOSTIC_POP()
 #include <cpuinfo.h>
 #endif
 namespace at {
-
-namespace {
 
 /*
   These const variables defined the fp32 precisions for different backend
@@ -40,16 +36,6 @@ namespace {
                 ->conv
                 ->rnn
 */
-
-  C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
-    TORCH_WARN_ONCE(
-      "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
-      "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
-      "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
-      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
-    );
-  }
-} // namespace
 
 Float32Backend str2backend(const std::string& name) {
   if (name == "generic")
@@ -95,9 +81,39 @@ std::string precision2str(Float32Precision prec) {
       return "tf32";
     case Float32Precision::BF16:
       return "bf16";
+    case Float32Precision::DEFAULT:
+      // DEFAULT is an internal sentinel and should be resolved before reaching here
+      TORCH_CHECK(false, "DEFAULT precision should not be visible externally");
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
+
+CuDNNDepthwiseKernel str2cudnn_depthwise(const std::string& name) {
+  if (name == "auto")
+    return CuDNNDepthwiseKernel::AUTO;
+  else if (name == "cudnn")
+    return CuDNNDepthwiseKernel::CUDNN;
+  else if (name == "native")
+    return CuDNNDepthwiseKernel::NATIVE;
+  TORCH_CHECK(false, "Unknown cuDNN depthwise kernel mode: ", name,
+              ". Expected one of: auto, cudnn, native");
+}
+
+std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
+  switch (k) {
+    case CuDNNDepthwiseKernel::AUTO:
+      return "auto";
+    case CuDNNDepthwiseKernel::CUDNN:
+      return "cudnn";
+    case CuDNNDepthwiseKernel::NATIVE:
+      return "native";
+  }
+  TORCH_CHECK(false, "Invalid enum CuDNNDepthwiseKernel(", static_cast<int>(k), ")");
+}
+
+#ifdef USE_ROCM
+static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+#endif
 
 Context::Context() = default;
 
@@ -192,6 +208,14 @@ void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
 }
 
+CuDNNDepthwiseKernel Context::cudnnDepthwiseKernel() const {
+  return depthwise_kernel_cudnn;
+}
+
+void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
+  depthwise_kernel_cudnn = k;
+}
+
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   if (!op.has_value()) {
     bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
@@ -206,7 +230,6 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
-  warn_deprecated_fp32_precision_api();
   return allow_tf32_cudnn;
 }
 
@@ -214,7 +237,6 @@ void Context::setAllowTF32CuDNN(bool b) {
   setFloat32Precision(Float32Backend::CUDA, Float32Op::RNN, b ? Float32Precision::TF32 : Float32Precision::NONE);
   setFloat32Precision(Float32Backend::CUDA, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
   allow_tf32_cudnn = b;
-  warn_deprecated_fp32_precision_api();
 }
 
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
@@ -223,7 +245,7 @@ void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
     "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
     at::num_sdp_backends, " unique backends specified in priority order.");
   for (uint32_t i = 0; i < order.size(); i++) {
-    sdp_priority_order[i] = (at::SDPBackend) order[i];
+    sdp_priority_order[i] = static_cast<at::SDPBackend>(order[i]);
   }
 }
 
@@ -244,12 +266,27 @@ bool Context::allowTF32OneDNN() const {
   #endif
 }
 
+#ifdef USE_ROCM
+bool Context::rocmAllowGroupGemmCk() const {
+    const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
+    return allow_group_gemm_ck;
+}
+#endif
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
 
 void Context::setSDPUseFlash(bool e) {
   enabled_flashSDP = e;
+}
+
+bool Context::userEnabledFA3SDP() const {
+  return enabled_fa3SDP;
+}
+
+void Context::setSDPUseFA3(bool e) {
+  enabled_fa3SDP = e;
 }
 
 bool Context::userEnabledMemEfficientSDP() const {
@@ -325,7 +362,6 @@ bool Context::allowTF32CuBLAS() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  warn_deprecated_fp32_precision_api();
   return allow_tf32_new;
 }
 
@@ -349,7 +385,6 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the matmul precision. ",
       "We suggest only using the new API for matmul precision. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  warn_deprecated_fp32_precision_api();
   return float32_matmul_precision;
 }
 
@@ -359,6 +394,25 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
   Float32Precision precision = it->second;
+
+  // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
+  // default". It is only used as the initial state for CUDA conv/rnn.
+  if (precision == Float32Precision::DEFAULT) {
+    key.second = Float32Op::ALL;
+    Float32Precision parent = fp32_precision.find(key)->second;
+    if (parent == Float32Precision::NONE || parent == Float32Precision::DEFAULT) {
+      key.first = Float32Backend::GENERIC;
+      parent = fp32_precision.find(key)->second;
+    }
+    if (parent != Float32Precision::NONE && parent != Float32Precision::DEFAULT) {
+      // A parent explicitly overrides; apply it (cuda does not support bf16).
+      return (backend == Float32Backend::CUDA && parent == Float32Precision::BF16)
+          ? Float32Precision::NONE
+          : parent;
+    }
+    return Float32Precision::TF32;
+  }
+
   if (precision == Float32Precision::NONE) {
     key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
@@ -377,7 +431,6 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
   auto match = [this](const std::string & s_) {
-    warn_deprecated_fp32_precision_api();
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
@@ -414,11 +467,26 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
       "backend 'cuda' does not support precision 'bf16'");
+  TORCH_CHECK(
+      p != Float32Precision::DEFAULT,
+      "DEFAULT precision is internal and cannot be set explicitly");
 
   it->second = p;
 }
 
+static void _warn_once_magma_deprecation() {
+  TORCH_WARN_ONCE(
+    "The usage of MAGMA backend for linear algebra operations is deprecated "
+    "and will be removed in future releases. cuSOLVER stays as the default backend."
+    "If you see any error messages with cuSOLVER but not MAGMA, please, "
+    "file an issue on GitHub."
+  );
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
+  if (linalg_preferred_backend == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
   return linalg_preferred_backend;
 }
 
@@ -435,39 +503,34 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "please file an issue on GitHub."
     );
   }
+  if (b == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
+}
+
+at::BlasBackend Context::blasDefaultBackend() {
+  at::BlasBackend result = at::BlasBackend::Cublas;
+#ifdef USE_ROCM
+  // AMD Instinct targets prefer hipblaslt
+  static const bool hipblaslt_preferred = []() {
+    const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
+        return false;
+      }
+    }
+    return true;
+  }();
+  if (hipblaslt_preferred) {
+    result = at::BlasBackend::Cublaslt;
+  }
+#endif
+  return result;
 }
 
 at::BlasBackend Context::blasPreferredBackend() {
-  // Rather than put logic for interpreting what Default means at every
-  // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
-    blas_preferred_backend = at::BlasBackend::Cublas;
-    // This logic sits in the getter because it needs to validate
-    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
-    // which initialize the backend without calling the setter
-#ifdef USE_ROCM
-    // AMD Instinct targets prefer hipblaslt
-    static const bool hipblaslt_preferred = []() {
-      static const std::vector<std::string> archs = {
-          "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60400
-          "gfx1200", "gfx1201",
-#endif
-#if ROCM_VERSION >= 60500
-          "gfx950"
-#endif
-      };
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          return false;
-        }
-      }
-      return true;
-    }();
-    if (hipblaslt_preferred) {
-      blas_preferred_backend = at::BlasBackend::Cublaslt;
-    }
-#endif
+    blas_preferred_backend = blasDefaultBackend();
   }
 
 #ifdef USE_ROCM
@@ -478,15 +541,7 @@ at::BlasBackend Context::blasPreferredBackend() {
       {
           return true;
       }
-      static const std::vector<std::string> archs = {
-          "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
-#endif
-#if ROCM_VERSION >= 70000
-          "gfx950", "gfx1150", "gfx1151"
-#endif
-      };
+      const auto& archs = detail::getCUDAHooks().getHipblasltSupportedArchs();
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
@@ -752,11 +807,21 @@ bool Context::isXNNPACKAvailable() {
 #endif
 }
 
-void Context::setCheckSparseTensorInvariants(bool e) {
+void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
   enable_sparse_tensor_invariant_checks = e;
 }
 
-bool Context::checkSparseTensorInvariants() const {
+std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitialized) const {
+  if (warn_when_uninitialized && !enable_sparse_tensor_invariant_checks.has_value()) {
+    TORCH_WARN_ONCE(
+        "Sparse invariant checks are implicitly disabled. "
+        "Memory errors (e.g. SEGFAULT) will occur when "
+        "operating on a sparse tensor which violates the "
+        "invariants, but checks incur performance overhead. "
+        "To silence this warning, explicitly opt in or out. "
+        "See `torch.sparse.check_sparse_tensor_invariants.__doc__` "
+        "for guidance. ");
+  }
   return enable_sparse_tensor_invariant_checks;
 }
 
@@ -823,6 +888,22 @@ bool Context::areVmapFallbackWarningsEnabled() const {
 
 void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
+}
+
+bool Context::warnOnAccumulateGradStreamMismatch() const {
+  return warn_on_accumulate_grad_stream_mismatch_;
+}
+
+void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
+  warn_on_accumulate_grad_stream_mismatch_ = enabled;
+}
+
+bool Context::overrideStaleCaptureStream() const {
+  return override_stale_capture_stream_;
+}
+
+void Context::setOverrideStaleCaptureStream(bool enabled) {
+  override_stale_capture_stream_ = enabled;
 }
 
 bool Context::isDefaultMobileCPUAllocatorSet() {

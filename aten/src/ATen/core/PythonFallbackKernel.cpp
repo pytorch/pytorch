@@ -1,7 +1,6 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
-#include <c10/core/SafePyObject.h>
 #include <ATen/record_function.h>
 
 namespace {
@@ -51,7 +50,7 @@ private:
 };
 
 void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
+  at::impl::MaybeSetTLSOnEntryGuard tls_guard;
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
   c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);
@@ -86,11 +85,8 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
         tensors_with_python_key_present = true;
       }
 
-      if (!interpreter) {
-        auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-        if (t_interpreter) {
-          interpreter = t_interpreter;
-        }
+      if (!interpreter && t->pyobj_slot()->load_pyobj()) {
+        interpreter = c10::impl::getGlobalPyInterpreter();
       }
     } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
@@ -105,11 +101,8 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
           tensors_with_python_key_present = true;
         }
 
-        if (!interpreter) {
-          auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-          if (t_interpreter) {
-            interpreter = t_interpreter;
-          }
+        if (!interpreter && t->pyobj_slot()->load_pyobj()) {
+          interpreter = c10::impl::getGlobalPyInterpreter();
         }
       }
     }
