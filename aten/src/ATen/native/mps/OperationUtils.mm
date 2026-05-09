@@ -1116,7 +1116,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   convert_double_scalar(other);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed = input.scalar_type() != other.scalar_type();
+  bool cast_needed = input.scalar_type() != other.scalar_type();
   bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
@@ -1148,19 +1148,45 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
+  // For the scalar path, casting one element on the host is cheaper (and
+  // avoids a per-element runtime switch) than dispatching the cast kernel.
+  // Promote the scalar operand to the common dtype here and fall through to
+  // the non-cast scalar kernel; we re-bind the converted CPU scalar after
+  // bind_iter_tensors below. This is only safe when the tensor operand
+  // already matches the common dtype; otherwise the non-cast scalar kernel
+  // (which expects matching dtypes) wouldn't exist (e.g. float tensor times
+  // complex scalar promotes to complex, but the tensor stays float).
+  if (use_scalar_kernel && cast_needed) {
+    const auto common = iter.common_dtype();
+    const auto& tensor_dtype = scalar_on_lhs ? other.scalar_type() : input.scalar_type();
+    if (tensor_dtype == common) {
+      if (scalar_on_lhs) {
+        input = input.to(common);
+      } else {
+        other = other.to(common);
+      }
+      cast_needed = false;
+    }
+  }
+
   const auto alpha_type =
       scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
   // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
-  // elements. Eligibility matches unary_dense — contiguous, floating-point,
-  // no cast / broadcast / scalar / alpha — and the same 256K crossover (see
-  // exec_unary_kernel for the rationale).
+  // elements. The kernel is applicable whenever the launch shape matches
+  // binary_dense (contiguous, no cast / broadcast / scalar / alpha); it is
+  // registered for every dtype REGISTER_BINARY_OP touches. The default-on
+  // heuristic narrows that to floating-point output past a 256K crossover
+  // (see exec_unary_kernel for the rationale); PYTORCH_BINARY_FORCE_FLAVOR
+  // overrides whenever the kernel is applicable, regardless of dtype.
   constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18;
-  const bool ilp_eligible = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
-      !alpha.has_value() && c10::isFloatingType(out.scalar_type());
-  bool dense_ilp = ilp_eligible && static_cast<uint32_t>(iter.numel()) >= ILP_DISPATCH_THRESHOLD;
-  if (ilp_eligible) {
+  const bool ilp_applicable =
+      !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed && !alpha.has_value();
+  const bool ilp_default = ilp_applicable && c10::isFloatingType(out.scalar_type()) &&
+      static_cast<uint32_t>(iter.numel()) >= ILP_DISPATCH_THRESHOLD;
+  bool dense_ilp = ilp_default;
+  if (ilp_applicable) {
     if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
       if (force.value() == "ilp")
         dense_ilp = true;
@@ -1220,6 +1246,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
       if (use_scalar_kernel) {
+        // Rebind the scalar in case we promoted it above; harmless when we
+        // didn't, since this matches what bind_iter_tensors already did.
+        mtl_setBuffer(computeEncoder, scalar_on_lhs ? input : other, scalar_on_lhs ? 1 : 2);
         if (cast_needed) {
           std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
                                                  static_cast<uint32_t>(c10::elementSize(other.scalar_type())),

@@ -8762,6 +8762,19 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(a * 2.0, a.cpu() * 2.0)
         self.assertEqual(torch.add(a, a, alpha=2.0), torch.add(a.cpu(), a.cpu(), alpha=2.0))
 
+        # mixed-dtype scalar cases: scalar dtype wider than tensor dtype.
+        # The scalar-kernel fast path can only host-promote the scalar when
+        # the tensor already matches the common dtype; otherwise it must
+        # fall through to the cast scalar kernel (see complex_convolution at
+        # Convolution.cpp which multiplies a float tensor by a complex scalar).
+        f_t = rand(100, dtype=torch.float32)
+        c_s = torch.tensor(complex(0, 1), device="mps", dtype=torch.complex64)
+        self.assertEqual(f_t * c_s, f_t.cpu() * c_s.cpu())
+        self.assertEqual(c_s * f_t, c_s.cpu() * f_t.cpu())
+        i_t = randint(100, dtype=torch.int32)
+        self.assertEqual(i_t * 1.5, i_t.cpu() * 1.5)
+        self.assertEqual(1.5 * i_t, 1.5 * i_t.cpu())
+
         # cast cases
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.float16), "+*-")
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")
