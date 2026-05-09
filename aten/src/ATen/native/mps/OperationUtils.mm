@@ -1116,7 +1116,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   convert_double_scalar(other);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed = input.scalar_type() != other.scalar_type();
+  bool cast_needed = input.scalar_type() != other.scalar_type();
   bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
@@ -1148,6 +1148,21 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
+  // For the scalar path, casting one element on the host is cheaper (and
+  // avoids a per-element runtime switch) than dispatching the cast kernel.
+  // Promote the scalar operand to the common dtype here and fall through to
+  // the non-cast scalar kernel; we re-bind the converted CPU scalar after
+  // bind_iter_tensors below.
+  if (use_scalar_kernel && cast_needed) {
+    const auto common = iter.common_dtype();
+    if (scalar_on_lhs) {
+      input = input.to(common);
+    } else {
+      other = other.to(common);
+    }
+    cast_needed = false;
+  }
+
   const auto alpha_type =
       scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
@@ -1169,13 +1184,18 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
+  // Cast kernel variants are registered as `..._cast_{common_dtype}` (the
+  // post-promotion input type that the kernel template was instantiated
+  // with). For ops where output type matches the input type this happens
+  // to equal `out.scalar_type()`, but for ops with a different output dtype
+  // (e.g. comparison ops returning bool) we must use the common dtype.
+  const auto cast_suffix_type = scalarToMetalTypeString(iter.common_dtype());
   std::string kernel_name;
   if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
     const auto lhs_suffix = scalar_on_lhs ? "_lhs" : "";
     if (cast_needed) {
-      kernel_name =
-          fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, scalarToMetalTypeString(out), alpha_suffix);
+      kernel_name = fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, cast_suffix_type, alpha_suffix);
     } else {
       kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
                                 name,
@@ -1187,11 +1207,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   } else if (use_broadcast_kernel) {
     const auto& tensor_operand = broadcast_on_lhs ? other : input;
     if (cast_needed) {
-      kernel_name = fmt::format("{}_dense_broadcast{}_cast_{}{}",
-                                name,
-                                broadcast_on_lhs ? "_rhs" : "",
-                                scalarToMetalTypeString(out),
-                                alpha_suffix);
+      kernel_name = fmt::format(
+          "{}_dense_broadcast{}_cast_{}{}", name, broadcast_on_lhs ? "_rhs" : "", cast_suffix_type, alpha_suffix);
     } else {
       kernel_name = fmt::format("{}_dense_broadcast{}_{}_{}{}",
                                 name,
@@ -1203,7 +1220,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
     const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" : "dense") : "strided";
-    kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+    kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
                                             suffix,
@@ -1220,17 +1237,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
       if (use_scalar_kernel) {
-        if (cast_needed) {
-          std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
-                                                 static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
-                                                 static_cast<uint32_t>(input.scalar_type()),
-                                                 static_cast<uint32_t>(other.scalar_type())};
-          if (alpha) {
-            mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type), sizes_types);
-          } else {
-            mtl_setArgs<3>(computeEncoder, sizes_types);
-          }
-        } else if (alpha) {
+        // Rebind the scalar in case we promoted it above; harmless when we
+        // didn't, since this matches what bind_iter_tensors already did.
+        mtl_setBuffer(computeEncoder, scalar_on_lhs ? input : other, scalar_on_lhs ? 1 : 2);
+        if (alpha) {
           mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else if (use_broadcast_kernel) {
