@@ -7,11 +7,32 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/BFloat16-math.h>
 
 
 namespace at::native {
 
 namespace {
+
+template <typename scalar_t>
+C10_HOST_DEVICE scalar_t maximum_with_signed_zero(scalar_t a, scalar_t b) {
+  if constexpr (std::is_floating_point_v<scalar_t> ||
+                c10::is_reduced_floating_point_v<scalar_t>) {
+    return ::fmax(a, b);
+  } else {
+    return ::max(a, b);
+  }
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE scalar_t minimum_with_signed_zero(scalar_t a, scalar_t b) {
+  if constexpr (std::is_floating_point_v<scalar_t> ||
+                c10::is_reduced_floating_point_v<scalar_t>) {
+    return ::fmin(a, b);
+  } else {
+    return ::min(a, b);
+  }
+}
 
 void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_V2(opaqueScalarType(iter.dtype()), "where_cuda", [&] {
@@ -44,7 +65,8 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
-      scalar_t result = ::min(::max(v, lower), upper);
+      scalar_t result = minimum_with_signed_zero(
+          maximum_with_signed_zero(v, lower), upper);
 
       result = at::_isnan(upper) ? upper : result;
       result = at::_isnan(lower) ? lower : result;
@@ -66,11 +88,13 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
       if (_isnan(static_cast<opmath_t>(v))) {
         return v;
       } else if (minmax==at::native::detail::ClampLimits::Min){
-        return ::max(static_cast<opmath_t>(v), lim0_val);
+        return maximum_with_signed_zero(static_cast<opmath_t>(v), lim0_val);
       } else if (minmax==at::native::detail::ClampLimits::Max){
-        return ::min(static_cast<opmath_t>(v), lim0_val);
+        return minimum_with_signed_zero(static_cast<opmath_t>(v), lim0_val);
       } else {
-        return ::min(::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
+        return minimum_with_signed_zero(
+            maximum_with_signed_zero(static_cast<opmath_t>(v), lim0_val),
+            lim1_val);
       }
     });
   });

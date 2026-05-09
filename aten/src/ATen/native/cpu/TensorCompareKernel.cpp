@@ -218,16 +218,13 @@ void aminmax_kernel(
         scalar_t max_number = min_number;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = c10::load(&self_data[i * self_dim_stride]);
-          // note: comparison is written this way to handle NaN correctly
-          if (!(value >= min_number)) {
+          if (_isnan<scalar_t>(value)) {
             min_number = value;
-            if (_isnan<scalar_t>(value)) {
-              max_number = value;
-              break;
-            }
-          } else if (!(value <= max_number)) {
             max_number = value;
+            break;
           }
+          min_number = minimum_with_signed_zero(min_number, value);
+          max_number = maximum_with_signed_zero(max_number, value);
         }
         *min_result_data = min_number;
         *max_result_data = max_number;

@@ -3,6 +3,7 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
 #include <c10/util/MathConstants.h>
+#include <c10/util/BFloat16-math.h>
 #include<ATen/NumericUtils.h>
 
 namespace at::native {
@@ -210,6 +211,9 @@ template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
+  } else if constexpr (std::is_floating_point_v<TYPE> ||
+                       c10::is_reduced_floating_point_v<TYPE>) {
+    return std::fmax(a, b);
   } else {
     return std::max(a, b);
   }
@@ -230,6 +234,9 @@ template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
+  } else if constexpr (std::is_floating_point_v<TYPE> ||
+                       c10::is_reduced_floating_point_v<TYPE>) {
+    return std::fmin(a, b);
   } else {
     return std::min(a, b);
   }
