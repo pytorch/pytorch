@@ -1,22 +1,20 @@
-(elastic_subprocess_handler-api)=
-# Subprocess Handling
+.. _elastic_subprocess_handler-api:
 
-```{eval-rst}
+Subprocess Handling
+======================
+
 .. automodule:: torch.distributed.elastic.multiprocessing.subprocess_handler
 .. automodule:: torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler
 .. automodule:: torch.distributed.elastic.multiprocessing.subprocess_handler.handlers
-```
 
-## Retrieve SubprocessHandler
+Retrieve SubprocessHandler
+---------------------------
 
-```{eval-rst}
 .. autofunction:: torch.distributed.elastic.multiprocessing.subprocess_handler.handlers.get_subprocess_handler
-```
 
-## SubprocessHandler
+SubprocessHandler
+---------------------
 
-```{eval-rst}
 .. currentmodule:: torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler
 
 .. autoclass:: SubprocessHandler
-```

@@ -11,11 +11,6 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
-      ci-docker-hash:
-        required: false
-        type: string
-        default: ""
-        description: Git tree hash of .ci/docker, used to construct docker image tags.
       build-generates-artifacts:
         required: false
         type: boolean
@@ -198,7 +193,6 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-          ci-docker-hash: ${{ inputs.ci-docker-hash }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -479,10 +473,10 @@ jobs:
     if: github.repository_owner == 'pytorch' && inputs.use-arc
     runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
-      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
     timeout-minutes: 480
     outputs:
-      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
       test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
@@ -569,7 +563,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 

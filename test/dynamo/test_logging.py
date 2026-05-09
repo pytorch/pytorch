@@ -1552,7 +1552,6 @@ exclusions = {
     "loop_tiling",
     "auto_chunker",
     "autotuning",
-    "incremental",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",

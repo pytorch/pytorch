@@ -1,14 +1,8 @@
-# torch.cpu
-
-```{eval-rst}
+torch.cpu
+===================================
 .. automodule:: torch.cpu
-```
-
-```{eval-rst}
 .. currentmodule:: torch.cpu
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -23,14 +17,11 @@
     set_device
     device_count
     StreamContext
-```
 
-## Streams and events
-
-```{eval-rst}
+Streams and events
+------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Stream
-```
