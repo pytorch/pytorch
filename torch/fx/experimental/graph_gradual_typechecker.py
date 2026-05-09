@@ -498,6 +498,7 @@ def maxpool2d_check(typ: Any, module_instance: Any) -> TensorType:
 def maxpool2d_inference_rule(n: Node, module_instance: Any) -> Any:
     """
     Given a MaxPool2D instance and a node check the following conditions:
+
     - Input size matches size 3 or 4
     - Current node type is consistent with the output type we will calculate
     - Input size matches output size and the last two dimensions of the output
@@ -806,7 +807,7 @@ def element_wise_eq(n: Node) -> list[Any]:
     Note that it takes two iterations for this result. One iteration to establish
     equality between certain dimensions of the operands (requiring the whole solver
     including unification) and another iteration to establish equality between the operands
-    and the resulting type, requiring another round of constraint generation and unificaiton.
+    and the resulting type, requiring another round of constraint generation and unification.
     """
     res: list[Any] = []
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):

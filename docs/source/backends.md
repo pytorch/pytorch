@@ -259,6 +259,10 @@ These backends include:
 .. autofunction:: torch.backends.cusparselt.is_available
 ```
 
+```{eval-rst}
+.. autofunction:: torch.backends.cusparselt.get_max_alg_id
+```
+
 ## torch.backends.mha
 
 ```{eval-rst}
@@ -300,6 +304,22 @@ These backends include:
 ```{eval-rst}
 .. autofunction::  torch.backends.mps.is_built
 
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.get_core_count
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.get_name
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.is_macos13_or_newer
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.is_macos_or_newer
 ```
 
 ## torch.backends.mkl
