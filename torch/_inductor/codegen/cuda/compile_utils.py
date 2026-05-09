@@ -29,13 +29,15 @@ def use_re_build() -> bool:
     return False
 
 
-def _cutlass_path() -> str:
+def _cutlass_path() -> str | None:
     if config.is_fbcode():
         from libfb.py import parutil
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cutlass.cutlass_dir
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        return config.cutlass.cutlass_dir if try_import_cutlass() else None
 
 
 def _cutlass_paths() -> list[str]:
@@ -48,20 +50,25 @@ def _cutlass_paths() -> list[str]:
 
 
 def _clone_cutlass_paths(build_root: str) -> list[str]:
-    paths = _cutlass_paths()
     cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
+    paths = []
     for path in _cutlass_paths():
         old_path = os.path.join(cutlass_root, path)
         new_path = os.path.join(build_root, path)
         shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+        paths.append(new_path)
     return paths
 
 
 def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
+    cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
+        os.path.realpath(os.path.join(cutlass_root, path))
         for path in _cutlass_paths()
     ]
 
