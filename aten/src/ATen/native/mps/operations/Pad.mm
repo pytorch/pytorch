@@ -25,6 +25,12 @@
 namespace at::native {
 namespace mps {
 
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& replication_pad_lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/ReplicationPad_metallib.h>
+#endif
+
 // Pad operations (1D/2D/3D forward and backward)
 static Tensor& pad_out_template(Tensor& output,
                                 const Tensor& input_,
@@ -324,15 +330,18 @@ static Tensor& pad_out_template(Tensor& output,
   return output;
 }
 
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& replication_pad_lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/ReplicationPad_metallib.h>
-#endif
+static MTLSize replication_pad1d_threadgroup(id<MTLComputePipelineState> pso,
+                                             NSUInteger gx,
+                                             NSUInteger gy,
+                                             NSUInteger gz) {
+  const auto maxTPG = [pso maxTotalThreadsPerThreadgroup];
+  const auto tg_x = std::min<NSUInteger>(maxTPG, gx);
+  const auto tg_y = std::min<NSUInteger>(maxTPG / tg_x, gy);
+  const auto tg_z = std::min<NSUInteger>(maxTPG / (tg_x * tg_y), gz);
+  return MTLSizeMake(tg_x, tg_y, tg_z);
+}
 
-static void replication_pad1d_kernel_mps(const Tensor& input_,
-                                         IntArrayRef padding,
-                                         const Tensor& output) {
+static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef padding, const Tensor& output) {
   if (output.numel() == 0 || input_.numel() == 0) {
     return;
   }
@@ -353,8 +362,7 @@ static void replication_pad1d_kernel_mps(const Tensor& input_,
                                             static_cast<int32_t>(padding[0]),
                                             static_cast<int32_t>(padding[1])};
 
-  auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_forward_" +
-                                                         scalarToMetalTypeString(input));
+  auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -362,10 +370,8 @@ static void replication_pad1d_kernel_mps(const Tensor& input_,
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, input, output_c, sizes_pad);
-      const NSUInteger maxTPG = [pso maxTotalThreadsPerThreadgroup];
-      const NSUInteger tg_x = std::min(maxTPG, static_cast<NSUInteger>(output_W));
       [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
-          threadsPerThreadgroup:MTLSizeMake(tg_x, 1, 1)];
+          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso);
     }
   });
@@ -404,10 +410,8 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
-      const NSUInteger maxTPG = [pso maxTotalThreadsPerThreadgroup];
-      const NSUInteger tg_x = std::min(maxTPG, static_cast<NSUInteger>(input_W));
       [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
-          threadsPerThreadgroup:MTLSizeMake(tg_x, 1, 1)];
+          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
       getMPSProfiler().endProfileKernel(pso);
     }
   });

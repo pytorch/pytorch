@@ -4,16 +4,6 @@
 using namespace metal;
 using namespace c10::metal;
 
-// 1D replication padding (a.k.a. clamp-to-edge). Mirrors the algorithm used by
-// the CUDA kernels in aten/src/ATen/native/cuda/ReplicationPadding.cu so that
-// negative paddings (which crop the input) match across devices.
-//
-// Forward: w_in = clip(w_out, padL, input_W + padL - 1) + (iStart - oStart)
-// where iStart = max(0, -padL), oStart = max(0, padL). The (iStart - oStart)
-// term equals -padL for both positive and negative padL, so this simplifies to
-//   w_in = clip(w_out - padL, 0, input_W - 1)
-// when w_out is also clamped to [0, output_W - 1] (which it always is).
-
 template <typename T>
 kernel void replication_pad1d_forward(
     constant T* input [[buffer(0)]],
@@ -32,8 +22,7 @@ kernel void replication_pad1d_forward(
 
   const int iStart = max(0, -padL);
   const int oStart = max(0, padL);
-  const int w_in =
-      min(max(padL, w_out), input_W + padL - 1) - oStart + iStart;
+  const int w_in = min(max(padL, w_out), input_W + padL - 1) - oStart + iStart;
 
   const ulong in_base =
       (static_cast<ulong>(n) * nplane + c) * static_cast<ulong>(input_W);
@@ -43,10 +32,6 @@ kernel void replication_pad1d_forward(
       input[in_base + static_cast<ulong>(w_in)];
 }
 
-// Backward uses a gather (one thread per input position sums over the small
-// range of output positions whose forward-mapped w_in equals this thread's
-// w_in). This avoids atomics entirely and is naturally deterministic, unlike
-// the CUDA path which scatters with atomicAdd.
 template <typename T>
 kernel void replication_pad1d_backward(
     constant T* grad_output [[buffer(0)]],
@@ -63,9 +48,6 @@ kernel void replication_pad1d_backward(
   const uint n = tid.z;
   const uint nplane = grid.y;
 
-  // Determine the inclusive range [wo_lo, wo_hi] of output positions that map
-  // to this w_in under the forward rule. wo_hi < wo_lo encodes "empty range",
-  // which can happen with negative padding.
   int wo_lo = 0;
   int wo_hi = -1;
   if (input_W == 1) {
@@ -98,22 +80,22 @@ kernel void replication_pad1d_backward(
   grad_input[in_base + static_cast<ulong>(w_in)] = static_cast<T>(sum);
 }
 
-#define INSTANTIATE_REPLICATION_PAD1D_FWD(DTYPE)         \
+#define INSTANTIATE_REPLICATION_PAD1D_FWD(DTYPE)              \
   template [[host_name("replication_pad1d_forward_" #DTYPE)]] \
-  kernel void replication_pad1d_forward<DTYPE>(          \
-      constant DTYPE * input [[buffer(0)]],              \
-      device DTYPE * output [[buffer(1)]],               \
-      constant int4 & sizes_pad [[buffer(2)]],           \
-      uint3 tid [[thread_position_in_grid]],             \
+  kernel void replication_pad1d_forward<DTYPE>(               \
+      constant DTYPE * input [[buffer(0)]],                   \
+      device DTYPE * output [[buffer(1)]],                    \
+      constant int4 & sizes_pad [[buffer(2)]],                \
+      uint3 tid [[thread_position_in_grid]],                  \
       uint3 grid [[threads_per_grid]])
 
-#define INSTANTIATE_REPLICATION_PAD1D_BWD(DTYPE)          \
+#define INSTANTIATE_REPLICATION_PAD1D_BWD(DTYPE)               \
   template [[host_name("replication_pad1d_backward_" #DTYPE)]] \
-  kernel void replication_pad1d_backward<DTYPE>(          \
-      constant DTYPE * grad_output [[buffer(0)]],         \
-      device DTYPE * grad_input [[buffer(1)]],            \
-      constant int4 & sizes_pad [[buffer(2)]],            \
-      uint3 tid [[thread_position_in_grid]],              \
+  kernel void replication_pad1d_backward<DTYPE>(               \
+      constant DTYPE * grad_output [[buffer(0)]],              \
+      device DTYPE * grad_input [[buffer(1)]],                 \
+      constant int4 & sizes_pad [[buffer(2)]],                 \
+      uint3 tid [[thread_position_in_grid]],                   \
       uint3 grid [[threads_per_grid]])
 
 INSTANTIATE_REPLICATION_PAD1D_FWD(float);
@@ -128,7 +110,6 @@ INSTANTIATE_REPLICATION_PAD1D_FWD(char);
 INSTANTIATE_REPLICATION_PAD1D_FWD(uchar);
 INSTANTIATE_REPLICATION_PAD1D_FWD(bool);
 
-// Backward only registered for the dtypes CUDA registers (floating + complex).
 INSTANTIATE_REPLICATION_PAD1D_BWD(float);
 INSTANTIATE_REPLICATION_PAD1D_BWD(half);
 INSTANTIATE_REPLICATION_PAD1D_BWD(bfloat);
