@@ -125,6 +125,7 @@ __all__ = [
     "set_warn_always",
     "split",
     "stack",
+    "switch",
     "sym_float",
     "sym_fresh_size",
     "sym_int",

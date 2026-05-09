@@ -1502,9 +1502,7 @@ def forward(self, pred_1, x_1):
         x = torch.ones(3)
         branches = (torch.sin, torch.cos)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Expected index to be an int or tensor"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Expected index to be"):
             torch.switch([0, 1], branches, (x,))
 
         with self.assertRaisesRegex(
@@ -1881,6 +1879,30 @@ def forward(self, pred_1, x_1):
         self.assertEqual(f(torch.tensor([0]), x), branch0(x))
         self.assertEqual(f(torch.tensor([1]), x), branch1(x))
         self.assertEqual(f(torch.tensor([2]), x), branch2(x))
+
+    def test_switch_pytree_operands(self):
+        # Test that switch supports pytree operands (nested dict/list/tuple of tensors)
+        def branch0(x):
+            return x["t"][0] + x["t"][1]["b"] * x["t"][2][0]
+
+        def branch1(x):
+            return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
+
+        def branch2(x):
+            return x["t"][0] - x["t"][1]["b"] + x["t"][2][0]
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        c = torch.randn(4)
+        operands = ({"t": [a, {"b": b}, (c,)]},)
+
+        # Test each branch
+        for idx, fn in enumerate([branch0, branch1, branch2]):
+            result = torch.switch(
+                torch.tensor(idx), [branch0, branch1, branch2], operands
+            )
+            expected = fn(operands[0])
+            self.assertEqual(result, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):

@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
+    _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     reenter_make_fx,
     unique_graph_id,
@@ -72,22 +73,25 @@ def switch(
         - Each branch must have the same signature as operands and return the same
           output structure (shape, dtype, etc.).
         - Branches cannot have in-place mutations on inputs or global variables.
+        - Autograd support is limited: gradients will not be computed correctly through
+          torch.switch in this prototype version. Full autograd support is planned for a
+          future release.
     """
-    # Early checks mirroring jax.lax.switch: an empty branch sequence is an
-    # error regardless of index type, and a single-branch switch degenerates
-    # to a plain call. Keeping these before the integer/tensor fast paths
-    # means torch.switch(idx, [], ops) always raises RuntimeError (not
-    # IndexError) and the 1-branch case never enters the HOP.
+    # Early check: empty branch sequence is an error (matches jax.lax.switch)
     if not isinstance(branches, (tuple, list)) or len(branches) == 0:
         raise RuntimeError(
             "Expected branches to be a non-empty tuple or list of callables."
         )
+
+    # Early shortcut: single-branch switch degenerates to a plain call
     if len(branches) == 1:
         return branches[0](*operands)
 
+    # If already compiling with dynamo, dispatch directly to the HOP
     if torch.compiler.is_dynamo_compiling():
         return switch_op(index, branches, operands)
 
+    # Constant index shortcut for eager mode
     if isinstance(index, int):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
@@ -102,6 +106,7 @@ def switch(
         clamped_index = min(max(0, index), len(branches) - 1)
         return branches[clamped_index](*operands)
 
+    # Validation for tensor-index path
     def _validate_input(index, branches, operands):
         if not isinstance(index, (int, torch.Tensor, torch.SymInt)):
             raise RuntimeError(
@@ -137,17 +142,11 @@ def switch(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.switch requires dynamo support.")
 
-    # Dynamo is expecting a callable with "__code__" attribute.
-    # We cannot directly pass switch_op to it. So we wrap it in a dummy function.
-    def _switch_op_wrapper(*args, **kwargs):
-        return switch_op(*args, **kwargs)
+    # Use _maybe_compile_and_run_fn pattern from scan/associative_scan
+    def run_switch(index, branches, operands):
+        return switch_op(index, branches, operands)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
-
-    with setup_compilation_env() as backend:
-        return torch.compile(_switch_op_wrapper, backend=backend, fullgraph=True)(
-            index, branches, operands
-        )
+    return _maybe_compile_and_run_fn(run_switch, index, branches, operands)
 
 
 def trace_switch(proxy_mode, func_overload, index, branches, operands):

@@ -2845,6 +2845,9 @@ def _merge_switch_graph_inputs(
                 canonical_seen.add(id(canonical))
                 canonical_order.append(canonical)
 
+    # Sort by node name to ensure deterministic ordering across branches.
+    # FX graph node names are unique within a graph, so this provides a
+    # stable canonical order when branches capture different free variables.
     canonical_order.sort(key=lambda p: p.node.name)
 
     # Fix up each branch graph: create new placeholders for the full
