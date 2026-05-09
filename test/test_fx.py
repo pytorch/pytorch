@@ -4697,6 +4697,11 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
@@ -5192,6 +5197,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool1d": PROXY_ITERABLE,
         "max_pool2d": PROXY_ITERABLE,
         "max_pool3d": PROXY_ITERABLE,
+        "max_pool3d_with_indices": CONTROL_FLOW,
         "lp_pool2d": PROXY_ITERATED,
         "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
@@ -5207,6 +5213,7 @@ class TestFunctionalTracing(JitTestCase):
         "celu": CONTROL_FLOW,
         "cosine_embedding_loss": CONTROL_FLOW,
         "cross_entropy": CONTROL_FLOW,
+        "linear_cross_entropy": CONTROL_FLOW,
         "ctc_loss": CONTROL_FLOW,
         "dropout": CONTROL_FLOW,
         "dropout1d": CONTROL_FLOW,
@@ -5373,6 +5380,11 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (

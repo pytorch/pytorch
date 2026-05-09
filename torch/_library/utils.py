@@ -82,6 +82,12 @@ def is_out(op: OpOverload) -> bool:
     return torch.Tag.out in op.tags
 
 
+def is_inplace(op: OpOverload) -> bool:
+    """Returns True if the operator has inplace semantics: it mutates its first
+    positional argument and returns it."""
+    return torch.Tag.inplace in op.tags
+
+
 def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
@@ -634,6 +640,15 @@ def is_impure(
     # Import here to avoid circular dependencies
     from torch._higher_order_ops.effects import _get_effect
     from torch.fx.node import _side_effectful_functions
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        if op in _side_effectful_functions:
+            return True
+        default = getattr(op, "default", None)
+        if default is not None:
+            return is_impure(
+                default, args=args, kwargs=kwargs, impure_random=impure_random
+            )
 
     if isinstance(op, torch._ops.OpOverload):
         schema = getattr(op, "_schema", None)

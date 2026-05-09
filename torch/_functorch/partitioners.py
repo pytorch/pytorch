@@ -167,6 +167,16 @@ def must_recompute(node: fx.Node) -> bool:
     ]
 
 
+def _is_assert_only_symbool(node: fx.Node) -> bool:
+    return (
+        isinstance(node.meta.get("val"), torch.SymBool)
+        and len(node.users) > 0
+        and all(
+            user.target is torch.ops.aten._assert_scalar.default for user in node.users
+        )
+    )
+
+
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
         if must_recompute(node):
@@ -1054,7 +1064,7 @@ def _extract_fwd_bwd_modules(
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
-        # we need to peak one node further to see if this wait_tensor is dead as well.
+        # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
             n.target is torch.ops._c10d_functional.wait_tensor.default
             and len(n.users) == 0
@@ -1210,6 +1220,10 @@ def _extract_fwd_bwd_modules(
             ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
         )
 
+    for node in bwd_graph.nodes:
+        if node.op in ("call_function", "get_attr"):
+            node.meta["autograd_backward"] = True
+
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     if (
@@ -1350,6 +1364,8 @@ def default_partition(
             continue
         if node.target in (
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
             # Profiler record_function ops are technically impure (they set up
             # profiling spans), but they're safe to duplicate during AC recompute.
             # We skip both enter and exit to keep profiling spans balanced.
@@ -1405,6 +1421,12 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
+    # These are runtime assertion intermediates and are not needed in backward
+    # for any real computation.
+    saved_sym_nodes = [
+        node for node in saved_sym_nodes if not _is_assert_only_symbool(node)
+    ]
     saved_opaque_nodes = list(dict.fromkeys(saved_opaque_nodes).keys())
 
     if config._sync_decision_cross_ranks:
@@ -1480,12 +1502,15 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, (list, tuple)):
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for _, n in val.items())
+            return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr" or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and len(node.target._schema.returns) == 0
+    ):
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -2030,7 +2055,7 @@ def cleanup_recompute_tags(
                 must_recompute(user) for user in node.users
             ):
                 # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
-                # This is to work around circular dependencies in Traceable FSDP2+AC.
+                # This is to work around circular dependencies with backward hooks + AC.
                 # Example:
                 # ```
                 # out = fully_shard(utils.checkpoint(module))(x)
@@ -2524,7 +2549,7 @@ def solve_min_cut(
                 joint_module.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
-                if joint_module
+                if joint_module is not None
                 else str(joint_graph)
             )
             # Always log to structured trace for production debugging
@@ -3141,7 +3166,9 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(aggressive_recomputation_saved_values)
+    aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
+        aggressive_recomputation_saved_values
+    )
     if aggressive_recomputation_saved_values_mem_ratio < memory_budget:
         return aggressive_recomputation_saved_values
 
@@ -3775,17 +3802,6 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
-
-    # save_for_backward on tensors and stashes symints in autograd .ctx
-    # Skip SymBool nodes whose only consumers are _assert_scalar calls.
-    # These are runtime assertion intermediates and are not needed in backward
-    # for any real computation.
-    def _is_assert_only_symbool(n: fx.Node) -> bool:
-        return (
-            isinstance(n.meta.get("val"), torch.SymBool)
-            and len(n.users) > 0
-            and all(u.target is torch.ops.aten._assert_scalar.default for u in n.users)
-        )
 
     saved_sym_nodes = list(
         filter(

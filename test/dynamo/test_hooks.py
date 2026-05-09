@@ -363,14 +363,12 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     y = l_x_ * 2;  l_x_ = None
-    fwd_body_0 = self.fwd_body_0
-    bwd_body_0 = self.bwd_body_0
-    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = y = None
-    getitem = autograd_function_apply[0];  autograd_function_apply = None
-    a = getitem * 3
-    add = a + getitem;  a = None
+    a = y * 3
+    hook_body_0 = self.hook_body_0
+    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
+    add = a + register_hook;  a = None
     sum_1 = add.sum();  add = None
-    return (sum_1, getitem)""",
+    return (sum_1, register_hook)""",
         )
 
     def test_hook_on_intermediate_used_before_and_after(self):
@@ -512,15 +510,13 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     split = l_x_.split(2);  l_x_ = None
     y = split[0]
-    fwd_body_0 = self.fwd_body_0
-    bwd_body_0 = self.bwd_body_0
-    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = y = None
-    getitem_3 = autograd_function_apply[0];  autograd_function_apply = None
     getitem_1 = split[1]
     getitem_2 = split[2];  split = None
-    result = torch.cat((getitem_3, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    result = torch.cat((y, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    hook_body_0 = self.hook_body_0
+    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
     sum_1 = result.sum();  result = None
-    sum_2 = getitem_3.sum();  getitem_3 = None
+    sum_2 = register_hook.sum();  register_hook = None
     add = sum_1 + sum_2;  sum_1 = sum_2 = None
     return (add,)""",
         )
@@ -1138,6 +1134,86 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertEqual(ref, res)
         finally:
             hook_handle.remove()
+
+    def test_register_hook_on_intermediate_stride_dependent(self):
+        def hook(grad):
+            if grad.is_contiguous():
+                return grad.sin()
+            else:
+                return grad.cos()
+
+        def fn(x):
+            y = x * 2
+            y.register_hook(hook)
+            return y.sum()
+
+        # Hooks that branch on grad metadata (e.g. is_contiguous)
+        # graph break because grad properties are unknown at trace time.
+        x = torch.randn(4, requires_grad=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_on_intermediate_autograd_cache(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 0.5)
+            return y.sum()
+
+        torch._functorch.config.enable_autograd_cache = True
+        try:
+            # First compile
+            torch._dynamo.reset()
+            counters.clear()
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x).backward()
+
+            # Second compile (force recompile to test cache)
+            torch._dynamo.reset()
+            x2 = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x2).backward()
+
+            aot_counters = counters["aot_autograd"]
+            self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self):
+        from torch._dynamo.utils import counters
+
+        def fn_a(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 0.5)
+            return y.sum()
+
+        def fn_b(x):
+            y = x * 2
+            y.register_hook(lambda g: g * 3.0)
+            return y.sum()
+
+        torch._functorch.config.enable_autograd_cache = True
+        try:
+            torch._dynamo.reset()
+            counters.clear()
+
+            # Compile fn_a
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn_a, fullgraph=True)(x).backward()
+
+            # Compile fn_b (different hook — must NOT cache hit from fn_a)
+            x2 = torch.randn(4, device="cuda", requires_grad=True)
+            torch.compile(fn_b, fullgraph=True)(x2).backward()
+
+            # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
+            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
+            self.assertEqual(
+                counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
+            )
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
 
 
 if __name__ == "__main__":

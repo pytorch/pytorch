@@ -7218,6 +7218,7 @@ xfail_hops_compile = {
     "map",  # assert type(args[1].realize()) is TensorVariable
     "scan",  # scan is not an OpOverload
     "local_map_hop",  # can't retrace
+    "register_hook",  # only generated internally by Dynamo, not callable directly
     # inductor
     "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError
