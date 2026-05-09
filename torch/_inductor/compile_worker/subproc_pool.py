@@ -394,6 +394,7 @@ class SubprocMain:
         if self.pool is not None:
             self.pool.shutdown(wait=False)
             self.pool = None
+        self._current_nprocs = 0
 
     def _shutdown(self) -> None:
         with self.write_lock:
@@ -441,7 +442,10 @@ class SubprocMain:
         future.add_done_callback(callback)
 
     def _start_pool(self, nprocs: int | None = None) -> None:
-        nprocs = nprocs or self.nprocs
+        if nprocs is not None:
+            self.nprocs = nprocs
+        else:
+            nprocs = self.nprocs
         if self.pool is not None:
             if nprocs <= self._current_nprocs:
                 return

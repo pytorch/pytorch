@@ -163,6 +163,7 @@ def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
     AsyncCompile.process_pool.cache_clear()
+    AsyncCompile._pool_needs_wakeup = True
 
 
 try:
@@ -278,6 +279,7 @@ class AsyncCompile:
     """
 
     _ready_future: Future[Any] | None = None
+    _pool_needs_wakeup: bool = True
     _metal_sources: list[tuple[str, str, list[str]]] | None = None
 
     def __init__(self) -> None:
@@ -370,7 +372,11 @@ class AsyncCompile:
         # we're sure they're needed.
         if not cls._ready_future:
             cls._ready_future = cls.process_pool().submit(cls._get_ready)
-        return cls._ready_future.done()
+        if not cls._ready_future.done():
+            return False
+        if cls._pool_needs_wakeup:
+            cls.wakeup()
+        return True
 
     @classmethod
     def wakeup(cls) -> None:
@@ -378,13 +384,17 @@ class AsyncCompile:
         If using a SubprocPool, signal the sidecar process to start up its
         ProcessPoolExecutor. The worker count is capped based on available
         CPU memory to avoid OOM during compilation.
+
+        Related: quiesce_async_compile_pool controls the idle timer;
+        eager_compile_pool_quiesce controls immediate quiesce after wait().
         """
-        if not cls.use_process_pool():
+        if get_compile_threads() <= 1:
             return
         pool = cls.process_pool()
         if isinstance(pool, SubprocPool):
             nprocs = _get_compile_threads_for_memory(get_compile_threads())
             pool.wakeup(nprocs=nprocs)
+        cls._pool_needs_wakeup = False
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
@@ -783,6 +793,7 @@ class AsyncCompile:
         if not isinstance(pool, SubprocPool):
             return
         pool.quiesce()
+        AsyncCompile._pool_needs_wakeup = True
         min_threads = config.compile_threads_min
         if min_threads > 0:
             pool.wakeup(nprocs=min_threads)

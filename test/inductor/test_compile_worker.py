@@ -217,6 +217,49 @@ class TestDynamicWakeup(TestCase):
         finally:
             pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_submit_after_reduced_wakeup(self):
+        # After quiesce + wakeup(small), submitting jobs should not scale the
+        # sidecar pool back up to the original nprocs. Before the fix in
+        # _start_pool, _submit_inner used a stale self.nprocs default which
+        # defeated memory-aware scaling.
+        pool = SubprocPool(8)
+        try:
+            pool.wakeup(nprocs=8)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+
+            for i in range(5):
+                f = pool.submit(operator.add, i, 10)
+                self.assertEqual(f.result(), i + 10)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_multi_cycle_quiesce_wakeup(self):
+        # Simulates multiple compilation cycles: full wakeup -> work ->
+        # quiesce -> reduced wakeup -> full wakeup -> work -> quiesce.
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=4)
+            self.assertEqual(pool.submit(operator.add, 1, 1).result(), 2)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=1)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=4)
+            self.assertEqual(pool.submit(operator.mul, 3, 7).result(), 21)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+            self.assertEqual(pool.submit(operator.sub, 10, 4).result(), 6)
+        finally:
+            pool.shutdown()
+
 
 class TestMemoryAwareThreads(TestCase):
     MEMINFO_TEMPLATE = (
