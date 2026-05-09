@@ -2347,6 +2347,20 @@ class SymNodeVariable(VariableTracker):
             ),
         )
 
+    def nb_index_impl(
+        self,
+        tx: "InstructionTranslator",
+    ) -> VariableTracker:
+        # SymInt / SymBool define __index__ as `self.node.int_()`, which
+        # specializes the symbolic value to a concrete int (with guard).
+        # SymFloat has no __index__.
+        # ref: torch/__init__.py SymInt.__index__ / SymBool.__index__
+
+        pytype = self.python_type()
+        if pytype in (int, bool):
+            return variables.ConstantVariable.create(self.evaluate_expr())
+        return super().nb_index_impl(tx)
+
     def nb_int_impl(
         self,
         tx: "InstructionTranslator",
