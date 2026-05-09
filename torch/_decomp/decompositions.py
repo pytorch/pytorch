@@ -3111,6 +3111,14 @@ def _index_add(
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_add(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
+    torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
@@ -3192,6 +3200,14 @@ def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
+    torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_copy(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
