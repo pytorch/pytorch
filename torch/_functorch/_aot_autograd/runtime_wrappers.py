@@ -1857,8 +1857,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
         )
-        # Save old input args for post-compile
-        self.old_input_info = fw_metadata.input_info
         # Pre-compute base_groups and other_arg_map from synthetic_base_info.
         # We avoid storing the raw synthetic_base_info because it contains
         # torch.Tensors which are not picklable by the autograd cache.
