@@ -52,23 +52,42 @@ struct radix_bits<bool> {
 // Map key to uint where uint-order matches sort-order, handles floats,
 // signed/unsigned ints and descending.
 template <typename T>
-inline uint to_radix_key(T val, bool desc) {
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, uint> to_radix_key(
+    T val,
+    bool desc) {
   using U = typename radix_bits<T>::type;
-  U result;
-  if (::metal::is_floating_point_v<T>) {
-    constexpr U all_ones = U(~U(0));
-    constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
-    // val != val is NaN check; metal::isnan is buggy at large TGs on M2.
-    if (val != val)
-      return desc ? 0u : uint(all_ones);
-    U bits = as_type<U>(val);
-    result = bits ^ ((bits & sign_bit) ? all_ones : sign_bit);
-  } else if (::metal::is_signed_v<T>) {
-    constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
-    result = as_type<U>(val) ^ sign_bit;
-  } else {
-    result = U(val);
-  }
+  constexpr U all_ones = U(~U(0));
+  constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
+  // val != val is NaN check; metal::isnan is buggy at large TGs on M2.
+  if (val != val)
+    return desc ? 0u : uint(all_ones);
+  U bits = as_type<U>(val);
+  U result = bits ^ ((bits & sign_bit) ? all_ones : sign_bit);
+  if (desc)
+    result = U(~result);
+  return uint(result);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<
+    !::metal::is_floating_point_v<T> && ::metal::is_signed_v<T>,
+    uint>
+to_radix_key(T val, bool desc) {
+  using U = typename radix_bits<T>::type;
+  constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
+  U result = as_type<U>(val) ^ sign_bit;
+  if (desc)
+    result = U(~result);
+  return uint(result);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<
+    !::metal::is_floating_point_v<T> && !::metal::is_signed_v<T>,
+    uint>
+to_radix_key(T val, bool desc) {
+  using U = typename radix_bits<T>::type;
+  U result = U(val);
   if (desc)
     result = U(~result);
   return uint(result);
