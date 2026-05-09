@@ -5298,6 +5298,33 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
     @requires_cuda_and_triton
+    def test_fusion_with_unused_buffer(self):
+        @triton.jit
+        def kernel_unused_tensor(
+            X,
+            Y,
+            unused,
+            n: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            idx = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = idx < n
+            x = tl.load(X + idx, mask=mask)
+            tl.store(Y + idx, x * 2, mask=mask)
+
+        def fn(a):
+            out = torch.empty_like(a)
+            unused = torch.empty(a.numel(), device="cuda")
+            kernel_unused_tensor[(1,)](a, out, unused, a.numel(), BLOCK_SIZE=16)
+            return out.relu()
+
+        a = torch.randn(10, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a)
+        self.assertEqual(out, fn(a))
+        self.check_code(code[0], num_kernels=1, num_allocs=2, num_deallocs=2)
+
+    @requires_cuda_and_triton
     def test_fusion_with_ordering_constraints(self):
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
