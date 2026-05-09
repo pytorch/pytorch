@@ -120,10 +120,18 @@ class AssociativeScanOp(HigherOrderOperator):
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
 
-        # Mutation is only allowed on loop-invariant inputs (additional_inputs).
-        # xs slots (both left and right operands of combine_fn) are fed with
-        # per-step tensors that appear in multiple combine calls across the
-        # O(T log T) reduction, so mutating them is unsafe.
+        # Mutation semantics for associative_scan:
+        # - additional_inputs is mutable: loop-invariant tensor identity
+        #   across the O(T log T) reduction, same semantics as while_loop's
+        #   additional_inputs (CUDA-graph-friendly lifted / pre-allocated
+        #   buffers).
+        # - xs is NOT mutable: associative_scan's combine_fn runs
+        #   O(T log T) times over overlapping pairs, so the same xs element
+        #   identity feeds multiple combine calls (once as the left operand,
+        #   later as the right operand of another pair). Any mutation on
+        #   either xs slot would change the inputs to subsequent combine
+        #   invocations, corrupting the reduction semantics. Users wanting
+        #   per-step in-place writes over a sequence should use scan or map.
         n_xs = len(xs)
         xs_mutated = [i for i in mutated_inputs if i < 2 * n_xs]
         if xs_mutated:
