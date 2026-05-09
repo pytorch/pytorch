@@ -1399,6 +1399,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
@@ -2334,6 +2335,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
@@ -2385,6 +2387,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
@@ -2437,6 +2440,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
@@ -2705,6 +2709,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("bs", (1,))
     @parametrize("Mdim", (192,))
@@ -2832,6 +2837,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("bs", (5,))
     @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
