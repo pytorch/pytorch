@@ -1,17 +1,14 @@
-```{eval-rst}
 .. role:: hidden
     :class: hidden-section
-```
 
-# torch.nn.functional
+torch.nn.functional
+===================
 
-```{eval-rst}
 .. currentmodule:: torch.nn.functional
-```
 
-## Convolution functions
+Convolution functions
+----------------------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -24,11 +21,10 @@
     conv_transpose3d
     unfold
     fold
-```
 
-## Pooling functions
+Pooling functions
+----------------------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -53,24 +49,22 @@
     adaptive_avg_pool3d
     fractional_max_pool2d
     fractional_max_pool3d
-```
 
-## Attention Mechanisms
+Attention Mechanisms
+-------------------------------
 
-The {mod}`torch.nn.attention.bias` module contains attention_biases that are designed to be used with
+The :mod:`torch.nn.attention.bias` module contains attention_biases that are designed to be used with
 scaled_dot_product_attention.
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     scaled_dot_product_attention
-```
 
-## Non-linear activation functions
+Non-linear activation functions
+-------------------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -119,22 +113,20 @@ scaled_dot_product_attention.
 
 .. _Link 1: https://arxiv.org/abs/1611.00712
 .. _Link 2: https://arxiv.org/abs/1611.01144
-```
 
-## Linear functions
+Linear functions
+----------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     linear
     bilinear
-```
 
-## Dropout functions
+Dropout functions
+-----------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -145,11 +137,10 @@ scaled_dot_product_attention.
     dropout1d
     dropout2d
     dropout3d
-```
 
-## Sparse functions
+Sparse functions
+----------------------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -157,11 +148,10 @@ scaled_dot_product_attention.
     embedding
     embedding_bag
     one_hot
-```
 
-## Distance functions
+Distance functions
+----------------------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -169,11 +159,11 @@ scaled_dot_product_attention.
     pairwise_distance
     cosine_similarity
     pdist
-```
 
-## Loss functions
 
-```{eval-rst}
+Loss functions
+--------------
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -200,11 +190,10 @@ scaled_dot_product_attention.
     soft_margin_loss
     triplet_margin_loss
     triplet_margin_with_distance_loss
-```
 
-## Vision functions
+Vision functions
+----------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -218,23 +207,22 @@ scaled_dot_product_attention.
     upsample_bilinear
     grid_sample
     affine_grid
-```
 
-## DataParallel functions (multi-GPU, distributed)
+DataParallel functions (multi-GPU, distributed)
+-----------------------------------------------
 
-### {hidden}`data_parallel`
+:hidden:`data_parallel`
+~~~~~~~~~~~~~~~~~~~~~~~
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     torch.nn.parallel.data_parallel
-```
 
-## Low-Precision functions
+Low-Precision functions
+-----------------------
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -244,4 +232,3 @@ scaled_dot_product_attention.
     grouped_mm
     scaled_mm
     scaled_grouped_mm
-```
