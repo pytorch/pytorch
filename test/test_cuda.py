@@ -1915,7 +1915,7 @@ if __name__ == '__main__':
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -6833,6 +6833,38 @@ class TestMemPool(TestCase):
 
             # pool's destructor calls emptyCache()
             del pool_use, pool_do_not_use
+        finally:
+            self._teardown_mempool_limited_memory_test()
+
+    @serialTest()
+    def test_mempool_release_cached_blocks_during_diversion(self):
+        # Regression test for the bug where allocations failing inside
+        # `torch.cuda.use_mem_pool(...)` would skip the OOM-time
+        # release_cached_blocks() retry, because the gate read
+        # `captures_underway.empty()` — which is non-empty during any
+        # private-pool diversion, even when no real cudaStreamBeginCapture
+        # is active. The fix uses a separate `num_active_captures_` counter
+        # tracked by CUDAGraph::capture_begin/end, so default-pool cached
+        # blocks can still be reclaimed during plain mempool diversion.
+        nelem_1mb = 1024 * 1024
+        device, dtype = self._setup_mempool_limited_memory_test(80)
+        try:
+            # Reserve 60 MB on the default pool, then free → cached but not
+            # returned to the driver. memory_reserved stays at 60 MB.
+            a = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            del a
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                # 60 MB into the private pool. Reservation budget remaining
+                # is only 20 MB (80 cap − 60 cached), so cudaMalloc must
+                # fail. The OOM retry needs to call release_cached_blocks()
+                # on the default pool to free the 60 MB and retry. Pre-fix,
+                # that path was gated off and this would raise.
+                b = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            self.assertEqual(b.numel(), 60 * nelem_1mb)
+            del b
+            del pool
         finally:
             self._teardown_mempool_limited_memory_test()
 
