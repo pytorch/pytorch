@@ -206,13 +206,13 @@ def flags(
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
-            enabled,
-            benchmark,
-            benchmark_limit,
-            deterministic,
-            allow_tf32,
-            fp32_precision,
-            depthwise_kernel,
+            _enabled=enabled,
+            _benchmark=benchmark,
+            _benchmark_limit=benchmark_limit,
+            _deterministic=deterministic,
+            _allow_tf32=allow_tf32,
+            _fp32_precision=fp32_precision,
+            _depthwise_kernel=depthwise_kernel,
         )
     try:
         yield
