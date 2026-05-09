@@ -934,6 +934,123 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
+    def test_workflow_opt_in_enables_experiment(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+                workflows: pull,trunk
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+        )
+        self.assertEqual("lf.", result.prefix)
+
+    def test_workflow_opt_out_skips_experiment(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: -periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
+        )
+        self.assertEqual("", result.prefix)
+
+    def test_workflow_unlisted_falls_back_to_rollout_perc(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                workflows: pull,-periodic
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="trunk"
+        )
+        self.assertEqual("lf.", result.prefix)
+
+    def test_user_opt_in_overrides_workflow_opt_out(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+                workflows: -pull
+        ---
+
+        Users:
+        @User1,lf
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+        )
+        self.assertEqual("lf.", result.prefix)
+
+    def test_user_opt_out_overrides_workflow_opt_in(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+                workflows: pull
+        ---
+
+        Users:
+        @User1,-lf
+
+        """
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+        )
+        self.assertEqual("", result.prefix)
+
+    def test_parse_workflows_setting(self) -> None:
+        settings_text = """
+        ```
+        experiments:
+            arc:
+                rollout_perc: 0
+                all_branches: true
+                default: false
+                workflows: pull,trunk,-periodic
+        ```
+        ---
+        """
+        settings = rd.parse_settings(settings_text)
+        self.assertEqual(
+            rd.Experiment(
+                rollout_perc=0,
+                all_branches=True,
+                default=False,
+                workflows="pull,trunk,-periodic",
+            ),
+            settings.experiments["arc"],
+        )
+
+    def test_parse_workflow_overrides_helper(self) -> None:
+        opt_in, opt_out = rd.parse_workflow_overrides("pull, trunk , -periodic, ")
+        self.assertEqual({"pull", "trunk"}, opt_in)
+        self.assertEqual({"periodic"}, opt_out)
+
+        empty_in, empty_out = rd.parse_workflow_overrides("")
+        self.assertEqual(set(), empty_in)
+        self.assertEqual(set(), empty_out)
+
 
 if __name__ == "__main__":
     main()
