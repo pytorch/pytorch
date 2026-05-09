@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, cast, no_type_check
+from typing import Any, cast, no_type_check, Optional
 
 import torch
 import torch.distributed as dist
@@ -98,9 +98,21 @@ class StateDictOptions:
       returned state_dict will be gathered. No ShardedTensor and DTensor
       will be in the returned state_dict.
 
+    - ``ranks_only``: a tuple of **global ranks** that should receive the full
+       state_dict when ``full_state_dict`` is True. All other ranks will get
+       empty state_dicts.
+       - If ``None`` (default), the behavior is determined by ``cpu_offload``.
+       - If ``()`` (empty tuple), all ranks will receive the full state_dict.
+       - If ``(rank, ...)`` (non-empty tuple), only the specified global ranks
+         will receive the full state_dict.
+       This option is useful in Pipeline Parallel scenarios where each stage
+       needs a representative rank (not necessarily global rank 0) to hold the
+       stage's full state_dict for export.
+
     - ``cpu_offload``: offload all the tensors to cpu. To prevent CPU OOM, if
-      ``full_state_dict`` is also true, then only the rank0 will get the
-      state_dict and all other ranks will get empty state_dict.
+      ``full_state_dict`` is also true and ``ranks_only`` is not specified,
+      then only the rank0 will get the state_dict and all other ranks will get
+      empty state_dict.
 
     - ``ignore_frozen_params``: if the value is True, the returned state_dict
       won't contain any frozen parameters -- the ``requires_grad`` is False.
@@ -128,6 +140,7 @@ class StateDictOptions:
     """
 
     full_state_dict: bool = False
+    ranks_only: Optional[tuple[int, ...]] = None
     cpu_offload: bool = False
     ignore_frozen_params: bool = False
     keep_submodule_prefixes: bool = True
@@ -334,6 +347,11 @@ def _verify_options(
         raise ValueError(
             "full_state_dict must be True when broadcast_from_rank0 is True."
         )
+    if options.ranks_only is not None and not options.full_state_dict:
+        raise ValueError(
+            "full_state_dict must be True when ranks_only is specified."
+        )
+
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
     optim_state_dict_config: OptimStateDictConfig
@@ -417,6 +435,7 @@ def _verify_state_dict(
         and not info.submodule_prefixes
         and not info.ignore_frozen_params
         and not (info.cpu_offload and info.full_state_dict)
+        and not (info.full_state_dict and info.ranks_only is not None)
         and info.strict
         and not info.broadcast_from_rank0
     ):
@@ -430,6 +449,7 @@ def _verify_state_dict(
         if (
             not optim_state_dict
             and not (info.cpu_offload and info.full_state_dict)
+            and not (info.full_state_dict and info.ranks_only is not None)
             and (not info.broadcast_from_rank0)
         ):
             raise RuntimeError(
@@ -456,11 +476,13 @@ def _maybe_full_or_cpu_state_dict(
     state_dict: dict[str, Any], info: _StateDictInfo
 ) -> dict[str, Any]:
     if info.full_state_dict:
-        ranks_only = (
-            ()
-            if (not info.cpu_offload or not torch.distributed.is_initialized())
-            else (0,)
-        )
+        if info.ranks_only is not None:
+            ranks_only = info.ranks_only
+        elif not info.cpu_offload or not torch.distributed.is_initialized():
+            ranks_only = ()
+        else:
+            ranks_only = (0,)
+
         return _gather_state_dict(
             state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
         )

@@ -498,6 +498,31 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_cpu_offload_full_state_dict,
         )
 
+    def test_ranks_only_requires_full_state_dict(self) -> None:
+        """Test that ranks_only raises ValueError when full_state_dict is False."""
+        model = nn.Linear(2, 2)
+
+        # ranks_only is not None but full_state_dict=False should raise ValueError
+        with self.assertRaises(ValueError):
+            get_model_state_dict(
+                model,
+                options=StateDictOptions(full_state_dict=False, ranks_only=(0,)),
+            )
+
+        # ranks_only=() with full_state_dict=False should also raise ValueError
+        with self.assertRaises(ValueError):
+            get_model_state_dict(
+                model,
+                options=StateDictOptions(full_state_dict=False, ranks_only=()),
+            )
+
+        # ranks_only=None with full_state_dict=False should not raise (default behavior)
+        msd = get_model_state_dict(
+            model,
+            options=StateDictOptions(full_state_dict=False),
+        )
+        self.assertEqual(msd, model.state_dict())
+
     @with_comms
     @skip_if_lt_x_gpu(1)
     def test_activation_ckpt_fqns_ddp(self) -> None:
