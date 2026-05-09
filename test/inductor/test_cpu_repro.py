@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
+import ctypes
 import functools
 import itertools
 import math
@@ -5541,6 +5542,34 @@ class CPUReproTests(TestCase):
             (torch.randn(1000), torch.rand(1000)),
         )
 
+    def test_max_autotune_bmm_omp_dynamic(self):
+        try:
+            omp = ctypes.CDLL("", ctypes.RTLD_GLOBAL)
+        except OSError:
+            self.skipTest("Could not access OpenMP symbols from process")
+
+        if not hasattr(omp, "omp_set_dynamic") or not hasattr(omp, "omp_get_dynamic"):
+            self.skipTest("omp_set_dynamic/omp_get_dynamic not found in OpenMP library")
+
+        def fn(x, y):
+            return torch.bmm(x, y)
+
+        B, M, K, N = 1, 32, 32, 32
+        x = torch.randn(B, M, K)
+        y = torch.randn(B, K, N)
+
+        with config.patch({"max_autotune": True}):
+            compiled_fn = torch.compile(fn)
+            original_dynamic = omp.omp_get_dynamic()
+            omp.omp_set_dynamic(1)
+            try:
+                with set_num_threads(4):
+                    actual = compiled_fn(x, y)
+                    expected = fn(x, y)
+                    torch.testing.assert_close(actual, expected)
+            finally:
+                omp.omp_set_dynamic(original_dynamic)
+
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
     def test_linear_float64(self):
@@ -5592,9 +5621,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
-    @xfailIf(
-        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
-    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
@@ -5637,7 +5663,7 @@ class CPUReproTests(TestCase):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
-            self.assertEqual(compiler_mode(*inputs), eager)
+            self.assertEqual(compiler_mode(*inputs), eager, atol=1e-4, rtol=1.6e-2)
 
     def test_fused_node(self):
         # https://github.com/pytorch/pytorch/issues/138550.

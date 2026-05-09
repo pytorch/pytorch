@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch.fx.graph_module import _del_attr, _get_attr
+from torch.fx.graph_module import _assign_attr, _del_attr, _get_attr
 
 
 def _resolve_reduce_op_str(
@@ -244,4 +244,40 @@ def _functionalize_inplace_collectives(
 
     if found:
         gm.recompile()
+    return gm
+
+
+def _unbox_process_group_torchbinds(
+    gm: torch.fx.GraphModule,
+) -> torch.fx.GraphModule:
+    """Replace ProcessGroup torchbind attrs with their unboxed Python
+    ``dist.ProcessGroup``.
+
+    ``make_fx`` traces ``dist.*`` collectives with a torchbind
+    ``__torch__.torch.classes.c10d.ProcessGroup`` baked in as a graph attr.
+    Inductor's collective ops (``_c10d_functional.{op}``) accept either a
+    ``group_name`` string or a Python ``dist.ProcessGroup`` — but **not** a
+    raw torchbind, which fails at runtime with::
+
+        all_reduce_(): argument 'group_name' must be either a string ...
+        but got __torch__.torch.classes.c10d.ProcessGroup
+
+    Unboxing the attribute in-place (without changing the FX graph) makes
+    the PG acceptable to the runtime collective op. The deepcopy
+    share-by-reference hook in ``GraphModule.__deepcopy__`` is what lets
+    ``standalone_compile``'s deepcopy of the gm survive the non-pickleable
+    Python ``dist.ProcessGroup``.
+    """
+    import torch.distributed as dist
+
+    if not torch.distributed.is_available():
+        return gm
+
+    for node in gm.graph.find_nodes(op="get_attr"):
+        attr = _get_attr(gm, node.target)  # type: ignore[arg-type]
+        if not isinstance(attr, torch.ScriptObject):
+            continue
+        if attr._type().qualified_name() != "__torch__.torch.classes.c10d.ProcessGroup":  # type: ignore[attr-defined]
+            continue
+        _assign_attr(dist.ProcessGroup.unbox(attr), gm, node.target)  # type: ignore[arg-type]
     return gm
