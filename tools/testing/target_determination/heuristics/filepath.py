@@ -4,6 +4,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -114,7 +115,11 @@ class Filepath(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        changed_files = query_changed_files()
+        try:
+            changed_files = query_changed_files()
+        except Exception as e:
+            warn(f"Can't query changed test files due to {e}")
+            changed_files = []
 
         # If only documentation files (.rst, .md) were modified, skip all tests
         if is_docs_only_change(changed_files):

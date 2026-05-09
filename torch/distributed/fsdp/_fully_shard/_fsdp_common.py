@@ -2,11 +2,9 @@
 import functools
 import math
 import traceback
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -18,10 +16,6 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from ._fsdp_api import DataParallelMeshDims
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
 def _dynamo_disable(func):
     """Disable dynamo tracing for FSDP hooks."""
 
@@ -30,17 +24,6 @@ def _dynamo_disable(func):
         return torch._dynamo.disable(
             func, recursive=True, reason="skipping FSDP hooks"
         )(*args, **kwargs)
-
-    return wrapper
-
-
-def _disable_functorch_if_active(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        if torch._C._are_functorch_transforms_active():
-            with torch._C._DisableFuncTorch():
-                return func(*args, **kwargs)
-        return func(*args, **kwargs)
 
     return wrapper
 

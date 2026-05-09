@@ -1461,7 +1461,7 @@ def _has_sufficient_memory(device, size):
     if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device_type not in ["cpu", "mps"]:
+    if device_type != "cpu":
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
