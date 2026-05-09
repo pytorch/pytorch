@@ -62,7 +62,7 @@ from ..source import AttrSource, DictGetItemSource
 from ..utils import proxy_args_kwargs, set_example_value
 from .base import VariableTracker
 from .dicts import ConstDictVariable
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import ListVariable, TupleVariable
 from .sets import SetVariable
 
@@ -688,7 +688,9 @@ def _call_while_loop(
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
-    args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+    args, kwargs = LazyVariableTracker.realize_all(
+        (args, kwargs), allow_lazy_constant=True
+    )
     cond_fn, body_fn, operands, additional_inputs = args
 
     # Input checks
@@ -1179,7 +1181,20 @@ def validate_args_and_maybe_create_graph_inputs(
                 args.append(a)
                 continue
 
-            if a.is_python_constant():
+            if isinstance(a, LazyConstantVariable) and not a.is_realized():
+                # LazyConstantVariable wraps a primitive constant (bool, str,
+                # None, etc.) that hasn't been read yet. Use python_type()
+                # (which installs only TYPE_MATCH) and peek_value() (no value
+                # guard) so that changing the value without changing the type
+                # does not trigger a recompile.
+                arg_name = (
+                    "const_unused"
+                    if sub_args_names is None
+                    else f"const_unused_{sub_args_names[idx]}"
+                )
+                tracer.create_graph_input(arg_name, a.python_type(), a.peek_value())
+                new_arg = a
+            elif a.is_python_constant():
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
@@ -2043,6 +2058,7 @@ def speculate_subgraph(
         # ensure guards on args get installed in parent subgraph
         f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
             (f, sub_args, sub_kwargs),
+            allow_lazy_constant=True,
         )
 
         with tx.output.subtracer(source_target, tracer, description) as subtracer:
@@ -2364,7 +2380,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self.supports_input_mutation = not torch.is_grad_enabled()
         self.supports_aliasing = not torch.is_grad_enabled()
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
@@ -2390,7 +2408,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         pred, true_fn, false_fn, operands = args
-        if type(args[0]) is ConstantVariable:
+        if isinstance(args[0], ConstantVariable):
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -2609,7 +2627,9 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         args_proxy = [arg.as_proxy() for arg in args]
         kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
@@ -2711,7 +2731,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         def arg_extractor(
             combine_fn: VariableTracker,
@@ -2955,7 +2977,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.scan import _extract_carry_and_out
         from torch._higher_order_ops.utils import first_slice_copy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         # combine_fn input check
         def _check_combine_fn_is_normalized(combine_fn_var: VariableTracker) -> bool:
@@ -3199,7 +3223,9 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         if len(kwargs) > 0:
             unimplemented(
@@ -3316,7 +3342,9 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         args_proxy = [arg.as_proxy() for arg in args]
         kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
@@ -3600,7 +3628,9 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         if kwargs:
             unimplemented(
@@ -3691,7 +3721,9 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        args, kwargs = LazyVariableTracker.realize_all(
+            (args, kwargs), allow_lazy_constant=True
+        )
 
         if kwargs:
             unimplemented(

@@ -539,6 +539,116 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager6[2], compiled6[2])
         self.assertEqual(counter_multi.frame_count, 1)
 
+    def test_hop_unused_constant_kwargs_no_recompile(self):
+        """Unused constant kwargs in higher-order ops should not cause recompiles.
+
+        When constant kwargs are passed through a HOP (e.g. torch.cond) but never
+        read by the body function, changing their values should not invalidate the
+        compiled graph. Only TYPE_MATCH guards should be installed, not
+        CONSTANT_MATCH / FALSE_MATCH / NONE_MATCH.
+        """
+
+        def true_fn(x, unused_flag, unused_none):
+            return x.sin() * 2
+
+        def false_fn(x, unused_flag, unused_none):
+            return x.cos() * 2
+
+        def fn(x, pred, unused_flag, unused_none):
+            return torch.cond(pred, true_fn, false_fn, (x, unused_flag, unused_none))
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.randn(4)
+        pred = torch.tensor(True)
+
+        opt_fn(x, pred, False, None)
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, True, None)
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, False, None)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_hop_used_constant_kwargs_do_recompile(self):
+        """Constants that ARE read by the HOP body should still cause recompiles."""
+
+        def true_fn(x, flag):
+            if flag:
+                return x.sin() * 2
+            return x.sin()
+
+        def false_fn(x, flag):
+            if flag:
+                return x.cos() * 2
+            return x.cos()
+
+        def fn(x, pred, flag):
+            return torch.cond(pred, true_fn, false_fn, (x, flag))
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.randn(4)
+        pred = torch.tensor(True)
+
+        opt_fn(x, pred, False)
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, True)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_hop_none_to_supported_type_does_recompile(self):
+        """Changing from None to a supported LazyConstantVariable type should
+        trigger recompile since the TYPE changes."""
+
+        def true_fn(x, val):
+            return x.sin() * 2
+
+        def false_fn(x, val):
+            return x.cos() * 2
+
+        def fn(x, pred, val):
+            return torch.cond(pred, true_fn, false_fn, (x, val))
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.randn(4)
+        pred = torch.tensor(True)
+
+        opt_fn(x, pred, None)
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, "hello")
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_speculate_subgraph_unused_constant_no_recompile(self):
+        """speculate_subgraph's realize_all should not install value guards
+        on unused lazy constants."""
+
+        def true_fn(x, unused_str):
+            return x.sin()
+
+        def false_fn(x, unused_str):
+            return x.cos()
+
+        def fn(x, pred, tag):
+            return torch.cond(pred, true_fn, false_fn, (x, tag))
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.randn(4)
+        pred = torch.tensor(True)
+
+        opt_fn(x, pred, "alpha")
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, "beta")
+        self.assertEqual(counter.frame_count, 1)
+
+        opt_fn(x, pred, "gamma")
+        self.assertEqual(counter.frame_count, 1)
+
 
 if __name__ == "__main__":
     run_tests()
