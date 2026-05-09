@@ -2356,10 +2356,32 @@ def _to_copy(
         x_tensor = torch.scalar_tensor(x)
 
     if device is not None and device != x_tensor.device:
-        # avoid conversions on cpu
-        if dtype is not None and device.type == "cpu":
-            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
-            dtype_converted = True
+        # When both dtype and device change, decide where to do the dtype
+        # conversion.  The general heuristic is to convert on the faster
+        # device (i.e. avoid conversions on cpu when the source is a gpu).
+        # However, we must convert on the *source* device when the target
+        # device does not support the source dtype – e.g. copying a float64
+        # tensor to an XPU device that lacks fp64 hardware would otherwise
+        # create an unsupported intermediate buffer on the target device.
+        if dtype is not None:
+            convert_before_transfer = False
+            if device.type == "cpu":
+                # Source is accelerator, target is CPU – convert on the
+                # (faster) source device before the transfer.
+                convert_before_transfer = True
+            elif x_tensor.dtype == torch.float64:
+                # The target device may not support float64 (e.g. Intel Arc
+                # consumer GPUs).  Convert to the requested dtype on the
+                # source device to avoid creating an unsupported fp64
+                # intermediate buffer on the target device.
+                from torch._inductor.utils import device_supports_fp64
+
+                if not device_supports_fp64(device):
+                    convert_before_transfer = True
+
+            if convert_before_transfer:
+                x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+                dtype_converted = True
         x_tensor = torch._prims.device_put(x_tensor, device, non_blocking)
 
     if dtype is not None and not dtype_converted:
