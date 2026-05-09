@@ -1218,8 +1218,7 @@ PyObject* process_outputs(
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject* output = PyTuple_GET_ITEM(outputs.get(), 0);
-    Py_INCREF(output);
-    return output;
+    return Py_NewRef(output);
   }
 
   return outputs.release();
@@ -1746,8 +1745,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
       "Either access saved_tensors only once, or set "
       "clear_saved_tensors_on_access=False.");
   if (self->saved_for_forward) {
-    Py_INCREF(self->saved_for_forward);
-    return self->saved_for_forward;
+    return Py_NewRef(self->saved_for_forward);
   } else {
     PyObject* result = unpack_saved_variables(
         self, [](const Variable& var) { return THPVariable_Wrap(var); });
@@ -1823,8 +1821,7 @@ PyObject* THPFunction_get_compiled_autograd_backward_state(
   if (bw_state == nullptr) {
     bw_state = Py_None;
   }
-  Py_INCREF(bw_state);
-  return bw_state;
+  return Py_NewRef(bw_state);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1905,8 +1902,7 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
       "please file an issue reporting that you are affected by this.");
   auto metadata = static_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
 
-  Py_INCREF(metadata);
-  return metadata;
+  return Py_NewRef(metadata);
   END_HANDLE_TH_ERRORS
 }
 } // namespace
@@ -1923,8 +1919,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
   if (!value) {
     Py_RETURN_NONE;
   }
-  Py_INCREF(value);
-  return value;
+  return Py_NewRef(value);
 }
 
 template <PyObject* THPFunction::* ptr>
