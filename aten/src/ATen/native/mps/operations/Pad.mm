@@ -345,22 +345,22 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   if (output.numel() == 0 || input_.numel() == 0) {
     return;
   }
-  Tensor input = input_.contiguous();
-  Tensor output_c = output;
+  auto input = input_.contiguous();
+  auto output_c = output;
   if (input.dim() == 2) {
     input = input.unsqueeze(0);
     output_c = output_c.unsqueeze(0);
   }
   TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
 
-  const int64_t nbatch = input.size(0);
-  const int64_t nplane = input.size(1);
-  const int64_t input_W = input.size(2);
-  const int64_t output_W = output_c.size(2);
-  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                            static_cast<int32_t>(output_W),
-                                            static_cast<int32_t>(padding[0]),
-                                            static_cast<int32_t>(padding[1])};
+  const auto nbatch = input.size(0);
+  const auto nplane = input.size(1);
+  const auto input_W = input.size(2);
+  const auto output_W = output_c.size(2);
+  const std::array<auto, 4> sizes_pad = {static_cast<int32_t>(input_W),
+                                         static_cast<int32_t>(output_W),
+                                         static_cast<int32_t>(padding[0]),
+                                         static_cast<int32_t>(padding[1])};
 
   auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -384,22 +384,22 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   if (grad_input.numel() == 0 || grad_output_.numel() == 0) {
     return;
   }
-  Tensor grad_output = grad_output_.contiguous();
-  Tensor grad_input_c = grad_input;
+  auto grad_output = grad_output_.contiguous();
+  auto grad_input_c = grad_input;
   if (input.dim() == 2) {
     grad_output = grad_output.unsqueeze(0);
     grad_input_c = grad_input_c.unsqueeze(0);
   }
   TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
 
-  const int64_t nbatch = grad_input_c.size(0);
-  const int64_t nplane = grad_input_c.size(1);
-  const int64_t input_W = grad_input_c.size(2);
-  const int64_t output_W = grad_output.size(2);
-  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                            static_cast<int32_t>(output_W),
-                                            static_cast<int32_t>(padding[0]),
-                                            static_cast<int32_t>(padding[1])};
+  const auto nbatch = grad_input_c.size(0);
+  const auto nplane = grad_input_c.size(1);
+  const auto input_W = grad_input_c.size(2);
+  const auto output_W = grad_output.size(2);
+  const std::array<auto, 4> sizes_pad = {static_cast<int32_t>(input_W),
+                                         static_cast<int32_t>(output_W),
+                                         static_cast<int32_t>(padding[0]),
+                                         static_cast<int32_t>(padding[1])};
 
   auto pso = replication_pad_lib.getPipelineStateForFunc("replication_pad1d_backward_" +
                                                          scalarToMetalTypeString(grad_input_c));
