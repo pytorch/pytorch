@@ -11,6 +11,7 @@ import sys
 import textwrap
 from itertools import chain, count
 from typing import Any, TYPE_CHECKING
+from typing_extensions import override
 
 import sympy
 
@@ -27,7 +28,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, make_codegen_buffer, normalize_name
+from ..utils import _align, is_dual_mode, make_codegen_buffer, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -470,11 +471,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             with open(
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
-                self.header.splice(f.read())
+                self.header.splice_aot(f.read())
         else:
-            # we produce a separate model header for each model in static linkage
-            self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
-        self.header.splice("\n")
+            self.header.splice_aot(f"""#include \"{self.model_class_name_suffix}.h\"""")
+        self.header.splice_aot("\n")
 
     def write_header(self):
         if V.graph.is_const_graph:
@@ -560,7 +560,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
         if V.graph.aot_mode:
-            self.prefix.writeline("namespace torch::aot_inductor {")
+            self.prefix.writeline_aot("namespace torch::aot_inductor {")
         if not V.graph.is_const_graph:
             self.codegen_input_size_and_nan_asserts()
 
@@ -808,11 +808,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_additional_funcs()
 
         if V.graph.const_module:
-            self.header.splice(V.graph.const_module.wrapper_code.header)
-
+            # In dual-mode, the const graph's JIT output is emitted separately,
+            # while its AOTI body is spliced below into the main AOTI source.
+            # Keep the const graph header out of the main output to avoid
+            # duplicate standalone header content.
+            if not is_dual_mode():
+                self.header.splice(V.graph.const_module.wrapper_code.header)
             assert V.graph.const_wrapper_code is not None
             self.prefix.splice_aot(V.graph.const_wrapper_code)
-
             assert V.graph.const_kernel_code is not None
             self.kernel_declarations.splice(V.graph.const_kernel_code)
 
@@ -828,8 +831,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         else:
             if not config.aot_inductor.use_runtime_constant_folding:
-                # If we do not split the constant graph, we'll just create
-                # an empty implementation when wrapping the main module.
                 self.prefix.splice_aot(
                     f"""
                     void {self.aoti_model_class_name}::_const_run_impl(
@@ -859,10 +860,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.generate_input_output_runtime_checks()
             self.prefix.splice_aot(run_impl_proto)
 
-    @staticmethod
-    def _write_jit_entry_point_signature(prefix):
+    def _write_jit_entry_point_signature(self):
         """Emit the JIT entry point: inductor_entry_impl free function."""
-        prefix.splice(
+        self.prefix.splice_jit(
             """
             void inductor_entry_impl(
                 AtenTensorHandle*
@@ -881,56 +881,56 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         AOTI: AOTInductorModel::run_impl with stream and proxy_executor params.
         JIT: inductor_entry_impl free function.
+        Dual-mode: both signatures, to their respective buffers.
         """
         if V.graph.aot_mode:
             self._write_aoti_entry_point_signature()
-        else:
-            self._write_jit_entry_point_signature(self.prefix)
+        self._write_jit_entry_point_signature()
 
     def _write_input_preamble(self):
         """Emit input stealing and (in JIT mode) GIL release."""
-        if V.graph.is_const_graph:
-            return
-        aoti_num_args = len(V.graph.graph_inputs)
-        # Weights are promoted in the JIT mode
-        jit_num_args = aoti_num_args + len(V.graph.constants)
-        # release GIL to support multiple instances inference (in different threads of the same process)
+        jit_num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
+        # AOTI const graphs enter through _const_run_impl and have no
+        # input_handles. Their JIT entry point still receives constants as
+        # appended input handles.
+        if not V.graph.is_const_graph:
+            aoti_num_args = len(V.graph.graph_inputs)
+            self.prefix.splice_aot(
+                f"auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {aoti_num_args});"
+            )
+        # release GIL to support multiple instances inference
         self.prefix.splice_jit("py::gil_scoped_release_simple release;")
         self.prefix.splice_jit(
             f"auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {jit_num_args});"
-        )
-        self.prefix.splice_aot(
-            f"auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {aoti_num_args});"
         )
 
     def _write_input_unpacking(self):
         """Emit code to unpack graph inputs from the handles array."""
         inputs_len = len(V.graph.graph_inputs.keys())
-        if inputs_len == 0:
-            return
-        for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
-            # unwrap input tensor back to scalar
-            if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
-                from ..graph import may_get_constant_buffer_dtype
+        if inputs_len != 0:
+            for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
+                    from ..graph import may_get_constant_buffer_dtype
 
-                dtype = may_get_constant_buffer_dtype(
-                    V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
-                )
-                assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
-                self.codegen_tensor_item(
-                    dtype, f"inputs[{idx}]", input_key, self.prefix
-                )
-            else:
-                self.prefix.writeline(f"auto {input_key} = std::move(inputs[{idx}]);")
-        # debug printing for all input args to AOTI model
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.codegen_model_inputs_value_print(
-            input_args_to_print=[
-                input_key
-                for input_key in V.graph.graph_inputs
-                if input_key.startswith("arg")
-            ]
-        )
+                    dtype = may_get_constant_buffer_dtype(
+                        V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
+                    )
+                    assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
+                    self.codegen_tensor_item(
+                        dtype, f"inputs[{idx}]", input_key, self.prefix
+                    )
+                else:
+                    self.prefix.writeline(
+                        f"auto {input_key} = std::move(inputs[{idx}]);"
+                    )
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.codegen_model_inputs_value_print(
+                input_args_to_print=[
+                    input_key
+                    for input_key in V.graph.graph_inputs
+                    if input_key.startswith("arg")
+                ]
+            )
 
     def _write_constants_unpacking(self):
         """Emit code to unpack constants — from constants_ (AOTI) or inputs (JIT)."""
@@ -1346,7 +1346,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate(self, is_inference):
         with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
             self.write_wrapper_decl()
-            return super().generate(is_inference)
+            result = super().generate(is_inference)
+            if is_dual_mode():
+                self._aot_output = self._assemble_aot_output()
+            return result
+
+    def _assemble_aot_output(self) -> str:
+        """Assemble the AOTI C++ file from .aot buffers."""
+        result = IndentedBuffer()
+        result.splice(self.header.aot)  # type: ignore[attr-defined]
+        result.splice(self.prefix.aot)  # type: ignore[attr-defined]
+        with result.indent():
+            result.splice(self.wrapper_call.aot)  # type: ignore[attr-defined]
+        entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
+        result.writeline(f"}} // {self.aoti_model_class_name}::{entry}")
+        result.splice(self.suffix)
+        self._generate_end_aoti(result)
+        return result.getvalue()
 
     def _codegen_aoti_model_class(self):
         """Emit AOTI model class, constructor, and const_run driver into self.prefix."""
@@ -1359,11 +1375,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def finalize_prefix(self):
         prior = self.prefix
+
+        # Build AOTI model class into a temporary buffer (AOTI-only content).
+        # _codegen_aoti_model_class calls methods that write to self.prefix,
+        # so redirect self.prefix to the temporary buffer during the call.
         aot_mode_decls = IndentedBuffer()
         if V.graph.aot_mode and not V.graph.is_const_graph:
             with self._target_buf("prefix", aot_mode_decls):
                 self._codegen_aoti_model_class()
 
+        # Reset self.prefix and write shared cache decls + CPU triton content.
         self.prefix = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
             self.prefix.writeline(f"CACHE_TORCH_DTYPE({dtype});")
@@ -1384,8 +1405,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline("\n")
                 wrapper.generate(self)
 
-        # aot_mode_decls is AOTI-only; splice_aot routes correctly across modes
-        # (no-op on plain IndentedBuffer in pure-JIT).
+        # aot_mode_decls is AOTI-only; splice_aot routes correctly across
+        # all three modes (no-op on plain IndentedBuffer in pure-JIT).
         self.prefix.splice_aot(aot_mode_decls)
         self.prefix.splice(prior)
 
@@ -1516,23 +1537,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output2idx[output] = idx
 
     def generate_before_suffix(self, result):
-        if not V.graph.is_const_graph:
-            if V.graph.aot_mode:
-                result.writeline(f"}} // {self.aoti_model_class_name}::run_impl")
-            else:
+        # Close the entry function. In dual-mode `result` is the JIT side;
+        # the AOTI side close is emitted by _assemble_aot_output.
+        if V.graph.aot_mode:
+            if is_dual_mode():
                 result.writeline("} // inductor_entry_impl")
+            else:
+                entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
+                result.writeline(f"}} // {self.aoti_model_class_name}::{entry}")
+        else:
+            result.writeline("} // inductor_entry_impl")
 
     def _generate_end_aoti(self, result):
-        """Close AOTI namespace (no-op for const_graph, which only has _const_run_impl)."""
-        if V.graph.is_const_graph:
-            result.writeline(f"}} // {self.aoti_model_class_name}::_const_run_impl")
-        else:
+        """Close AOTI namespace (no-op for const_graph)."""
+        if not V.graph.is_const_graph:
             result.writeline("} // namespace torch::aot_inductor\n\n\n")
 
     def _generate_end_jit(self, result):
         """Close JIT C++ block and emit Python wrapper for loading/calling."""
         if config.cpp_wrapper_build_separate:
-            # Close the wrapper code block, then write any kernel definitions.
             result.splice('"""\n)')
             if self.kernel_declarations:
                 result.splice('\nkernel_src = (\nr"""')
@@ -1545,14 +1568,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     """
                 )
         else:
-            # Merge main code and kernel code
             result.splice(self.kernel_declarations.getvalue())
             self.kernel_declarations.clear()
-            # Close the wrapper code block
             result.splice('"""\n)')
 
         kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
-        # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
@@ -1567,10 +1587,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
-            # Append constants to the input args for cpp wrapper.
-            # Python wrapper directly gets the value inside the wrapper call
-            # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
-            # For cpp wrapper, we need to pass this python value to the inductor_entry_impl function explicitly.
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
@@ -1579,20 +1595,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     constants_tensor = {constants_str}
                     input_tensors.extend(constants_tensor)
             """
-        # Convert vector of at::Tensor to vector of AtenTensorHandle.
-        # If we pass at::Tensor, the compilation will be too slow.
         wrapper_body += """
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
         """
-        # Release the inputs for memory reuse.
         wrapper_body += """
                     args.clear()
                     del input_tensors
         """
 
-        # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
-            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
             outputs_str = "output_tensors"
         else:
             outputs = [
@@ -1610,7 +1621,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     return {outputs_str}
         """
 
-        # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
@@ -1625,9 +1635,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_end(self, result):
         """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
-            self._generate_end_aoti(result)
-        else:
-            self._generate_end_jit(result)
+            if not is_dual_mode():
+                self._generate_end_aoti(result)
+            # In dual-mode, AOTI closing handled by _assemble_aot_output
+            return
+        self._generate_end_jit(result)
 
     @staticmethod
     def get_c_shim_func_name(kernel: str, device: str) -> str:
@@ -1912,10 +1924,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # In AOT mode, emit runtime checks for potential division/modulo by zero
         # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
         if V.graph.aot_mode:
-            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
-            for divisor, op_name in divisors:
+            for divisor, op_name in self._extract_divisors_from_expr(
+                maybe_simplified_x
+            ):
                 divisor_str = cexpr(divisor)
-                self.writeline(
+                self.wrapper_call.writeline_aot(
                     f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
                 )
         return cexpr(maybe_simplified_x)
@@ -2175,6 +2188,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_is_pinned(),
         )
 
+    @override
     def make_allocation(
         self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
     ):
@@ -2214,7 +2228,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             graph=self.get_codegened_graph(),
         )
         device_type, device_id = device_str.split(",")
-        device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
+        if V.graph.aot_mode:
+            # Pure AOTI allocates on the model runtime device. Dual-mode shares
+            # this expression with JIT code, where `this->device_idx_` is not
+            # available, so use the concrete graph device id.
+            device_idx = device_id if is_dual_mode() else "this->device_idx_"
+        else:
+            device_idx = device_id
 
         handle_name = f"{name}_handle"
         args = [
@@ -2824,14 +2844,32 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert isinstance(output_name, list), type(output_name)
             output_args = output_name
 
-        # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
+            # The fallback helpers below emit via self.writeline. In dual-mode,
+            # temporarily route those writes first to wrapper_call's AOTI side
+            # and then to its JIT side. setattr (vs direct assignment) avoids
+            # a pyrefly type cascade on self.writeline.
+            saved_writeline = self.writeline
+            if is_dual_mode():
+                setattr(self, "writeline", self.wrapper_call.writeline_aot)  # noqa: B010
             self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
+            if is_dual_mode():
+                setattr(self, "writeline", self.wrapper_call.writeline_jit)  # noqa: B010
+                self._generate_fallback_kernel_jit(
+                    buf_name,
+                    python_kernel_name,
+                    get_args,
+                    op_overload,
+                    raw_args,
+                    output_args,
+                    outputs,
+                )
+                setattr(self, "writeline", saved_writeline)  # noqa: B010
             return
 
         self._generate_fallback_kernel_jit(
@@ -2862,9 +2900,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 "returns, not more complicated types (such as list-of-list-of-tensor)"
             )
 
-        # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
-        # outputs of the op can be represented with StableIValue.  This avoids the
-        # overhead of calling back into Python, and covers most remaining fallback ops.
         if self._compatible_with_stableivalue(op_overload):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
@@ -2874,9 +2909,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return
 
-        # Otherwise, we call back into Python, which has some extra runtime overhead,
-        # but handles situations like list[Tensor] (currently unrepresentable via
-        # StableIValue).
         self.generate_fallback_kernel_with_runtime_lookup_python(
             buf_name,
             python_kernel_name,
@@ -3453,10 +3485,13 @@ if (!custom_op_wrapper) {
         tmp_var_name = f"var_{next(self.arg_var_id)}"
         call_str = f"auto {tmp_var_name} = {handle};"
 
-        writer = writer if writer is not None else self
+        writer = (
+            writer if writer is not None else self
+        )  # pyrefly: ignore [bad-assignment]
         if isinstance(writer, list):
             writer.append(call_str)
         else:
+            # pyrefly: ignore [missing-attribute]
             writer.writeline(call_str)
 
         return tmp_var_name

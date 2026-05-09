@@ -853,8 +853,9 @@ class CppWrapperGpu(CppWrapperCpu):
         super().write_header()
         kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         if V.graph.is_const_graph and is_dual_mode():
-            # const_graph's AOTI variant merges into main (which has its own
-            # kernel_driver) — JIT-only emission avoids the duplicate.
+            # For a dual-mode const graph, only the standalone JIT output needs
+            # this header content. The AOTI const body is spliced into the main
+            # AOTI source, which has its own kernel driver.
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -864,6 +865,12 @@ class CppWrapperGpu(CppWrapperCpu):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
+        # Pure AOTI receives the stream as a function parameter. JIT and
+        # dual-mode code use an explicit stream variable so the shared kernel
+        # call arguments are valid for the JIT entry point.
+        if V.graph.aot_mode and not is_dual_mode():
+            return "stream"
+
         name = f"stream{device_idx}"
         self.writeline(
             maybe_hipify_code_wrapper(
@@ -1241,11 +1248,7 @@ static struct TritonKernelCompileInit {{
                 original_fxnode_name=original_fxnode_name,
             )
 
-        stream = (
-            "stream"
-            if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, graph_name)
-        )
+        stream = self.write_get_raw_stream(device.index, graph_name)
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -1290,18 +1293,26 @@ static struct TritonKernelCompileInit {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            # Pure AOTI passes the model runtime device. Dual-mode shares this
+            # call arg list with JIT code, where `this->device_idx_` is not
+            # available, so use the concrete graph device index.
+            device_idx = (
+                "this->device_idx_"
+                if V.graph.aot_mode and not is_dual_mode()
+                else str(device.index)
+            )
             call_args.append(device_idx)
             call_args.append(stream)
-            if V.graph.aot_mode:
-                call_args.append("kernels")
-                call_args.append("this->cubin_dir_")
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 call_args[: len(arg_types)], kernel_name, arg_types, None
             )
+            base_call = f"{wrapper_name}({', '.join(call_args)}"
+            self.wrapper_call.writeline_jit(f"{base_call});")
             with debug_printer_manager:
-                self.writeline(f"{wrapper_name}({', '.join(call_args)});")
+                self.wrapper_call.writeline_aot(
+                    f"{base_call}, kernels, this->cubin_dir_);"
+                )
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]

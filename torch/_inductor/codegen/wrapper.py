@@ -58,6 +58,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_dual_mode,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -575,7 +576,15 @@ class EnterDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if V.graph.aot_mode:
+            if is_dual_mode():
+                if self.last_seen_device_guard_index is None:
+                    code.writeline_aot(
+                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                    )
+                    code.writeline_jit(
+                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
+                    )
+            elif V.graph.aot_mode:
                 # In AOT mode, we have a stream provided as a param. A stream is
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
@@ -2146,9 +2155,15 @@ class PythonWrapperCodegen(CodeGen):
         result.splice(self.imports)
         result.writeline("")
         result.splice(self.header)
-        # We do not want the cpp header for intermediate const graph. Headers would be
-        # rendered by the main module instead.
-        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+        # Intermediate const graphs normally use headers rendered by the main
+        # module. In dual-mode, the const graph's JIT wrapper is emitted as
+        # standalone C++ and needs its own header.
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and V.graph.is_const_graph
+            and not is_dual_mode()
+        ):
             result = IndentedBuffer()
 
         # Add subgraph definitions to the result
