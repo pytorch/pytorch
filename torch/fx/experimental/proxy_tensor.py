@@ -2630,6 +2630,11 @@ class _MakefxTracer:
         self.decomposition_table.setdefault(
             torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel
         )
+        if decomposition_table is None and not pre_dispatch:
+            self.decomposition_table.setdefault(
+                torch.ops.aten.detach.default,
+                torch._decomp.decompositions.nop_decomposition,
+            )
         self.tracing_mode: _TracingMode = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
