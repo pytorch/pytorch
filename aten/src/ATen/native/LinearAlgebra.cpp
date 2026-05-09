@@ -291,7 +291,7 @@ template <typename Meta>
 static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
-  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(), "batch1 and batch2 must have the same dtype, but got ", batch1.scalar_type(), " and ", batch2.scalar_type());
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(), "expected scalar type ", batch1.scalar_type(), " but found ", batch2.scalar_type());
 
   const auto batch1_sizes = batch1.sizes();
   const auto batch2_sizes = batch2.sizes();

@@ -2465,10 +2465,11 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
-    torch._check(
-        a.dtype == b.dtype,
-        lambda: f"expected scalar type {a.dtype} but found {b.dtype}",
-    )
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            a.dtype == b.dtype,
+            lambda: f"self and mat2 must have the same dtype, but got {a.dtype} and {b.dtype}",
+        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -3827,6 +3828,11 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     self = self.expand((dim1, dim2))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            self.dtype == batch1.dtype == batch2.dtype,
+            lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
+        )
     torch._check(
         batch1.size(0) == batch2.size(0),
         lambda: f"batch1 and batch2 must have same number of batches, got {batch1.size(0)} and {batch2.size(0)}",
@@ -4719,10 +4725,11 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
 
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
-    torch._check(
-        batch1.dtype == batch2.dtype,
-        lambda: f"expected scalar type {batch1.dtype} but found {batch2.dtype}",
-    )
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            batch1.dtype == batch2.dtype,
+            lambda: f"expected scalar type {batch1.dtype} but found {batch2.dtype}",
+        )
 
     batch1_sizes = batch1.size()
     batch2_sizes = batch2.size()

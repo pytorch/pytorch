@@ -10738,11 +10738,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_mm_matmul_2d_mixed_dtype_error(self):
-        a = torch.randn(8, 8, device="cuda", dtype=torch.float16)
-        b = torch.randn(8, 64, device="cuda", dtype=torch.float32)
-        err = "same dtype|expected scalar type"
+        a = torch.randn(8, 8, dtype=torch.float16)
+        b = torch.randn(8, 64, dtype=torch.float32)
+        err = "same dtype"
 
         with self.assertRaisesRegex(RuntimeError, err):
             torch.mm(a, b)
