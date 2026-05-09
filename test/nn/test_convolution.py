@@ -900,10 +900,19 @@ class TestConvolutionNN(NNTestCase):
                 atol=dtype2prec_DONTUSE[dtype],
                 rtol=0,
             )
+            tf32_conv = (
+                device == "cuda"
+                and dtype == torch.float
+                and torch.cuda.is_tf32_supported()
+                and torch.backends.cudnn.conv.fp32_precision == "tf32"
+            )
+            weight_grad_atol = 0.01 if tf32_conv else dtype2prec_DONTUSE[dtype]
+            if dtype == torch.half:
+                weight_grad_atol = 1e-1
             self.assertEqual(
                 m.weight.grad.data,
                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                atol=1e-1 if dtype == torch.half else dtype2prec_DONTUSE[dtype],
+                atol=weight_grad_atol,
                 rtol=0,
             )
 
@@ -947,10 +956,19 @@ class TestConvolutionNN(NNTestCase):
                 atol=dtype2prec_DONTUSE[dtype],
                 rtol=0,
             )
+            tf32_conv = (
+                device == "cuda"
+                and dtype == torch.float
+                and torch.cuda.is_tf32_supported()
+                and torch.backends.cudnn.conv.fp32_precision == "tf32"
+            )
+            weight_grad_atol = 0.01 if tf32_conv else dtype2prec_DONTUSE[dtype]
+            if dtype == torch.half:
+                weight_grad_atol = 1e-1
             self.assertEqual(
                 m.weight.grad.data,
                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                atol=1e-1 if dtype == torch.half else dtype2prec_DONTUSE[dtype],
+                atol=weight_grad_atol,
                 rtol=0,
             )
 
