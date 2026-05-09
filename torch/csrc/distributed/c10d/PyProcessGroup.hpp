@@ -55,7 +55,7 @@ class PyProcessGroup : public ProcessGroup {
     return cname::name(__VA_ARGS__);                                    \
   } while (false)
 
-  // This class is used to wrap a PyWork trampoline with it's corresponding
+  // This class is used to wrap a PyWork trampoline with its corresponding
   // Python object to prevent the Python object from being garbage collected.
   class PyWorkHolder : public Work {
    public:
