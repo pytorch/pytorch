@@ -262,23 +262,36 @@ class ScanOp(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
-        if len(mutated_inputs) > 0:
+
+        # Mutation is only allowed on loop-invariant inputs (init / carry and
+        # additional_inputs). xs slices are per-iteration views, so mutating
+        # them is not meaningful and is rejected. If xs needs to be mutated as
+        # well, add it as a lifted argument.
+        n_init = len(init)
+        n_xs = len(xs)
+        xs_mutated = [i for i in mutated_inputs if n_init <= i < n_init + n_xs]
+        if xs_mutated:
             raise RuntimeError(
-                "For scan, combine_fn cannot have in-place mutations but found "
-                f"{mutated_inputs}-th inputs are mutated."
+                "For scan, combine_fn cannot mutate xs inputs but found "
+                f"{[i - n_init for i in xs_mutated]}-th xs inputs are mutated."
             )
+        mutated_set = set(mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
 
         for idx, arg in enumerate(init):
-            schema_gen.add_arg(f"init{idx}", arg)
+            schema_gen.add_arg(f"init{idx}", arg, is_mutated=idx in mutated_set)
 
         for idx, arg in enumerate(xs):
             schema_gen.add_arg(f"xs{idx}", arg)
 
         for idx, arg in enumerate(additional_inputs):
-            schema_gen.add_arg(f"additional_input{idx}", arg)
+            schema_gen.add_arg(
+                f"additional_input{idx}",
+                arg,
+                is_mutated=(n_init + n_xs + idx) in mutated_set,
+            )
 
         for out in outputs:
             schema_gen.add_output(out)
