@@ -224,3 +224,25 @@ if trace_log.handlers:
   - Local files: "FX graph dump: min_cut_failed_graph.txt"
   - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
 - Use `_get_unique_path()` pattern to avoid overwriting existing debug files
+
+# cuda::ptx
+
+When using `<cuda/ptx>` typed wrappers for PTX instructions:
+
+- **Namespace**: Inside `namespace at::native`, unqualified `cuda::ptx` resolves
+  to the sibling `at::cuda` namespace. Always use `::cuda::ptx` or alias it:
+  `namespace ptx = ::cuda::ptx;`
+- **Include conflicts**: The monolithic `<cuda/ptx>` header can fail when included
+  alongside heavy PyTorch headers (e.g. `Loops.cuh`) due to CCCL bugs in
+  transitive headers like `cp_async_bulk_tensor.h`. Workaround: put kernels using
+  `<cuda/ptx>` in a separate `.cu` file with minimal includes.
+- **mbarrier_try_wait_parity is non-blocking**: `ptx::mbarrier_try_wait_parity()`
+  returns `bool` (tries once). You must wrap it in a spin loop:
+  `while (!ptx::mbarrier_try_wait_parity(mbar, parity)) {}`
+- **Half/BFloat16 types**: `cuda::ptx` overloads use CUDA native types (`__half`,
+  `__nv_bfloat16`), not PyTorch wrappers (`c10::Half`, `c10::BFloat16`).
+  Use `reinterpret_cast` at the call site.
+- **cp_async_bulk_wait_group**: Takes a compile-time constant via
+  `ptx::n32_t<N>{}`, not a runtime integer.
+- **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
+  operations. Place mbarriers in a separate smem region from data buffers.
