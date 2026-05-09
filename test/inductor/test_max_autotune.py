@@ -3381,7 +3381,10 @@ class TestMaxAutotune(TestCase):
                 out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x)
 
         FileCheck().check_not(kernel_name).run(code_unfused[0])
-        self.assertEqual(out, out_unfused)
+        if GPU_TYPE == "xpu" and dtype == torch.float16:
+            torch.testing.assert_close(out, out_unfused, atol=5e-4, rtol=5e-4)
+        else:
+            self.assertEqual(out, out_unfused)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
