@@ -449,6 +449,9 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
+# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
+dedup_reduce_scatters: bool = False
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
@@ -511,6 +514,14 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# When True, autotuning is spread across real kernel invocations instead of
+# blocking on the first call. Each run() call executes one config and records
+# timing via CUDA events, progressively eliminating underperforming configs.
+# An additional JK gate inside the plugin can still block the feature on True.
+incremental_autotune: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
