@@ -452,8 +452,15 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
 
 
 def module_inputs_torch_nn_PoissonNLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    # Narrow the input range for fp16 so `i.exp()` summed over numel doesn't
+    # blow past 65504 in the `full` reference path; the default (-9, 9) range
+    # gives `exp(8.9) ~= 7300` and over 120 elements overflows fp16 to inf,
+    # while the fused kernel accumulates in higher precision and stays finite.
+    fp16_kwargs = {'low': -2, 'high': 2} if dtype == torch.float16 else {}
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         requires_grad=requires_grad, **fp16_kwargs)
+    make_target = partial(make_tensor, device=device, dtype=dtype,
+                          requires_grad=False, **fp16_kwargs)
 
     cases: list[tuple[str, dict]] = [
         ('', {}),
@@ -4399,6 +4406,15 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.KLDivLoss,
                module_inputs_func=module_inputs_torch_nn_KLDivLoss,
+               decorators=(
+                   # `mean` reduction over softmaxed inputs accumulates ~1 ULP per
+                   # element in fp16; the default fp16 tolerance (atol=1e-5,
+                   # rtol=1e-3) is tight enough that small RNG perturbations push
+                   # a few elements just past the threshold.
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                                "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),
+               ),
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4542,8 +4558,12 @@ module_db: list[ModuleInfo] = [
                    # Insufficient accuracy, likely related to an issue with cross_entropy
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
                                 dtypes=[torch.bfloat16], device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.bfloat16], device_type='xpu'),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
                                 "test_save_load", device_type="cuda", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
@@ -4699,6 +4719,10 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='mps')],
                skips=(
                    # No channels_last support for MultiheadAttention currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)

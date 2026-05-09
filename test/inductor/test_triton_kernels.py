@@ -2748,6 +2748,32 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(expected, actual)
 
     @requires_gpu
+    def test_triton_kernel_constexpr_arg(self):
+        @triton.jit
+        def kernel(in_ptr, out_ptr, n, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 0:
+                out = tl.abs(x)
+            else:
+                out = x * x
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+            grid = (triton.cdiv(n, 1024),)
+            kernel[grid](x, out, n, MODE=CONSTANT_C, BLOCK_SIZE=1024)
+            return out
+
+        x = torch.randn(2048, device=GPU_TYPE)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(expected, actual)
+
+    @requires_gpu
     @unittest.skipIf(
         not triton_version_uses_attrs_dict(),
         "Test is only valid for new triton versions where attrs is represented by a raw dict",
@@ -5270,6 +5296,33 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a)
         self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @requires_cuda_and_triton
+    def test_fusion_with_unused_buffer(self):
+        @triton.jit
+        def kernel_unused_tensor(
+            X,
+            Y,
+            unused,
+            n: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            idx = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = idx < n
+            x = tl.load(X + idx, mask=mask)
+            tl.store(Y + idx, x * 2, mask=mask)
+
+        def fn(a):
+            out = torch.empty_like(a)
+            unused = torch.empty(a.numel(), device="cuda")
+            kernel_unused_tensor[(1,)](a, out, unused, a.numel(), BLOCK_SIZE=16)
+            return out.relu()
+
+        a = torch.randn(10, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a)
+        self.assertEqual(out, fn(a))
+        self.check_code(code[0], num_kernels=1, num_allocs=2, num_deallocs=2)
 
     @requires_cuda_and_triton
     def test_fusion_with_ordering_constraints(self):

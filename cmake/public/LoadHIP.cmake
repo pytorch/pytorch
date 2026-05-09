@@ -71,15 +71,6 @@ if(PYTORCH_ROCM_ARCH STREQUAL "")
 endif()
 message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
-# Add HIP to the CMAKE Module Path
-# needed because the find_package call to this module uses the Module mode search
-# https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
-if(UNIX)
-  set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip;${ROCM_PATH}/lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/hip ${CMAKE_MODULE_PATH})
-else() # Win32
-  set(CMAKE_MODULE_PATH ${ROCM_PATH}/cmake/ ${CMAKE_MODULE_PATH})
-endif()
-
 # Add ROCM_PATH to CMAKE_PREFIX_PATH, needed because the find_package
 # call to individual ROCM components uses the Config mode search
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
@@ -96,17 +87,96 @@ macro(find_package_and_print_version PACKAGE_NAME)
   endif()
 endmacro()
 
-# Find the HIP Package
-# MODULE argument is added for clarity that CMake is searching
-# for FindHIP.cmake in Module mode
-find_package_and_print_version(HIP 1.0 MODULE)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  enable_language(HIP)
+# Use CMake's native HIP language support instead of FindHIP.cmake.
+# Set up the HIP compiler before calling enable_language(HIP).
+if(DEFINED ENV{HIP_CLANG_PATH})
+  file(TO_CMAKE_PATH "$ENV{HIP_CLANG_PATH}" _hip_clang_dir)
+else()
+  set(_hip_clang_dir "${ROCM_PATH}/lib/llvm/bin")
+endif()
+if(WIN32)
+  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++.exe")
+else()
+  set(CMAKE_HIP_COMPILER "${_hip_clang_dir}/clang++")
+endif()
+if(NOT EXISTS "${CMAKE_HIP_COMPILER}")
+  message(FATAL_ERROR "HIP compiler not found at ${CMAKE_HIP_COMPILER}")
 endif()
 
-if(HIP_FOUND)
-  set(PYTORCH_FOUND_HIP TRUE)
-  find_package_and_print_version(hip REQUIRED CONFIG)
+set(CMAKE_HIP_PLATFORM "amd" CACHE STRING "HIP platform" FORCE)
+set(CMAKE_HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+
+if(WIN32)
+  # On Windows, C/CXX use clang-cl (MSVC frontend) but HIP must use clang++
+  # (GNU frontend). CMake's Windows-Clang platform module enforces that all
+  # compilers use the same frontend variant, and the ABI detection test
+  # fails because MSVC-style linker flags (/machine:x64) are passed to clang++.
+  # Skip compiler detection to avoid these issues.
+  set(CMAKE_HIP_COMPILER_FORCED TRUE)
+  set(CMAKE_HIP_COMPILER_WORKS TRUE)
+  set(CMAKE_HIP_COMPILER_ID "Clang")
+  set(CMAKE_HIP_COMPILER_FRONTEND_VARIANT "GNU")
+endif()
+
+enable_language(HIP)
+message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
+message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
+
+if(WIN32)
+  # After enable_language(HIP), the platform module Windows-Clang-HIP.cmake
+  # sets MSVC-style compile/link rules (because C/CXX use MSVC frontend).
+  # Override them all with GNU-style rules for clang++.
+
+  # Compile: use GNU-style flags (-o, -isystem) instead of MSVC-style.
+  set(CMAKE_HIP_COMPILE_OBJECT
+    "<CMAKE_HIP_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -x hip -c <SOURCE>")
+  set(CMAKE_INCLUDE_SYSTEM_FLAG_HIP "-isystem ")
+  set(CMAKE_HIP_DEPFILE_FORMAT gcc)
+  set(CMAKE_DEPFILE_FLAGS_HIP "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
+
+  # Link: use GNU-style clang++ syntax with -Xlinker for MSVC flags.
+  # Set the wrapper flag so CMake passes MSVC linker flags via -Xlinker.
+  set(CMAKE_HIP_LINKER_WRAPPER_FLAG "-Xlinker" " ")
+  set(CMAKE_HIP_LINKER_WRAPPER_FLAG_SEP)
+  set(CMAKE_HIP_USING_LINKER_DEFAULT "-fuse-ld=lld-link")
+
+  set(CMAKE_HIP_LINK_EXECUTABLE
+    "<CMAKE_HIP_COMPILER> -nostartfiles -nostdlib -fuse-ld=lld-link <FLAGS> <CMAKE_HIP_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> -Xlinker /MANIFEST:EMBED -Xlinker /implib:<TARGET_IMPLIB> -Xlinker /pdb:<TARGET_PDB> -Xlinker /version:<TARGET_VERSION_MAJOR>.<TARGET_VERSION_MINOR> <LINK_LIBRARIES>")
+  set(CMAKE_HIP_CREATE_SHARED_LIBRARY
+    "<CMAKE_HIP_COMPILER> -nostartfiles -nostdlib -fuse-ld=lld-link -shared <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> -o <TARGET> -Xlinker /MANIFEST:EMBED -Xlinker /implib:<TARGET_IMPLIB> -Xlinker /pdb:<TARGET_PDB> -Xlinker /version:<TARGET_VERSION_MAJOR>.<TARGET_VERSION_MINOR> <OBJECTS> <LINK_LIBRARIES>")
+  set(CMAKE_HIP_CREATE_SHARED_MODULE ${CMAKE_HIP_CREATE_SHARED_LIBRARY})
+
+  # Standard libraries for Windows linking
+  set(CMAKE_HIP_STANDARD_LIBRARIES_INIT "-lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 -loldnames")
+
+  # Tell CMake how to handle MSVC_RUNTIME_LIBRARY for the HIP compiler.
+  set(CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_MultiThreaded -fms-runtime-lib=static)
+  set(CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_MultiThreadedDLL -fms-runtime-lib=dll)
+  set(CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_MultiThreadedDebug -fms-runtime-lib=static_dbg)
+  set(CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_MultiThreadedDebugDLL -fms-runtime-lib=dll_dbg)
+
+  # Disable MSVC-specific debug info flags for HIP
+  set(CMAKE_HIP_COMPILE_OPTIONS_MSVC_DEBUG_INFORMATION_FORMAT_Embedded "")
+endif()
+
+# Remove any FindHIP.cmake module paths to prevent downstream contamination.
+# FindHIP.cmake overrides global variables like CMAKE_HIP_LINK_EXECUTABLE
+# (pointing to hipcc_linker_cmake_helper, a bash script that doesn't exist on Windows).
+list(FILTER CMAKE_MODULE_PATH EXCLUDE REGEX ".*/cmake/hip$")
+
+set(PYTORCH_FOUND_HIP TRUE)
+find_package_and_print_version(hip REQUIRED CONFIG)
+
+# Map lowercase hip_VERSION vars (from CONFIG mode) to uppercase HIP_VERSION
+# vars that the rest of PyTorch's build expects (previously set by FindHIP MODULE).
+if(hip_VERSION AND NOT HIP_VERSION)
+  set(HIP_VERSION "${hip_VERSION}")
+  set(HIP_VERSION_MAJOR "${hip_VERSION_MAJOR}")
+  set(HIP_VERSION_MINOR "${hip_VERSION_MINOR}")
+  set(HIP_VERSION_PATCH "${hip_VERSION_PATCH}")
+endif()
+
+if(PYTORCH_FOUND_HIP)
   if(HIP_VERSION)
     # Check if HIP_VERSION contains a dash (e.g., "7.1.25421-32f9fa6ca5")
     # and strip everything after it to get clean numeric version

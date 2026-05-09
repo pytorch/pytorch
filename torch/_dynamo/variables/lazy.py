@@ -22,7 +22,10 @@ class LazyCache:
 
     def __init__(self, value: Any, source: Any) -> None:
         if not isinstance(value, LazySymNodeFormatString):
-            assert source
+            if not source:
+                raise AssertionError(
+                    "source is required for non-LazySymNodeFormatString values"
+                )
         self.value = value
         self.source = source
         self.name_hint: str | None = None
@@ -30,7 +33,8 @@ class LazyCache:
         self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
-        assert self.vt is None
+        if self.vt is not None:
+            raise AssertionError("LazyCache.realize() called but vt is already set")
         from ..symbolic_convert import InstructionTranslator
         from . import builder
 
@@ -98,7 +102,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
-        assert isinstance(_cache, LazyCache)
+        if not isinstance(_cache, LazyCache):
+            raise AssertionError(
+                f"_cache must be a LazyCache instance, got {type(_cache).__name__}"
+            )
         super().__init__(**kwargs)
         self._cache = _cache
 
@@ -106,7 +113,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
             self._cache.realize()
-            assert self._cache.vt is not None
+            if self._cache.vt is None:
+                raise AssertionError("LazyCache.realize() did not set vt")
         return self._cache.vt
 
     def lazy_isinstance(self, cls: type) -> bool:
@@ -116,7 +124,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
-            assert self._cache.vt is not None
+            if self._cache.vt is None:
+                raise AssertionError("is_realized() returned True but vt is None")
             return self._cache.vt
         return self
 
@@ -124,17 +133,26 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         return self._cache.vt is not None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
-        assert kwargs.get("_cache", self._cache) is self._cache
+        if kwargs.get("_cache", self._cache) is not self._cache:
+            raise AssertionError(
+                "cannot clone LazyVariableTracker with a different _cache"
+            )
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
     def peek_type(self) -> type[Any]:
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "peek_type() called on an already realized LazyVariableTracker"
+            )
         return type(self._cache.value)
 
     def peek_value(self) -> Any:
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "peek_value() called on an already realized LazyVariableTracker"
+            )
         return self._cache.value
 
     def set_name_hint(self, name: str) -> None:
@@ -238,10 +256,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def is_hashable(self) -> bool:
+    def is_hashable_lazy(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
-        # This is used by ConstDictVariable tracker to find if the key LazyVT
-        # can be hashed.
+        # This is used by the is_hashable() function in hashable.py as a fast
+        # path for unrealized LazyVTs.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
             return (
@@ -250,7 +268,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 or is_function_or_wrapper(value)
             )
 
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "is_hashable() called on an already realized LazyVariableTracker"
+            )
         value = self._cache.value
         if isinstance(value, tuple):
             return all(_helper(v) for v in value)
@@ -258,12 +279,18 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     def original_value(self) -> Any:
         # Returns the value without realizing the VT.
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "original_value() called on an already realized LazyVariableTracker"
+            )
         return self._cache.value
 
     def original_source(self) -> Any:
         # Returns the source without realizing the VT.
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "original_source() called on an already realized LazyVariableTracker"
+            )
         return self._cache.source
 
 
@@ -284,7 +311,12 @@ class LazyConstantVariable(LazyVariableTracker):
     """
 
     supported_types = (int, float, bool, str)
-    _nonvar_fields = {"_type_guard_installed", *LazyVariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "_type_guard_installed",
+        "_type_guard_ref",
+        "_handler_type",
+        *LazyVariableTracker._nonvar_fields,
+    }
 
     @staticmethod
     def create(
@@ -295,8 +327,12 @@ class LazyConstantVariable(LazyVariableTracker):
         from ..source import is_constant_source
         from .constant import ConstantVariable
 
-        assert type(value) in LazyConstantVariable.supported_types
-        assert source is not None
+        if type(value) not in LazyConstantVariable.supported_types:
+            raise AssertionError(
+                f"unsupported type {type(value).__name__} for LazyConstantVariable"
+            )
+        if source is None:
+            raise AssertionError("source must not be None for LazyConstantVariable")
 
         # If the source doesn't support guards (e.g., ConstantSource), fall back
         # to creating a regular ConstantVariable directly
@@ -308,6 +344,8 @@ class LazyConstantVariable(LazyVariableTracker):
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
         super().__init__(_cache, **kwargs)
         self._type_guard_installed = False
+        self._type_guard_ref: Any = None
+        self._handler_type: type | None = None
 
     def _ensure_type_guard(self) -> None:
         """Install TYPE_MATCH guard if not already installed and not realized."""
@@ -316,9 +354,12 @@ class LazyConstantVariable(LazyVariableTracker):
 
         from ..guards import GuardBuilder, install_guard
 
-        assert self.source is not None
-        install_guard(self.source.make_guard(GuardBuilder.TYPE_MATCH))
+        if self.source is None:
+            raise AssertionError("source must not be None when installing type guard")
+        guard = self.source.make_guard(GuardBuilder.TYPE_MATCH)
+        install_guard(guard)
         self._type_guard_installed = True
+        self._type_guard_ref = guard
 
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker."""
@@ -330,21 +371,23 @@ class LazyConstantVariable(LazyVariableTracker):
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
-        tracing_context = TracingContext.get()
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "source must not be None when realizing LazyConstantVariable"
+            )
 
-        # Realize first to see what we get
         result = super().realize()
 
         # Only remove TYPE_MATCH if we're installing CONSTANT_MATCH
         # (which subsumes it). For SymNodeVariable, keep TYPE_MATCH.
         if isinstance(result, ConstantVariable):
-            if self._type_guard_installed:
-                tracing_context.guards_context.dynamo_guards.remove_guards_with_source(
-                    self.source
+            if self._type_guard_ref is not None:
+                tracing_context = TracingContext.get()
+                tracing_context.guards_context.dynamo_guards.inner.discard(
+                    self._type_guard_ref
                 )
-            constant_guard = self.source.make_guard(GuardBuilder.CONSTANT_MATCH)
-            install_guard(constant_guard)
+                self._type_guard_ref = None
+            install_guard(self.source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
         return result
 
@@ -397,10 +440,16 @@ class LazyConstantVariable(LazyVariableTracker):
         This allows builtins like isinstance() and type() to find the correct
         handler without triggering full realization of the lazy constant.
         """
+        if self._handler_type is not None:
+            return self._handler_type
+
         from .constant import ConstantVariable
 
         realized_type = self._maybe_realize_for_type()
-        return realized_type if realized_type is not None else ConstantVariable
+        self._handler_type = (
+            realized_type if realized_type is not None else ConstantVariable
+        )
+        return self._handler_type
 
     def lazy_isinstance(self, cls: type) -> bool:
         """Check isinstance without triggering realization when possible.

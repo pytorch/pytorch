@@ -459,6 +459,9 @@ test_dtensor() {
 
 test_h100_distributed() {
   # Distributed tests at H100
+  # Disable NVLS: AWS H100 instances lack the IMEX channel device
+  # needed for NCCL NVLS multicast
+  export NCCL_NVLS_ENABLE=0
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -2076,6 +2079,12 @@ test_operator_benchmark() {
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install . -v --no-build-isolation
 
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
+
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
@@ -2092,6 +2101,12 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  # When running the baseline (nightly wheel), tag outputs so the compare step can distinguish them
+  local suffix=""
+  if [[ "${TEST_CONFIG:-}" == *_baseline ]]; then
+    suffix="_baseline"
+  fi
+
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
@@ -2099,13 +2114,21 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
+
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm; do
-    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
+  # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
+  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  for op in $op_list; do
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
-    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
 }
@@ -2176,6 +2199,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_torchcomms
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2195,10 +2219,36 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
 
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
+  # Support single-operator selection via config name:
+  #   operator_microbenchmark_{op}_test     — run against the PR-built wheel
+  #   operator_microbenchmark_{op}_baseline — install latest nightly and run against it
+  if [[ "${TEST_CONFIG}" =~ operator_microbenchmark_(.+)_(test|baseline) ]] && [[ "${BASH_REMATCH[1]}" != "" ]]; then
+    export OP_BENCHMARK_TESTS="${BASH_REMATCH[1]}"
+  fi
+  if [[ "${TEST_CONFIG}" == *_baseline ]]; then
+    # Derive the nightly wheel channel from BUILD_ENVIRONMENT so baseline matches the PR
+    # build's CUDA/ROCm toolchain. Override by setting BASELINE_INDEX_URL in the workflow.
+    if [[ -z "${BASELINE_INDEX_URL:-}" ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
+      elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+      elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+        # Keep in sync with the ROCm version in the benchmarks docker image
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+      else
+        echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
+        exit 1
+      fi
+    fi
+    echo "Installing nightly torch from ${BASELINE_INDEX_URL} for baseline comparison"
+    pip install --pre --force-reinstall --index-url "${BASELINE_INDEX_URL}" torch
+  fi
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2333,6 +2383,7 @@ elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  install_torchcomms
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
