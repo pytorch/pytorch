@@ -339,6 +339,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
+                cwd=cache_dir,
                 text=True,
                 env=env,
             )
@@ -347,10 +348,72 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
+                cwd=cache_dir,
                 text=True,
                 env=env,
             )
             self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
+
+
+# Helper script for test_static_init_dlopen_does_not_deadlock
+_STATIC_INIT_DEADLOCK_SCRIPT = """\
+import torch
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
+from torch._inductor import config
+
+config.compile_threads = 1
+config.cpp_wrapper = True
+config.triton.autotune_at_compile_time = False
+
+
+def fn(x):
+    return (x * 2 + 1).sum()
+
+
+compiled = torch.compile(fn)
+x = torch.randn(128, device=GPU_TYPE)
+compiled(x)
+"""
+
+
+class TestCppWrapperStaticInitDeadlock(InductorTestCase):
+    device = GPU_TYPE
+
+    def test_static_init_dlopen_does_not_deadlock(self):
+        """The cpp_wrapper-generated .so must not trigger Triton kernel
+        compilation from a static initializer (dlopen-time): doing so
+        runs Triton -> mlir::verify -> llvm::StdThreadPool, whose workers
+        contend for the dynamic linker's global init lock and deadlock
+        the main thread inside dlopen.
+        """
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            env = {
+                **os.environ,
+                "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+            }
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-c", _STATIC_INIT_DEADLOCK_SCRIPT],
+                    capture_output=True,
+                    cwd=cache_dir,
+                    text=True,
+                    env=env,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                self.fail(
+                    "cpp_wrapper subprocess timed out after 60s -- likely "
+                    "deadlocked in dlopen / static-init Triton kernel compile."
+                )
+        self.assertEqual(
+            r.returncode,
+            0,
+            f"Subprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+        )
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
