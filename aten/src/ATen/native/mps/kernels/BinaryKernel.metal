@@ -447,47 +447,12 @@ struct gcd_functor {
   }
 };
 
-struct eq_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a == b;
-  }
-};
-
-struct ne_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a != b;
-  }
-};
-
-struct lt_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a < b;
-  }
-};
-
-struct le_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a <= b;
-  }
-};
-
-struct gt_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a > b;
-  }
-};
-
-struct ge_functor {
-  template <typename T>
-  inline bool operator()(const T a, const T b) {
-    return a >= b;
-  }
-};
+DEFINE_BINARY_COMPARISON_FUNCTOR(eq, ==);
+DEFINE_BINARY_COMPARISON_FUNCTOR(ne, !=);
+DEFINE_BINARY_COMPARISON_FUNCTOR(lt, <);
+DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
+DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
+DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
