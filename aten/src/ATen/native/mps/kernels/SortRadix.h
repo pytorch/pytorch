@@ -58,7 +58,8 @@ inline uint to_radix_key(T val, bool desc) {
   if (::metal::is_floating_point_v<T>) {
     constexpr U all_ones = U(~U(0));
     constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
-    if (metal::isnan(val))
+    // val != val is NaN check; metal::isnan is buggy at large TGs on M2.
+    if (val != val)
       return desc ? 0u : uint(all_ones);
     U bits = as_type<U>(val);
     result = bits ^ ((bits & sign_bit) ? all_ones : sign_bit);
