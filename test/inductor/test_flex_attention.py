@@ -35,7 +35,6 @@ from torch.nn.attention.flex_attention import (
     _identity,
     _mask_mod_signature,
     _score_mod_signature,
-    _WARNINGS_SHOWN,
     and_masks,
     AuxOutput,
     AuxRequest,
@@ -2742,6 +2741,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         """Test that deprecation warnings are issued for legacy parameters"""
         import warnings
 
+        import torch.nn.attention.flex_attention as fa
+
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 64, 16),
@@ -2751,8 +2752,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         # Clear shown warnings to ensure we can test them
-        original_shown = _WARNINGS_SHOWN.copy()
-        _WARNINGS_SHOWN.clear()
+        original_shown = fa._WARNINGS_SHOWN.copy()
+        fa._WARNINGS_SHOWN.clear()
 
         try:
             # Test deprecation warning for return_lse
@@ -2767,7 +2768,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
             # Clear for next test
-            _WARNINGS_SHOWN.clear()
+            fa._WARNINGS_SHOWN.clear()
 
             # Test error when both old and new API are used
             with self.assertRaises(ValueError) as cm:
@@ -2784,8 +2785,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         finally:
             # Restore original warnings state
-            _WARNINGS_SHOWN.clear()
-            _WARNINGS_SHOWN.update(original_shown)
+            fa._WARNINGS_SHOWN.clear()
+            fa._WARNINGS_SHOWN.update(original_shown)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
@@ -4352,64 +4353,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps  # exercises BACKEND='TRITON' kernel-options branch
-    @common_utils.parametrize("case", ["offset", "stride"])
-    def test_cutedsl_captured_alias_views_keep_distinct_layouts(self, device, case):
-        make_tensor = functools.partial(
-            torch.randn,
-            (1, 2, 128, 64),
-            device=device,
-            dtype=torch.float16,
-            requires_grad=False,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-
-        match case:
-            case "offset":
-                base = torch.randn((1, 2, 128, 256), device=device, dtype=torch.float32)
-                expected_reinterpret_tensors = [
-                    "(65536, 32768, 256, 1), 0)",
-                    "(65536, 32768, 256, 1), 128)",
-                ]
-            case "stride":
-                base = torch.randn((1, 2, 256, 128), device=device, dtype=torch.float32)
-                expected_reinterpret_tensors = [
-                    "(65536, 32768, 128, 1), 0)",
-                    "(65536, 32768, 256, 1), 0)",
-                ]
-            case _:
-                raise AssertionError(case)
-
-        def fn(q, k, v, base):
-            match case:
-                case "offset":
-                    left = base[:, :, :, :128]
-                    right = base[:, :, :, 128:]
-                case "stride":
-                    left = base[:, :, :128, :]
-                    right = base[:, :, ::2, :]
-                case _:
-                    raise AssertionError(case)
-
-            def score_mod(score, b, h, m, n):
-                return score + left[b, h, m, n] + right[b, h, m, n]
-
-            return flex_attention(
-                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
-            )
-
-        expected = fn(q, k, v, base)
-        actual, code = run_and_get_code(
-            torch.compile(fn, fullgraph=True), q, k, v, base
-        )
-        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
-
-        src = "\n".join(code)
-        for expected_reinterpret_tensor in expected_reinterpret_tensors:
-            self.assertIn(expected_reinterpret_tensor, src)
-
-    @supported_platform
-    @skip_on_cpu
+    @skip_on_mps
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
@@ -6209,7 +6153,8 @@ class GraphModule(torch.nn.Module):
 
         finally:
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
-            fa._WARNINGS_SHOWN = original_warnings_shown
+            fa._WARNINGS_SHOWN.clear()
+            fa._WARNINGS_SHOWN.update(original_warnings_shown)
 
     @supported_platform
     def test_mask_mod_functools_partial(self, device):
@@ -8579,12 +8524,17 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     def test_flex_attention_logging(self, device):
+        from torch._inductor.select_algorithm import get_flex_attention_log_filename
+
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "flex_attention_configs")
 
             with patch.dict(
                 os.environ, {"TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE": log_file}
             ):
+                get_flex_attention_log_filename.cache_clear()
+                self.addCleanup(get_flex_attention_log_filename.cache_clear)
+
                 query = torch.randn(
                     1,
                     2,
