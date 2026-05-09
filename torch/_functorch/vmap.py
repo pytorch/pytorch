@@ -11,7 +11,7 @@ import functools
 import itertools
 from collections.abc import Callable  # noqa: TC003
 from functools import partial
-from typing import Any, cast, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Optional
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -326,6 +326,10 @@ def vmap_impl(
                 ).movedim(in_dim, 0),
                 args,
                 in_dims,
+            )
+            
+            chunks_flat_args = _get_chunked_inputs(
+                flat_args, flat_in_dims, batch_size, chunk_size
             )
 
             # We run over one chunk to get the pre_chunk_out_dims info.
