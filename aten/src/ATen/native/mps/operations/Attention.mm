@@ -546,15 +546,6 @@ static bool can_use_mpp_prefill(const Tensor& q,
                                 bool supports_fast_sdpa) {
   if (!at::mps::is_macos_13_or_newer(at::mps::MacOSVersion::MACOS_VER_26_2_PLUS))
     return false;
-  // matmul2d cooperative_tensor's lane->element layout is implementation-defined.
-  // The MPP attention kernel hardcodes the simdgroup_matrix-style layout used
-  // on Apple10 (M5+). On Apple9 (M3/M4) the
-  // layout is different and the kernel produces wrong results, so restrict MPP
-  // to Apple10+ until the kernel becomes layout-agnostic.
-  static const bool is_apple10_or_newer =
-      [at::mps::MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
-  if (!is_apple10_or_newer)
-    return false;
   if (supports_fast_sdpa || qL <= 8 || kL <= 0)
     return false;
   if (q.scalar_type() != at::kHalf && q.scalar_type() != at::kBFloat16)
@@ -665,26 +656,36 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
     }
   }
 
-  const std::string kname = use_mpp ? fmt::format("prefill_attention_mpp_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
-                                                  dtype_str,
-                                                  shape.BQ,
-                                                  shape.BK,
-                                                  static_cast<int>(headSize),
-                                                  shape.WM,
-                                                  shape.WN,
-                                                  has_mask ? 1 : 0,
-                                                  is_causal ? 1 : 0,
-                                                  mask_dtype_str)
-                                    : fmt::format("prefill_attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
-                                                  dtype_str,
-                                                  shape.BQ,
-                                                  shape.BK,
-                                                  static_cast<int>(headSize),
-                                                  shape.WM,
-                                                  shape.WN,
-                                                  has_mask ? 1 : 0,
-                                                  is_causal ? 1 : 0,
-                                                  mask_dtype_str);
+  // matmul2d cooperative_tensor's lane->element layout differs across
+  // Apple GPU generations. Apple10+ (M5+) uses a contig-quad layout for
+  // ct_b/ct_c (slots 0..7 = first N-half, 8..15 = second N-half); Apple8
+  // (M2) uses a split-pair layout interleaved every 4 slots.
+  static const bool is_apple10_or_newer =
+      [at::mps::MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
+  const char* mpp_arch_suffix = is_apple10_or_newer ? "a10" : "a9";
+
+  const std::string kname = use_mpp
+      ? fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
+                    mpp_arch_suffix,
+                    dtype_str,
+                    shape.BQ,
+                    shape.BK,
+                    static_cast<int>(headSize),
+                    shape.WM,
+                    shape.WN,
+                    has_mask ? 1 : 0,
+                    is_causal ? 1 : 0,
+                    mask_dtype_str)
+      : fmt::format("prefill_attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}_hm{}_dc{}_mask{}",
+                    dtype_str,
+                    shape.BQ,
+                    shape.BK,
+                    static_cast<int>(headSize),
+                    shape.WM,
+                    shape.WN,
+                    has_mask ? 1 : 0,
+                    is_causal ? 1 : 0,
+                    mask_dtype_str);
 
   // Threadgroup grid: (Q-blocks, head, batch).
   const int64_t nQ = (qL + shape.BQ - 1) / shape.BQ;

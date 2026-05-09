@@ -1,12 +1,6 @@
-// MPP (MetalPerformancePrimitives, cooperative-tensor) flash-attention
-// prefill for MPS. Built on mpp::tensor_ops::matmul2d
-//
-// Adapted from MLX
-//
-// The kernel itself is only emitted when the Metal 4 SDK is available
-// (matmul2d lives in <MetalPerformancePrimitives/...>). At runtime,
-// dispatch additionally gates on macOS 26.0+ (see mpp_attention_available
-// in Attention.mm).
+// MPP cooperative-tensor flash-attention prefill for MPS, on
+// mpp::tensor_ops::matmul2d. Adapted from MLX. Emitted only with the
+// Metal 4 SDK; runtime dispatch gates on macOS 26.0+.
 #pragma once
 
 #include <ATen/native/mps/kernels/PrefillAttention.h>
@@ -18,11 +12,8 @@
 #define MPP_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
 #define MPP_CONST static constant constexpr const
 
-// metal::integral_constant in MSL has no arithmetic operator overloads
-// (unlike std::integral_constant or MLX's vendored version). Provide
-// just enough so the load / store helpers below can multiply runtime
-// indices by a compile-time stride like Int<1>{} without falling back
-// to an explicit ::value access at every call site.
+// MSL's metal::integral_constant lacks arithmetic overloads, so add the
+// minimum needed to multiply runtime indices by Int<1>{}
 template <typename T, T Val, typename U>
 METAL_FUNC constexpr auto operator*(U lhs, metal::integral_constant<T, Val>) {
   return lhs * Val;
@@ -32,8 +23,11 @@ METAL_FUNC constexpr auto operator*(metal::integral_constant<T, Val>, U rhs) {
   return Val * rhs;
 }
 
-// 16x16 tile of a 32-lane simdgroup. Each thread owns 8 elements, laid out
-// as 2 rows x 4 cols with row jump 8 (i.e. rows 0 and 8 of a 16x16 frag).
+// 16x16 simdgroup tile, 8 cells/lane in 2 rows x 4 cols (rows fm, fm+8).
+// Within-row col pattern is contig-quad {0,1,2,3} on Apple10 and split-pair
+// {0,1,8,9} on Apple8, this matches what matmul2d::run() expects in each
+// arch's ct_a/ct_b/ct_c slots so the mma below can register-copy directly.
+template <bool IS_APPLE10>
 struct BaseMPPFrag {
   MPP_CONST short kFragRows = 16;
   MPP_CONST short kFragCols = 16;
@@ -51,10 +45,25 @@ struct BaseMPPFrag {
 
   METAL_FUNC static short2 get_coord() {
     const ushort lane = __metal_get_thread_index_in_simdgroup(ushort());
-    const short qid = lane >> 2;
-    const short fm = (qid & 4) | ((lane >> 1) & 3);
-    const short fn = ((qid & 2) | (lane & 1)) * 4;
-    return short2{fn, fm};
+    if (IS_APPLE10) {
+      const short qid = lane >> 2;
+      const short fm = (qid & 4) | ((lane >> 1) & 3);
+      const short fn = ((qid & 2) | (lane & 1)) * 4;
+      return short2{fn, fm};
+    } else {
+      const short fm = ((lane >> 4) & 1) * 4 + ((lane >> 1) & 3);
+      const short fn = ((lane >> 3) & 1) * 4 + (lane & 1) * 2;
+      return short2{fn, fm};
+    }
+  }
+
+  // Slot j -> col offset: contig {0,1,2,3} on A10, split-pair {0,1,8,9} on A8.
+  METAL_FUNC static constexpr short col_offset(short j) {
+    if (IS_APPLE10) {
+      return j;
+    } else {
+      return (j & 1) | ((j >> 1) << 3);
+    }
   }
 
   template <
@@ -80,13 +89,14 @@ struct BaseMPPFrag {
       if constexpr (metal::is_same_v<StrY, Int<1>>) {
         MPP_PRAGMA_UNROLL
         for (short j = 0; j < kElemCols; j++) {
-          dst[i * kElemCols + j] = static_cast<T>(src[r * str_x + c + j]);
+          dst[i * kElemCols + j] =
+              static_cast<T>(src[r * str_x + c + col_offset(j)]);
         }
       } else {
         MPP_PRAGMA_UNROLL
         for (short j = 0; j < kElemCols; j++) {
           dst[i * kElemCols + j] =
-              static_cast<T>(src[r * str_x + (c + j) * str_y]);
+              static_cast<T>(src[r * str_x + (c + col_offset(j)) * str_y]);
         }
       }
     }
@@ -119,13 +129,14 @@ struct BaseMPPFrag {
         if constexpr (metal::is_same_v<StrY, Int<1>>) {
           MPP_PRAGMA_UNROLL
           for (short j = 0; j < kElemCols; j++) {
-            dst[i * kElemCols + j] = static_cast<T>(src[r * str_x + c + j]);
+            dst[i * kElemCols + j] =
+                static_cast<T>(src[r * str_x + c + col_offset(j)]);
           }
         } else {
           MPP_PRAGMA_UNROLL
           for (short j = 0; j < kElemCols; j++) {
             dst[i * kElemCols + j] =
-                static_cast<T>(src[r * str_x + (c + j) * str_y]);
+                static_cast<T>(src[r * str_x + (c + col_offset(j)) * str_y]);
           }
         }
       } else {
@@ -165,9 +176,10 @@ struct BaseMPPFrag {
       const auto c = off_y;
       MPP_PRAGMA_UNROLL
       for (short j = 0; j < kElemCols; j++) {
-        if (r < lx && (c + j) < ly) {
+        const auto coff = col_offset(j);
+        if (r < lx && (c + coff) < ly) {
           dst[i * kElemCols + j] =
-              static_cast<T>(src[r * str_x + (c + j) * str_y]);
+              static_cast<T>(src[r * str_x + (c + coff) * str_y]);
         } else {
           dst[i * kElemCols + j] = T(0);
         }
@@ -199,12 +211,13 @@ struct BaseMPPFrag {
       if constexpr (metal::is_same_v<StrY, Int<1>>) {
         MPP_PRAGMA_UNROLL
         for (short j = 0; j < kElemCols; j++) {
-          dst[r * str_x + c + j] = static_cast<U>(src[i * kElemCols + j]);
+          dst[r * str_x + c + col_offset(j)] =
+              static_cast<U>(src[i * kElemCols + j]);
         }
       } else {
         MPP_PRAGMA_UNROLL
         for (short j = 0; j < kElemCols; j++) {
-          dst[r * str_x + (c + j) * str_y] =
+          dst[r * str_x + (c + col_offset(j)) * str_y] =
               static_cast<U>(src[i * kElemCols + j]);
         }
       }
@@ -239,12 +252,13 @@ struct BaseMPPFrag {
         if constexpr (metal::is_same_v<StrY, Int<1>>) {
           MPP_PRAGMA_UNROLL
           for (short j = 0; j < kElemCols; j++) {
-            dst[r * str_x + c + j] = static_cast<U>(src[i * kElemCols + j]);
+            dst[r * str_x + c + col_offset(j)] =
+                static_cast<U>(src[i * kElemCols + j]);
           }
         } else {
           MPP_PRAGMA_UNROLL
           for (short j = 0; j < kElemCols; j++) {
-            dst[r * str_x + (c + j) * str_y] =
+            dst[r * str_x + (c + col_offset(j)) * str_y] =
                 static_cast<U>(src[i * kElemCols + j]);
           }
         }
@@ -252,15 +266,19 @@ struct BaseMPPFrag {
     }
   }
 
-  // C[16, 32] += A[16, 16] * B[16, 16]^T concatenated with B[16, 16]^T,
-  // packed as two 16x16 destination fragments laid out along N.
+  // C[16,32] += A[16,16] * [Bn0|Bn1] (Bn0/Bn1 packed along N).
+  // ct_b/ct_c slot order: A10 = (Bn0_0..7 | Bn1_0..7);
+  // A8 = (Bn0[0..3] | Bn1[0..3] | Bn0[4..7] | Bn1[4..7]).
+  // For Q@K^T (transpose_b=true), Bn0/Bn1 come from BaseMPPFragK so the
+  // per-lane geometry already matches; slot copies are identical for both
+  // transpose modes.
   template <
       typename CType,
       typename AType,
       typename BType,
       bool transpose_a = false,
       bool transpose_b = false>
-  METAL_FUNC static constexpr void mma(
+  METAL_FUNC static void mma(
       thread dtype_frag_t<CType>& Cn0,
       thread dtype_frag_t<CType>& Cn1,
       const thread dtype_frag_t<AType>& A,
@@ -293,84 +311,51 @@ struct BaseMPPFrag {
     for (short i = 0; i < kElemsPerFrag; i++) {
       ct_a[i] = A[i];
     }
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      ct_b[i] = Bn0[i];
-      ct_b[kElemsPerFrag + i] = Bn1[i];
-    }
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      ct_c[i] = Cn0[i];
-      ct_c[kElemsPerFrag + i] = Cn1[i];
-    }
 
-    gemm_op.run(ct_a, ct_b, ct_c);
+    if (IS_APPLE10) {
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < kElemsPerFrag; i++) {
+        ct_b[i] = Bn0[i];
+        ct_b[kElemsPerFrag + i] = Bn1[i];
+      }
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < kElemsPerFrag; i++) {
+        ct_c[i] = Cn0[i];
+        ct_c[kElemsPerFrag + i] = Cn1[i];
+      }
 
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      Cn0[i] = ct_c[i];
-      Cn1[i] = ct_c[kElemsPerFrag + i];
-    }
-  }
+      gemm_op.run(ct_a, ct_b, ct_c);
 
-  // Same matmul shape, but two A fragments stacked along M (32x16) and a
-  // single B fragment.
-  template <
-      typename CType,
-      typename AType,
-      typename BType,
-      bool transpose_a = false,
-      bool transpose_b = false>
-  METAL_FUNC static constexpr void mma(
-      thread dtype_frag_t<CType>& Cm0,
-      thread dtype_frag_t<CType>& Cm1,
-      const thread dtype_frag_t<AType>& Am0,
-      const thread dtype_frag_t<AType>& Am1,
-      metal::bool_constant<transpose_a>,
-      const thread dtype_frag_t<BType>& B,
-      metal::bool_constant<transpose_b>) {
-    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
-        16,
-        32,
-        16,
-        transpose_a,
-        transpose_b,
-        true,
-        mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
-    mpp::tensor_ops::matmul2d<desc, metal::execution_simdgroup> gemm_op;
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < kElemsPerFrag; i++) {
+        Cn0[i] = ct_c[i];
+        Cn1[i] = ct_c[kElemsPerFrag + i];
+      }
+    } else {
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        ct_b[i] = Bn0[i];
+        ct_b[4 + i] = Bn1[i];
+        ct_b[8 + i] = Bn0[4 + i];
+        ct_b[12 + i] = Bn1[4 + i];
+      }
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        ct_c[i] = Cn0[i];
+        ct_c[4 + i] = Cn1[i];
+        ct_c[8 + i] = Cn0[4 + i];
+        ct_c[12 + i] = Cn1[4 + i];
+      }
 
-    auto ct_a =
-        gemm_op
-            .template get_left_input_cooperative_tensor<AType, BType, CType>();
-    auto ct_b =
-        gemm_op
-            .template get_right_input_cooperative_tensor<AType, BType, CType>();
-    auto ct_c = gemm_op.template get_destination_cooperative_tensor<
-        decltype(ct_a),
-        decltype(ct_b),
-        CType>();
+      gemm_op.run(ct_a, ct_b, ct_c);
 
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      ct_a[i] = Am0[i];
-      ct_a[kElemsPerFrag + i] = Am1[i];
-    }
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      ct_b[i] = B[i];
-    }
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      ct_c[i] = Cm0[i];
-      ct_c[kElemsPerFrag + i] = Cm1[i];
-    }
-
-    gemm_op.run(ct_a, ct_b, ct_c);
-
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kElemsPerFrag; i++) {
-      Cm0[i] = ct_c[i];
-      Cm1[i] = ct_c[kElemsPerFrag + i];
+      MPP_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        Cn0[i] = ct_c[i];
+        Cn1[i] = ct_c[4 + i];
+        Cn0[4 + i] = ct_c[8 + i];
+        Cn1[4 + i] = ct_c[12 + i];
+      }
     }
   }
 
@@ -406,11 +391,101 @@ struct BaseMPPFrag {
   }
 };
 
-template <
-    typename T,
-    short kTileRows_,
-    short kTileCols_,
-    class MPPFrag_ = BaseMPPFrag>
+// Second operand of Q@K^T (transpose_b=true) on Apple8: 4x2 split-pair per
+// lane, rows {fm0, fm0+1, fm0+8, fm0+9}, cols {fn0, fn0+8}. K is read-only
+// here, so only load / load_rows are implemented. On Apple10 the regular
+// BaseMPPFrag layout already matchess
+struct BaseMPPFragK_Apple8 {
+  MPP_CONST short kFragRows = 16;
+  MPP_CONST short kFragCols = 16;
+  MPP_CONST short kElemsPerFrag = 8;
+  // Rows aren't equally spaced ({fm0, fm0+1, fm0+8, fm0+9}); kElemRowsJump
+  // is unused. kElemRows/kElemCols exist because MPPTile reads them.
+  MPP_CONST short kElemRows = 4;
+  MPP_CONST short kElemCols = 2;
+  MPP_CONST short kElemRowsJump = 1;
+
+  template <typename U>
+  using dtype_frag_t = metal::vec<U, kElemsPerFrag>;
+
+  METAL_FUNC static short2 get_coord() {
+    const ushort lane = __metal_get_thread_index_in_simdgroup(ushort());
+    const short fm0 = ((lane >> 3) & 1) * 4 + (lane & 1) * 2;
+    const short fn0 = ((lane >> 4) & 1) * 4 + ((lane >> 1) & 3);
+    return short2{fn0, fm0};
+  }
+
+  template <
+      typename T,
+      typename SrcPtrType,
+      typename StrX,
+      typename StrY,
+      typename OffX = Int<0>,
+      typename OffY = Int<0>>
+  METAL_FUNC static constexpr void load(
+      thread dtype_frag_t<T>& dst,
+      SrcPtrType src,
+      StrX str_x,
+      StrY str_y,
+      OffX off_x = {},
+      OffY off_y = {}) {
+    const short2 sc = get_coord();
+    src += sc.y * str_x + sc.x * str_y;
+    MPP_PRAGMA_UNROLL
+    for (short s = 0; s < kElemsPerFrag; s++) {
+      const short s_local = s & 3;
+      const short r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
+      const short c = off_y + 8 * (s >> 2);
+      if constexpr (metal::is_same_v<StrY, Int<1>>) {
+        dst[s] = static_cast<T>(src[r * str_x + c]);
+      } else {
+        dst[s] = static_cast<T>(src[r * str_x + c * str_y]);
+      }
+    }
+  }
+
+  template <
+      typename T,
+      typename SrcPtrType,
+      typename StrX,
+      typename StrY,
+      typename LimX,
+      typename OffX = Int<0>,
+      typename OffY = Int<0>>
+  METAL_FUNC static constexpr void load_rows(
+      thread dtype_frag_t<T>& dst,
+      SrcPtrType src,
+      StrX str_x,
+      StrY str_y,
+      LimX lim_x,
+      OffX off_x = {},
+      OffY off_y = {}) {
+    const short2 sc = get_coord();
+    src += sc.y * str_x + sc.x * str_y;
+    auto lx = lim_x - sc.y;
+    MPP_PRAGMA_UNROLL
+    for (short s = 0; s < kElemsPerFrag; s++) {
+      const short s_local = s & 3;
+      const short r = off_x + (s_local & 1) + 8 * ((s_local >> 1) & 1);
+      const short c = off_y + 8 * (s >> 2);
+      if (r < lx) {
+        if constexpr (metal::is_same_v<StrY, Int<1>>) {
+          dst[s] = static_cast<T>(src[r * str_x + c]);
+        } else {
+          dst[s] = static_cast<T>(src[r * str_x + c * str_y]);
+        }
+      } else {
+        dst[s] = T(0);
+      }
+    }
+  }
+};
+
+template <bool IS_APPLE10>
+using BaseMPPFragK =
+    metal::conditional_t<IS_APPLE10, BaseMPPFrag<true>, BaseMPPFragK_Apple8>;
+
+template <typename T, short kTileRows_, short kTileCols_, class MPPFrag_>
 struct MPPTile {
   using MPPFrag_t = MPPFrag_;
   using elem_type = T;
@@ -555,11 +630,9 @@ struct MPPTile {
   }
 };
 
-// Flash-attention prefill kernel using cooperative-tensor matmul2d.
-// Mirrors prefill_attention's contract (PrefillAttnParams + 4D
-// PrefillAttnMaskParams, last-dim contiguous Q/K/V/mask, [B, H, L, D]
-// layout) and PyTorch's upper-left causal alignment. Each threadgroup
-// covers one (Q-block, head, batch) tile.
+// Flash-attention prefill via matmul2d. Mirrors prefill_attention's contract
+// (PrefillAttnParams + 4D mask, last-dim contiguous, [B, H, L, D] layout,
+// upper-left causal). One threadgroup per (Q-block, head, batch) tile.
 template <
     typename T,
     int BQ,
@@ -569,6 +642,7 @@ template <
     int WN,
     bool HAS_MASK,
     bool DO_CAUSAL,
+    bool IS_APPLE10,
     typename MaskType = float>
 [[kernel, max_total_threads_per_threadgroup(WM* WN * 32)]] void
 prefill_attention_mpp(
@@ -638,7 +712,9 @@ prefill_attention_mpp(
       (TD & 1) == 0,
       "TD must be even: each P@V mma writes 2 N-fragments at a time.");
 
-  using otile_t = MPPTile<AccumType, TQ, TD>;
+  using QFrag_t = BaseMPPFrag<IS_APPLE10>;
+  using KFrag_t = BaseMPPFragK<IS_APPLE10>;
+  using otile_t = MPPTile<AccumType, TQ, TD, QFrag_t>;
   otile_t Otile;
   Otile.clear();
 
@@ -675,7 +751,7 @@ prefill_attention_mpp(
   for (int kb = 0; kb < kb_lim; kb++) {
     const bool is_last_k = (kb == NK_aligned);
 
-    using stile_t = MPPTile<AccumType, TQ, TK>;
+    using stile_t = MPPTile<AccumType, TQ, TK, QFrag_t>;
     stile_t Stile;
     Stile.clear();
 
@@ -686,8 +762,8 @@ prefill_attention_mpp(
       for (short ik = 0; ik < TK; ik += 2) {
         MPP_PRAGMA_UNROLL
         for (short id = 0; id < TD; id++) {
-          MPPTile<T, 1, 1> Qtile;
-          MPPTile<T, 2, 1> Ktile;
+          MPPTile<T, 1, 1, QFrag_t> Qtile;
+          MPPTile<T, 2, 1, KFrag_t> Ktile;
 
           const int Q_load_off = iq * kU * params->Q_strides[2] + id * kU;
           const int K_load_off = ik * kU * params->K_strides[2] + id * kU;
@@ -706,7 +782,7 @@ prefill_attention_mpp(
             Ktile.load(K + K_load_off, params->K_strides[2]);
           }
 
-          stile_t::MPPFrag_t::mma(
+          QFrag_t::mma(
               Stile.frag_at(iq, ik),
               Stile.frag_at(iq, ik + 1),
               Qtile.frag_at(0, 0),
@@ -737,7 +813,8 @@ prefill_attention_mpp(
             MPP_PRAGMA_UNROLL
             for (short jj = 0; jj < stile_t::kFragThrCols; jj++) {
               const auto loc = ii * stile_t::kFragThrCols + jj;
-              if ((col_pos + jj) >= kL_rem) {
+              const short c_off = QFrag_t::col_offset(jj);
+              if ((col_pos + c_off) >= kL_rem) {
                 fg[loc] = -INFINITY;
               }
             }
@@ -762,7 +839,7 @@ prefill_attention_mpp(
               for (short jj = 0; jj < stile_t::kFragThrCols; jj++) {
                 const int r =
                     base_row + iq * kU + ii * stile_t::kFragRowsJump + sm;
-                const int c = base_col + ik * kU + jj + sn;
+                const int c = base_col + ik * kU + QFrag_t::col_offset(jj) + sn;
                 const auto loc = ii * stile_t::kFragThrCols + jj;
                 if (r < c) {
                   fg[loc] = -INFINITY;
@@ -778,7 +855,7 @@ prefill_attention_mpp(
     if constexpr (HAS_MASK) {
       constexpr bool is_bool = metal::is_same_v<MaskType, bool>;
       using melem_t = typename metal::conditional_t<is_bool, bool, AccumType>;
-      using mtile_t = MPPTile<melem_t, TQ, TK>;
+      using mtile_t = MPPTile<melem_t, TQ, TK, QFrag_t>;
       using mfrag_t = typename mtile_t::frag_type;
 
       const int base_row = block_idx * BQ + tm;
@@ -865,7 +942,7 @@ prefill_attention_mpp(
         }
         MPP_PRAGMA_UNROLL
         for (short ik = 0; ik < TK; ik++) {
-          MPPTile<T, 1, 2> Vtile;
+          MPPTile<T, 1, 2, QFrag_t> Vtile;
           const int V_load_off = ik * kU * params->V_strides[2] + id * kU;
           if (!align_K && is_last_k) {
             Vtile.load_rows(
@@ -873,7 +950,7 @@ prefill_attention_mpp(
           } else {
             Vtile.load(V + V_load_off, params->V_strides[2]);
           }
-          otile_t::MPPFrag_t::mma(
+          QFrag_t::mma(
               Otile.frag_at(iq, id),
               Otile.frag_at(iq, id + 1),
               Stile.frag_at(iq, ik),
@@ -914,21 +991,41 @@ prefill_attention_mpp(
   }
 }
 
-#define instantiate_mpp_attn(                                                 \
-    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)                   \
-  instantiate_kernel(                                                         \
-      "prefill_attention_mpp_" #tname "_bq" #bq "_bk" #bk "_bd" #bd "_wm" #wm \
-      "_wn" #wn "_hm" #hm "_dc" #dc "_mask" #mname,                           \
-      prefill_attention_mpp,                                                  \
-      dtype,                                                                  \
-      bq,                                                                     \
-      bk,                                                                     \
-      bd,                                                                     \
-      wm,                                                                     \
-      wn,                                                                     \
-      hm,                                                                     \
-      dc,                                                                     \
+#define instantiate_mpp_attn_arch(                                        \
+    arch_suffix,                                                          \
+    is_a10,                                                               \
+    tname,                                                                \
+    dtype,                                                                \
+    bq,                                                                   \
+    bk,                                                                   \
+    bd,                                                                   \
+    wm,                                                                   \
+    wn,                                                                   \
+    hm,                                                                   \
+    dc,                                                                   \
+    mname,                                                                \
+    mtype)                                                                \
+  instantiate_kernel(                                                     \
+      "prefill_attention_mpp_" arch_suffix "_" #tname "_bq" #bq "_bk" #bk \
+      "_bd" #bd "_wm" #wm "_wn" #wn "_hm" #hm "_dc" #dc "_mask" #mname,   \
+      prefill_attention_mpp,                                              \
+      dtype,                                                              \
+      bq,                                                                 \
+      bk,                                                                 \
+      bd,                                                                 \
+      wm,                                                                 \
+      wn,                                                                 \
+      hm,                                                                 \
+      dc,                                                                 \
+      is_a10,                                                             \
       mtype)
+
+#define instantiate_mpp_attn(                                              \
+    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)                \
+  instantiate_mpp_attn_arch(                                               \
+      "a10", true, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype) \
+      instantiate_mpp_attn_arch(                                           \
+          "a9", false, tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)
 
 #define instantiate_mpp_attn_shapes(iname, itype, hm, dc, mname, mtype)       \
   instantiate_mpp_attn(iname, itype, 64, 32, 256, 4, 1, hm, dc, mname, mtype) \
