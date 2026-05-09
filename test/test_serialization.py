@@ -64,7 +64,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._import_utils import import_dill
 from pickle import UnpicklingError
-from torch._dynamo.utils import warn_once_cache
 
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
