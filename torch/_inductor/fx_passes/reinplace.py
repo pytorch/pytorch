@@ -561,6 +561,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return all(can_inplace(node, arg) for arg in mutated_args)
 
     def log_inplace_results(
+        old_node_name,
         node_name,
         old_tensors_to_clone,
         tensors_to_clone,
@@ -590,12 +591,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 missed_bytes += bytes(node)
 
         log.info(
-            "For node %s, attempted to reinplace %s. We were unable to reinplace %s; "
-            "%s (if non-empty) are possible missed reinplacing opportunities that may be bad for "
-            "memory usage and performance. Total size of missed opportunities with static shapes is"
-            " : %s bytes.",
+            "Reinplace for %s (wrapped by %s): candidates=%s, successfully reinplaced=%s, "
+            "remain clones=%s, missed opportunities=%s, missed static bytes=%s.",
+            old_node_name,
             node_name,
             old_tensors_to_clone,
+            [
+                tensor_idx
+                for tensor_idx in old_tensors_to_clone
+                if tensor_idx not in tensors_to_clone
+            ],
             tensors_to_clone,
             missed_args,
             missed_bytes,
@@ -607,7 +612,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger
+        old_tensors_to_clone, kwargs, node_name, old_node_name, trigger
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
@@ -669,6 +674,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 tensors_to_clone.append(arg)
 
         log_inplace_results(
+            old_node_name,
             node_name,
             old_tensors_to_clone,
             tensors_to_clone,
@@ -705,7 +711,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
                     bases_to_clone,
                     base_tensors_dct,
-                    node.target,
+                    node.name,
+                    _mutable_op._name,
                     ReInplaceTrigger.AUTO_FUNC_V2,
                 )
                 # Stash the metadata. There is a pass later on where we decompose
@@ -724,6 +731,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 tensors_to_clone,
                 node.kwargs,
+                node.name,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V1,
             )
@@ -892,6 +900,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
+                node.name,
                 kernel_name,
                 ReInplaceTrigger.TRITON_OPS,
             )

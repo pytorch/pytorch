@@ -97,6 +97,12 @@
   desc: |
           This tag indicates that an operator performs a reduction operation, computing aggregate values
           (sum, mean, max, min, etc.) across one or more dimensions of the input tensor(s).
+- tag: inplace
+  desc: |
+          This tag indicates that an operator has inplace semantics: it mutates
+          its first positional argument (self) and returns it. For custom
+          operators, self must be a plain Tensor. Some native operators have
+          Tensor[] self with no return, but this is subject to change.
 - tag: out
   desc: |
           This tag indicates that an operator has "out" semantics: its mutable

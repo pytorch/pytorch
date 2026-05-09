@@ -66,9 +66,11 @@ from ..scheduler import (
     SchedulerNode,
 )
 from ..shape_propagation import get_broadcasted_shape
+from ..stream_utils import get_raw_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
+    device_supports_fp64,
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -831,6 +833,17 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # pyrefly: ignore [missing-attribute]
         return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
 
+    @staticmethod
+    def _get_scalar_float_type() -> str:
+        """Return the Triton float type for scalar shape math.
+
+        Uses tl.float64 by default but falls back to tl.float32 on devices
+        that lack fp64 support (e.g. Intel Arc consumer GPUs).
+        """
+        if not device_supports_fp64(V.graph.current_device):
+            return "tl.float32"
+        return "tl.float64"
+
     def _print_Float(self, expr: sympy.Expr) -> str:
         if expr.is_integer:
             # sympy considers 0.0 to be integer, but triton doesn't.
@@ -840,14 +853,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
-            ret = f"tl.full([], {expr}, tl.float64)"
+            float_type = self._get_scalar_float_type()
+            ret = f"tl.full([], {expr}, {float_type})"
         return ret
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         # pyrefly: ignore [bad-argument-type]
         s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
-        return f"{s}.to(tl.float64)"
+        float_type = self._get_scalar_float_type()
+        return f"{s}.to({float_type})"
 
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
         quot, div = expr.args
@@ -911,25 +926,27 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # pyrefly: ignore [missing-attribute]
         exp = self._print(expr.args[1])
         # libdevice.pow requires both arguments to have the same type.
-        # Always cast to float64 for consistency. This is scalar shape math,
-        # not tensor ops, so the performance impact is negligible.
-        return f"libdevice.pow(({base}).to(tl.float64), ({exp}).to(tl.float64))"
+        # Cast to float64 for precision. Falls back to float32 on devices
+        # without fp64 support. This is scalar shape math, not tensor ops.
+        float_type = self._get_scalar_float_type()
+        return f"libdevice.pow(({base}).to({float_type}), ({exp}).to({float_type}))"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        float_type = self._get_scalar_float_type()
         if expr.args[0].is_Integer:
-            base = f"tl.full([], {float(expr.args[0])}, tl.float64)"
+            base = f"tl.full([], {float(expr.args[0])}, {float_type})"
         else:
             # pyrefly: ignore [missing-attribute]
-            base = f"({self._print(expr.args[0])}).to(tl.float64)"
+            base = f"({self._print(expr.args[0])}).to({float_type})"
         exp_val = expr.args[1]
         if exp_val.is_Integer:
-            exp = f"tl.full([], {float(exp_val)}, tl.float64)"
+            exp = f"tl.full([], {float(exp_val)}, {float_type})"
         else:
             # pyrefly: ignore [missing-attribute]
-            exp = f"({self._print(exp_val)}).to(tl.float64)"
+            exp = f"({self._print(exp_val)}).to({float_type})"
         # libdevice.pow requires both arguments to have the same type.
-        # Always cast to float64 for consistency. This is scalar shape math,
-        # not tensor ops, so the performance impact is negligible.
+        # Cast to float64 for precision. Falls back to float32 on devices
+        # without fp64 support. This is scalar shape math, not tensor ops.
         return f"libdevice.pow({base}, {exp})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
@@ -1970,6 +1987,12 @@ class TritonOverrides(OpOverrides):
                 if low_precision_fp(result_dtype) or any_needs_upcast
                 else torch.float64
             )
+        if pow_dtype == torch.float64 and not device_supports_fp64(
+            V.graph.current_device
+        ):
+            pow_dtype = torch.float32
+            if result_dtype == torch.float64:
+                result_dtype = torch.float32
 
         cast_a = cls._cast_libdevice_arg(a, pow_dtype)
         cast_b = cls._cast_libdevice_arg(b, pow_dtype)
@@ -3964,7 +3987,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         tma_compatibility_checker = None
         if mode is None or mode == "tma":
-            force = mode == "tma"
+            force = mode == "tma" or getattr(self, "tma_store", False)
             tma_compatibility_checker = self.tma_compatibility_checker_cls(
                 self,
                 dtype,
@@ -5465,7 +5488,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -5582,6 +5605,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "autotune_remote_cache": config.autotune_remote_cache,
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
+            "incremental_autotune": config.incremental_autotune,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
@@ -5591,6 +5615,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "batch_invariant": config.batch_invariant,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
+            "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -5620,6 +5645,101 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 config.coordinate_descent_check_all_directions
             )
         return inductor_meta
+
+    def inductor_meta_per_kernel(self) -> dict[str, Any]:
+        """
+        Used by both standalone codegen_kernel() and ComboKernel.combo_grid_meta()
+        (which calls this on each sub_kernel).
+        """
+        out: dict[str, Any] = {
+            "no_x_dim": self.no_x_dim,
+            "atomic_add_found": self.atomic_add_found,
+            "num_load": self.num_load,
+            "num_store": self.num_store,
+            "num_reduction": self.num_reduction,
+            # Triton will not accept an OrderedSet for autotune_hints
+            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+        }
+        if self.mix_order_reduction:
+            out["RSPLIT_SIZE"] = self.rsplit_size
+        if config.deterministic or config.test_configs.force_filter_reduction_configs:
+            out["has_loadstore_with_contiguous_rdim"] = (
+                self.has_load_with_contiguous_rdim
+                or self.has_store_with_contiguous_rdim
+            )
+        if self.tma_min_block_sizes:
+            out["tma_min_block_sizes"] = self.tma_min_block_sizes
+        if self.tiling_scores:
+            out["tiling_scores"] = self.tiling_scores
+        if self.cooperative_reduction:
+            out["persistent_reduction"] = self.persistent_reduction
+        if self.add_persistent_rblock:
+            out["add_persistent_rblock"] = True
+        if (
+            config.benchmark_kernel
+            or config.profile_bandwidth
+            or config.benchmark_combo_kernel
+        ):
+            num_gb = self.estimate_kernel_num_bytes() / 1e9
+            if num_gb is not None:
+                out["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel or config.benchmark_combo_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                out["kernel_flop"] = flops
+        return out
+
+    @functools.cached_property
+    def add_persistent_rblock(self) -> bool:
+        # Bail on 3d tiling, which has more complicated coalesce patterns
+        looped_red = self.features.is_reduction() and not self.persistent_reduction
+        tiling_scores = self.tiling_scores
+        two_d_red = len(self.tiling) == 2
+        if looped_red and two_d_red:
+            memory_stats = self.features.memory_stats(self.tiling)
+            dim_stats = memory_stats.persistent.memory.dim[0]
+            mem_ops_per_thread = dim_stats.count_per_thread
+
+            if (
+                tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
+                # reads coalesced by xblock
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+            else:
+                contiguous_red = (
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
+                )
+
+            looped_mem = memory_stats.looped.memory.bytes
+            persistent_mem = memory_stats.persistent.memory.bytes
+            # check that we save significant memory by doing persistent
+            saved_bytes_ratio = V.graph.sizevars.optimization_hint(looped_mem) / max(
+                V.graph.sizevars.optimization_hint(persistent_mem),
+                1,
+            )
+
+            # TODO - rnumel should be reasonably close to power of 2
+            if (
+                # significant memory bandwidth savings
+                saved_bytes_ratio >= 1.3
+                and contiguous_red
+                # TODO - need more detailed register analysis
+                and V.graph.sizevars.statically_known_leq(
+                    self.features.reduction_numel, 32768
+                )
+                # We will already generate a persistent config in this case
+                and V.graph.sizevars.statically_known_gt(
+                    self.features.reduction_numel, 2048
+                )
+                and mem_ops_per_thread <= 10
+            ):
+                return True
+        return False
 
     def codegen_kernel(self, name=None) -> str:
         """
@@ -5758,95 +5878,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
-            # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
-            "no_x_dim": self.no_x_dim,
-            "atomic_add_found": self.atomic_add_found,
-            "num_load": self.num_load,
-            "num_store": self.num_store,
-            "num_reduction": self.num_reduction,
+            **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
-
-        if self.mix_order_reduction:
-            inductor_meta["RSPLIT_SIZE"] = self.rsplit_size
-
-        if config.deterministic or config.test_configs.force_filter_reduction_configs:
-            inductor_meta["has_loadstore_with_contiguous_rdim"] = (
-                self.has_load_with_contiguous_rdim
-                or self.has_store_with_contiguous_rdim
-            )
-
-        # Bail on 3d tiling, which has more complicated coalesce patterns
-        looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
-        tiling_scores = self.tiling_scores
-        two_d_red = len(self.tiling) == 2
-        if looped_red and two_d_red:
-            memory_stats = self.features.memory_stats(self.tiling)
-            dim_stats = memory_stats.persistent.memory.dim[0]
-            mem_ops_per_thread = dim_stats.count_per_thread
-
-            if (
-                tiling_scores is not None
-                and "x" in tiling_scores
-                and "r0_" in tiling_scores
-            ):
-                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
-                # reads coalesced by xblock
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
-            else:
-                contiguous_red = (
-                    self.features.get_reduction_hint(tiling_scores)
-                    == ReductionHint.INNER
-                )
-
-            looped_mem = memory_stats.looped.memory.bytes
-            persistent_mem = memory_stats.persistent.memory.bytes
-            # check that we save significant memory by doing persistent
-            saved_bytes_ratio = V.graph.sizevars.optimization_hint(looped_mem) / max(
-                V.graph.sizevars.optimization_hint(persistent_mem),
-                1,
-            )
-
-            # TODO - rnumel should be reasonably close to power of 2
-            if (
-                # significant memory bandwidth savings
-                saved_bytes_ratio >= 1.3
-                and contiguous_red
-                # TODO - need more detailed register analysis
-                and V.graph.sizevars.statically_known_leq(
-                    self.features.reduction_numel, 32768
-                )
-                # We will already generate a persistent config in this case
-                and V.graph.sizevars.statically_known_gt(
-                    self.features.reduction_numel, 2048
-                )
-                and mem_ops_per_thread <= 10
-            ):
-                inductor_meta["add_persistent_rblock"] = True
-
-        if self.tiling_scores:
-            inductor_meta["tiling_scores"] = self.tiling_scores
-
-        if self.tma_min_block_sizes:
-            inductor_meta["tma_min_block_sizes"] = self.tma_min_block_sizes
-
-        if self.cooperative_reduction:
-            inductor_meta["persistent_reduction"] = self.persistent_reduction
-
-        num_gb = None
-        if config.benchmark_kernel or config.profile_bandwidth:
-            num_gb = self.estimate_kernel_num_bytes() / 1e9
-            if num_gb is not None:
-                inductor_meta["kernel_num_gb"] = num_gb
-        if config.benchmark_kernel:
-            flops = self.estimate_flops()
-            if flops is not None:
-                inductor_meta["kernel_flop"] = flops
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
@@ -5935,7 +5972,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb))
+            code.splice(
+                self.codegen_kernel_benchmark(
+                    inductor_meta.get("kernel_num_gb")  # type: ignore[arg-type]
+                )
+            )
 
         return code.getvalue()
 
@@ -6931,6 +6972,8 @@ class TritonScheduling(SIMDScheduling):
             total_ms += ms
             total_clone_ms += ms_clone
             file_list.append(mod.__file__)
+            args = call = wrapped_jit_function = None
+            torch.accelerator.empty_cache()
         V.graph.removed_buffers = removed_buffers_orig
         V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list

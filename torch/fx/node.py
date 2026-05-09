@@ -507,7 +507,7 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def insert_arg(self, idx: int, arg: Argument) -> None:
         """
-        Insert an positional argument to the argument list with given index.
+        Insert a positional argument to the argument list with given index.
 
         Args:
 
@@ -758,6 +758,10 @@ class Node(_NodeBase):
             if self.graph.owning_module is None:
                 raise AssertionError(
                     "self.graph.owning_module not set for purity check"
+                )
+            if not isinstance(self.target, str):
+                raise AssertionError(
+                    f"Expected str target for call_module, got {type(self.target)}"
                 )
             target_mod = self.graph.owning_module.get_submodule(self.target)
             if target_mod is None:
