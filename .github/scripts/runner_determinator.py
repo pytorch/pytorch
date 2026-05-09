@@ -42,13 +42,13 @@ Example config:
         all_branches: false
         default: true
       arc:
-        rollout_perc: 0
+        rollout_perc: 50
         all_branches: true
         default: false
-        # Comma-separated allowlist of github.workflow names. When set, the
-        # experiment runs only for these workflows; all others are opted out
-        # (rollout_perc is ignored). Use the literal "ALL" to enable every
-        # workflow. Leave empty to use rollout_perc instead.
+        # Comma-separated allowlist of github.workflow names that are
+        # eligible for this experiment. rollout_perc is then applied within
+        # that set; non-listed workflows are 0%. Use the literal "ALL" (or
+        # leave empty) to make every workflow eligible.
         workflows: pull,trunk
     ---
 
@@ -116,10 +116,10 @@ class Experiment(NamedTuple):
     default: bool = (
         True  # If True, the experiment is enabled by default for all queries
     )
-    # Per-experiment workflow allowlist. Comma-separated github.workflow
-    # names; when set, the experiment runs only for these workflows and all
-    # others are opted out (rollout_perc is ignored). The literal "ALL" enables
-    # every workflow. Empty falls back to rollout_perc. Applied after user
+    # Per-experiment workflow eligibility. Comma-separated github.workflow
+    # names; when non-empty, only listed workflows are eligible for the
+    # experiment and rollout_perc is applied within that set. The literal
+    # "ALL" (or empty) makes every workflow eligible. Applied after user
     # opt-in/out.
     workflows: str = ""
 
@@ -622,28 +622,22 @@ def get_runner_prefix(
                 )
 
         else:
-            # Per-experiment workflow allowlist: when set, only listed
-            # workflows run the experiment; all others are opted out and
-            # rollout_perc is ignored. The literal "ALL" enables every
-            # workflow. When empty, fall back to rollout_perc.
+            # workflows: gates which workflows are eligible. rollout_perc is
+            # applied within that gate; non-listed workflows are 0%.
+            # The literal "ALL" (or empty) makes every workflow eligible.
             workflow_list = parse_workflow_list(experiment_settings.workflows)
-            if workflow_list:
-                if WORKFLOW_ALLOWLIST_ALL in workflow_list:
-                    log.info(f"All workflows enabled for experiment {experiment_name}.")
-                    enabled = True
-                elif workflow_name and workflow_name in workflow_list:
-                    log.info(
-                        f"Workflow '{workflow_name}' is in the {experiment_name} "
-                        f"allowlist. Enabling."
-                    )
-                    enabled = True
-                else:
-                    log.info(
-                        f"Workflow '{workflow_name}' is not in the {experiment_name} "
-                        f"allowlist. Skipping."
-                    )
-                    continue
-            elif experiment_settings.rollout_perc:
+            eligible = (
+                not workflow_list
+                or WORKFLOW_ALLOWLIST_ALL in workflow_list
+                or (workflow_name and workflow_name in workflow_list)
+            )
+            if not eligible:
+                log.info(
+                    f"Workflow '{workflow_name}' is not eligible for experiment "
+                    f"{experiment_name}. Skipping."
+                )
+                continue
+            if experiment_settings.rollout_perc:
                 if random.uniform(0, 100) <= experiment_settings.rollout_perc:
                     log.info(
                         f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."

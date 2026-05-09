@@ -934,11 +934,15 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_workflow_in_allowlist_enables_experiment(self) -> None:
+    @patch("random.uniform", return_value=10)
+    def test_listed_workflow_uses_rollout_perc_enabled(
+        self, mock_uniform: Mock
+    ) -> None:
+        """Listed workflow with 50% rollout, random=10 -> enabled."""
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 0
+                rollout_perc: 50
                 workflows: pull,trunk
         ---
 
@@ -951,25 +955,32 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("lf.", result.prefix)
 
-    def test_workflows_all_enables_every_workflow(self) -> None:
+    @patch("random.uniform", return_value=80)
+    def test_listed_workflow_uses_rollout_perc_disabled(
+        self, mock_uniform: Mock
+    ) -> None:
+        """Listed workflow with 50% rollout, random=80 -> disabled."""
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 0
-                workflows: ALL
+                rollout_perc: 50
+                workflows: pull,trunk
         ---
 
         Users:
         @User1,otherExp
 
         """
-        for wf in ("pull", "trunk", "periodic", "anything-else"):
-            result = rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name=wf
-            )
-            self.assertEqual("lf.", result.prefix, f"failed for workflow {wf}")
+        result = rd.get_runner_prefix(
+            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
+        )
+        self.assertEqual("", result.prefix)
 
-    def test_workflow_unlisted_skipped_even_with_rollout_perc(self) -> None:
+    @patch("random.uniform", return_value=10)
+    def test_unlisted_workflow_skipped_regardless_of_rollout_perc(
+        self, mock_uniform: Mock
+    ) -> None:
+        """Unlisted workflow is 0% even when rollout_perc=100."""
         settings_text = """
         experiments:
             lf:
@@ -986,10 +997,33 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         )
         self.assertEqual("", result.prefix)
 
-    @patch("random.uniform", return_value=10)
-    def test_workflows_empty_falls_back_to_rollout_perc(
+    @patch("random.uniform", return_value=70)
+    def test_workflows_all_applies_rollout_perc_to_every_workflow(
         self, mock_uniform: Mock
     ) -> None:
+        """workflows: ALL with 80% rollout, random=70 -> enabled for every workflow."""
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 80
+                workflows: ALL
+        ---
+
+        Users:
+        @User1,otherExp
+
+        """
+        for wf in ("pull", "trunk", "periodic", "anything-else"):
+            result = rd.get_runner_prefix(
+                settings_text, ["User1"], USER_BRANCH, workflow_name=wf
+            )
+            self.assertEqual("lf.", result.prefix, f"failed for workflow {wf}")
+
+    @patch("random.uniform", return_value=10)
+    def test_workflows_empty_applies_rollout_perc_to_every_workflow(
+        self, mock_uniform: Mock
+    ) -> None:
+        """Empty workflows behaves like ALL: rollout_perc applies to every workflow."""
         settings_text = """
         experiments:
             lf:
@@ -1006,10 +1040,11 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("lf.", result.prefix)
 
     def test_user_opt_in_bypasses_workflow_allowlist(self) -> None:
+        """User opt-in (100%) wins even when workflow is unlisted."""
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 0
+                rollout_perc: 100
                 workflows: trunk
         ---
 
@@ -1026,7 +1061,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         settings_text = """
         experiments:
             lf:
-                rollout_perc: 0
+                rollout_perc: 100
                 workflows: pull
         ---
 
