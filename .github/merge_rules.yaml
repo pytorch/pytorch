@@ -2,6 +2,7 @@
   patterns:
   - .ci/caffe2/*
   - .ci/onnx/*
+  - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - benchmarks/dynamo/**
   - docs/source/onnx.rst
@@ -41,7 +42,6 @@
   patterns:
   - .github/**
   - .ci/**
-  - "-.ci/docker/**"
   - scripts/**
   - tools/**
   approved_by:
@@ -58,6 +58,7 @@
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .github/ci_commit_pins/vllm.txt
+  - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:
@@ -76,6 +77,16 @@
   - Lint
   - pull
   - slow
+
+- name: OSS CI /pytorchbot / Executorch
+  patterns:
+  - .ci/docker/ci_commit_pins/executorch.txt
+  approved_by:
+  - pytorchbot
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -538,7 +549,6 @@
 - name: Metamates
   patterns:
   - '*'
-  - "-.ci/docker/**"
   approved_by:
   - 8Keep
   - aditvenk
@@ -639,7 +649,6 @@
 - name: Core Reviewers
   patterns:
   - '*'
-  - "-.ci/docker/**"
   approved_by:
   - mruberry
   - lezcano
