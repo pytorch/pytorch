@@ -1374,10 +1374,11 @@ class TensorVariable(VariableTracker):
             # Unwrap dict-like wrappers (e.g. `OrderedDictVariable`,
             # `DefaultDictVariable`, `MappingProxyVariable`) to expose the
             # underlying `ConstDictVariable` storage.
-            if (
-                isinstance(inputs, variables.UserDefinedDictVariable)
-                and inputs._base_vt is not None
-            ):
+            if isinstance(inputs, variables.UserDefinedDictVariable):
+                if inputs._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None"
+                    )
                 inputs = inputs._base_vt
             elif isinstance(inputs, variables.MappingProxyVariable):
                 inputs = inputs.dv_dict

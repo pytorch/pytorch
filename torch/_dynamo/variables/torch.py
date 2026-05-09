@@ -2811,13 +2811,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                # `ConstDictVariable.reconstruct()` special-cases
-                # `user_cls is OrderedDict` to emit `collections.OrderedDict(...)`
-                # bytecode, so the post-reconstruction Python object has the
-                # correct runtime type. Wrapping in `OrderedDictVariable` here
-                # would be more faithful to `VariableBuilder._wrap`'s shape but
-                # requires a source for the `OrderedDict` class to reconstruct
-                # the sourceless wrapper, which is not available at this point.
+                # `ConstDictVariable.reconstruct()` already special-cases
+                # `OrderedDict` to emit the correct bytecode. Wrapping in
+                # `OrderedDictVariable` requires a class source we lack here.
                 return ConstDictVariable(items, result_cls)
             return result
 
