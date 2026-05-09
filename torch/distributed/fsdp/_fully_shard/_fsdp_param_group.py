@@ -615,7 +615,7 @@ class FSDPParamGroup:
                     and fsdp_param.unsharded_param.requires_grad
                 ):
                     fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(torch.zeros_like(fsdp_param.unsharded_param))
+                    unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
             if self.reshard_after_backward:
                 self.reshard()
         # Wait on prior module's RS states (assumes backward fires groups
