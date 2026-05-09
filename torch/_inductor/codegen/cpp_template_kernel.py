@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -186,7 +186,7 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    def maybe_codegen_profile(self, prefix_kernel_name: Optional[str] = None) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
