@@ -449,6 +449,9 @@ class SubprocMain:
         if self.pool is not None:
             if nprocs <= self._current_nprocs:
                 return
+            # Scale-up: tear down the existing pool and rebuild with more
+            # workers.  This is only reached via explicit WAKEUP before work is
+            # submitted, so there should be no in-flight jobs.
             self._quiesce()
 
         self._current_nprocs = nprocs

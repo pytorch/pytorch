@@ -1369,17 +1369,19 @@ quiesce_async_compile_time: int = Config(
 # AsyncCompile.wait) instead of relying solely on the idle timer.  This keeps
 # workers alive only during active compilation, greatly reducing memory pressure
 # between compiles.  See also quiesce_async_compile_pool (idle-timer quiesce).
-eager_compile_pool_quiesce: bool = Config(
-    env_name_force="TORCHINDUCTOR_EAGER_COMPILE_POOL_QUIESCE",
+quiesce_async_compile_eager: bool = Config(
+    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_EAGER",
     default=True,
 )
 
 # Minimum number of compile workers to keep alive between compiles. After an
 # eager quiesce the pool is immediately restarted with this many workers so the
-# next compile gets a warm start. 0 means fully quiesce.
+# next compile gets a warm start.  0 means fully quiesce.  During active
+# compilation the memory-aware scaler always uses at least 1 worker regardless
+# of this setting.
 compile_threads_min: int = Config(
     env_name_force="TORCHINDUCTOR_COMPILE_THREADS_MIN",
-    default=1,
+    default=0,
 )
 
 # Available-memory fraction below which we start reducing compile workers.

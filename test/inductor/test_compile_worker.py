@@ -315,6 +315,12 @@ class TestMemoryAwareThreads(TestCase):
         with self._mock_meminfo(100000, 1000):
             self.assertEqual(_get_compile_threads_for_memory(32), 32)
 
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 0)
+    def test_threads_min_zero_clamps_to_one(self):
+        with self._mock_meminfo(100000, 10000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 1)
+
 
 class TestEagerQuiesce(TestCase):
     def setUp(self):
@@ -330,7 +336,7 @@ class TestEagerQuiesce(TestCase):
         super().tearDown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    @config.patch("eager_compile_pool_quiesce", True)
+    @config.patch("quiesce_async_compile_eager", True)
     @config.patch("compile_threads_min", 0)
     @config.patch("compile_threads", 4)
     @config.patch("worker_start_method", "subprocess")
@@ -345,7 +351,7 @@ class TestEagerQuiesce(TestCase):
         self.assertTrue(AsyncCompile._pool_needs_wakeup)
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    @config.patch("eager_compile_pool_quiesce", True)
+    @config.patch("quiesce_async_compile_eager", True)
     @config.patch("compile_threads_min", 2)
     @config.patch("compile_threads", 4)
     @config.patch("worker_start_method", "subprocess")
@@ -363,7 +369,7 @@ class TestEagerQuiesce(TestCase):
         self.assertEqual(b.result(), 7)
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    @config.patch("eager_compile_pool_quiesce", True)
+    @config.patch("quiesce_async_compile_eager", True)
     @config.patch("compile_threads_min", 1)
     @config.patch("compile_threads", 4)
     @config.patch("worker_start_method", "subprocess")
@@ -380,7 +386,7 @@ class TestEagerQuiesce(TestCase):
         self.assertTrue(result)
         self.assertFalse(AsyncCompile._pool_needs_wakeup)
 
-    @config.patch("eager_compile_pool_quiesce", True)
+    @config.patch("quiesce_async_compile_eager", True)
     @config.patch("compile_threads", 4)
     def test_eager_quiesce_skips_uncreated_pool(self):
         AsyncCompile.process_pool.cache_clear()

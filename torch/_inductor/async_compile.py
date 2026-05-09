@@ -386,7 +386,7 @@ class AsyncCompile:
         CPU memory to avoid OOM during compilation.
 
         Related: quiesce_async_compile_pool controls the idle timer;
-        eager_compile_pool_quiesce controls immediate quiesce after wait().
+        quiesce_async_compile_eager controls immediate quiesce after wait().
         """
         if get_compile_threads() <= 1:
             return
@@ -784,7 +784,7 @@ class AsyncCompile:
 
     @staticmethod
     def _eager_quiesce() -> None:
-        if not config.eager_compile_pool_quiesce:
+        if not config.quiesce_async_compile_eager:
             return
         if not AsyncCompile.process_pool.cache_info().currsize:
             return
