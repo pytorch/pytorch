@@ -1078,7 +1078,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha,
-                                            std::optional<c10::ScalarType> scalar_arg_type) {
+                                            std::optional<c10::ScalarType> scalar_arg_type,
+                                            std::optional<uint32_t> ilp_threshold) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1092,7 +1093,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
     }
     return;
   }
@@ -1152,14 +1153,29 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // avoids a per-element runtime switch) than dispatching the cast kernel.
   // Promote the scalar operand to the common dtype here and fall through to
   // the non-cast scalar kernel; we re-bind the converted CPU scalar after
-  // bind_iter_tensors below. This is only safe when the tensor operand
-  // already matches the common dtype; otherwise the non-cast scalar kernel
-  // (which expects matching dtypes) wouldn't exist (e.g. float tensor times
-  // complex scalar promotes to complex, but the tensor stays float).
+  // bind_iter_tensors below.
+  //
+  // We only take the shortcut when (a) the tensor operand already matches
+  // the common dtype (otherwise the non-cast scalar kernel that expects
+  // matching dtypes wouldn't exist; e.g. float tensor times complex scalar
+  // promotes to complex but the tensor stays float), and (b) the host-side
+  // .to(common) is provably lossless. The conservative case is integer
+  // scalar with float common: any int representable in the kernel's
+  // op_math_t (which is float for float common) survives the conversion,
+  // and since the GPU cast kernel would also widen to op_math_t = float
+  // before computing, the result is bit-identical. Integer-to-half /
+  // bfloat would also be lossless for small ints but requires inspecting
+  // the scalar value; leave that for later. Float scalar to a narrower
+  // float common (e.g. half) would lose precision because the cast kernel
+  // would have read the scalar at full float precision via op_math_t,
+  // producing different numerics from the host-rounded version.
   if (use_scalar_kernel && cast_needed) {
     const auto common = iter.common_dtype();
     const auto& tensor_dtype = scalar_on_lhs ? other.scalar_type() : input.scalar_type();
-    if (tensor_dtype == common) {
+    const auto& scalar_dtype = scalar_on_lhs ? input.scalar_type() : other.scalar_type();
+    const bool safe_host_promote =
+        tensor_dtype == common && c10::isIntegralType(scalar_dtype, /*includeBool=*/true) && common == kFloat;
+    if (safe_host_promote) {
       if (scalar_on_lhs) {
         input = input.to(common);
       } else {
@@ -1176,16 +1192,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
   // elements. The kernel is applicable whenever the launch shape matches
   // binary_dense (contiguous, no cast / broadcast / scalar / alpha); it is
-  // registered for every dtype REGISTER_BINARY_OP touches. The default-on
-  // heuristic narrows that to floating-point output past a 256K crossover
-  // (see exec_unary_kernel for the rationale); PYTORCH_BINARY_FORCE_FLAVOR
+  // registered for every dtype REGISTER_BINARY_OP touches. The crossover
+  // (`ilp_threshold`) is owned by the caller: floating-point output defaults
+  // to 256K (see exec_unary_kernel for the rationale), non-floating to
+  // UINT32_MAX (i.e. off by default), and ops with a different
+  // memory-bandwidth profile can override. PYTORCH_BINARY_FORCE_FLAVOR
   // overrides whenever the kernel is applicable, regardless of dtype.
-  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18;
   const bool ilp_applicable =
       !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed && !alpha.has_value();
-  const bool ilp_default = ilp_applicable && c10::isFloatingType(out.scalar_type()) &&
-      static_cast<uint32_t>(iter.numel()) >= ILP_DISPATCH_THRESHOLD;
-  bool dense_ilp = ilp_default;
+  const uint32_t threshold = ilp_threshold.value_or(
+      c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
+  bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
   if (ilp_applicable) {
     if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
       if (force.value() == "ilp")
@@ -1196,10 +1213,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   }
 
   // Cast kernel variants are registered as `..._cast_{common_dtype}` (the
-  // post-promotion input type that the kernel template was instantiated
-  // with). For ops where output type matches the input type this happens
-  // to equal `out.scalar_type()`, but for ops with a different output dtype
-  // (e.g. comparison ops returning bool) we must use the common dtype.
+  // post-promotion input type the kernel template was instantiated with).
+  // For arithmetic ops the output dtype equals the common dtype so this
+  // happens to match `out.scalar_type()`, but the iterator layer should
+  // stay generic: future ops with a different output dtype (e.g. comparison
+  // returning bool) need the common dtype here.
   const auto cast_suffix_type = scalarToMetalTypeString(iter.common_dtype());
   std::string kernel_name;
   if (use_scalar_kernel) {
@@ -1230,7 +1248,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
-    const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" : "dense") : "strided";
+    // The ILP suffix carries the unroll width (e.g. dense_ilp4) so future
+    // variants (ilp8, ...) can coexist; see C10_METAL_ILP_PER_THREAD_STR.
+    const auto suffix =
+        iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense") : "strided";
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,

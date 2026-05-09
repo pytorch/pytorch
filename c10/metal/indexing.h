@@ -386,11 +386,22 @@ kernel void binary_dense(
   out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(other[tid])));
 }
 
-// ILP variant of binary_dense: each thread processes ILP_PER_THREAD elements.
+static_assert(
+    ILP_PER_THREAD == 4,
+    "C10_METAL_ILP_PER_THREAD_STR must match ILP_PER_THREAD");
+
+// ILP variant of binary_dense: each thread processes ILP elements.
 // Mirrors unary_dense; selected on the host when both inputs and the output
 // are contiguous, share dtype (no cast), and the iterator has neither a scalar
-// nor a broadcast operand. See ILP_DISPATCH_THRESHOLD in OperationUtils.mm.
-template <typename T, typename F, typename om_t = opmath_t<T>>
+// nor a broadcast operand. The unroll width defaults to ILP_PER_THREAD; the
+// host-side kernel name encodes the value (e.g. `..._dense_ilp4_...`) so
+// future variants (ilp8, etc.) can coexist. See exec_binary_kernel for the
+// dispatch threshold.
+template <
+    typename T,
+    typename F,
+    typename om_t = opmath_t<T>,
+    unsigned ILP = ILP_PER_THREAD>
 kernel void binary_dense_ilp(
     device result_of<F, T, T>* out [[buffer(0)]],
     constant T* input [[buffer(1)]],
@@ -399,22 +410,22 @@ kernel void binary_dense_ilp(
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
-  uint base = index * ILP_PER_THREAD;
-  if (base + ILP_PER_THREAD <= numel) {
-    array<T, ILP_PER_THREAD> tmp_a;
-    array<T, ILP_PER_THREAD> tmp_b;
-    array<res_t, ILP_PER_THREAD> tmp_out;
+  uint base = index * ILP;
+  if (base + ILP <= numel) {
+    array<T, ILP> tmp_a;
+    array<T, ILP> tmp_b;
+    array<res_t, ILP> tmp_out;
 #pragma unroll
-    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+    for (uint j = 0; j < ILP; ++j) {
       tmp_a[j] = input[base + j];
       tmp_b[j] = other[base + j];
     }
 #pragma unroll
-    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+    for (uint j = 0; j < ILP; ++j) {
       tmp_out[j] = static_cast<res_t>(f(om_t(tmp_a[j]), om_t(tmp_b[j])));
     }
 #pragma unroll
-    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+    for (uint j = 0; j < ILP; ++j) {
       out[base + j] = tmp_out[j];
     }
   } else {
@@ -736,15 +747,15 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEI * input_,                                            \
           constant DTYPEI * other_,                                            \
           uint tid);                                                           \
-  template                                                                     \
-      [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI)]] kernel void ::    \
-          c10::metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(           \
-              device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * \
-                  out_,                                                        \
-              constant DTYPEI * input_,                                        \
-              constant DTYPEI * other_,                                        \
-              constant uint & numel,                                           \
-              uint tid);                                                       \
+  template [[host_name(#NAME "_dense_ilp" C10_METAL_ILP_PER_THREAD_STR         \
+                             "_" #DTYPEO "_" #DTYPEI)]] kernel void ::c10::    \
+      metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(                    \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
+          constant uint & numel,                                               \
+          uint tid);                                                           \
   template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
       metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
