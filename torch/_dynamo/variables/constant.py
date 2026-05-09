@@ -502,7 +502,11 @@ class ConstantVariable(VariableTracker):
         if not isinstance(other_val, (int, float, complex)):
             return ConstantVariable.create(NotImplemented)
         # Numeric multiplication is commutative; ignore reverse.
-        return VariableTracker.build(tx, self.value * other_val)
+        try:
+            res = self.value * other_val
+        except OverflowError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, res)
 
     def sq_repeat_impl(
         self,

@@ -7,7 +7,6 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
-    parametrize,
 )
 
 
@@ -26,10 +25,7 @@ class UserDefinedClassWithMul:
         return UserDefinedClassWithMul(other * self.value)
 
     def __eq__(self, other):
-        return (
-            isinstance(other, UserDefinedClassWithMul)
-            and self.value == other.value
-        )
+        return isinstance(other, UserDefinedClassWithMul) and self.value == other.value
 
     def __repr__(self):
         return f"UserDefinedClassWithMul({self.value})"
@@ -333,12 +329,8 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_subclass_of_user_defined_gets_priority(self):
-        self.assertEqual(
-            _SubWithMul() * _BaseWithMul(), "_SubWithMul.__mul__"
-        )
-        self.assertEqual(
-            _BaseWithMul() * _SubWithMul(), "_SubWithMul.__rmul__"
-        )
+        self.assertEqual(_SubWithMul() * _BaseWithMul(), "_SubWithMul.__mul__")
+        self.assertEqual(_BaseWithMul() * _SubWithMul(), "_SubWithMul.__rmul__")
 
     @make_dynamo_test
     def test_inherited_subclass_no_priority(self):
@@ -353,18 +345,14 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
         def f(t):
             return t * 2
 
-        self.assertEqual(
-            f(torch.tensor([1.0, 2.0, 3.0])).tolist(), [2.0, 4.0, 6.0]
-        )
+        self.assertEqual(f(torch.tensor([1.0, 2.0, 3.0])).tolist(), [2.0, 4.0, 6.0])
 
     def test_scalar_mul_tensor(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(t):
             return 2 * t
 
-        self.assertEqual(
-            f(torch.tensor([1.0, 2.0, 3.0])).tolist(), [2.0, 4.0, 6.0]
-        )
+        self.assertEqual(f(torch.tensor([1.0, 2.0, 3.0])).tolist(), [2.0, 4.0, 6.0])
 
     def test_tensor_mul_tensor(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -388,6 +376,59 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(torch.randn(5, 4)), 15)
 
+    def test_symint_mul_float(self):
+        # SymNodeVariable.nb_multiply_impl must accept any python constant, not
+        # just symnode-like ones — float constants aren't is_symnode_like().
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return x.shape[0] * 1.5
+
+        self.assertEqual(f(torch.randn(5, 4)), 7.5)
+
+    def test_float_mul_symint(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return 1.5 * x.shape[0]
+
+        self.assertEqual(f(torch.randn(5, 4)), 7.5)
+
+    def test_symint_mul_str(self):
+        # int * str works in CPython via PyNumber_Multiply's sq_repeat fallback.
+        # SymNode operand must allow str on the other side just like a constant int.
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return x.shape[0] * "ab"
+
+        self.assertEqual(f(torch.randn(3, 4)), "ababab")
+
+    def test_symfloat_mul_int(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return x.item() * 2
+
+        self.assertEqual(f(torch.tensor(3.5)), 7.0)
+
+    def test_int_mul_symfloat(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return 2 * x.item()
+
+        self.assertEqual(f(torch.tensor(3.5)), 7.0)
+
+    def test_symfloat_mul_float(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return x.item() * 1.5
+
+        self.assertEqual(f(torch.tensor(3.0)), 4.5)
+
+    def test_float_mul_symfloat(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x):
+            return 1.5 * x.item()
+
+        self.assertEqual(f(torch.tensor(3.0)), 4.5)
+
     # --- Error message accuracy (matches CPython exactly) ---
 
     @make_dynamo_test
@@ -395,9 +436,7 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
         try:
             [1, 2] * "foo"
         except TypeError as e:
-            self.assertEqual(
-                str(e), "can't multiply sequence by non-int of type 'str'"
-            )
+            self.assertEqual(str(e), "can't multiply sequence by non-int of type 'str'")
 
     @make_dynamo_test
     def test_error_message_range_mul(self):

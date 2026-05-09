@@ -1917,6 +1917,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
         return self.call_method(tx, "__ior__", [other], {})
 
+    def nb_inplace_multiply_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__imul__", [other], {})
+
     def call_method(
         self,
         tx: "InstructionTranslator",
