@@ -447,6 +447,48 @@ struct gcd_functor {
   }
 };
 
+struct eq_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a == b;
+  }
+};
+
+struct ne_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a != b;
+  }
+};
+
+struct lt_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a < b;
+  }
+};
+
+struct le_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a <= b;
+  }
+};
+
+struct gt_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a > b;
+  }
+};
+
+struct ge_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a >= b;
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -472,6 +514,17 @@ struct gcd_functor {
   REGISTER_OPMATH_BINARY_OP(NAME, float, float); \
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
+
+#define REGISTER_COMPARISON_OP(NAME)      \
+  REGISTER_BINARY_OP(NAME, float, bool);  \
+  REGISTER_BINARY_OP(NAME, half, bool);   \
+  REGISTER_BINARY_OP(NAME, bfloat, bool); \
+  REGISTER_BINARY_OP(NAME, long, bool);   \
+  REGISTER_BINARY_OP(NAME, int, bool);    \
+  REGISTER_BINARY_OP(NAME, short, bool);  \
+  REGISTER_BINARY_OP(NAME, uchar, bool);  \
+  REGISTER_BINARY_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, bool, bool)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);
@@ -539,6 +592,12 @@ REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
 REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
 REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
+REGISTER_COMPARISON_OP(eq);
+REGISTER_COMPARISON_OP(ne);
+REGISTER_COMPARISON_OP(lt);
+REGISTER_COMPARISON_OP(le);
+REGISTER_COMPARISON_OP(gt);
+REGISTER_COMPARISON_OP(ge);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);

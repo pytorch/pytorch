@@ -314,6 +314,30 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "bitwise_right_shift");
 }
 
+static void eq_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "eq");
+}
+
+static void ne_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ne");
+}
+
+static void lt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "lt");
+}
+
+static void le_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "le");
+}
+
+static void gt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "gt");
+}
+
+static void ge_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ge");
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -355,4 +379,10 @@ REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
 REGISTER_DISPATCH(lshift_stub, &bitwise_left_shift_mps_kernel)
 REGISTER_DISPATCH(rshift_stub, &bitwise_right_shift_mps_kernel)
+REGISTER_DISPATCH(eq_stub, &eq_mps_kernel)
+REGISTER_DISPATCH(ne_stub, &ne_mps_kernel)
+REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
+REGISTER_DISPATCH(le_stub, &le_mps_kernel)
+REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
+REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
 } // namespace at::native
