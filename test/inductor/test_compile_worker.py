@@ -261,6 +261,25 @@ class TestDynamicWakeup(TestCase):
         finally:
             pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_crash_recovery_uses_reduced_pool(self):
+        # After wakeup with a reduced nprocs, a BrokenProcessPool crash
+        # recovery should recreate the pool at the reduced size, not the
+        # original constructor size.
+        pool = SubprocPool(8)
+        try:
+            pool.wakeup(nprocs=2)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            with self.assertRaises(Exception):
+                pool.submit(os._exit, 1).result()
+
+            b = pool.submit(operator.add, 10, 20)
+            self.assertEqual(b.result(), 30)
+        finally:
+            pool.shutdown()
+
 
 class TestMemoryAwareThreads(TestCase):
     MEMINFO_TEMPLATE = (
@@ -299,10 +318,10 @@ class TestMemoryAwareThreads(TestCase):
     @config.patch("compile_worker_memory_threshold", 0.8)
     @config.patch("compile_threads_min", 2)
     def test_threads_scaled_down_when_memory_low(self):
+        # available=50% => scale = (0.5 - 0.4) / (0.8 - 0.4) = 0.25
+        # result = int(32 * 0.25) = 8
         with self._mock_meminfo(100000, 50000):
-            result = _get_compile_threads_for_memory(32)
-            self.assertGreater(result, 2)
-            self.assertLess(result, 32)
+            self.assertEqual(_get_compile_threads_for_memory(32), 8)
 
     @config.patch("compile_worker_memory_threshold", 0.8)
     @config.patch("compile_threads_min", 2)

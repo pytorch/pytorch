@@ -1368,10 +1368,13 @@ quiesce_async_compile_time: int = Config(
 # Quiesce the subprocess pool immediately after each compile finishes (in
 # AsyncCompile.wait) instead of relying solely on the idle timer.  This keeps
 # workers alive only during active compilation, greatly reducing memory pressure
-# between compiles.  See also quiesce_async_compile_pool (idle-timer quiesce).
+# between compiles.  Trades compile-time for memory: each graph compilation
+# tears down and recreates the pool, so workloads with many graph breaks may
+# see slower compilation.  Use compile_threads_min > 0 to keep a warm pool.
+# See also quiesce_async_compile_pool (idle-timer quiesce).
 quiesce_async_compile_eager: bool = Config(
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_EAGER",
-    default=True,
+    default=False,
 )
 
 # Minimum number of compile workers to keep alive between compiles. After an

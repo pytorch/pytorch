@@ -393,6 +393,12 @@ class AsyncCompile:
         pool = cls.process_pool()
         if isinstance(pool, SubprocPool):
             nprocs = _get_compile_threads_for_memory(get_compile_threads())
+            if nprocs < get_compile_threads():
+                log.info(
+                    "Memory-aware scaling: %d workers (configured %d)",
+                    nprocs,
+                    get_compile_threads(),
+                )
             pool.wakeup(nprocs=nprocs)
         cls._pool_needs_wakeup = False
 

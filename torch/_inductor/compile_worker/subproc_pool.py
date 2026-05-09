@@ -442,6 +442,10 @@ class SubprocMain:
         future.add_done_callback(callback)
 
     def _start_pool(self, nprocs: int | None = None) -> None:
+        # When called from WAKEUP, nprocs overrides self.nprocs so that
+        # subsequent lazy _start_pool() calls (e.g. from _submit_inner or
+        # BrokenProcessPool crash recovery) use the memory-aware count
+        # rather than the original constructor value.
         if nprocs is not None:
             self.nprocs = nprocs
         else:
@@ -450,8 +454,14 @@ class SubprocMain:
             if nprocs <= self._current_nprocs:
                 return
             # Scale-up: tear down the existing pool and rebuild with more
-            # workers.  This is only reached via explicit WAKEUP before work is
-            # submitted, so there should be no in-flight jobs.
+            # workers.  Callers must ensure no in-flight jobs exist; if this
+            # invariant is violated, shutdown(wait=False) will silently cancel
+            # queued futures whose results the parent is waiting on.
+            if self.pool._pending_work_items:
+                log.warning(
+                    "Scale-up with %d pending work items; these may be lost",
+                    len(self.pool._pending_work_items),
+                )
             self._quiesce()
 
         self._current_nprocs = nprocs
