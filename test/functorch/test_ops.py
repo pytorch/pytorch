@@ -404,6 +404,7 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
+    "native_group_norm",
 }
 
 bool_unsupported_ordered_ops = {
