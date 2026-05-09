@@ -546,6 +546,7 @@ view of a storage and defines numeric operations on it.
     Tensor.nansum
     Tensor.narrow
     Tensor.narrow_copy
+    Tensor.narrow_scatter
     Tensor.ndimension
     Tensor.nan_to_num
     Tensor.nan_to_num_

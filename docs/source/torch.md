@@ -143,6 +143,7 @@ range of distributions.
     moveaxis
     narrow
     narrow_copy
+    narrow_scatter
     nonzero
     nonzero_static
     permute

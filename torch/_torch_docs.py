@@ -8133,6 +8133,51 @@ Example::
 )
 
 add_docstr(
+    torch.narrow_scatter,
+    r"""
+narrow_scatter(input, src, dim, start, length) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` along
+dimension :attr:`dim` starting at index :attr:`start` for :attr:`length`
+elements.
+This function returns a tensor with fresh storage; it does not create a view.
+
+This is the reverse operation of :func:`torch.narrow`: where ``narrow``
+extracts a slice, ``narrow_scatter`` writes a slice back.
+
+Args:
+    {input}
+    src (Tensor): The tensor to embed into :attr:`input`. Must have the same
+        shape as ``torch.narrow(input, dim, start, length)``
+    dim (int): the dimension along which to scatter
+    start (int): index of the element to start the scatter from
+    length (int): length of the scattered dimension
+
+Example::
+
+    >>> a = torch.zeros(3, 3)
+    >>> b = torch.ones(2, 3)
+    >>> torch.narrow_scatter(a, b, 0, 0, 2)
+    tensor([[1., 1., 1.],
+            [1., 1., 1.],
+            [0., 0., 0.]])
+
+    >>> a = torch.zeros(3, 3)
+    >>> b = torch.ones(3, 1)
+    >>> torch.narrow_scatter(a, b, 1, 2, 1)
+    tensor([[0., 0., 1.],
+            [0., 0., 1.],
+            [0., 0., 1.]])
+
+.. seealso::
+
+        :func:`torch.narrow` for the reverse (extracting) operation,
+        :func:`torch.slice_scatter` for a similar operation with ``start``/``end``/``step`` semantics
+
+""".format(**common_args),
+)
+
+add_docstr(
     torch.nan_to_num,
     r"""
 nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
