@@ -9,7 +9,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch import distributed as dist, Event
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
@@ -65,17 +65,31 @@ class Layer(nn.Module):
         return self.e1.elapsed_time(self.e2)
 
 
-def _create_model(compute_cycles, has_params: bool):
+def _create_model(compute_cycles, has_params: bool, use_orig_params: bool = False):
     # Use `limit_all_gathers=False` since the timing being tested relies on the
     # CPU running ahead of the GPU
+    fsdp_kwargs = {"limit_all_gathers": False, "use_orig_params": use_orig_params}
+    if use_orig_params:
+        # MixedPrecision causes `pre_unshard` to return True via the
+        # `_uses_param_mixed_precision` branch, which makes
+        # `unshard_stream.wait_stream(pre_unshard_stream)` fire. Combined with
+        # the `pre_unshard_stream.wait_stream(compute_stream)` sync introduced
+        # by #178223, this serializes AG against compute -- exactly the
+        # regression we want this test to catch.
+        fsdp_kwargs["mixed_precision"] = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+            cast_forward_inputs=True,
+        )
     model = FSDP(
         nn.Sequential(
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+            FSDP(Layer(compute_cycles, has_params), **fsdp_kwargs),
+            FSDP(Layer(compute_cycles, has_params), **fsdp_kwargs),
+            FSDP(Layer(compute_cycles, has_params), **fsdp_kwargs),
+            FSDP(Layer(compute_cycles, has_params), **fsdp_kwargs),
         ),
-        limit_all_gathers=False,
+        **fsdp_kwargs,
     ).to(device_type)
     return model
 
@@ -101,7 +115,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
     def world_size(self):
         return 1
 
-    def _dist_train(self):
+    def _dist_train(self, use_orig_params: bool = False):
         rank = self.rank
         world_size = self.world_size
         # Save the original torch.distributed.all_gather_into_tensor function since we will
@@ -110,7 +124,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
-            model = _create_model(compute_cycles, has_params)
+            model = _create_model(compute_cycles, has_params, use_orig_params)
 
             # Get the input and sets the input's requires_grad to True because
             # we have a fake compute in the forward pass.
@@ -261,6 +275,17 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
     @property
     def world_size(self):
         return 2
+
+    # Exercises the `use_orig_params=True` path, where `_writeback_orig_params`
+    # runs inside `pre_unshard`. Guards against regressions that serialize
+    # the all-gather stream against the compute stream (see #178223). Defined
+    # here (not on the parent) so it survives `instantiate_device_type_tests`,
+    # and runs at world_size=2 where the AG-overlap assertion is exercised.
+    @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1504
+    @skip_if_lt_x_gpu(2)
+    def test_forward_overlap_use_orig_params(self):
+        self._dist_train(use_orig_params=True)
 
 
 devices = ("cuda", "hpu", "xpu")
