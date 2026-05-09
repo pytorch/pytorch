@@ -108,6 +108,7 @@ from .object_protocol import (
     generic_len,
     generic_multiply,
     generic_neg,
+    generic_pos,
     vt_getitem,
     vt_identity_compare,
 )
@@ -1686,8 +1687,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__neg__" and len(args) == 1 and not kwargs:
             # type.__neg__(instance) → neg(instance)
             # e.g., int.__neg__(4) → neg(4)
-            # For builtin types called on user-defined subclasses, use the base iterator
             return generic_neg(tx, args[0])
+
+        if name == "__pos__" and len(args) == 1 and not kwargs:
+            # type.__pos__(instance) → pos(instance)
+            # e.g., int.__pos__(4) → pos(4)
+            return generic_pos(tx, args[0])
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1993,13 +1998,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        # Call arg.__pos__()
-        pos_method = SourcelessBuilder.create(tx, getattr).call_function(
-            tx, [arg, VariableTracker.build(tx, "__pos__")], {}
-        )
-        return pos_method.call_function(tx, [], {})
+        return generic_pos(tx, arg)
 
     def call_index(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -3044,7 +3043,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_contains(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return a.call_method(tx, "__contains__", [b], {})
+        from .object_protocol import generic_contains
+
+        return generic_contains(tx, a, b)
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn

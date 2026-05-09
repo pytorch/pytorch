@@ -2047,6 +2047,16 @@
       "Hints": []
     }
   ],
+  "GB4411": [
+    {
+      "Gb_type": "missing sq_contains",
+      "Context": "sq_contains not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0154": [
     {
       "Gb_type": "Unsupported kwargs for itertools.accumulate",
@@ -2478,6 +2488,16 @@
       "Hints": [
         "Manually convert the argument to a list.",
         "Ensure all keys are hashable."
+      ]
+    }
+  ],
+  "GB7489": [
+    {
+      "Gb_type": "Unsupported argument type in tensor method call",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo could not create a proxy for an argument in the call to Tensor.{name}(). This usually means an unsupported type was passed as an argument to a tensor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4206,6 +4226,16 @@
       "Hints": [
         "Use `set_subgraph_inputs='automatic'` when passing `sub_kwargs`.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB7510": [
+    {
+      "Gb_type": "nb_positive_impl not implemented",
+      "Context": "{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
+      "Explanation": "The type {self.python_type_name()} has an nb_positive C slot but the corresponding VariableTracker doesn't implement nb_positive_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
