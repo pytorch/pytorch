@@ -33,6 +33,10 @@ C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
 // Reading/writing a small array of values per thread improves memory-level
 // parallelism vs. a one-element-per-thread kernel.
 C10_METAL_CONSTEXPR unsigned ILP_PER_THREAD = 4;
+// String form of ILP_PER_THREAD, used to embed the unroll width in kernel
+// host names (e.g. `add_dense_ilp4_float_float`). Keep in sync with
+// ILP_PER_THREAD; a static_assert in indexing.h enforces this.
+#define C10_METAL_ILP_PER_THREAD_STR "4"
 
 #ifdef __METAL__
 template <typename T, unsigned N>
