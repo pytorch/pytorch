@@ -385,10 +385,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         )
 
     filtered_score_mod_buffers = [
-        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
     filtered_mask_mod_buffers = [
-        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
 
     inputs_for_flex_decoding = (
