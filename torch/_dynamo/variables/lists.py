@@ -1190,11 +1190,12 @@ class ListVariable(CommonListMethodsVariable):
         if name == "__init__" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            tx.output.side_effects.mutation(self)
             if len(args) == 0:
+                self.items.clear()
                 return ConstantVariable.create(None)
             elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
                 (arg,) = args
-                tx.output.side_effects.mutation(self)
                 self.items[:] = arg.force_unpack_var_sequence(tx)
                 return ConstantVariable.create(None)
 
