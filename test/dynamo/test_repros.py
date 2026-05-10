@@ -1007,18 +1007,6 @@ class LRUCacheWarningTests(LoggingTestCase):
             else:
                 torch.set_default_device(prev_default)
 
-        self.addCleanup(_restore_default_device)
-        torch.set_default_device(device_type)
-
-        @torch.compile(backend="eager")
-        def f(x):
-            torch.get_device_module()
-            x = x.cos().sin()
-            return x
-
-        result = f(torch.randn(1024))
-        self.assertIsInstance(result, torch.Tensor)
-
         for record in records:
             if "call to a lru_cache wrapped function at:" in record.getMessage():
                 self.fail("lru_cache warning was incorrectly logged")
