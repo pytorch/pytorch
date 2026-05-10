@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -2278,7 +2280,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            flatten = (
+                template_kwargs.get("FLATTEN", True)
+                and not constraints_violated
+                and USE_META_WS
+            )
             yield {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
