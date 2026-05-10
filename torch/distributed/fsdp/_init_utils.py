@@ -3,6 +3,7 @@ import collections
 import itertools
 import os
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Iterable, Iterator
 from typing import Any, no_type_check, TYPE_CHECKING
 
@@ -468,8 +469,11 @@ def _init_core_state(
     )
     state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
-    # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: dict[nn.Module, FlatParamHandle] = {}
+    # unshard and reshard (see [Note: Fully Sharded Module]).
+    # WeakKeyDictionary so the dict doesn't pin the wrapped modules alive.
+    _fully_sharded_module_to_handle: weakref.WeakKeyDictionary[
+        nn.Module, FlatParamHandle
+    ] = weakref.WeakKeyDictionary()
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`

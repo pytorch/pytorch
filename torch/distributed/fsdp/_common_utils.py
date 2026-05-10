@@ -285,9 +285,12 @@ class _FSDPState(_State):
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: bool | None = None
         self._handle: flat_param_file.FlatParamHandle | None = None
-        self._fully_sharded_module_to_handle: dict[
+        # WeakKeyDictionary so the wrapped module isn't kept alive by the
+        # state's bookkeeping (handles are also held strongly by `_handle` /
+        # `_all_handles`, so weakening only the keys is sufficient).
+        self._fully_sharded_module_to_handle: weakref.WeakKeyDictionary[
             nn.Module, flat_param_file.FlatParamHandle | None
-        ] = {}
+        ] = weakref.WeakKeyDictionary()
         self.compute_device: torch.device | None = None
         self._gradient_predivide_factor: int = 0
         self._gradient_postdivide_factor: int = 0
