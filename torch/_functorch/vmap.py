@@ -299,17 +299,29 @@ def vmap_impl(
     batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
         in_dims, args, func
     )
-
     if chunk_size is not None:
-        if chunk_with_scan:
-            if batch_size % chunk_size != 0:
-                # TODO: support padding
-                raise NotImplementedError(
-                    f"vmap_impl: batch_size ({batch_size}) must be divisible by chunk_size ({chunk_size})"
-                )
+        # `randomness="same"` requires resetting rng state before each chunk so
+        # every chunk draws identical random values. The scan HOP's traced
+        # combine_fn can't reliably honor that side effect, so for "same" we
+        # fall back to the Python-loop chunker.
+        if chunk_with_scan and randomness != "same":
+            # Scan handles the divisible leading portion; a trailing eager call
+            # processes the last `tail_size` slices. For non-divisible batches
+            # the tail is the remainder `r`; for divisible batches the tail is
+            # one full chunk_size (kept out of scan so the eager call can both
+            # produce real output AND yield `per_chunk_out_dims`, avoiding the
+            # previous throwaway probe that duplicated chunk-0 compute and
+            # shifted rng state). This ordering (scan first, tail last)
+            # matches `_chunked_vmap`'s rng consumption sequence.
+            r = batch_size % chunk_size
+            tail_size = r if r > 0 else chunk_size
+            main_size = batch_size - tail_size
+            num_chunks = main_size // chunk_size
 
-            num_chunks = batch_size // chunk_size
-
+            # if isinstance(in_dims, int) or in_dims is None:
+            #     assert len(args) == 1
+            #     in_dims = (in_dims,)
+            # in_dims = cast(tuple[int | None, ...], in_dims)
             def _normalize_dims(in_dims):
                 if isinstance(in_dims, int) or in_dims is None:
                     assert len(args) == 1
@@ -318,40 +330,68 @@ def vmap_impl(
 
             in_dims: tuple[Optional[int], ...] = _normalize_dims(in_dims)
 
-            chunked_args = tree_map(
-                lambda t, in_dim: t.unsqueeze(0).expand(num_chunks, *t.shape)
+            chunked_outs: Any = None
+            if num_chunks > 0:
+                main_args = tree_map(
+                    lambda t, in_dim: t
+                    if in_dim is None
+                    else t.narrow(in_dim, 0, main_size),
+                    args,
+                    in_dims,
+                )
+                chunked_args = tree_map(
+                    lambda t, in_dim: t.unsqueeze(0).expand(num_chunks, *t.shape)
+                    if in_dim is None
+                    else t.view(
+                        *t.shape[:in_dim],
+                        num_chunks,
+                        chunk_size,
+                        *t.shape[in_dim + 1 :],
+                    ).movedim(in_dim, 0),
+                    main_args,
+                    in_dims,
+                )
+
+                def _scan_fn(carry, per_chunk_args):
+                    per_chunk_outs, _ = restore_vmap(
+                        func, in_dims, chunk_size, randomness
+                    )(*per_chunk_args, **kwargs)
+                    return carry.clone(), per_chunk_outs
+
+                from torch._higher_order_ops import scan
+
+                _, chunked_outs = scan(_scan_fn, torch.zeros([]), chunked_args)
+
+            # Tail: eager call on the last `tail_size` slices. Captures
+            # per_chunk_out_dims AND produces real output that becomes the
+            # final part of the concatenated result.
+            tail_args = tree_map(
+                lambda t, in_dim: t
                 if in_dim is None
-                else t.view(
-                    *t.shape[:in_dim], num_chunks, chunk_size, *t.shape[in_dim + 1 :]
-                ).movedim(in_dim, 0),
+                else t.narrow(in_dim, main_size, tail_size),
                 args,
                 in_dims,
             )
-            
-            chunks_flat_args = _get_chunked_inputs(
-                flat_args, flat_in_dims, batch_size, chunk_size
-            )
+            tail_outs, per_chunk_out_dims = restore_vmap(
+                func, in_dims, tail_size, randomness
+            )(*tail_args, **kwargs)
 
-            # We run over one chunk to get the pre_chunk_out_dims info.
-            # 1. We cannot use side effect to capture per_chunk_out_dims
-            # since this is a side effect
-            # 2. We also don't want to directly use the hop because
-            # we'll lost the ability of lifting closures such as those in
-            # kwargs as scan inputs.
-            _, per_chunk_out_dims = restore_vmap(func, in_dims, chunk_size, randomness)(
-                *tree_map(lambda t: t.select(0, 0), chunked_args), **kwargs
-            )
-
-            def _scan_fn(carry, per_chunk_args):
-                per_chunk_outs, _ = restore_vmap(func, in_dims, chunk_size, randomness)(
-                    *per_chunk_args, **kwargs
+            if num_chunks == 0:
+                # Whole batch fit in the tail; nothing to concat.
+                return tree_map(
+                    lambda t, final_out_dim, chunk_dim: t.movedim(
+                        chunk_dim, final_out_dim
+                    )
+                    if final_out_dim is not None and final_out_dim != chunk_dim
+                    else t,
+                    tail_outs,
+                    out_dims,
+                    per_chunk_out_dims,
                 )
-                return carry.clone(), per_chunk_outs
 
-            from torch._higher_order_ops import scan
-
-            _, chunked_outs = scan(_scan_fn, torch.zeros([]), chunked_args)
-            outs = tree_map(
+            # Merge num_chunks with chunk_size along chunk_dim, then append
+            # the tail outputs along the same dim.
+            scan_outs = tree_map(
                 lambda t, chunk_dim: t.view(
                     [
                         num_chunks * s if i == chunk_dim else s
@@ -362,6 +402,12 @@ def vmap_impl(
                 per_chunk_out_dims,
             )
             outs = tree_map(
+                lambda s, t, chunk_dim: torch.cat([s, t], dim=chunk_dim),
+                scan_outs,
+                tail_outs,
+                per_chunk_out_dims,
+            )
+            return tree_map(
                 lambda t, final_out_dim, chunk_dim: t.movedim(chunk_dim, final_out_dim)
                 if final_out_dim is not None and final_out_dim != chunk_dim
                 else t,
@@ -369,20 +415,19 @@ def vmap_impl(
                 out_dims,
                 per_chunk_out_dims,
             )
-            return outs
-        else:
-            chunks_flat_args = _get_chunked_inputs(
-                flat_args, flat_in_dims, batch_size, chunk_size
-            )
-            return _chunked_vmap(
-                func,
-                flat_in_dims,
-                chunks_flat_args,
-                args_spec,
-                out_dims,
-                randomness,
-                **kwargs,
-            )
+
+        chunks_flat_args = _get_chunked_inputs(
+            flat_args, flat_in_dims, batch_size, chunk_size
+        )
+        return _chunked_vmap(
+            func,
+            flat_in_dims,
+            chunks_flat_args,
+            args_spec,
+            out_dims,
+            randomness,
+            **kwargs,
+        )
 
     # If chunk_size is not specified.
     return _flat_vmap(

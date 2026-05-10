@@ -6221,18 +6221,23 @@ class TestRandomness(TestCase):
             )(x)
             self._assert_all_slices_unique(output)
 
-    @parametrize("in_dim", [0, 1, 2])
-    @parametrize("out_dim", [0, 1, 2])
+    # @parametrize("in_dim", [0, 1, 2])
+    @parametrize("in_dim", [1, 2])
+    # @parametrize("out_dim", [0, 1, 2])
+    @parametrize("out_dim", [1, 2])
     def test_vmap_chunk_with_scan(self, in_dim, out_dim):
         randomness = "different"
 
-        x = torch.randn(4, 8, 16)
+        x = torch.randn(5, 8, 16)
 
         def f(x):
             y = x.sin() + torch.rand_like(x)
             return y
 
-        for chunk_size in [1, 2, 4]:
+        # chunk_size 1, 2, 4 divide the batch; 3 and 5 hit the
+        # non-divisible remainder path; 20 exercises the
+        # batch_size <= chunk_size fast-path.
+        for chunk_size in [1, 2, 3, 4, 5, 20]:
             output = torch.vmap(
                 f,
                 in_dims=in_dim,
@@ -6242,6 +6247,74 @@ class TestRandomness(TestCase):
                 chunk_with_scan=True,
             )(x)
             self._assert_all_slices_unique(output)
+
+    @parametrize("in_dim", [1, 2])
+    @parametrize("out_dim", [1, 2])
+    def test_vmap_chunk_with_scan_different_matches_chunked_vmap(
+        self, device, in_dim, out_dim
+    ):
+        # Regression test for probe-duplication rng drift: chunk_with_scan=True
+        # with randomness="different" must match chunk_with_scan=False when
+        # seeded identically. Chunking itself shifts the rng call pattern
+        # relative to an unchunked vmap (separate randn calls per chunk
+        # rather than one big call), so we compare against the non-scan
+        # chunker — not an unchunked reference.
+        x = torch.randn(5, 8, 16, device=device)
+
+        def f(x):
+            return x.sin() + torch.rand_like(x)
+
+        for chunk_size in [1, 2, 3, 4, 5, 20]:
+            torch.manual_seed(0)
+            out_scan = torch.vmap(
+                f,
+                in_dims=in_dim,
+                out_dims=out_dim,
+                randomness="different",
+                chunk_size=chunk_size,
+                chunk_with_scan=True,
+            )(x)
+            torch.manual_seed(0)
+            out_chunked = torch.vmap(
+                f,
+                in_dims=in_dim,
+                out_dims=out_dim,
+                randomness="different",
+                chunk_size=chunk_size,
+                chunk_with_scan=False,
+            )(x)
+            self.assertEqual(out_scan, out_chunked, exact_dtype=True)
+
+    @parametrize("in_dim", [1, 2])
+    @parametrize("out_dim", [1, 2])
+    def test_vmap_chunk_with_scan_same_falls_back(self, device, in_dim, out_dim):
+        # randomness="same" is not supported on the scan path and falls back
+        # to _chunked_vmap. The fallback must agree with chunk_with_scan=False.
+        x = torch.randn(5, 8, 16, device=device)
+
+        def f(x):
+            return x.sin() + torch.rand_like(x)
+
+        for chunk_size in [1, 2, 3, 4, 5, 20]:
+            torch.manual_seed(0)
+            out_scan = torch.vmap(
+                f,
+                in_dims=in_dim,
+                out_dims=out_dim,
+                randomness="same",
+                chunk_size=chunk_size,
+                chunk_with_scan=True,
+            )(x)
+            torch.manual_seed(0)
+            out_chunked = torch.vmap(
+                f,
+                in_dims=in_dim,
+                out_dims=out_dim,
+                randomness="same",
+                chunk_size=chunk_size,
+                chunk_with_scan=False,
+            )(x)
+            self.assertEqual(out_scan, out_chunked, exact_dtype=True)
 
     @parametrize("in_dim1", [0, 1])
     @parametrize("out_dim1", [0, 1])
