@@ -152,3 +152,4 @@ There are several useful invariants for `torch.ops.higher_order.switch`:
 
 ```{eval-rst}
 .. autofunction:: torch._higher_order_ops.switch.switch
+```
