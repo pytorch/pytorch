@@ -658,26 +658,28 @@ def _view_has_unbacked_input(
 
 def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     """
-    Heuristic: before _view_unbacked_meta falls through to the specializing
-    recursion (which often emits Eq/Neq(s, 1) via eval_eager), check if the
-    input's free symbols and the target shape's free symbols contain pairs
-    that are equal at the runtime hint. For each candidate pair (x, y),
-    evaluate `bool(x == y)`; if True, the shape env records `Eq(x, y)` and
-    set_replacement unifies them, letting the size-oblivious view path
-    succeed without specialization.
+    Smarter heuristic: collect candidate (x, y) pairs whose runtime hints
+    match (so they *could* be equal), then test whether substituting them
+    into the view's numel equation makes the equation symbolically zero.
+    Only commit the equalities (adds the real Eq guards via bool(x == y)
+    which triggers set_replacement) if the substitution actually solves
+    the view validity check.
 
-    Returns True if at least one equality was added.
+    This avoids polluting the shape env with spurious guards from probing.
+
+    Returns True if at least one equality was committed.
 
     Conservative: only considers SymInts that appear as a top-level dim of
     the input or target (skipping the -1 marker), and skips already-equal
-    pairs.
+    pairs, and skips unbacked symbols.
     """
+    import operator
+    from functools import reduce
+
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     def _atomic_syms(dims) -> list[torch.SymInt]:
-        """Keep only SymInts whose expr is a single bare *backed* symbol
-        (skip derived expressions like (131*s57)//s40 and skip unbacked
-        symbols like u0)."""
+        """Keep only SymInts whose expr is a single bare *backed* symbol."""
         out: list[torch.SymInt] = []
         for s in dims:
             if not isinstance(s, torch.SymInt):
@@ -693,19 +695,55 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
 
     a_syms = _atomic_syms(a.size())
     target_syms = _atomic_syms(shape)
-    added = False
+    if not a_syms or not target_syms:
+        return False
+
+    # 1) Collect candidate equalities: (x, y) pairs whose hints match.
+    #    Build a sympy substitution map.
+    subs: dict = {}
+    candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
     for x in a_syms:
         for y in target_syms:
-            # Cheap pre-check: only attempt the equality (which adds a guard
-            # and may pollute the shape env with Ne(...)) if the runtime
-            # hints already match.
+            x_expr = x.node.expr
+            y_expr = y.node.expr
+            if x_expr == y_expr:
+                continue  # already same symbol
             if x.node.hint != y.node.hint:
+                continue  # hints disagree, not a candidate
+            # Substitute y -> x (canonicalise on the input-side symbol).
+            if y_expr in subs and subs[y_expr] == x_expr:
                 continue
+            subs[y_expr] = x_expr
+            candidates.append((x, y))
+
+    if not subs:
+        return False
+
+    # 2) Symbolic test: does the substitution make the view's numel match?
+    def _expr_of(s):
+        return s.node.expr if isinstance(s, torch.SymInt) else s
+
+    try:
+        a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
+        shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
+        diff = (a_numel - shape_numel).subs(subs)
+        # If sympy can simplify the difference to 0, the substitution makes
+        # the numel match and the view becomes valid.
+        if diff == 0 or getattr(diff, "simplify", lambda: diff)() == 0:
+            pass
+        else:
+            return False
+    except Exception:
+        return False
+
+    # 3) Commit the equalities for real (adds Eq guards, triggers set_replacement).
+    added = False
+    for x, y in candidates:
+        try:
             if bool(x == y):
                 added = True
-                break
-        if added:
-            break
+        except Exception:
+            continue
     return added
 
 
