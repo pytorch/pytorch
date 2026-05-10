@@ -619,8 +619,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   py_context_manager_DEPRECATED<torch::DisableTorchDispatch>(
       _C_m, "_DisableTorchDispatch");
-  py_context_manager_DEPRECATED<EnableTorchFunction>(
-      _C_m, "_EnableTorchFunction");
+  py_context_manager<EnableTorchFunction>(_C_m, "_EnableTorchFunction");
   py_context_manager_DEPRECATED<EnablePythonDispatcher>(
       _C_m, "_EnablePythonDispatcher");
   py_context_manager<c10::impl::DisablePythonDispatcher>(

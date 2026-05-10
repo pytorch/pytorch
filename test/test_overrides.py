@@ -1805,18 +1805,14 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertFalse(called)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182318")
     def test_disable_enable_subclass(self):
         class A(torch.Tensor):
             pass
 
         x = A(torch.randn(5))
         with torch._C.DisableTorchFunctionSubclass():
-            g = torch._C._EnableTorchFunction()
-            try:
+            with torch._C._EnableTorchFunction():
                 self.assertIsInstance(torch.sum(x), A)
-            finally:
-                del g
 
     def test_disable_enable_torch_function_ctx(self):
         class A(torch.Tensor):
