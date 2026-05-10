@@ -681,10 +681,8 @@ class TestAOTInductorPackage(TestCase):
                     with zipfile.ZipFile(package_path, "r") as zip_ref:
                         zip_ref.extractall(temp_dir)
 
-                    loaded_metadata_from_directory = (
-                        torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
-                            temp_dir, "model"
-                        )
+                    loaded_metadata_from_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
                     )
                     self.assertEqual(loaded_metadata_from_directory, loaded_metadata)
 
@@ -694,10 +692,8 @@ class TestAOTInductorPackage(TestCase):
                         if item != "nested_dir":
                             shutil.move(os.path.join(temp_dir, item), nested_dir)
 
-                    loaded_metadata_from_nested_directory = (
-                        torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
-                            temp_dir, "model"
-                        )
+                    loaded_metadata_from_nested_directory = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        temp_dir, "model"
                     )
                     self.assertEqual(
                         loaded_metadata_from_nested_directory, loaded_metadata
