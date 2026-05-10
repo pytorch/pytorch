@@ -2239,6 +2239,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "tma_load_for_template_epilogue": config.triton.enable_tma_load_for_template_epilogue,
             "transpose_discontiguous_tensor_descriptors_override": True,
         }
 
