@@ -141,7 +141,7 @@ There are several useful invariants for `torch.ops.higher_order.switch`:
     - They are `torch.fx.GraphModule`
     - Closures in original functions become explicit inputs. No closures.
     - No mutations on inputs or globals are allowed
-    - Branch outputs must be tensors or tuples/lists/dicts of tensors. If a branch returns a single non-tensor value, it must be an int (which will be converted to a SymInt for dynamic shapes).
+    - Branch outputs must be tensors or possibly nested tuples/lists/dicts of tensors. Non-tensor leaves must be `int` or `None`. Diverging `int` values across branches are merged into a SymInt for dynamic shapes; `None` must match positionally across every branch.
 
 - For operands:
     - It will be a flat tuple of tensors

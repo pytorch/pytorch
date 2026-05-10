@@ -1061,6 +1061,7 @@ Control Flow
     :nosignatures:
 
     cond
+    switch
 
 Optimizations
 -------------
