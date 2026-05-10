@@ -2852,11 +2852,14 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented(
-                gb_type="Exception with bad expected type",
-                context=str(expected_exc_types),
-                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[*graph_break_hints.USER_ERROR],
+            # Match CPython: CHECK_EXC_MATCH raises TypeError for non-exception
+            # types (strings, non-BaseException classes/instances, etc.)
+            exc.raise_observed_exception(
+                TypeError,
+                self,
+                args=[
+                    "catching classes that do not inherit from BaseException is not allowed",
+                ],
             )
 
         if sys.version_info >= (3, 11):
@@ -2884,11 +2887,14 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented(
-                    gb_type="Exception with non-type expectation",
-                    context=str(expected_type),
-                    explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[*graph_break_hints.USER_ERROR],
+                # Match CPython: raise TypeError for non-exception types in
+                # except tuples, e.g. except (SomeString,):
+                exc.raise_observed_exception(
+                    TypeError,
+                    self,
+                    args=[
+                        "catching classes that do not inherit from BaseException is not allowed",
+                    ],
                 )
             if self._isinstance_exception(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
