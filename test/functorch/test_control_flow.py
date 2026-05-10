@@ -5992,6 +5992,7 @@ class TestControlFlowTraced(TestCase):
         # fake and asserts graph(*args) == eager for each.
         self._check_tracing(f, (torch.tensor([1]), torch.randn(4)))
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_simple_capture_check_graph(self):
         def f(idx, x):
@@ -6046,6 +6047,7 @@ def forward(self, l_x_):
     return (abs_1,)""",
         )
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_lifted_args_check_graph(self):
         # When different branches close over different tensors, dynamo must
@@ -6122,6 +6124,7 @@ def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_co
     return (add,)""",
         )
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_constant_index_specialization_check_graph(self):
         # When the index is a Python constant, dynamo specializes into the
@@ -6159,6 +6162,7 @@ def forward(self, L_x_ : torch.Tensor):
         # And no branch submodules were installed because the HOP never ran.
         self.assertEqual(list(dict(gm.named_children()).keys()), [])
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_nn_module_lifted_check_graph(self):
         # nn.Module branches: every parameter of every branch's module is
