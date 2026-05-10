@@ -56,16 +56,19 @@ inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, uint> to_radix_key(
     T val,
     bool desc) {
   using U = typename radix_bits<T>::type;
-  constexpr U all_ones = U(~U(0));
-  constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
+  constexpr uint nbits = sizeof(T) * 8;
+  constexpr uint key_mask = (nbits == 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1u);
+  constexpr uint sign_bit = 1u << (nbits - 1);
   // val != val is NaN check; metal::isnan is buggy at large TGs on M2.
   if (val != val)
-    return desc ? 0u : uint(all_ones);
-  U bits = as_type<U>(val);
-  U result = bits ^ ((bits & sign_bit) ? all_ones : sign_bit);
+    return desc ? 0u : key_mask;
+  uint bits = uint(as_type<U>(val));
+  uint is_neg = bits >> (nbits - 1);
+  uint mask = (uint(0) - is_neg) | sign_bit;
+  uint result = (bits ^ mask) & key_mask;
   if (desc)
-    result = U(~result);
-  return uint(result);
+    result = (~result) & key_mask;
+  return result;
 }
 
 template <typename T>
