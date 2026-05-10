@@ -4681,7 +4681,8 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
-instantiate_device_type_tests(ExportTestsDevice, globals(), except_for="cpu")
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(ExportTestsDevice, globals(), only_for=devices, allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
