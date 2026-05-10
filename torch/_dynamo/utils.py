@@ -3155,6 +3155,13 @@ def raise_args_mismatch(
     )
 
 
+def _richcompare_eq(a: Any, b: Any) -> bool:
+    """Mirrors CPython's PyObject_RichCompareBool for Py_EQ: identity first, then equality."""
+    if a is b:
+        return True
+    return a == b
+
+
 def iter_contains(
     items: Iterable[Any],
     search: Any,
@@ -3164,9 +3171,10 @@ def iter_contains(
     from .variables import ConstantVariable
 
     if search.is_python_constant():
+        search_val = search.as_python_constant()
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and _richcompare_eq(x.as_python_constant(), search_val)
             for x in items
         )
         return ConstantVariable.create(found_const)

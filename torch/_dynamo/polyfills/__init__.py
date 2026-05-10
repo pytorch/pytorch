@@ -179,14 +179,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
@@ -225,9 +226,12 @@ def list_cmp(
     if op is ne and left_len != right_len:
         return True
 
-    # Apply `op` to the first pair that differ
+    # Apply `op` to the first pair that differ.
+    # CPython's list_richcompare uses PyObject_RichCompareBool which checks
+    # identity before equality, so identical objects are always considered equal
+    # (e.g. NaN is NaN => True even though NaN == NaN => False).
     for a, b in zip(left, right):
-        if a != b:
+        if a is not b and a != b:
             return op(a, b)
 
     # No more pairs to compare, so compare sizes.
@@ -242,7 +246,8 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
         return list(d.items()) == list(other.items())
 
     for k, v in d.items():
-        if v != other[k]:
+        other_v = other[k]
+        if v is not other_v and v != other_v:
             return False
 
     return True
