@@ -8792,6 +8792,18 @@ class TestMPS(TestCaseMPS):
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")
         check(randint(100, dtype=torch.int32), randint(100, dtype=torch.int64), "+*-")
 
+        # In-place narrowing: out dtype is narrower than the iterator common
+        # dtype (e.g. half.maximum_(float) via clamp_min_). The cast kernel
+        # would otherwise write common-dtype-sized elements into the narrower
+        # output buffer. Regression for cosine_similarity on 0-d float16.
+        for shape in [(), (8,), (3, 5)]:
+            h = torch.full(shape, 0.5, device="mps", dtype=torch.float16)
+            f = torch.full(shape, 1e-8, device="mps", dtype=torch.float32)
+            h_cpu = h.cpu().clone()
+            h.clamp_min_(f)
+            h_cpu.clamp_min_(f.cpu())
+            self.assertEqual(h.cpu(), h_cpu)
+
         # non contiguous cases/slices
         check(rand(100, 100)[10:50, 20:80], rand(100, 100)[10:50, 20:80])
         check(rand(100, 100)[::2, ::3], rand(100, 100)[::2, ::3], "+*")
