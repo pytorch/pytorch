@@ -320,6 +320,13 @@ class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
     @staticmethod
+    def _get_stream():
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        return device_interface.get_raw_stream(device_interface.current_device())
+
+    @staticmethod
     def _make_kernel_inputs():
         in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
         out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
@@ -345,7 +352,9 @@ class TestCachingAutotunerPlugin(TestCase):
             patch.object(autotuner, "precompile") as mock_precompile,
             patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
         ):
-            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+            result = autotuner.run(
+                *self._make_kernel_inputs(), stream=self._get_stream()
+            )
 
         self.assertIs(result, sentinel)
         mock_precompile.assert_not_called()
@@ -360,7 +369,9 @@ class TestCachingAutotunerPlugin(TestCase):
 
         autotuner = self._make_autotuner([_Plugin()])
         with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
-            result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+            result = autotuner.run(
+                *self._make_kernel_inputs(), stream=self._get_stream()
+            )
 
         self.assertIs(result, sentinel)
         mock_autotune.assert_not_called()
@@ -381,7 +392,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner = self._make_autotuner(
             [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
         )
-        result = autotuner.run(*self._make_kernel_inputs(), stream=0)
+        result = autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
 
         self.assertIs(result, sentinel)
         self.assertEqual(seen, ["a", "b", "c"])
@@ -399,7 +410,7 @@ class TestCachingAutotunerPlugin(TestCase):
         full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
 
-        autotuner.run(*self._make_kernel_inputs(), stream=0)
+        autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
 
         self.assertEqual(seen, ["pre_dispatch"])
         self.assertEqual(len(autotuner.launchers), 1)
