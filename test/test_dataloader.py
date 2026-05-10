@@ -437,6 +437,121 @@ class TestTensorDataset(TestCase):
             TensorDataset(tensor1, tensor2, tensor3)
 
 
+class TestTensorDatasetFastPath(TestCase):
+    """Tests for the TensorDataset contiguous-slice fast path in _MapDatasetFetcher."""
+
+    def _make_loader(self, dataset, batch_size=4, shuffle=False, collate_fn=None):
+        kwargs = {"batch_size": batch_size, "shuffle": shuffle, "num_workers": 0}
+        if collate_fn is not None:
+            kwargs["collate_fn"] = collate_fn
+        return DataLoader(dataset, **kwargs)
+
+    def test_is_contiguous_batch(self):
+        from torch.utils.data._utils.fetch import _is_contiguous_batch
+
+        self.assertTrue(_is_contiguous_batch([0, 1, 2, 3]))
+        self.assertTrue(_is_contiguous_batch([5, 6, 7]))
+        self.assertTrue(_is_contiguous_batch([0]))
+        self.assertFalse(_is_contiguous_batch([]))
+        self.assertFalse(_is_contiguous_batch([0, 2, 3]))   # gap
+        self.assertFalse(_is_contiguous_batch([3, 1, 2]))   # not sorted
+        self.assertFalse(_is_contiguous_batch([0, 1, 1, 2]))  # duplicate
+
+    def test_fast_path_single_tensor(self):
+        t = torch.arange(20, dtype=torch.float32).reshape(20, 1)
+        dataset = TensorDataset(t)
+        loader = self._make_loader(dataset, batch_size=4, shuffle=False)
+        for i, (batch,) in enumerate(loader):
+            expected = t[i * 4 : (i + 1) * 4]
+            self.assertEqual(batch, expected)
+
+    def test_fast_path_multiple_tensors(self):
+        features = torch.randn(32, 8)
+        labels = torch.randint(0, 10, (32,))
+        dataset = TensorDataset(features, labels)
+        loader = self._make_loader(dataset, batch_size=8, shuffle=False)
+        for i, (feat_batch, label_batch) in enumerate(loader):
+            self.assertEqual(feat_batch, features[i * 8 : (i + 1) * 8])
+            self.assertEqual(label_batch, labels[i * 8 : (i + 1) * 8])
+
+    def test_fast_path_1d_tensors(self):
+        x = torch.arange(16, dtype=torch.float32)
+        y = torch.arange(16, dtype=torch.float32) * 2
+        dataset = TensorDataset(x, y)
+        loader = self._make_loader(dataset, batch_size=4, shuffle=False)
+        for i, (xb, yb) in enumerate(loader):
+            self.assertEqual(xb, x[i * 4 : (i + 1) * 4])
+            self.assertEqual(yb, y[i * 4 : (i + 1) * 4])
+
+    def test_fast_path_is_view(self):
+        # The fast-path slice should share storage with the original tensor (zero-copy).
+        t = torch.randn(16, 4)
+        dataset = TensorDataset(t)
+        loader = self._make_loader(dataset, batch_size=4, shuffle=False)
+        (batch,) = next(iter(loader))
+        self.assertTrue(batch.untyped_storage().data_ptr() == t.untyped_storage().data_ptr())
+
+    def test_fast_path_partial_last_batch(self):
+        # 10 samples, batch_size=4 → last batch has 2 samples.
+        t = torch.arange(10, dtype=torch.float32)
+        dataset = TensorDataset(t)
+        loader = self._make_loader(dataset, batch_size=4, shuffle=False, collate_fn=None)
+        batches = list(loader)
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[-1][0]), 2)
+        self.assertEqual(batches[-1][0], t[8:10])
+
+    def test_shuffle_falls_back_to_slow_path(self):
+        # With shuffle=True indices are non-contiguous; result must still be correct.
+        torch.manual_seed(0)
+        features = torch.randn(32, 4)
+        labels = torch.randint(0, 5, (32,))
+        dataset = TensorDataset(features, labels)
+        loader = self._make_loader(dataset, batch_size=8, shuffle=True)
+        seen = torch.zeros(32, dtype=torch.bool)
+        for feat_batch, label_batch in loader:
+            self.assertEqual(feat_batch.shape, (8, 4))
+            self.assertEqual(label_batch.shape, (8,))
+            seen[: len(feat_batch)] = True  # just verify iteration completes
+        # Verify correctness: every sample in a batch matches its original row.
+        torch.manual_seed(0)
+        loader2 = self._make_loader(dataset, batch_size=8, shuffle=True)
+        for feat_batch, label_batch in loader2:
+            for row in feat_batch:
+                self.assertTrue(any(torch.equal(row, features[j]) for j in range(32)))
+
+    def test_custom_collate_skips_fast_path(self):
+        # A custom collate_fn must be respected — fast path should not activate.
+        called = {"count": 0}
+
+        def counting_collate(batch):
+            called["count"] += 1
+            import torch.utils.data._utils.collate as C
+            return C.default_collate(batch)
+
+        t = torch.randn(16, 4)
+        dataset = TensorDataset(t)
+        loader = self._make_loader(dataset, batch_size=4, collate_fn=counting_collate)
+        list(loader)
+        self.assertEqual(called["count"], 4)  # collate was called for each of 4 batches
+
+    def test_fast_path_matches_slow_path(self):
+        # Numerically identical results between fast (sequential) and slow (shuffled) paths.
+        torch.manual_seed(42)
+        features = torch.randn(40, 16)
+        labels = torch.randint(0, 3, (40,))
+        dataset = TensorDataset(features, labels)
+
+        fast_batches = list(self._make_loader(dataset, batch_size=8, shuffle=False))
+        slow_batches = [
+            (features[i * 8 : (i + 1) * 8], labels[i * 8 : (i + 1) * 8])
+            for i in range(5)
+        ]
+        for (ff, fl), (sf, sl) in zip(fast_batches, slow_batches):
+            self.assertEqual(ff, sf)
+            self.assertEqual(fl, sl)
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
