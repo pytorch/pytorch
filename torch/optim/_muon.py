@@ -15,7 +15,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
-
+from torch.utils._exposed_in import exposed_in
 
 __all__ = ["Muon"]
 
@@ -83,7 +83,7 @@ def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> 
         adjusted_ratio = 1.0
     return lr * adjusted_ratio
 
-
+@exposed_in("torch.optim")
 class Muon(Optimizer):
     def __init__(
         self,
