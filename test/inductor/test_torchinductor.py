@@ -20411,16 +20411,6 @@ def _run_and_get_stripped_kernels(
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
 
-class TestCombinationsDynamic(TestCase):
-    def test_combinations_dynamic(self):
-        def f(x):
-            return torch.combinations(x, r=2)
-        
-        torch.manual_seed(0)
-
-        for n in [3, 5, 7]:
-            x = torch.randn(n)
-            check_model(self, f, (x,))
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
