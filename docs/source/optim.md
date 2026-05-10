@@ -161,6 +161,12 @@ for input, target in dataset:
 .. currentmodule:: torch.optim
 ```
 
+## Utilities
+
+```{eval-rst}
+.. autofunction:: swap_in_optimizer_params_and_state
+```
+
 ## Algorithms
 
 ```{eval-rst}
