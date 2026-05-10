@@ -38,3 +38,4 @@ rules = struct(
 def _enabled(tags = [], **_kwds):
     """Determines if the target is enabled."""
     return "-bazel" not in tags
+# Wigglytuff
