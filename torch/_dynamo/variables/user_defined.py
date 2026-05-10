@@ -667,6 +667,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        #
+        # Torch classes are excluded: their C-level descriptors (e.g.
+        # Tensor.detach, Size.__add__) must go through VariableTracker.build /
+        # trace_rules to get TorchInGraphFunctionVariable, which carries guards
+        # like inplace-view-on-input-tensor detection. The descriptor VTs would
+        # bypass trace_rules and lose those guards.
         if (
             isinstance(cls_attr, types.WrapperDescriptorType)
             and not is_torch_class(self.value)
@@ -701,20 +707,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # TODO(tp_descr_get) - C-level descriptors not matched above (e.g.
-        # instancemethod, or wrapper/method descriptors on torch classes that
-        # need trace_rules). OrderedDict's C-level methods are handled at
-        # runtime.
-        if inspect.ismethoddescriptor(cls_attr):
-            if (
-                source
-                and self.value is not collections.OrderedDict
-                and (
-                    name in getattr(self.value, "__dict__", {})
-                    or self.value.__module__.startswith("torch.")
-                    or self.value.__module__ == "torch"
-                )
-            ):
+        # instancemethod_descr_get with obj=NULL returns __func__.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L160
+        if torch._C._dynamo.utils.is_instancemethod(cls_attr):  # type: ignore[attr-defined]
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            im_vt = variables.InstanceMethodVariable(cls_attr, source=descriptor_source)
+            return im_vt.tp_descr_get_impl(tx, None, self)
+
+        # Remaining C-level descriptors: wrapper/method descriptors on torch
+        # classes (excluded from the VT checks above by is_torch_class). These
+        # must go through VariableTracker.build / trace_rules to get the right
+        # VT (e.g. TorchInGraphFunctionVariable for Tensor.detach).
+        if inspect.ismethoddescriptor(cls_attr) and is_torch_class(self.value):
+            if source:
                 return VariableTracker.build(tx, cls_attr, source)
             return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
@@ -2953,12 +2962,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # TODO(tp_descr_get) - Investigate if we need a separate descriptor
-        # VT for instancemethod and cython functions.
-        if (
-            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
-            or is_cython_function(type_attr)
-        ):
+        # instancemethod_descr_get binds __func__ to obj via PyMethod_New.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L168
+        if torch._C._dynamo.utils.is_instancemethod(type_attr):  # type: ignore[attr-defined]
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if can_use_mro_source
+                else source
+            )
+            im_vt = variables.InstanceMethodVariable(
+                type_attr, source=descriptor_source
+            )
+            return im_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+        if is_cython_function(type_attr):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
