@@ -4199,7 +4199,14 @@ class TestFromBlob(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    return device_type if torch.device(device).type == "cpu" else "cpu"
+    device = torch.device(device)
+
+    if device.type != "cpu":
+        return "cpu"
+
+    acc = torch.accelerator.current_accelerator(True)
+
+    return acc.type if acc is not None else None
 
 def identity(tensor):
     return tensor
