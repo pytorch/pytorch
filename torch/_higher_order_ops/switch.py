@@ -56,7 +56,7 @@ def switch(
         PyTorch. Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    Equivalent to: branches[index](*operands) with index in [0, len(branches)).
+    Equivalent to: ``branches[index](*operands)`` with index in ``[0, len(branches))``.
 
     Args:
         index (Union[int, torch.Tensor]): An int or 0-dim tensor in [0, len(branches)),
