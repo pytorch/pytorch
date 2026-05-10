@@ -4,6 +4,7 @@ import functools
 import logging
 import os
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Iterator, Sequence
 from enum import auto, Enum
 from itertools import accumulate, chain
@@ -119,15 +120,45 @@ NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES = (
 )
 
 
-class ParamInfo(NamedTuple):
-    """Information for an original parameter."""
+class ParamInfo:
+    """
+    Information for an original parameter.
 
-    param_name: str  # unprefixed
-    module: nn.Module
-    module_name: str
+    ``module`` is stored as a ``weakref`` so the ``FlatParameter`` does not
+    pin the wrapped ``nn.Module`` alive. Otherwise the chain
+    ``FlatParameter -> ParamInfo.module -> Module._parameters (view of
+    FlatParameter) -> view.grad_fn (ViewBackward) -> Edge -> AccumulateGrad
+    -> variable -> FlatParameter`` forms a Python/C++ cross-language cycle
+    that ``gc.collect`` cannot break (``THPCppFunction_traverse`` bails out
+    when an autograd ``Node`` has ``use_count != 1``).
+    """
+
+    __slots__ = ("param_name", "_module_ref", "module_name")
+
+    def __init__(self, param_name: str, module: nn.Module, module_name: str):
+        self.param_name = param_name
+        self._module_ref: weakref.ref[nn.Module] | None = (
+            weakref.ref(module) if module is not None else None
+        )
+        self.module_name = module_name
+
+    @property
+    def module(self) -> nn.Module | None:
+        return self._module_ref() if self._module_ref is not None else None
+
+    def __iter__(self):
+        yield self.param_name
+        yield self.module
+        yield self.module_name
+
+    def __repr__(self):
+        return (
+            f"ParamInfo(param_name={self.param_name!r}, "
+            f"module={self.module!r}, module_name={self.module_name!r})"
+        )
 
 
-class SharedParamInfo(NamedTuple):
+class SharedParamInfo:
     """
     Additional information for a shared parameter.
 
@@ -135,14 +166,64 @@ class SharedParamInfo(NamedTuple):
     variable to be the primary owner, determined as the first one encountered
     in the parameter walk. These are prefixed with "prim". The primary module
     and parameter do not have their own :class:`SharedParamInfo` instance.
+
+    See :class:`ParamInfo` for why ``module`` and ``prim_module`` are stored
+    as weak references.
     """
 
-    param_name: str  # unprefixed
-    module: nn.Module
-    module_name: str
-    prim_param_name: str  # unprefixed
-    prim_module: nn.Module
-    prim_module_name: str
+    __slots__ = (
+        "param_name",
+        "_module_ref",
+        "module_name",
+        "prim_param_name",
+        "_prim_module_ref",
+        "prim_module_name",
+    )
+
+    def __init__(
+        self,
+        param_name: str,
+        module: nn.Module,
+        module_name: str,
+        prim_param_name: str,
+        prim_module: nn.Module,
+        prim_module_name: str,
+    ):
+        self.param_name = param_name
+        self._module_ref: weakref.ref[nn.Module] | None = (
+            weakref.ref(module) if module is not None else None
+        )
+        self.module_name = module_name
+        self.prim_param_name = prim_param_name
+        self._prim_module_ref: weakref.ref[nn.Module] | None = (
+            weakref.ref(prim_module) if prim_module is not None else None
+        )
+        self.prim_module_name = prim_module_name
+
+    @property
+    def module(self) -> nn.Module | None:
+        return self._module_ref() if self._module_ref is not None else None
+
+    @property
+    def prim_module(self) -> nn.Module | None:
+        return self._prim_module_ref() if self._prim_module_ref is not None else None
+
+    def __iter__(self):
+        yield self.param_name
+        yield self.module
+        yield self.module_name
+        yield self.prim_param_name
+        yield self.prim_module
+        yield self.prim_module_name
+
+    def __repr__(self):
+        return (
+            f"SharedParamInfo(param_name={self.param_name!r}, "
+            f"module={self.module!r}, module_name={self.module_name!r}, "
+            f"prim_param_name={self.prim_param_name!r}, "
+            f"prim_module={self.prim_module!r}, "
+            f"prim_module_name={self.prim_module_name!r})"
+        )
 
 
 class _ShardParamInfo(NamedTuple):
@@ -273,8 +354,6 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             shard parameter info; see :class:`_ShardParamInfo` for details.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo` for details.
-        _modules (set[nn.Module]): Modules that contain some original parameter
-            that is flattened into the flat parameter.
 
         _shard_numel_padded (int): Numel padded for this rank's sharded flat
             parameter.
@@ -340,7 +419,6 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     _numels: tuple[int, ...]
     _shard_param_infos: tuple[_ShardParamInfo, ...]
     _shared_param_infos: tuple[SharedParamInfo, ...]
-    _modules: set[nn.Module]
     _shard_numel_padded: int
     _local_shard: Tensor
     _full_param_padded: Tensor
@@ -440,9 +518,6 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             )
 
         self._shared_param_infos = tuple(shared_param_infos)
-        self._modules = {pi.module for pi in self._param_infos}.union(
-            {spi.module for spi in self._shared_param_infos}
-        )
         if (params is None) != (shared_params is None):
             raise AssertionError(
                 "Expected params and shared_params to both be None or both be not None"
@@ -580,7 +655,12 @@ class FlatParamHandle:
         self._keep_low_precision_grads = keep_low_precision_grads
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
-        self._fully_sharded_module = fully_sharded_module
+        # Weak back-reference to break the FSDP-module <-> handle cycle.
+        # Access via the `_fully_sharded_module` property; the wrapping FSDP
+        # module is alive on every code path that reaches this handle.
+        self._fully_sharded_module_ref: weakref.ref[nn.Module] = weakref.ref(
+            fully_sharded_module
+        )
         # For strategies that do not free after forward, we skip using sharded
         # views after forward since the unsharded data exists. We still switch
         # `self.flat_param` to point to the sharded flat parameter since what
@@ -622,6 +702,16 @@ class FlatParamHandle:
 
     def __repr__(self):
         return f"FlatParamHandle(flat_param.fqns={self.flat_param._fqns})"
+
+    @property
+    def _fully_sharded_module(self) -> nn.Module:
+        module = self._fully_sharded_module_ref()
+        if module is None:
+            raise RuntimeError(
+                "FlatParamHandle._fully_sharded_module accessed after the "
+                "wrapping FSDP module was garbage-collected."
+            )
+        return module
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
@@ -2497,12 +2587,6 @@ class FlatParamHandle:
                 self._use_sharded_views()
             else:
                 self._use_unsharded_views(as_params=True)
-
-    def _get_modules(self) -> set[nn.Module]:
-        """Return a :class:`set` of the modules whose parameters are included in this handle's flat parameter."""
-        return {pi.module for pi in self.flat_param._param_infos}.union(
-            {spi.module for spi in self.flat_param._shared_param_infos}
-        )
 
     def is_sharded(self, tensor: Tensor) -> bool:
         """
