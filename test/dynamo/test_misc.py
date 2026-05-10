@@ -15785,6 +15785,18 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(fn_compile_and_search(t), torch.tensor(15))
         self.assertEqual(fn_escape(t), torch.tensor(11))
 
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_compile_exec_function_no_cache_thrash(self):
+        # Issue #124269: exec'd functions must not go through wrap_inline,
+        # else they share one `inner` code object and hit recompile_limit.
+        code = "def op(x):\n    return torch.mean(x)"
+        x = torch.zeros(3)
+        for _ in range(5):  # > recompile_limit
+            scope: dict = {"torch": torch}
+            exec(code, scope)
+            compiled = torch.compile(scope["op"], fullgraph=True)
+            self.assertEqual(compiled(x), torch.tensor(0.0))
+
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module
