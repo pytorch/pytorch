@@ -6330,7 +6330,8 @@ class TestMPS(TestCaseMPS):
         for shape, dim in strided_cases.get(elem_size, []):
             check(make(shape)[:, ::2], dim)
 
-    @xfailIf(MACOS_VERSION < 15.0)  # MPSGraph gather > 4GB assert on macOS 14
+    # xfailIf doesn't catch the SIGABRT from MPSGraph's gather assert
+    @unittest.skipIf(MACOS_VERSION < 15.0, "MPSGraph gather > 4GB assert aborts process on macOS 14")
     @parametrize("dtype", [torch.float32, torch.int32, torch.bfloat16, torch.float16,
                            torch.int16, torch.int8, torch.uint8, torch.bool])
     @parametrize("descending", [False, True])
