@@ -28,7 +28,13 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu, skipIfXpu
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    parametrize,
+    skipIfHpu,
+    skipIfXpu,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1935,7 +1941,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         prefer_cudnn = (
             cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
         )
-        if prefer_cudnn and torch.version.cuda:
+        if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
