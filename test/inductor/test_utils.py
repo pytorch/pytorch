@@ -7,11 +7,10 @@ from collections.abc import Callable, Iterator
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._inductor.sizevars import SizeVarAllocator
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.fx_utils import (
     count_flops_fx,
     countable_fx,
@@ -20,6 +19,7 @@ from torch._inductor.fx_utils import (
 )
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.utils._sympy.functions import Identity, Mod
-
 class TestUtils(TestCase):
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
@@ -264,15 +263,12 @@ class TestUtils(TestCase):
         Ref: https://github.com/pytorch/pytorch/issues/177146
         """
 
-        # Create a real ShapeEnv (required by SizeVarAllocator)
         shape_env = ShapeEnv()
-        # Create SizeVarAllocator directly (no V.graph!)
         allocator = SizeVarAllocator(shape_env)
-        # Create real SymPy symbols
-        s0 = Symbol("s0", positive=True, integer=True)
-        s1 = Symbol("s1", positive=True, integer=True)
-        # Tell ShapeEnv that s1 is divisible by 16
-        shape_env._add_divisible(Mod(s1, 16))
+        s0 = shape_env.create_unbacked_symint().node.expr
+        s1 = shape_env.create_unbacked_symint().node.expr
+        # Register as a runtime assert (this actually adds an axiom)
+        shape_env.defer_runtime_assert(sympy.Eq(Mod(s1, 16), 0), "test")
 
         # If s1 is divisible by 16, then s0 * s1 should also be divisible by 16
         self.assertTrue(
