@@ -12,9 +12,9 @@
 
 #if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 #define Py_BUILD_CORE
-#include <internal/pycore_stackref.h>
 #include <internal/pycore_code.h>
 #include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
 #undef Py_BUILD_CORE
 #endif
 
@@ -858,14 +858,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
 
-  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    return NULL;
-  }
-  Py_INCREF(&THPPyInterpreterFrameType);
-  if (PyModule_AddObject(
-          module,
-          "_PyInterpreterFrame",
-          (PyObject*)&THPPyInterpreterFrameType) != 0) {
+  if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
 
