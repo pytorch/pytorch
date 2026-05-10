@@ -23,6 +23,7 @@ while enabling optimizations where safe.
 
 import collections
 import contextlib
+import enum
 import inspect
 import logging
 import textwrap
@@ -71,6 +72,12 @@ if TYPE_CHECKING:
 side_effects_log = torch._logging.getArtifactLogger(__name__, "side_effects")
 
 
+class AttrMutationKind(enum.Enum):
+    GENERIC_SETATTR = enum.auto()
+    INSTANCE_DICT = enum.auto()
+    SLOT = enum.auto()
+
+
 def _manual_dict_setitem(
     dict_from: dict[Any, Any], dict_to: dict[Any, Any], mro_index: int
 ) -> None:
@@ -111,6 +118,7 @@ class SideEffects:
 
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+    attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[Any]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -120,6 +128,8 @@ class SideEffects:
         output_graph: "OutputGraph",
         id_to_variable: dict[int, VariableTracker] | None = None,
         store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+        | None = None,
+        attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
@@ -143,6 +153,7 @@ class SideEffects:
         self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
+        self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
@@ -269,6 +280,7 @@ class SideEffects:
         return (
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
+            and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
         )
@@ -288,6 +300,8 @@ class SideEffects:
             if sk_sam != ok_sam:
                 return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
             return "store_attr_mutations: unknown diff"
+        elif self.attr_mutation_kinds != other.attr_mutation_kinds:
+            return "attr_mutation_kinds: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
@@ -305,6 +319,9 @@ class SideEffects:
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
+            },
+            attr_mutation_kinds={
+                k: dict(v) for k, v in self.attr_mutation_kinds.items()
             },
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
@@ -399,7 +416,11 @@ class SideEffects:
         return False
 
     def store_attr(
-        self, item: VariableTracker, name: str, value: VariableTracker
+        self,
+        item: VariableTracker,
+        name: str,
+        value: VariableTracker,
+        mutation_kind: AttrMutationKind,
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -422,12 +443,74 @@ class SideEffects:
             self.check_allowed_side_effect(item)
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
+        if item not in self.attr_mutation_kinds:
+            self.attr_mutation_kinds[item] = {}
         self.store_attr_mutations[item][name] = value
+        self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
         item_source = getattr(item, "source", None)
         if item_source is not None:
             self.mutated_sources.add(AttrSource(item_source, name))
+
+    def store_generic_attr(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
+        self.store_attr(item, name, value, AttrMutationKind.GENERIC_SETATTR)
+
+    def store_instance_dict_attr(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
+        self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
+
+    def store_slot_attr(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
+        self.store_attr(item, name, value, AttrMutationKind.SLOT)
+
+    def get_attr_mutation_kind(
+        self, item: VariableTracker, name: str
+    ) -> AttrMutationKind:
+        if name not in self.store_attr_mutations.get(item, ()):
+            return AttrMutationKind.GENERIC_SETATTR
+        if name not in self.attr_mutation_kinds.get(item, ()):
+            raise AssertionError(f"Missing attribute mutation kind for {item}.{name}")
+        return self.attr_mutation_kinds[item][name]
+
+    def attr_mutations_of_kind(
+        self, item: VariableTracker, mutation_kind: AttrMutationKind
+    ) -> dict[str, VariableTracker]:
+        return {
+            name: value
+            for name, value in self.store_attr_mutations.get(item, {}).items()
+            if self.get_attr_mutation_kind(item, name) is mutation_kind
+        }
+
+    def instance_dict_attr_mutations(
+        self, item: VariableTracker
+    ) -> dict[str, VariableTracker]:
+        return self.attr_mutations_of_kind(item, AttrMutationKind.INSTANCE_DICT)
+
+    def has_pending_instance_dict_mutation_of_attr(
+        self, item: VariableTracker, name: str
+    ) -> bool:
+        return self.has_pending_mutation_of_attr(
+            item, name, (AttrMutationKind.INSTANCE_DICT,)
+        )
+
+    def has_pending_instance_dict_or_generic_mutation_of_attr(
+        self, item: VariableTracker, name: str
+    ) -> bool:
+        return self.has_pending_mutation_of_attr(
+            item,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        )
+
+    def has_pending_slot_mutation_of_attr(
+        self, item: VariableTracker, name: str
+    ) -> bool:
+        return self.has_pending_mutation_of_attr(item, name, (AttrMutationKind.SLOT,))
 
     def load_attr(
         self,
@@ -467,7 +550,7 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker, got {type(value)} in store_cell"
             )
-        self.store_attr(cellvar, "cell_contents", value)
+        self.store_generic_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         if not isinstance(cellvar, variables.CellVariable):
@@ -513,7 +596,7 @@ class SideEffects:
             raise AssertionError(
                 f"Expected VariableTracker for value, got {type(value)} in store_global"
             )
-        self.store_attr(gvar, name, value)
+        self.store_generic_attr(gvar, name, value)
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
@@ -537,10 +620,20 @@ class SideEffects:
             self.store_attr_mutations.get(item)
         )
 
-    def has_pending_mutation_of_attr(self, item: VariableTracker, name: str) -> bool:
-        return self.is_attribute_mutation(
-            item
-        ) and name in self.store_attr_mutations.get(item, ())
+    def has_pending_mutation_of_attr(
+        self,
+        item: VariableTracker,
+        name: str,
+        mutation_kinds: tuple[AttrMutationKind, ...] | None = None,
+    ) -> bool:
+        if not (
+            self.is_attribute_mutation(item)
+            and name in self.store_attr_mutations.get(item, ())
+        ):
+            return False
+        if mutation_kinds is None:
+            return True
+        return self.get_attr_mutation_kind(item, name) in mutation_kinds
 
     def is_modified(self, item: VariableTracker) -> bool:
         if item.is_immutable():
@@ -718,7 +811,20 @@ class SideEffects:
                         user_cls
                     )
             else:
-                obj = base_cls.__new__(user_cls)
+                try:
+                    obj = base_cls.__new__(user_cls)
+                except TypeError as exc:
+                    # Backstop for direct construction paths that bypass the
+                    # UserDefinedClassVariable object.__new__ preflight.
+                    unimplemented(
+                        gb_type="Unsupported user-defined object construction during side-effect tracking",
+                        context=f"class={user_cls}, base={base_cls}, error={exc}",
+                        explanation=(
+                            "Dynamo could not construct an example object for "
+                            "side-effect replay using the class __new__ method."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
         return obj
 
     def track_new_user_defined_object(
@@ -884,6 +990,9 @@ class SideEffects:
         }
         self.store_attr_mutations = {
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+        }
+        self.attr_mutation_kinds = {
+            k: v for k, v in self.attr_mutation_kinds.items() if is_live(k)
         }
 
     def mutation(self, var: VariableTracker) -> None:
@@ -1512,6 +1621,7 @@ class SideEffects:
                 for name, value in reversed(
                     self.store_attr_mutations.get(var, {}).items()
                 ):
+                    mutation_kind = self.get_attr_mutation_kind(var, name)
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -1525,7 +1635,30 @@ class SideEffects:
                         )
                         side_effect_occurred = True
                     elif isinstance(value, variables.DeletedVariable):
-                        if isinstance(
+                        if (
+                            isinstance(var, variables.UserDefinedObjectVariable)
+                            and mutation_kind is AttrMutationKind.INSTANCE_DICT
+                        ):
+                            original_dict = getattr(
+                                getattr(var, "value", None), "__dict__", {}
+                            )
+                            if name in original_dict:
+                                cg.add_push_null(
+                                    lambda: cg.load_import_from(
+                                        utils.__name__,
+                                        "object_delattr_ignore_descriptor",
+                                    )
+                                )
+                                cg(var.source)  # type: ignore[attr-defined]
+                                cg(variables.ConstantVariable(name))
+                                suffixes.append(
+                                    [
+                                        *create_call_function(2, False),
+                                        create_instruction("POP_TOP"),
+                                    ]
+                                )
+                                side_effect_occurred = True
+                        elif isinstance(
                             var.mutation_type, AttributeMutationExisting
                         ) and hasattr(getattr(var, "value", None), name):
                             cg.tx.output.update_co_names(name)
@@ -1534,6 +1667,25 @@ class SideEffects:
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
                             side_effect_occurred = True
+                    elif (
+                        isinstance(var, variables.UserDefinedObjectVariable)
+                        and mutation_kind is AttrMutationKind.INSTANCE_DICT
+                    ):
+                        cg.add_push_null(
+                            lambda: cg.load_import_from(
+                                utils.__name__, "object_setattr_ignore_descriptor"
+                            )
+                        )
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        suffixes.append(
+                            [
+                                *create_call_function(3, False),
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
+                        side_effect_occurred = True
                     elif isinstance(
                         var, variables.UserDefinedObjectVariable
                     ) and var.should_skip_descriptor_setter(name):

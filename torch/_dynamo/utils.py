@@ -4259,8 +4259,25 @@ def object_has_getattribute(value: Any) -> bool:
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
     # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
-    d = object.__getattribute__(obj, "__dict__")
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        # threading.local stores attributes in a per-thread C-backed dict that
+        # object.__getattribute__ cannot see.
+        d = threading.local.__getattribute__(obj, "__dict__")
     d[name] = value
+
+
+def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        if not isinstance(obj, threading.local):
+            raise
+        d = threading.local.__getattribute__(obj, "__dict__")
+    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:

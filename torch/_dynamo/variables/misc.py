@@ -345,7 +345,7 @@ class SuperVariable(VariableTracker):
                 )
             if not isinstance(attr, str):
                 raise AssertionError(f"attr must be a str, got {type(attr)}")
-            tx.output.side_effects.store_attr(
+            tx.output.side_effects.store_generic_attr(
                 self.objvar, attr, variables.DeletedVariable()
             )
             return variables.ConstantVariable.create(None)

@@ -1318,11 +1318,13 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return key.vt.as_python_constant() if istype(key, Hasher) else key
 
     def side_effects_table(self) -> dict[str, VariableTracker]:
-        return self.side_effects.store_attr_mutations.get(self.item, {})
+        return self.side_effects.instance_dict_attr_mutations(self.item)
 
     def __getitem__(self, key: kV) -> VariableTracker:
         name = self._maybe_unwrap_key(key)
-        if self.side_effects.has_pending_mutation_of_attr(self.item, name):
+        if self.side_effects.has_pending_instance_dict_mutation_of_attr(
+            self.item, name
+        ):
             return self.side_effects.load_attr(self.item, name, deleted_ok=True)
         return self.item_dict[name]
 
@@ -1331,21 +1333,22 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         name = self._maybe_unwrap_key(key)
         if not istype(name, str):
             raise AssertionError(f"Expected str key, got {type(name)}")
-        self.side_effects.store_attr(self.item, name, value)
+        self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:
         name = self._maybe_unwrap_key(key)
-        self.side_effects.store_attr(self.item, name, variables.DeletedVariable())
+        self.side_effects.store_instance_dict_attr(
+            self.item, name, variables.DeletedVariable()
+        )
 
     def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
         name = self._maybe_unwrap_key(key)
-        table = self.side_effects_table()
-        # if name in side effects, then it is only contained if it's not a DeletedVariable
-        # even if the original dict contains it
-        if name in table:
-            return not isinstance(table[name], variables.DeletedVariable)
-        else:
-            return name in self.item_dict
+        if self.side_effects.has_pending_instance_dict_mutation_of_attr(
+            self.item, name
+        ):
+            value = self.side_effects.load_attr(self.item, name, deleted_ok=True)
+            return not isinstance(value, variables.DeletedVariable)
+        return name in self.item_dict
 
     def __len__(self) -> int:
         return sum(1 for _ in self)
@@ -1393,6 +1396,11 @@ class DunderDictVariable(ConstDictVariable):
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
+
+    def delitem(self, name: str) -> None:
+        if not self.contains(name):
+            raise KeyError(name)
+        del self.items[name]
 
     def getitem(self, name: str) -> VariableTracker:
         return self.items[name]

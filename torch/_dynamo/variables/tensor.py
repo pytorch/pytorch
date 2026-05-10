@@ -2078,7 +2078,7 @@ class TensorVariable(VariableTracker):
                 if not self.source and tx.output.side_effects.is_attribute_mutation(
                     self
                 ):
-                    tx.output.side_effects.store_attr(
+                    tx.output.side_effects.store_generic_attr(
                         self, "grad", variables.ConstantVariable.create(None)
                     )
         return self

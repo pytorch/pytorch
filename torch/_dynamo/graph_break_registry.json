@@ -4770,6 +4770,36 @@
       ]
     }
   ],
+  "GB7502": [
+    {
+      "Gb_type": "Unsupported user-defined object construction during side-effect tracking",
+      "Context": "class={user_cls}, base={base_cls}, error={exc}",
+      "Explanation": "Dynamo could not construct an example object for side-effect replay using the class __new__ method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3697": [
+    {
+      "Gb_type": "C-level descriptor setattr on user-defined object",
+      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
+      "Explanation": "Dynamo does not yet model this C-level descriptor setter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2404": [
+    {
+      "Gb_type": "Unsupported object.__new__ user-defined class construction",
+      "Context": "class={self.value}, error={exc}",
+      "Explanation": "Dynamo could not construct an example object for side-effect replay using object.__new__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",

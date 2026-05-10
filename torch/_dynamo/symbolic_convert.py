@@ -6044,7 +6044,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )
             name = inst.argval
             _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
-            self.output.side_effects.store_attr(fglobals_vt, name, value)
+            self.output.side_effects.store_generic_attr(fglobals_vt, name, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
