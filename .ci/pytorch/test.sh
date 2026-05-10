@@ -1811,7 +1811,7 @@ build_xla() {
   rm "${XLA_DIR}/torch_patches/.torch_pin" || true
 
   apply_patches
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
@@ -1826,7 +1826,7 @@ test_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # Set LD_LIBRARY_PATH for C++ tests
   export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
