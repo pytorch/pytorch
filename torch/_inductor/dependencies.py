@@ -371,7 +371,7 @@ class StarDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class UserTritonDep(StarDep):
     # pyrefly: ignore [bad-override]
-    access_count: int = 1
+    access_count: int = 0
 
     # depends on the entire buffer
     @property

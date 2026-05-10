@@ -6286,6 +6286,7 @@ def is_node_sequence(
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
     inputs: Sequence[IRNode | Sequence[IRNode]]
+    _DepType = dependencies.StarDep
 
     def input_name(self, i: int) -> str:
         input = self.inputs[i]
@@ -6294,18 +6295,17 @@ class InputsKernel(OperationBuffer):
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         reads = OrderedSet[dependencies.Dep]()
-        StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, Sequence):
-                reads.update(StarDep(x.get_name()) for x in input)
+                reads.update(self._DepType(x.get_name()) for x in input)
             elif isinstance(input, ShapeAsConstantBuffer):
                 # Skip creating dependency for symbolics as they're visible globally
                 continue
             else:
-                reads.add(StarDep(input.get_name()))
+                reads.add(self._DepType(input.get_name()))
 
         writes = OrderedSet[dependencies.Dep](
-            StarDep(buf.get_name()) for buf in self.get_outputs()
+            self._DepType(buf.get_name()) for buf in self.get_outputs()
         )
 
         return dependencies.ReadWrites(
@@ -7923,6 +7923,8 @@ class UserDefinedTritonKernel(ExternKernel):
     """
     A user-defined triton kernel (e.g. via @triton.jit).
     """
+
+    _DepType = dependencies.UserTritonDep
 
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
