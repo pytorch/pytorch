@@ -809,7 +809,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized: see comment in CppWrapperCpu.make_buffer_allocation
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -829,6 +830,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride,
         buffer_if_can_stack_allocate=None,
         is_pinned=False,
+        is_uninitialized=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
