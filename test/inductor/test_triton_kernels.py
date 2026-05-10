@@ -5225,6 +5225,11 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         cls._stack = contextlib.ExitStack()
         torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
 
+    @classmethod
+    def tearDownClass(cls):
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = False
+        super().tearDownClass()
+
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
         from torch._inductor import config
 
@@ -5384,12 +5389,15 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
     def test_fusion_custom_kernel_with_linebreaks(self):
         # we do AST manipulation / string manipulation of the kernel source code
         # so we wanna make sure to correctly handle edge cases with tricky line breaks
+        # which `ast.parse`-`ast.unparse` roundtrip does not recover
         @triton.jit
         def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
             offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offs < n_elements
             x = tl.load(in_ptr0 + offs, mask=mask)
+            # forcing newlines before `tl.store`
+
             tl.store(
                 out_ptr + offs,
                 # forcing the `value` arg to be written in multiple lines
