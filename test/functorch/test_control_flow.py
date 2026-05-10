@@ -5992,6 +5992,7 @@ class TestControlFlowTraced(TestCase):
         # fake and asserts graph(*args) == eager for each.
         self._check_tracing(f, (torch.tensor([1]), torch.randn(4)))
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_simple_capture_check_graph(self):
         def f(idx, x):
             branches = (lambda x: x.sin(), lambda x: x.cos(), lambda x: x.abs())
@@ -6045,6 +6046,7 @@ def forward(self, l_x_):
     return (abs_1,)""",
         )
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_lifted_args_check_graph(self):
         # When different branches close over different tensors, dynamo must
         # union the free variables across branches so every branch graph
@@ -6120,6 +6122,7 @@ def forward(self, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_co
     return (add,)""",
         )
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_constant_index_specialization_check_graph(self):
         # When the index is a Python constant, dynamo specializes into the
         # selected branch and the switch HOP is not emitted at all. The
@@ -6156,6 +6159,7 @@ def forward(self, L_x_ : torch.Tensor):
         # And no branch submodules were installed because the HOP never ran.
         self.assertEqual(list(dict(gm.named_children()).keys()), [])
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_nn_module_lifted_check_graph(self):
         # nn.Module branches: every parameter of every branch's module is
         # lifted into the HOP operand tuple, and each branch's submodule
