@@ -3431,16 +3431,6 @@ def _device_handler(args: Sequence[object]) -> torch.device:
         return args[0].fake_device
 
 
-# [subclass inputs]
-# Suppose we enable fake tensor mode.  This means that fake tensor
-# mode will run first.  But what if we do an operation that
-# involves a tensor subclass that will desugar into normal tensor
-# operations?  Without returning NotImplemented, fake tensor mode will run first,
-# decide that a conversion was made (since there was a non fake
-# tensor argument), and report an error that converting non
-# fake tensor is not supported.  What we actually wanted to happen
-# was to give the subclass a chance to figure out what it wants to
-# before erroring out. Returning NotImplemented here allows this.
 def _maybe_extract_fake_view(x: Tensor, fake_mode: FakeTensorMode) -> FakeTensor | None:
     """If *x* is a plain-Tensor view of a FunctionalTensor whose innermost
     storage is a FakeTensor belonging to *fake_mode*, return the
@@ -3468,6 +3458,16 @@ def _maybe_extract_fake_view(x: Tensor, fake_mode: FakeTensorMode) -> FakeTensor
     return out  # pyrefly: ignore[bad-return]
 
 
+# [subclass inputs]
+# Suppose we enable fake tensor mode.  This means that fake tensor
+# mode will run first.  But what if we do an operation that
+# involves a tensor subclass that will desugar into normal tensor
+# operations?  Without returning NotImplemented, fake tensor mode will run first,
+# decide that a conversion was made (since there was a non fake
+# tensor argument), and report an error that converting non
+# fake tensor is not supported.  What we actually wanted to happen
+# was to give the subclass a chance to figure out what it wants to
+# before erroring out. Returning NotImplemented here allows this.
 def _check_for_subclass(flat_args: Sequence[object]) -> bool:
     return any(_check_for_subclass_arg(x) for x in flat_args)
 

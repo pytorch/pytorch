@@ -5423,14 +5423,19 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(result, expected)
 
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_compile_grad_linear_nd_input(self, device, backend):
+    @parametrize(
+        "input_shape",
+        [(16, 3, 6), (2, 4, 3, 6)],
+        name_fn=lambda s: f"{len(s)}d",
+    )
+    def test_compile_grad_linear_nd_input(self, device, backend, input_shape):
         # Regression test for https://github.com/pytorch/pytorch/issues/181304
         linear = nn.Linear(6, 52).to(device)
 
         def model(x):
             return torch.abs(linear(x)).mean()
 
-        x = torch.randn(16, 3, 6, device=device)
+        x = torch.randn(*input_shape, device=device)
         expected = grad(model)(x)
 
         torch._dynamo.reset()
