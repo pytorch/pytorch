@@ -2132,9 +2132,7 @@ class InstructionTranslatorBase(
         if self.exec_recorder:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
-            else:
-                if name not in self.f_builtins:
-                    raise AssertionError("expected name in self.f_builtins to be true")
+            elif name in self.f_builtins:
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
         if name not in self.f_globals:
@@ -2324,13 +2322,8 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            unimplemented(
-                gb_type="failed to find name in frame builtins",
-                context="",
-                explanation=f"Failed to find name `{argval}` in frame's builtins.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
+            exc.raise_observed_exception(
+                NameError, self, args=[f"name '{argval}' is not defined"]
             )
         val = self.f_builtins[argval]
 
