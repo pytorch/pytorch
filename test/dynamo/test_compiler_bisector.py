@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import requires_cuda
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu_and_triton
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 

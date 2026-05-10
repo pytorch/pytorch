@@ -15,11 +15,11 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_reg-istry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     set_default_dtype,
+    TEST_CUDA,
     TEST_XPU, 
-    TEST_CUDA
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
