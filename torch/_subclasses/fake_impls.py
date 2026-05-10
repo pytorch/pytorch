@@ -656,11 +656,60 @@ def _view_has_unbacked_input(
     )
 
 
+def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
+    """
+    Heuristic: before _view_unbacked_meta falls through to the specializing
+    recursion (which often emits Eq/Neq(s, 1) via eval_eager), check if the
+    input's free symbols and the target shape's free symbols contain pairs
+    that are equal at the runtime hint. For each candidate pair (x, y),
+    evaluate `bool(x == y)`; if True, the shape env records `Eq(x, y)` and
+    set_replacement unifies them, letting the size-oblivious view path
+    succeed without specialization.
+
+    Returns True if at least one equality was added.
+
+    Conservative: only considers SymInts that appear as a top-level dim of
+    the input or target (skipping the -1 marker), and skips already-equal
+    pairs.
+    """
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    def _atomic_syms(dims) -> list[torch.SymInt]:
+        """Keep only SymInts whose expr is a single bare *backed* symbol
+        (skip derived expressions like (131*s57)//s40 and skip unbacked
+        symbols like u0)."""
+        out: list[torch.SymInt] = []
+        for s in dims:
+            if not isinstance(s, torch.SymInt):
+                continue
+            expr = s.node.expr
+            free = expr.free_symbols
+            if len(free) != 1 or expr not in free:
+                continue
+            if free_unbacked_symbols(expr):
+                continue
+            out.append(s)
+        return out
+
+    a_syms = _atomic_syms(a.size())
+    target_syms = _atomic_syms(shape)
+    added = False
+    for x in a_syms:
+        for y in target_syms:
+            if bool(x == y):
+                added = True
+                break
+        if added:
+            break
+    return added
+
+
 def _view_unbacked_meta(
     a: torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
     allow_copy: bool = False,
+    tried_duck_specialize: bool = False,
 ) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
@@ -724,6 +773,26 @@ def _view_unbacked_meta(
         torch.fx.experimental._config.backed_size_oblivious
         or _view_has_unbacked_input(a, shape)
     ):
+        # Heuristic: before falling through to the specializing recursion
+        # (which often emits Eq(s, 1) via eval_eager), try to discover
+        # cross-symbol equalities between input and target shape symbols.
+        # If a pair (x, y) is True at the runtime hint, the shape env will
+        # record Eq(x, y) and set_replacement unifies them — letting the
+        # size-oblivious view path succeed without specialization on x==1.
+        # But with potential duck specializations which are more general.
+        if (
+            torch.fx.experimental._config.unify_view_symbols_unbacked_meta
+            and not tried_duck_specialize
+            and try_duck_specialization_first(a, shape)
+        ):
+            return _view_unbacked_meta(
+                a,
+                shape,
+                size_oblivious_enabled=True,
+                allow_copy=allow_copy,
+                tried_duck_specialize=True,
+            )
+
         return _view_unbacked_meta(
             a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
         )
