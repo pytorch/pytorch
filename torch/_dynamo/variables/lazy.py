@@ -310,7 +310,7 @@ class LazyConstantVariable(LazyVariableTracker):
       flow or math), which subsumes any TYPE_MATCH guard
     """
 
-    supported_types = (int, float, bool, str)
+    supported_types = (int, float, bool, str, type(None))
     _nonvar_fields = {
         "_type_guard_installed",
         "_type_guard_ref",
@@ -405,7 +405,9 @@ class LazyConstantVariable(LazyVariableTracker):
 
     def is_constant_none(self) -> bool:
         self._ensure_type_guard()
-        return False
+        if not self.is_realized():
+            return self.peek_type() is type(None)
+        return self.realize().is_constant_none()
 
     def _maybe_realize_for_type(self) -> type | None:
         """Check if we need to realize to determine the VariableTracker type.
