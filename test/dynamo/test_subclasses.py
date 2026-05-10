@@ -626,6 +626,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             # verify it carries correct metadata.
             self.assertEqual(convert_nodes[0].meta["val"].dtype, torch.float64)
 
+    def test_enable_torch_function_no_tls_leak(self):
+        @torch.compile(backend="eager")
+        def fn():
+            with torch._C.DisableTorchFunctionSubclass():
+                g = torch._C._EnableTorchFunction()
+                del g
+
+        fn()
+        self.assertTrue(torch._C._is_torch_function_enabled())
+        self.assertEqual(
+            torch._C._get_torch_function_state(),
+            torch._C._TorchFunctionState.ENABLED,
+        )
+
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")
         def fn(x):
