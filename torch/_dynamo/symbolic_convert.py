@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -2635,6 +2636,22 @@ class InstructionTranslatorBase(
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
             curr_exc = self.exn_vt_stack.get_current_exception()
+
+            # SkipTest is a test-framework signal, not a real user exception.
+            # Let it propagate directly so the test runner can skip the test.
+            if issubclass(curr_exc.python_type(), unittest.SkipTest):
+                base_exc = curr_exc
+                if isinstance(base_exc, UserDefinedExceptionObjectVariable):
+                    base_exc = base_exc._base_vt
+                skip_args = []
+                if isinstance(base_exc, variables.ExceptionVariable):
+                    for arg in base_exc.args:
+                        try:
+                            skip_args.append(arg.as_python_constant())
+                        except NotImplementedError:
+                            skip_args.append(str(arg))
+                raise unittest.SkipTest(*skip_args)
+
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(

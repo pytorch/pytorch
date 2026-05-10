@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest
 import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
@@ -2149,6 +2150,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    unittest.SkipTest,
                 ),
             ):
                 raise
@@ -2313,6 +2315,10 @@ class ConvertFrame:
         except Exception as e:
             # Do not allow errors to be suppressed if we're tracing a resume function prologue
             if isinstance(e, ResumePrologueTracingError):
+                raise
+
+            # SkipTest is a test-framework signal, not a real compilation error.
+            if isinstance(e, unittest.SkipTest):
                 raise
 
             error_on_graph_break = (
