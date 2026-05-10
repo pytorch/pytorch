@@ -1523,7 +1523,7 @@ class GuardedCache(Generic[T]):
             local, remote_cache, key
         ):
             assert hasattr(candidate, "guards_expr")
-            if not candidate.guards_expr:  # type: ignore[attr-defined]
+            if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
                 pickled_content = content
@@ -1534,7 +1534,7 @@ class GuardedCache(Generic[T]):
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
+            hit = bool(evaluate_guards(candidate.guards_expr, hints))
             if hit:
                 graph = candidate
                 pickled_content = content
@@ -3242,7 +3242,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
         result = [torch.tensor([]) if r is None else r for r in result]
         for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)
 
     assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
     return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
@@ -4966,7 +4966,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
             self.static_autotuner.recheck_autotune_cache(
                 reload_kernel_from_src=self.reload_kernel_from_src
             )
-            self.static_autotuner.precompile(  # type: ignore[union-attr]
+            self.static_autotuner.precompile(
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
