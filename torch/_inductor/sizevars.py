@@ -924,6 +924,8 @@ class SizeVarAllocator:
         """
         strides = []
         index = self.simplify(index)
+        if isinstance(index, Expr):
+            index = index.expand(identity=True)
         # remove any offset
         index = index - sympy_subs(
             index, {v: sympy.S.Zero for v in support_vars if v != 0}
