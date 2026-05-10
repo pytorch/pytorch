@@ -724,27 +724,20 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
         return s.node.expr if isinstance(s, torch.SymInt) else s
 
     try:
+        import sympy
+
         a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
         shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
-        diff = (a_numel - shape_numel).subs(subs)
-        # If sympy can simplify the difference to 0, the substitution makes
-        # the numel match and the view becomes valid.
-        if diff == 0 or getattr(diff, "simplify", lambda: diff)() == 0:
-            pass
-        else:
+        diff = sympy.simplify((a_numel - shape_numel).subs(subs))
+        if diff != 0:
             return False
     except Exception:
         return False
 
     # 3) Commit the equalities for real (adds Eq guards, triggers set_replacement).
-    added = False
     for x, y in candidates:
-        try:
-            if bool(x == y):
-                added = True
-        except Exception:
-            continue
-    return added
+        torch._check(x == y)
+    return True
 
 
 def _view_unbacked_meta(
