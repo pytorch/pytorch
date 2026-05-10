@@ -1149,26 +1149,14 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
-  // For the scalar path, casting one element on the host is cheaper (and
-  // avoids a per-element runtime switch) than dispatching the cast kernel.
-  // Promote the scalar operand to the common dtype here and fall through to
-  // the non-cast scalar kernel; we re-bind the converted CPU scalar after
-  // bind_iter_tensors below.
-  //
-  // We only take the shortcut when (a) the tensor operand already matches
-  // the common dtype (otherwise the non-cast scalar kernel that expects
-  // matching dtypes wouldn't exist; e.g. float tensor times complex scalar
-  // promotes to complex but the tensor stays float), and (b) the host-side
-  // .to(common) is provably lossless. The conservative case is integer
-  // scalar with float common: any int representable in the kernel's
-  // op_math_t (which is float for float common) survives the conversion,
-  // and since the GPU cast kernel would also widen to op_math_t = float
-  // before computing, the result is bit-identical. Integer-to-half /
-  // bfloat would also be lossless for small ints but requires inspecting
-  // the scalar value; leave that for later. Float scalar to a narrower
-  // float common (e.g. half) would lose precision because the cast kernel
-  // would have read the scalar at full float precision via op_math_t,
-  // producing different numerics from the host-rounded version.
+  // Scalar fast-path: host-promote the scalar to the common dtype so we can
+  // use the no-cast scalar kernel and skip the per-element runtime switch.
+  // Only safe when (a) the tensor already matches the common dtype (else the
+  // matching no-cast kernel doesn't exist) and (b) `.to(common)` is bit-exact.
+  // Conservatively limited to int scalar -> float common: lossless on the
+  // host, and the GPU cast path also widens via op_math_t=float, so the two
+  // paths produce identical results. Other promotions fall through to the
+  // cast scalar kernel.
   if (use_scalar_kernel && cast_needed) {
     const auto common = iter.common_dtype();
     const auto& tensor_dtype = scalar_on_lhs ? other.scalar_type() : input.scalar_type();
@@ -1212,13 +1200,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   }
 
-  // Cast kernel variants are registered as `..._cast_{common_dtype}` (the
-  // post-promotion input type the kernel template was instantiated with).
-  // For arithmetic ops the output dtype equals the common dtype so this
-  // happens to match `out.scalar_type()`, but the iterator layer should
-  // stay generic: future ops with a different output dtype (e.g. comparison
-  // returning bool) need the common dtype here.
-  const auto cast_suffix_type = scalarToMetalTypeString(iter.common_dtype());
+  // Both cast and non-cast variants use a `_{DTYPEO}_{DTYPEI}` suffix.
+  // Conceptually the second suffix is the kernel's compute precision (= the
+  // iterator's common dtype). For arithmetic ops out and common coincide in
+  // every registered combo (DTYPEI=DTYPEO and inputs are promoted to common
+  // before the kernel reads them, OPMATH variants widen further internally),
+  // so we substitute out for the lookup. For comparison ops DTYPEO=bool but
+  // DTYPEI varies with the read precision, so we use the actual common dtype.
+  const auto cast_suffix_type =
+      fmt::format("{}_{}",
+                  scalarToMetalTypeString(out),
+                  scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
   std::string kernel_name;
   if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
