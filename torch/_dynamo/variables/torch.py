@@ -2108,14 +2108,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
+        @register(
+            torch.accelerator.current_stream,
+            torch.cuda.current_stream,
+            torch.xpu.current_stream,
+        )
         def handle_current_stream(
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
-            from .streams import CudaStreamVariable
+            from .streams import _get_stream_variable_cls
 
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
@@ -2135,10 +2139,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     device = None
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
-                if self.value is torch.cuda.current_stream and not isinstance(
-                    stream_var, CudaStreamVariable
+                stream_variable_cls = _get_stream_variable_cls(self.value)
+                if stream_variable_cls is not None and not isinstance(
+                    stream_var, stream_variable_cls
                 ):
-                    stream_var = CudaStreamVariable(
+                    stream_var = stream_variable_cls(
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
