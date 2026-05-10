@@ -3111,6 +3111,14 @@ def _index_add(
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_add(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
+    torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
@@ -3192,6 +3200,14 @@ def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
+    torch._check(
+        x.device == index.device and x.device == tensor.device,
+        lambda: (
+            f"index_copy(): self, index and source expected to be in the same device, "
+            f"but got (self) {x.device}, (index) {index.device}, "
+            f"and (source) {tensor.device}"
+        ),
+    )
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
@@ -5747,6 +5763,9 @@ def max_pool2d_with_indices_backward(
     """
     # Use native kernel in deterministic mode
     if torch.are_deterministic_algorithms_enabled():
+        return NotImplemented
+
+    if grad_output.is_xpu:
         return NotImplemented
 
     # MPS: Use native kernel. scatter_add has correctness issues on macOS 14

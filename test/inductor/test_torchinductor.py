@@ -74,6 +74,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
@@ -10979,7 +10980,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
@@ -11011,7 +11012,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
@@ -14278,6 +14279,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    @requires_gpu()
+    @parametrize("inplace", [False, True])
+    def test_index_add_device_mismatch(self, inplace):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires GPU for device mismatch test")
+
+        def fn(x, source):
+            index = torch.randperm(x.size(0))
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 3, device=self.device)
+        source = torch.randn(10, 3, device=self.device)
+
+        with self.assertRaises(RuntimeError):
+            fn(x, source)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
@@ -16846,6 +16870,11 @@ if RUN_GPU:
                 expected_divisible = {
                     # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
+                }
+            elif SM100OrLater:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    0: (0, 1, 3),
                 }
             else:
                 self.assertEqual(len(kernels), 2)
