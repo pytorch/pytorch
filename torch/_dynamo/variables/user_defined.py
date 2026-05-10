@@ -955,6 +955,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # unreconstructable args (e.g. generators).  Other tp_new functions
             # (tuple.__new__, BaseException.__new__) use the extra args.
             new_fn = self.value.__new__
+
+            # CPython's excess-args check: C-level tp_new rejects kwargs
+            # when the class has NOT overridden __init__ from the base.
+            # See CPython typeobject.c: type_call / excess_args.
+            _NO_KWARGS_NEW = (
+                float.__new__,
+                tuple.__new__,
+                frozenset.__new__,
+                int.__new__,
+                str.__new__,
+                bool.__new__,
+                object.__new__,
+            )
+            if kwargs and new_fn in _NO_KWARGS_NEW:
+                cls_type = args[0]
+                init_not_overridden = True
+                if isinstance(cls_type, UserDefinedClassVariable):
+                    cls_val = cls_type.value
+                    init_not_overridden = cls_val.__init__ is object.__init__
+                if init_not_overridden:
+                    owner_name = new_fn.__self__.__name__  # type: ignore[union-attr]
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[f"{owner_name}() takes no keyword arguments"],
+                    )
+
             if new_fn in (dict.__new__, set.__new__):
                 init_args: list[VariableTracker] = []
             else:

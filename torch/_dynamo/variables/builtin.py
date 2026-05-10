@@ -2415,6 +2415,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
+        if kwargs:
+            name = self.fn.__name__
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"{name}() takes no keyword arguments"],
+            )
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
@@ -3070,7 +3077,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         _format_string: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
+        # The builtin format(value, format_spec) calls
+        # type(value).__format__(value, format_spec). Only handle the case
+        # where the first arg is a string (i.e. str.format()); for all
+        # other types, fall through to the constant-fold handler.
+        if not isinstance(_format_string, ConstantVariable) or not isinstance(
+            _format_string.value, str
+        ):
+            return None
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(format_string, args, kwargs)
@@ -3783,6 +3798,13 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .user_defined import UserDefinedObjectVariable
+
+        if kwargs:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["list() takes no keyword arguments"],
+            )
 
         obj = args[0] if args else None
 
