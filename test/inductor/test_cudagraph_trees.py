@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import os
 import re
 import sys
 import unittest
@@ -1943,6 +1944,7 @@ if HAS_CUDA_AND_TRITON:
         )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
+        @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
