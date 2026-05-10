@@ -124,9 +124,8 @@ class ContextWrappingVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) != 1:
-            raise AssertionError(f"expected exactly 1 arg, got {len(args)}")
-        if not isinstance(
+        assert len(args) == 1
+        assert isinstance(
             args[0],
             (
                 NestedUserFunctionVariable,
@@ -134,8 +133,7 @@ class ContextWrappingVariable(VariableTracker):
                 UserMethodVariable,
                 UserFunctionVariable,
             ),
-        ):
-            raise AssertionError(f"expected a function variable, got {type(args[0])}")
+        )
 
         if isinstance(args[0], NestedUserFunctionVariable):
             return WrappedNestedUserFunctionVariable(args[0], self)
@@ -160,8 +158,7 @@ class ContextWrappingVariable(VariableTracker):
             self.cleanup_fn = None
 
     def cleanup_assert(self) -> None:
-        if not self.cleanup_fn:
-            raise AssertionError("multiple exits?")
+        assert self.cleanup_fn, "multiple exits?"
         self.cleanup()
 
 
@@ -169,8 +166,7 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
-        if cm_obj is None:
-            raise AssertionError("cm_obj must not be None")
+        assert cm_obj is not None
         super().__init__(
             value=cm_obj,
             value_type=cm_obj.__class__,
@@ -528,10 +524,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         initial_values: Any | None = None,
         **kwargs: Any,
     ) -> None:
-        if not isinstance(catch_warnings_args, dict):
-            raise AssertionError(
-                f"catch_warnings_args must be a dict, got {catch_warnings_args}"
-            )
+        assert isinstance(catch_warnings_args, dict), catch_warnings_args
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -666,8 +659,7 @@ class GradModeVariable(ContextWrappingVariable):
         return super().call_function(tx, args, kwargs)
 
     def _call_func(self, tx: "InstructionTranslator", values: Any) -> None:
-        if len(values) != 1:
-            raise AssertionError(f"expected 1 value, got {len(values)}")
+        assert len(values) == 1
         value = values[0]
         # Coalesce grad mode mutations
         if torch.is_grad_enabled() != value:
@@ -761,21 +753,28 @@ class InferenceModeVariable(ContextWrappingVariable):
         return torch.inference_mode
 
 
-class GenericDeviceVariable(ContextWrappingVariable):
-    """Abstract base for device context managers that swap the active device index."""
+class CUDADeviceVariable(ContextWrappingVariable):
+    """represents torch.cuda.device"""
 
-    _exchange_fn: Any
-    _maybe_exchange_fn: Any
-    _get_device_index_fn: Any
-
-    @classmethod
+    @staticmethod
     def create(
-        cls, tx: "InstructionTranslator", device: Any, **kwargs: Any
-    ) -> "GenericDeviceVariable":
-        return cls(
-            target_values=[cls._get_device_index_fn(device, optional=True)],
+        tx: "InstructionTranslator", device: Any, **kwargs: Any
+    ) -> "CUDADeviceVariable":
+        var = CUDADeviceVariable(
+            target_values=[torch.cuda._get_device_index(device, optional=True)],
             initial_values=None,
             **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: Any,
+        initial_values: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
         )
 
     def exit(
@@ -784,104 +783,31 @@ class GenericDeviceVariable(ContextWrappingVariable):
         self.cleanup_assert()
         tx.output.create_node(
             "call_function",
-            self._maybe_exchange_fn,
+            torch.cuda._maybe_exchange_device,
             (self.proxy,),
             {},
         )
         return variables.ConstantVariable.create(False)
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        prev_idx = self._exchange_fn(*self.target_values)
-        self.set_cleanup_hook(tx, lambda: self._maybe_exchange_fn(prev_idx))
+        prev_idx = torch.cuda._exchange_device(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
         self.proxy = tx.output.create_node(
             "call_function",
-            self._exchange_fn,
+            torch.cuda._exchange_device,
             (*self.target_values,),
             {},
         )
         return variables.ConstantVariable.create(None)
 
     def module_name(self) -> str:
-        raise NotImplementedError
+        return "torch.cuda"
 
     def fn_name(self) -> str:
         return "device"
 
     def python_type(self) -> type:
-        raise NotImplementedError
-
-
-class CUDADeviceVariable(GenericDeviceVariable):
-    """represents torch.cuda.device"""
-
-    _exchange_fn = staticmethod(torch.cuda._exchange_device)
-    _maybe_exchange_fn = staticmethod(torch.cuda._maybe_exchange_device)
-    _get_device_index_fn = staticmethod(torch.cuda._get_device_index)
-
-    def module_name(self) -> str:
-        return "torch.cuda"
-
-    def python_type(self) -> type:
         return torch.cuda.device
-
-
-class XPUDeviceVariable(GenericDeviceVariable):
-    """represents torch.xpu.device"""
-
-    _exchange_fn = staticmethod(torch.xpu._exchange_device)
-    _maybe_exchange_fn = staticmethod(torch.xpu._maybe_exchange_device)
-    _get_device_index_fn = staticmethod(torch.xpu._get_device_index)
-
-    def module_name(self) -> str:
-        return "torch.xpu"
-
-    def python_type(self) -> type:
-        return torch.xpu.device
-
-
-class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
-    """represents torch.accelerator.device_index"""
-
-    _exchange_fn = staticmethod(torch._C._accelerator_exchangeDevice)
-    _maybe_exchange_fn = staticmethod(torch._C._accelerator_maybeExchangeDevice)
-    _get_device_index_fn = staticmethod(lambda device, **kwargs: device)
-
-    def module_name(self) -> str:
-        return "torch.accelerator"
-
-    def fn_name(self) -> str:
-        return "device_index"
-
-    def python_type(self) -> type:
-        return torch.accelerator.device_index
-
-
-_device_context_manager_map: dict[type, type[GenericDeviceVariable]] = {
-    torch.cuda.device: CUDADeviceVariable,
-    torch.xpu.device: XPUDeviceVariable,
-    torch.accelerator.device_index: AcceleratorDeviceIndexVariable,
-}
-
-
-def register_device_context_manager(
-    device_context: type, variable_cls: type[GenericDeviceVariable]
-) -> None:
-    """Register a Dynamo variable class for a device context manager type.
-
-    Raises ``ValueError`` if ``device_context`` is already registered.
-    """
-    if device_context in _device_context_manager_map:
-        raise ValueError(
-            f"Device context {device_context} already has a registered context manager"
-        )
-    _device_context_manager_map[device_context] = variable_cls
-
-
-def get_device_context_manager(
-    device_context: type,
-) -> type[GenericDeviceVariable] | None:
-    """Return the Dynamo variable class for ``device_context``, or ``None`` if not registered."""
-    return _device_context_manager_map.get(device_context)
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
@@ -909,14 +835,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         only_subclass: bool = True,
         **kwargs: Any,
     ) -> None:
-        if len(target_values) != 0:
-            raise AssertionError(f"expected 0 target_values, got {len(target_values)}")
-        if initial_values is None:
-            raise AssertionError("initial_values must not be None")
-        if len(initial_values) != 0:
-            raise AssertionError(
-                f"expected 0 initial_values, got {len(initial_values)}"
-            )
+        assert len(target_values) == 0
+        assert initial_values is not None and len(initial_values) == 0
         self.only_subclass = only_subclass
         self.initial_torch_function_subclass_enabled = (
             tx.symbolic_torch_function_state.torch_function_subclass_enabled
@@ -950,8 +870,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx.output.add_cleanup_hook(self.cleanup)
 
     def _call_func(self, tx: "InstructionTranslator", values: Sized) -> None:
-        if len(values) != 0:
-            raise AssertionError(f"expected 0 values, got {len(values)}")
+        assert len(values) == 0
         tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
         if not self.only_subclass:
             tx.symbolic_torch_function_state.torch_function_mode_enabled = False
@@ -1004,8 +923,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     def _call_func(
         self, tx: "InstructionTranslator", values: Sequence[str | None]
     ) -> None:
-        if len(values) != 1:
-            raise AssertionError(f"expected 1 value, got {len(values)}")
+        assert len(values) == 1
         value = values[0]
         if value is not None:
             # Disable `saved_tensors_hooks` with message (`value`)
@@ -1042,12 +960,11 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        if func not in [
+        assert func in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ]:
-            raise AssertionError(f"unexpected autocast function: {func}")
+        ]
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -1312,10 +1229,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
-            if not isinstance(tensors, variables.TupleVariable):
-                raise AssertionError(
-                    f"tensors must be a TupleVariable, got {type(tensors)}"
-                )
+            assert isinstance(tensors, variables.TupleVariable)
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in tensors.items]
             )
@@ -1427,8 +1341,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return super().call_function(tx, args, kwargs)
 
     def _call_func(self, tx: "InstructionTranslator", values: Sequence[Any]) -> None:
-        if len(values) != 1:
-            raise AssertionError(f"expected 1 value, got {len(values)}")
+        assert len(values) == 1
         value = values[0]
         if self.param_group_var.value._training_state != value:
             self.param_group_var.call_method(
@@ -1611,8 +1524,7 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         self.initial_values = (tuple(initial_values_dict.items()),)
 
     def _call_func(self, tx: "InstructionTranslator", values: Any) -> None:
-        if len(values) != 1:
-            raise AssertionError(f"expected 1 value, got {len(values)}")
+        assert len(values) == 1
         value = values[0]
         # manually patch dynamo config
         for key, val in value:
@@ -1645,8 +1557,7 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
         )
 
     def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
-        if len(values) != 1:
-            raise AssertionError(f"expected 1 value, got {len(values)}")
+        assert len(values) == 1
         _set_error_on_graph_break(values[0])
 
     def module_name(self) -> str:
@@ -1688,8 +1599,7 @@ class CudagraphOverrideVariable(ContextWrappingVariable):
             tx.output.cudagraph_annotation = None
             tx.output.tracing_context.cudagraph_annotation = None
         else:
-            if len(values) != 2:
-                raise AssertionError(f"expected 2 values, got {len(values)}")
+            assert len(values) == 2
             fwd, bwd = values
             annotation = _CudagraphAnnotation(fwd=fwd, bwd=bwd)
             tx.output.cudagraph_annotation = annotation
@@ -1738,14 +1648,8 @@ class WithEnterFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if args:
-            raise AssertionError(
-                "WithEnterFunctionVariable.call_function expects no args"
-            )
-        if kwargs:
-            raise AssertionError(
-                "WithEnterFunctionVariable.call_function expects no kwargs"
-            )
+        assert not args
+        assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
 
@@ -1783,12 +1687,9 @@ class WithExitFunctionVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if not isinstance(
+        assert isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-        ):
-            raise AssertionError(
-                f"ctx must be a ContextWrappingVariable or GenericContextWrappingVariable, got {type(ctx)}"
-            )
+        )
         self.ctx = ctx
         self.target = target
 
@@ -1801,10 +1702,7 @@ class WithExitFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise AssertionError(
-                "WithExitFunctionVariable.call_function expects no kwargs"
-            )
+        assert not kwargs
         return self.ctx.exit(tx, *args)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

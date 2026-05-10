@@ -112,7 +112,7 @@ def get_scale_by_from_metas(*metas: ChunkingMeta) -> Node | None:
     raise a CantChunk exception.
 
     If no ChunkingMeta has scale_by field, return None.
-    Otherwise return the only scale_by field.
+    Other wise return the only scale_by field.
     """
 
     scale_by_list = []

@@ -2086,7 +2086,7 @@ class PatternMatcherPass:
             graph = gm.graph
         elif isinstance(gm, torch.fx.Graph):
             graph = gm
-            gm = graph.owning_module  # type: ignore[assignment]
+            gm = graph.owning_module
         else:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
@@ -2491,7 +2491,5 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
     """
     if node.op == "call_module":
         assert isinstance(node.target, str)
-        if node.graph.owning_module is None:
-            raise AssertionError("node.graph.owning_module must not be None")
         return _get_attr(node.graph.owning_module, node.target).__class__
     return node.target

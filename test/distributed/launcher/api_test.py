@@ -134,7 +134,6 @@ class ElasticLaunchTest(unittest.TestCase):
         cls._etcd_server.stop()
 
     def setUp(self):
-        super().setUp()
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables.

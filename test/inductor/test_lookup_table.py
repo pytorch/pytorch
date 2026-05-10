@@ -715,7 +715,6 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
     """Base class for E2E lookup table tests"""
 
     def setUp(self):
-        super().setUp()
         torch._dynamo.reset()
         clear_preprocessing_fns()
         self.device = torch.device("cuda")

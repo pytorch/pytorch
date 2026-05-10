@@ -43,7 +43,7 @@ class TestAutogradFallback(TestCase):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         self.libraries.append(result)
         return result
 

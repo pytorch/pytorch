@@ -147,7 +147,7 @@ class PackageImporter(Importer):
 
         self._mangler = PackageMangler()
 
-        # used for reduce deserialization
+        # used for reduce deserializaiton
         self.storage_context: Any = None
         self.last_map_location = None
 
@@ -294,7 +294,7 @@ class PackageImporter(Importer):
 
         @contextmanager
         def set_deserialization_context():
-            # to let reduce_package access deserialization context
+            # to let reduce_package access deserializaiton context
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:

@@ -308,11 +308,9 @@ class GuardManager:
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
-    def add_dimension_marking_guard(
+    def add_dynamic_indices_guard(
         self,
-        expected_attrs: dict[str, set[int]],
-        absent_attrs: list[str],
-        dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]],
+        value: set[Any],
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -332,13 +330,6 @@ class GuardManager:
     def add_type_match_guard(
         self,
         value: int,
-        verbose_code_parts: list[str],
-        user_stack: traceback.StackSummary | None,
-    ) -> None: ...
-    def add_fake_script_type_match_guard(
-        self,
-        fake_script_object_type: type,
-        type_id: int,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...

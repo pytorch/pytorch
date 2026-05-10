@@ -54,12 +54,8 @@ class SDPAParamsVariable(VariableTracker):
         return SDPAParams
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.source is not None:
-            raise AssertionError(
-                "SDPAParamsVariable should not have a source during reconstruct"
-            )
-        if self.param_vars is None:
-            raise AssertionError("SDPAParamsVariable.param_vars must not be None")
+        assert self.source is None
+        assert self.param_vars is not None
         codegen.add_push_null(
             lambda: codegen.load_import_from("torch._C", "_SDPAParams")
         )

@@ -13,8 +13,7 @@ class _Color(enum.Enum):
 
 
 import torch.nn
-from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import make_dynamo_test, run_tests, TestCase
 
 
 class NbBoolTests(TestCase):
@@ -238,27 +237,6 @@ class NbBoolTests(TestCase):
             TypeError, "__bool__ should return bool, returned Baz"
         ):
             fn(Baz())
-
-    # --- Blocked slot: __bool__ = None ---
-
-    def test_user_defined_bool_none_raises(self):
-        class NoBool:
-            __bool__ = None
-
-        obj = NoBool()
-
-        def fn(x):
-            try:
-                return str(bool(obj))
-            except TypeError as e:
-                return str(e)
-
-        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        eager_result = fn(torch.tensor(0))
-        self.assertTrue(
-            "NoneType" in result or "cannot be interpreted as a boolean" in result
-        )
-        self.assertEqual(result, eager_result)
 
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
 
