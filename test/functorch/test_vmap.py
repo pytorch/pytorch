@@ -6221,14 +6221,12 @@ class TestRandomness(TestCase):
             )(x)
             self._assert_all_slices_unique(output)
 
-    # @parametrize("in_dim", [0, 1, 2])
-    @parametrize("in_dim", [1, 2])
-    # @parametrize("out_dim", [0, 1, 2])
-    @parametrize("out_dim", [1, 2])
+    @parametrize("in_dim", [0, 1, 2])
+    @parametrize("out_dim", [0, 1, 2])
     def test_vmap_chunk_with_scan(self, in_dim, out_dim):
         randomness = "different"
 
-        x = torch.randn(5, 8, 16)
+        x = torch.randn(4, 8, 16)
 
         def f(x):
             y = x.sin() + torch.rand_like(x)

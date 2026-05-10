@@ -11,7 +11,7 @@ import functools
 import itertools
 from collections.abc import Callable  # noqa: TC003
 from functools import partial
-from typing import Any, cast, NoReturn, TYPE_CHECKING, Optional
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -318,17 +318,16 @@ def vmap_impl(
             main_size = batch_size - tail_size
             num_chunks = main_size // chunk_size
 
-            # if isinstance(in_dims, int) or in_dims is None:
-            #     assert len(args) == 1
-            #     in_dims = (in_dims,)
-            # in_dims = cast(tuple[int | None, ...], in_dims)
             def _normalize_dims(in_dims):
                 if isinstance(in_dims, int) or in_dims is None:
-                    assert len(args) == 1
+                    if len(args) != 1:
+                        raise AssertionError(
+                            f"vmap_impl: expected single arg when in_dims is int/None, got {len(args)}"
+                        )
                     in_dims = (in_dims,)
                 return in_dims
 
-            in_dims: tuple[Optional[int], ...] = _normalize_dims(in_dims)
+            in_dims = _normalize_dims(in_dims)
 
             chunked_outs: Any = None
             if num_chunks > 0:
