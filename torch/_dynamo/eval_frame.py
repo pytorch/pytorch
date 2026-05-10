@@ -1001,7 +1001,10 @@ class _TorchDynamoContext:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
             (
-                filename is None
+                # exec/eval'd Python functions also report no source file
+                # but can be traced directly; wrapping collapses them onto
+                # wrap_inline's shared `inner` code (#124269).
+                (filename is None and not inspect.isfunction(fn))
                 or trace_rules.check(fn)
                 or top_level_in_graph
                 or has_polyfill
