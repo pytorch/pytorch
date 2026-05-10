@@ -10,7 +10,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    onlyMPS,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIfNotRocm,
@@ -818,13 +817,14 @@ class TestTorchDlPack(TestCase):
         )
 
     @skipMeta
-    @onlyMPS
-    def test_dlpack_exchange_api_mps_sliced(self, device):
-        # Regression: toDLPackNonOwning must encode storage_offset in
-        # byte_offset for MPS, since DLTensor.data is id<MTLBuffer> (an
-        # opaque Obj-C handle) and pointer arithmetic on it produces a
-        # corrupted handle. The owning path already does this; the
-        # non-owning path used to set data = data_ptr() and byte_offset = 0.
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
+    def test_dlpack_exchange_api_sliced(self, device):
+        # Regression: toDLPackNonOwning must split storage_base/byte_offset for
+        # sliced tensors. On MPS, DLTensor.data is an opaque id<MTLBuffer> so
+        # pointer arithmetic on it produces a corrupted handle; on CPU/CUDA the
+        # split form is also valid per the DLPack spec. Asserts the split form
+        # uniformly across native devices.
         api_capsule = torch.Tensor.__dlpack_c_exchange_api__
         base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
         sliced = base[1:3, :]  # storage_offset = 6, elemsize = 4 -> byte_offset = 24
@@ -837,7 +837,7 @@ class TestTorchDlPack(TestCase):
 
         namespace py = pybind11;
 
-        void check_sliced_mps_dltensor(at::Tensor sliced, py::object api_obj) {
+        void check_sliced_dltensor(at::Tensor sliced, py::object api_obj) {
             const DLPackExchangeAPI* api =
                 static_cast<const DLPackExchangeAPI*>(
                     PyCapsule_GetPointer(api_obj.ptr(), "dlpack_exchange_api"));
@@ -857,7 +857,7 @@ class TestTorchDlPack(TestCase):
                 sliced.storage_offset() * c10::elementSize(sliced.scalar_type());
 
             TORCH_CHECK(dltensor.data == expected_base,
-                        "data should be storage base for MPS, got offset pointer");
+                        "data should be storage base, got offset pointer");
             TORCH_CHECK(dltensor.byte_offset == expected_offset,
                         "byte_offset should be ", expected_offset,
                         ", got ", dltensor.byte_offset);
@@ -867,12 +867,14 @@ class TestTorchDlPack(TestCase):
         from torch.utils import cpp_extension
 
         module = cpp_extension.load_inline(
-            name="test_mps_sliced_dltensor",
+            name="test_sliced_dltensor",
             cpp_sources=[source],
-            functions=["check_sliced_mps_dltensor"],
+            functions=["check_sliced_dltensor"],
             verbose=False,
+            with_cuda=device.startswith("cuda"),
+            with_sycl=device.startswith("xpu"),
         )
-        module.check_sliced_mps_dltensor(sliced, api_capsule)
+        module.check_sliced_dltensor(sliced, api_capsule)
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])
