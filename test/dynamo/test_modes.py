@@ -895,10 +895,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_no_leak_on_graph_break(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182317
-        # When a TorchFunctionMode context manager spans a graph break, the
-        # resume function must properly pop the mode on normal completion.
-        # Previously, only the exception path was handled (via try/except),
-        # leaving a leaked mode on the C-level stack after normal exit.
+        # The resume function's except handler referenced a variable from
+        # the first compiled graph's scope, causing a KeyError that masked
+        # the original exception and left the mode on the C-level stack.
         @torch.compile(backend="eager")
         def fn():
             class A(TorchFunctionMode):
@@ -920,7 +919,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     return -1
 
             with A():
-                x = torch.tensor([1])
+                _x = torch.tensor([1])
 
                 # Second graph break inside the with block
                 class B:
