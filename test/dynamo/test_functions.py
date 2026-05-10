@@ -4676,6 +4676,1394 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_property_descriptor_input_get_on_instance_and_class(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            @property
+            def doubled(self):
+                return self.x * 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            class_access = isinstance(desc.__get__(None, Foo), property)
+            return desc.__get__(obj, Foo) + class_access
+
+        self.assertEqual(
+            fn(Foo.__dict__["doubled"], Foo(torch.tensor(3))), torch.tensor(7)
+        )
+
+    def test_property_subclass_overridden_get_lookup_and_input(self):
+        class MyProperty(property):
+            def __get__(self, obj, owner=None):
+                return torch.tensor(42)
+
+        class C:
+            x = MyProperty(lambda self: torch.tensor(1))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def lookup_fn(obj):
+            return obj.x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def input_fn(desc, obj):
+            return desc.__get__(obj, C)
+
+        obj = C()
+        self.assertEqual(lookup_fn(obj), torch.tensor(42))
+        self.assertEqual(input_fn(C.__dict__["x"], obj), torch.tensor(42))
+
+    def test_descriptor_subclass_overridden_get_lookup_and_input(self):
+        class MyStaticMethod(staticmethod):
+            def __get__(self, obj, owner=None):
+                return torch.tensor(43)
+
+        class MyClassMethod(classmethod):
+            def __get__(self, obj, owner=None):
+                return torch.tensor(44)
+
+        class C:
+            s = MyStaticMethod(lambda: torch.tensor(1))
+            c = MyClassMethod(lambda cls: torch.tensor(2))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def lookup_fn(cls, obj):
+            return cls.s + obj.s + cls.c + obj.c
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def input_fn(s_desc, c_desc, obj):
+            return s_desc.__get__(obj, C) + c_desc.__get__(None, C)
+
+        obj = C()
+        self.assertEqual(lookup_fn(C, obj), torch.tensor(174))
+        self.assertEqual(
+            input_fn(C.__dict__["s"], C.__dict__["c"], obj), torch.tensor(87)
+        )
+
+    def test_descriptor_subclass_inherited_get_lookup_and_input(self):
+        class MyProperty(property):
+            pass
+
+        class MyStaticMethod(staticmethod):
+            pass
+
+        class MyClassMethod(classmethod):
+            pass
+
+        class C:
+            x = MyProperty(lambda self: self.v)
+            s = MyStaticMethod(lambda x: x + 1)
+            c = MyClassMethod(lambda cls, x: x + 2)
+
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def lookup_fn(cls, obj, x):
+            return obj.x + cls.s(x) + obj.s(x) + cls.c(x) + obj.c(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def input_fn(p_desc, s_desc, c_desc, obj, x):
+            return (
+                p_desc.__get__(obj, C)
+                + s_desc.__get__(obj, C)(x)
+                + c_desc.__get__(obj, C)(x)
+            )
+
+        obj = C(torch.tensor(3))
+        self.assertEqual(lookup_fn(C, obj, torch.tensor(4)), torch.tensor(25))
+        self.assertEqual(
+            input_fn(
+                C.__dict__["x"],
+                C.__dict__["s"],
+                C.__dict__["c"],
+                obj,
+                torch.tensor(4),
+            ),
+            torch.tensor(14),
+        )
+
+    def test_staticmethod_subclass_preserves_call_and_type(self):
+        class MyStaticMethod(staticmethod):
+            def __call__(self, x):
+                return x + 100
+
+        class C:
+            s = MyStaticMethod(lambda x: x + 1)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def call_fn(desc, x):
+            return desc(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def type_fn(desc):
+            return type(desc) is MyStaticMethod
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def get_fn(desc, x):
+            return desc.__get__(None, C)(x)
+
+        desc = C.__dict__["s"]
+        self.assertEqual(call_fn(desc, torch.tensor(3)), torch.tensor(103))
+        self.assertTrue(type_fn(desc))
+        self.assertEqual(get_fn(desc, torch.tensor(3)), torch.tensor(4))
+
+    def test_property_subclass_shadowed_fget_uses_internal_callable(self):
+        class MyProperty(property):
+            @property
+            def fget(self):
+                return lambda obj: torch.tensor(100)
+
+        class C:
+            x = MyProperty(lambda self: self.v)
+
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj, t):
+            return obj.x + desc.__get__(obj, C) + t
+
+        self.assertEqual(
+            fn(C.__dict__["x"], C(torch.tensor(2)), torch.tensor(1)),
+            torch.tensor(5),
+        )
+
+    def test_property_subclass_visible_fget_not_read_during_lookup(self):
+        class MyProperty(property):
+            @property
+            def fget(self):
+                raise RuntimeError("visible fget should not be read")
+
+        class C:
+            x = MyProperty(lambda self: self.v + 1)
+
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.x
+
+        self.assertEqual(fn(C(torch.tensor(2))), torch.tensor(3))
+
+    def test_descriptor_subclass_shadowed_func_uses_internal_callable(self):
+        class MyStaticMethod(staticmethod):
+            @property
+            def __func__(self):
+                return lambda x: x + 100
+
+        class MyClassMethod(classmethod):
+            @property
+            def __func__(self):
+                return lambda cls, x: x + 100
+
+        class C:
+            s = MyStaticMethod(lambda x: x + 1)
+            c = MyClassMethod(lambda cls, x: x + 2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, obj, s_desc, c_desc, x):
+            return (
+                cls.s(x)
+                + obj.s(x)
+                + s_desc.__get__(obj, C)(x)
+                + s_desc(x)
+                + cls.c(x)
+                + obj.c(x)
+                + c_desc.__get__(obj, C)(x)
+            )
+
+        self.assertEqual(
+            fn(
+                C,
+                C(),
+                C.__dict__["s"],
+                C.__dict__["c"],
+                torch.tensor(1),
+            ),
+            torch.tensor(17),
+        )
+
+    def test_property_subclass_get_mutation_invalidates_lookup(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class MyProperty(property):
+            pass
+
+        class C:
+            x = MyProperty(lambda self: self.v)
+
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(obj, t):
+            return obj.x + t
+
+        self.assertEqual(fn(C(torch.tensor(2)), torch.tensor(1)), torch.tensor(3))
+        self.assertEqual(compile_count, 1)
+
+        MyProperty.__get__ = lambda self, obj, owner=None: torch.tensor(100)
+        self.assertEqual(C(torch.tensor(2)).x + torch.tensor(1), torch.tensor(101))
+        self.assertEqual(fn(C(torch.tensor(2)), torch.tensor(1)), torch.tensor(101))
+        self.assertEqual(compile_count, 2)
+
+    def test_property_subclass_get_mutation_invalidates_descriptor_input(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class MyProperty(property):
+            pass
+
+        class C:
+            x = MyProperty(lambda self: self.v)
+
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(desc, obj, t):
+            return desc.__get__(obj, C) + t
+
+        desc = C.__dict__["x"]
+        self.assertEqual(fn(desc, C(torch.tensor(2)), torch.tensor(1)), torch.tensor(3))
+        self.assertEqual(compile_count, 1)
+
+        MyProperty.__get__ = lambda self, obj, owner=None: torch.tensor(100)
+        self.assertEqual(
+            desc.__get__(C(torch.tensor(2)), C) + torch.tensor(1), torch.tensor(101)
+        )
+        self.assertEqual(
+            fn(desc, C(torch.tensor(2)), torch.tensor(1)), torch.tensor(101)
+        )
+        self.assertEqual(compile_count, 2)
+
+    def test_staticmethod_subclass_call_mutation_invalidates_direct_call(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class MyStaticMethod(staticmethod):
+            pass
+
+        class C:
+            s = MyStaticMethod(lambda x: x + 1)
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(desc, x):
+            return desc(x)
+
+        desc = C.__dict__["s"]
+        self.assertEqual(fn(desc, torch.tensor(3)), torch.tensor(4))
+        self.assertEqual(compile_count, 1)
+
+        MyStaticMethod.__call__ = lambda self, x: x + 100
+        self.assertEqual(desc(torch.tensor(3)), torch.tensor(103))
+        self.assertEqual(fn(desc, torch.tensor(3)), torch.tensor(103))
+        self.assertEqual(compile_count, 2)
+
+    def test_descriptor_subclass_get_mutation_invalidates_lookup(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class MyStaticMethod(staticmethod):
+            pass
+
+        class MyClassMethod(classmethod):
+            pass
+
+        class C:
+            s = MyStaticMethod(lambda x: x + 1)
+            c = MyClassMethod(lambda cls, x: x + 2)
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(cls, obj, x):
+            return cls.s(x) + obj.c(x)
+
+        obj = C()
+        self.assertEqual(fn(C, obj, torch.tensor(3)), torch.tensor(9))
+        self.assertEqual(compile_count, 1)
+
+        MyStaticMethod.__get__ = lambda self, obj, owner=None: lambda x: x + 100
+        MyClassMethod.__get__ = lambda self, obj, owner=None: lambda x: x + 200
+        self.assertEqual(
+            C.s(torch.tensor(3)) + obj.c(torch.tensor(3)), torch.tensor(306)
+        )
+        self.assertEqual(fn(C, obj, torch.tensor(3)), torch.tensor(306))
+        self.assertEqual(compile_count, 2)
+
+    def test_wrapper_descriptor_object_getattribute_on_user_object(self):
+        class C:
+            def __init__(self, x):
+                self.x = x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc(obj, "x") + 1
+
+        self.assertEqual(
+            fn(object.__getattribute__, C(torch.tensor(3))), torch.tensor(4)
+        )
+
+    def test_descriptor_get_method_input_is_reconstructable(self):
+        class C:
+            pass
+
+        def plus_one(x):
+            return x + 1
+
+        desc = staticmethod(plus_one)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc):
+            return desc.__get__
+
+        get = fn(desc)
+        self.assertEqual(get(None, C)(torch.tensor(3)), torch.tensor(4))
+
+    def test_descriptor_get_method_respects_instance_shadow(self):
+        class C:
+            pass
+
+        static_desc = staticmethod(lambda x: x + 1)
+        static_desc.__get__ = lambda obj=None, owner=None: (lambda x: x + 100)
+
+        class_desc = classmethod(lambda cls, x: x + 2)
+        class_desc.__get__ = lambda obj=None, owner=None: (lambda x: x + 200)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(static_desc, class_desc, x):
+            return static_desc.__get__(None, C)(x) + class_desc.__get__(None, C)(x)
+
+        self.assertEqual(
+            fn(static_desc, class_desc, torch.tensor(3)), torch.tensor(306)
+        )
+
+    def test_descriptor_get_method_shadow_mutation_invalidates(self):
+        class C:
+            pass
+
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        desc = staticmethod(lambda x: x + 1)
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(desc, x):
+            return desc.__get__(None, C)(x)
+
+        self.assertEqual(fn(desc, torch.tensor(3)), torch.tensor(4))
+        self.assertEqual(compile_count, 1)
+
+        desc.__get__ = lambda obj=None, owner=None: (lambda x: x + 100)
+        self.assertEqual(fn(desc, torch.tensor(3)), torch.tensor(103))
+        self.assertEqual(compile_count, 2)
+
+    def test_mro_descriptor_source_cache_preserves_lookup_owner(self):
+        p = property(lambda self: self.v)
+
+        class A:
+            x = p
+
+            def __init__(self, v):
+                self.v = v
+
+        class B:
+            x = p
+
+            def __init__(self, v):
+                self.v = v
+
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(a, b, t):
+            return t + a.x + b.x
+
+        t = torch.tensor(1)
+        self.assertEqual(fn(A(2), B(3), t), torch.tensor(6))
+        self.assertEqual(compile_count, 1)
+
+        B.x = property(lambda self: 100)
+        self.assertEqual(t + A(2).x + B(3).x, torch.tensor(103))
+        self.assertEqual(fn(A(2), B(3), t), torch.tensor(103))
+        self.assertEqual(compile_count, 2)
+
+    def test_python_descriptor_class_lookup_uses_raw_mro_source(self):
+        class Desc:
+            def __init__(self, v):
+                self.v = v
+
+            def __get__(self, obj, owner):
+                return torch.tensor(self.v)
+
+        class Base:
+            d = Desc(2)
+
+        class Inherited(Base):
+            pass
+
+        class Direct:
+            d = Desc(4)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            return cls.d + x
+
+        self.assertEqual(fn(Inherited, torch.tensor(3)), torch.tensor(5))
+        self.assertEqual(fn(Direct, torch.tensor(3)), torch.tensor(7))
+
+    def test_inherited_descriptor_instance_lookup_guards_subclass_dict(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class Base:
+            @property
+            def x(self):
+                return self.v
+
+        class Sub(Base):
+            def __init__(self, v):
+                self.v = v
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(obj, t):
+            return obj.x + t
+
+        self.assertEqual(fn(Sub(torch.tensor(2)), torch.tensor(1)), torch.tensor(3))
+        self.assertEqual(compile_count, 1)
+
+        Sub.x = property(lambda self: torch.tensor(100))
+        self.assertEqual(Sub(torch.tensor(2)).x + torch.tensor(1), torch.tensor(101))
+        self.assertEqual(fn(Sub(torch.tensor(2)), torch.tensor(1)), torch.tensor(101))
+        self.assertEqual(compile_count, 2)
+
+    def test_inherited_descriptor_class_lookup_guards_subclass_dict(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class Desc:
+            def __init__(self, v):
+                self.v = v
+
+            def __get__(self, obj, owner):
+                return torch.tensor(self.v)
+
+        class Base:
+            d = Desc(2)
+
+        class Sub(Base):
+            pass
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(cls, t):
+            return cls.d + t
+
+        self.assertEqual(fn(Sub, torch.tensor(1)), torch.tensor(3))
+        self.assertEqual(compile_count, 1)
+
+        Sub.d = Desc(100)
+        self.assertEqual(Sub.d + torch.tensor(1), torch.tensor(101))
+        self.assertEqual(fn(Sub, torch.tensor(1)), torch.tensor(101))
+        self.assertEqual(compile_count, 2)
+
+    def test_instance_python_descriptor_get_uses_sourced_owner(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class Desc:
+            def __get__(self, obj, owner):
+                return owner.val
+
+        class C:
+            val = 2
+            d = Desc()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(obj, x):
+            return obj.d + x
+
+        self.assertEqual(fn(C(), torch.tensor(1)), torch.tensor(3))
+        self.assertEqual(compile_count, 1)
+
+        C.val = 100
+        self.assertEqual(C().d + torch.tensor(1), torch.tensor(101))
+        self.assertEqual(fn(C(), torch.tensor(1)), torch.tensor(101))
+        self.assertEqual(compile_count, 2)
+
+    def test_instance_python_descriptor_get_sourced_owner_tensor_attr(self):
+        class Desc:
+            def __get__(self, obj, owner):
+                return owner.val
+
+        class C:
+            val = torch.tensor(2)
+            d = Desc()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj, x):
+            return obj.d + x
+
+        self.assertEqual(fn(C(), torch.tensor(1)), torch.tensor(3))
+
+    def test_inherited_metaclass_descriptor_lookup_guards_metaclass_dict(self):
+        compile_count = 0
+
+        def backend(gm, example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return gm.forward
+
+        class Meta(type):
+            pass
+
+        class C(metaclass=Meta):
+            pass
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(cls, t):
+            return cls.mro, t + 1
+
+        method, y = fn(C, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertEqual(method(), [C, object])
+        self.assertEqual(compile_count, 1)
+
+        Meta.mro = lambda cls: [cls]
+        self.assertEqual(C.mro(), [C])
+        method, y = fn(C, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertEqual(method(), [C])
+        self.assertEqual(compile_count, 2)
+
+    def test_property_descriptor_without_getter_raises_attribute_error(self):
+        class Foo:
+            x = property()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def lookup_fn(obj, t):
+            try:
+                obj.x
+            except AttributeError:
+                return t + 1
+            return t
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def direct_fn(desc, obj, t):
+            try:
+                desc.__get__(obj, Foo)
+            except AttributeError:
+                return t + 1
+            return t
+
+        obj = Foo()
+        self.assertEqual(lookup_fn(obj, torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(
+            direct_fn(Foo.__dict__["x"], obj, torch.tensor(2)), torch.tensor(3)
+        )
+
+    def test_staticmethod_classmethod_descriptor_input_get(self):
+        class Foo:
+            @staticmethod
+            def static_plus_one(x):
+                return x + 1
+
+            @classmethod
+            def class_plus_two(cls, x):
+                return x + 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(sm_desc, cm_desc, x):
+            return sm_desc.__get__(None, Foo)(x) + cm_desc.__get__(None, Foo)(x)
+
+        self.assertEqual(
+            fn(
+                Foo.__dict__["static_plus_one"],
+                Foo.__dict__["class_plus_two"],
+                torch.tensor(3),
+            ),
+            torch.tensor(9),
+        )
+
+    def test_classmethod_alias_class_lookup_returns_bound_method(self):
+        def real(cls, x):
+            return x + 1
+
+        class C:
+            alias = classmethod(real)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.alias
+
+        method = fn(C)
+        self.assertIs(type(method), types.MethodType)
+        self.assertIs(method.__self__, C)
+        self.assertEqual(method(torch.tensor(1)), torch.tensor(2))
+
+    def test_classmethod_alias_instance_lookup_returns_bound_method(self):
+        def real(cls, x):
+            return x + 1
+
+        class C:
+            alias = classmethod(real)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.alias
+
+        method = fn(C())
+        self.assertIs(type(method), types.MethodType)
+        self.assertIs(method.__self__, C)
+        self.assertEqual(method(torch.tensor(1)), torch.tensor(2))
+
+    def test_staticmethod_and_classmethod_descriptor_input_direct_call(self):
+        class Foo:
+            @staticmethod
+            def static_plus_one(x):
+                return x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(sm_desc, cmd_desc, x):
+            return sm_desc(x) + cmd_desc(dict, ("x",), x)["x"]
+
+        self.assertEqual(
+            fn(
+                Foo.__dict__["static_plus_one"],
+                dict.__dict__["fromkeys"],
+                torch.tensor(3),
+            ),
+            torch.tensor(7),
+        )
+
+    def test_classmethod_descriptor_input_get_with_none_owner(self):
+        class Foo:
+            @classmethod
+            def class_plus_one(cls, x):
+                return x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cm_desc, cmd_desc, obj, dict_obj, x):
+            return (
+                cm_desc.__get__(obj, None)(x)
+                + cmd_desc.__get__(dict_obj, None)(("x",), x)["x"]
+            )
+
+        self.assertEqual(
+            fn(
+                Foo.__dict__["class_plus_one"],
+                dict.__dict__["fromkeys"],
+                Foo(),
+                {},
+                torch.tensor(3),
+            ),
+            torch.tensor(7),
+        )
+
+    def test_descriptor_input_get_none_without_owner_errors(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc):
+            try:
+                desc.__get__(None)
+            except TypeError:
+                return True
+            return False
+
+        self.assertTrue(fn(tuple.__len__))
+
+    def test_trace_rule_wrapper_descriptor_normal_lookup_on_class_construction(self):
+        class C:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            C()
+            return x + 1
+
+        self.assertEqual(fn(torch.tensor(3)), torch.tensor(4))
+
+    def test_trace_rule_wrapper_descriptor_namedtuple_construction(self):
+        Point = collections.namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            point = Point(x, x + 1)
+            return point.x + point.y
+
+        self.assertEqual(fn(torch.tensor(3)), torch.tensor(7))
+
+    def test_metaclass_method_descriptor_lookup_returns_bound_method(self):
+        class C:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            return cls.mro, x + 1
+
+        method, y = fn(C, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertEqual(method(), [C, object])
+
+    def test_metaclass_classmethod_descriptor_lookup_returns_bound_method(self):
+        class C:
+            pass
+
+        class Meta(type):
+            pass
+
+        class D(metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            return cls.__prepare__, x + 1
+
+        method, y = fn(C, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertIs(method.__self__, type)
+        self.assertEqual(method("E", ()), {})
+
+        method, y = fn(D, torch.tensor(2))
+        self.assertEqual(y, torch.tensor(3))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertIs(method.__self__, Meta)
+        self.assertEqual(method("E", ()), {})
+
+    def test_wrapper_descriptor_lookup_on_builtin_subclass(self):
+        class TupleSubclass(tuple):
+            __slots__ = ()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.__len__() + obj[0]
+
+        self.assertEqual(
+            fn(TupleSubclass((torch.tensor(3), torch.tensor(4)))), torch.tensor(5)
+        )
+
+    def test_method_descriptor_lookup_on_builtin_subclass(self):
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.get("x") + 1
+
+        self.assertEqual(fn(DictSubclass({"x": torch.tensor(3)})), torch.tensor(4))
+
+    def test_classmethod_descriptor_lookup_on_builtin_subclass(self):
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, x):
+            result = cls.fromkeys(("x",), x)
+            return result["x"], type(result) is cls
+
+        value, is_subclass = fn(DictSubclass, torch.tensor(3))
+        self.assertEqual(value, torch.tensor(3))
+        self.assertTrue(is_subclass)
+
+    def test_member_descriptor_input_get(self):
+        class Foo:
+            __slots__ = ("x",)
+
+            def __init__(self, x):
+                self.x = x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            class_access = isinstance(
+                desc.__get__(None, Foo), types.MemberDescriptorType
+            )
+            return desc.__get__(obj, Foo) + class_access
+
+        self.assertEqual(fn(Foo.__dict__["x"], Foo(torch.tensor(3))), torch.tensor(4))
+
+    def test_descriptor_input_guards_distinguish_member_descriptor(self):
+        class Foo:
+            __slots__ = ("x", "y")
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc.__get__(obj, Foo)
+
+        obj = Foo(torch.tensor(1), torch.tensor(10))
+        self.assertEqual(fn(Foo.__dict__["x"], obj), torch.tensor(1))
+        self.assertEqual(fn(Foo.__dict__["y"], obj), torch.tensor(10))
+
+    def test_getset_descriptor_input_get(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, cls, x):
+            class_access = isinstance(
+                desc.__get__(None, type), types.GetSetDescriptorType
+            )
+            return x + (desc.__get__(cls, type) == "int") + class_access
+
+        self.assertEqual(
+            fn(type.__dict__["__name__"], int, torch.tensor(3)), torch.tensor(5)
+        )
+
+    def test_tuplegetter_descriptor_input_get(self):
+        Point = collections.namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, p):
+            return desc.__get__(p, Point) + p.y
+
+        p = Point(torch.tensor(3), torch.tensor(4))
+        self.assertEqual(fn(Point.__dict__["x"], p), torch.tensor(7))
+
+    def test_wrapper_descriptor_input_get_and_call(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, x):
+            values = (x, x + 1)
+            class_access = isinstance(
+                desc.__get__(None, tuple), types.WrapperDescriptorType
+            )
+            return x + desc.__get__(values, tuple)() + desc(values) + class_access
+
+        self.assertEqual(fn(tuple.__len__, torch.tensor(3)), torch.tensor(8))
+
+    def test_method_descriptor_input_get_and_call(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, x):
+            values = {"x": x}
+            class_access = isinstance(
+                desc.__get__(None, dict), types.MethodDescriptorType
+            )
+            return desc.__get__(values, dict)("x") + desc(values, "x") + class_access
+
+        self.assertEqual(fn(dict.get, torch.tensor(3)), torch.tensor(7))
+
+    def test_descriptor_input_get_returns_bound_c_method(self):
+        class DictSubclass(dict):
+            def get(self, key, default=None):
+                return torch.tensor(999)
+
+        class TupleSubclass(tuple):
+            __slots__ = ()
+
+            def __len__(self):
+                return 999
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def method_fn(desc, obj):
+            return desc.__get__(obj, dict)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def wrapper_fn(desc, obj):
+            return desc.__get__(obj, tuple)
+
+        method = method_fn(dict.get, {"x": torch.tensor(3)})
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertEqual(method("x"), torch.tensor(3))
+
+        wrapper = wrapper_fn(tuple.__len__, (torch.tensor(1), torch.tensor(2)))
+        self.assertIs(type(wrapper), types.MethodWrapperType)
+        self.assertEqual(wrapper(), 2)
+
+        method = method_fn(dict.get, DictSubclass({"x": torch.tensor(4)}))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertEqual(method("x"), torch.tensor(4))
+
+        wrapper = wrapper_fn(tuple.__len__, TupleSubclass((torch.tensor(1),)))
+        self.assertIs(type(wrapper), types.MethodWrapperType)
+        self.assertEqual(wrapper(), 1)
+
+    def test_descriptor_input_get_ignores_instance_shadowing(self):
+        class DictSubclass(dict):
+            pass
+
+        class TupleSubclass(tuple):  # noqa: SLOT001
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def method_fn(desc, obj, x):
+            return desc.__get__(obj, DictSubclass), x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def wrapper_fn(desc, obj, x):
+            return desc.__get__(obj, TupleSubclass), x + 1
+
+        dict_obj = DictSubclass({"x": torch.tensor(5)})
+        dict_obj.get = lambda key, default=None: torch.tensor(999)
+        method, y = method_fn(dict.get, dict_obj, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertEqual(method("x"), torch.tensor(5))
+        self.assertEqual(dict_obj.get("x"), torch.tensor(999))
+
+        tuple_obj = TupleSubclass((torch.tensor(1), torch.tensor(2)))
+        tuple_obj.__len__ = lambda: 999
+        wrapper, y = wrapper_fn(tuple.__len__, tuple_obj, torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertIs(type(wrapper), types.MethodWrapperType)
+        self.assertEqual(wrapper(), 2)
+        self.assertEqual(tuple_obj.__len__(), 999)
+
+    def test_member_descriptor_input_get_ignores_subclass_shadowing(self):
+        class Base:
+            __slots__ = ("x",)
+
+            def __init__(self, x):
+                Base.__dict__["x"].__set__(self, x)
+
+        class Sub(Base):
+            @property
+            def x(self):
+                return torch.tensor(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc.__get__(obj, Sub) + 1
+
+        obj = Sub(torch.tensor(3))
+        self.assertEqual(fn(Base.__dict__["x"], obj), torch.tensor(4))
+        self.assertEqual(obj.x, torch.tensor(999))
+
+    def test_getset_descriptor_input_get_ignores_metaclass_shadowing(self):
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return {"a": torch.tensor(999)}
+
+        class C(metaclass=Meta):
+            a = torch.tensor(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, cls):
+            return desc.__get__(cls, type)["a"] + 1
+
+        self.assertEqual(fn(type.__dict__["__dict__"], C), torch.tensor(4))
+        self.assertEqual(C.__dict__["a"], torch.tensor(999))
+
+    def test_classmethod_descriptor_input_get_ignores_subclass_shadowing(self):
+        class Base:
+            @classmethod
+            def cm(cls, x):
+                return x + 1
+
+        class Sub(Base):
+            @classmethod
+            def cm(cls, x):
+                return x + 999
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, x):
+            return desc.__get__(None, Sub), x + 1
+
+        method, y = fn(Base.__dict__["cm"], torch.tensor(1))
+        self.assertEqual(y, torch.tensor(2))
+        self.assertEqual(method(torch.tensor(3)), torch.tensor(4))
+        self.assertEqual(Sub.cm(torch.tensor(3)), torch.tensor(1002))
+
+    def test_tuplegetter_descriptor_input_get_ignores_getitem_override(self):
+        PointBase = collections.namedtuple("PointBase", ["x", "y"])
+
+        class Point(PointBase):
+            __slots__ = ()
+
+            def __getitem__(self, idx):
+                return torch.tensor(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc.__get__(obj, Point) + 1
+
+        obj = Point(torch.tensor(3), torch.tensor(4))
+        self.assertEqual(fn(PointBase.__dict__["x"], obj), torch.tensor(4))
+        self.assertEqual(obj[0], torch.tensor(999))
+
+    def test_member_descriptor_input_get_observes_pending_mutation(self):
+        class Foo:
+            __slots__ = ("x",)
+
+            def __init__(self, x):
+                self.x = x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj, y):
+            obj.x = y
+            return desc.__get__(obj, Foo) + obj.x
+
+        self.assertEqual(
+            fn(Foo.__dict__["x"], Foo(torch.tensor(1)), torch.tensor(3)),
+            torch.tensor(6),
+        )
+
+    def test_getset_descriptor_input_get_observes_pending_class_mutation(self):
+        class C:
+            a = torch.tensor(1)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, cls, y):
+            cls.a = y
+            return desc.__get__(cls, type)["a"] + cls.a
+
+        self.assertEqual(
+            fn(type.__dict__["__dict__"], C, torch.tensor(3)),
+            torch.tensor(6),
+        )
+
+    def test_class_dict_lookup_observes_pending_class_mutation(self):
+        class C:
+            a = torch.tensor(1)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls, y):
+            cls.a = y
+            return cls.__dict__["a"] + cls.a
+
+        self.assertEqual(fn(C, torch.tensor(3)), torch.tensor(6))
+
+    def test_instancemethod_descriptor_input_get_and_call(self):
+        import ctypes
+
+        def plus_one(self, x):
+            return x + 1
+
+        py_instance_method_new = ctypes.pythonapi.PyInstanceMethod_New
+        py_instance_method_new.argtypes = [ctypes.py_object]
+        py_instance_method_new.restype = ctypes.py_object
+        desc = py_instance_method_new(plus_one)
+
+        class C:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def call_fn(desc, obj, x):
+            return desc(obj, x) + desc.__get__(obj, C)(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def bind_fn(desc, obj):
+            return desc.__get__(obj, C)
+
+        obj = C()
+        self.assertEqual(call_fn(desc, obj, torch.tensor(3)), torch.tensor(8))
+
+        method = bind_fn(desc, obj)
+        self.assertIs(type(method), types.MethodType)
+        self.assertEqual(method(torch.tensor(5)), torch.tensor(6))
+
+    def test_descriptor_lookup_returns_bound_c_method(self):
+        class DictSubclass(dict):
+            pass
+
+        class TupleSubclass(tuple):
+            __slots__ = ()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def method_fn(obj):
+            return obj.get
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def wrapper_fn(obj):
+            return obj.__len__
+
+        method = method_fn(DictSubclass({"x": torch.tensor(3)}))
+        self.assertIs(type(method), types.BuiltinMethodType)
+        self.assertEqual(method("x"), torch.tensor(3))
+
+        wrapper = wrapper_fn(TupleSubclass((torch.tensor(1), torch.tensor(2))))
+        self.assertIs(type(wrapper), types.MethodWrapperType)
+        self.assertEqual(wrapper(), 2)
+
+    def test_classmethod_descriptor_returns_bound_c_method(self):
+        class DictSubclass(dict):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def descriptor_fn(desc, cls):
+            return desc.__get__(None, cls)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def lookup_fn(cls):
+            return cls.fromkeys
+
+        descriptor_method = descriptor_fn(dict.__dict__["fromkeys"], DictSubclass)
+        self.assertIs(type(descriptor_method), types.BuiltinMethodType)
+        descriptor_result = descriptor_method(("x",), torch.tensor(3))
+        self.assertIs(type(descriptor_result), DictSubclass)
+        self.assertEqual(descriptor_result["x"], torch.tensor(3))
+
+        lookup_method = lookup_fn(DictSubclass)
+        self.assertIs(type(lookup_method), types.BuiltinMethodType)
+        lookup_result = lookup_method(("x",), torch.tensor(4))
+        self.assertIs(type(lookup_result), DictSubclass)
+        self.assertEqual(lookup_result["x"], torch.tensor(4))
+
+    def test_classmethod_descriptor_bound_call_preserves_raw_descriptor(self):
+        class MyInt(int):
+            @classmethod
+            def from_bytes(cls, b, byteorder="big", *, signed=False):
+                return torch.tensor(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def bound_fn(desc, cls, x):
+            return desc.__get__(None, cls)(b"\x03", "big") + x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def direct_fn(desc, cls, x):
+            return desc(cls, b"\x03", "big") + x
+
+        desc = int.__dict__["from_bytes"]
+        self.assertEqual(MyInt.from_bytes(b"\x03", "big"), torch.tensor(999))
+        self.assertEqual(desc.__get__(None, MyInt)(b"\x03", "big"), 3)
+        self.assertEqual(bound_fn(desc, MyInt, torch.tensor(1)), torch.tensor(4))
+        self.assertEqual(direct_fn(desc, MyInt, torch.tensor(2)), torch.tensor(5))
+
+    def test_dict_classmethod_descriptor_bound_call_ignores_override(self):
+        class DictSubclass(dict):
+            @classmethod
+            def fromkeys(cls, keys, value=None):
+                return torch.tensor(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, cls, x):
+            result = desc.__get__(None, cls)(("x",), x)
+            return result["x"], type(result) is cls
+
+        value, is_subclass = fn(
+            dict.__dict__["fromkeys"], DictSubclass, torch.tensor(3)
+        )
+        self.assertEqual(
+            DictSubclass.fromkeys(("x",), torch.tensor(3)), torch.tensor(999)
+        )
+        self.assertEqual(value, torch.tensor(3))
+        self.assertTrue(is_subclass)
+
+    def test_ordered_dict_classmethod_descriptor_fromkeys_tensor_value(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, x):
+            result = desc.__get__(None, collections.OrderedDict)(("a", "b"), value=x)
+            return result["a"] + result["b"]
+
+        self.assertEqual(
+            fn(collections.OrderedDict.__dict__["fromkeys"], torch.tensor(3)),
+            torch.tensor(6),
+        )
+
+    def test_descriptor_input_guards_distinguish_same_owner_c_descriptors(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj, key):
+            return desc(obj, key)
+
+        obj = {"x": torch.tensor(3)}
+        self.assertTrue(fn(dict.__contains__, obj, "x"))
+        self.assertEqual(fn(dict.__getitem__, obj, "x"), torch.tensor(3))
+
+    def test_c_descriptor_input_wrong_object_type_errors(self):
+        Point = collections.namedtuple("Point", ["x"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def wrapper_fn(desc, obj):
+            try:
+                desc(obj)
+            except TypeError:
+                return True
+            return False
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def method_fn(desc, obj):
+            try:
+                desc(obj, "x")
+            except TypeError:
+                return True
+            return False
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def tuplegetter_fn(desc, obj):
+            try:
+                desc.__get__(obj, Point)
+            except TypeError:
+                return True
+            return False
+
+        self.assertTrue(wrapper_fn(tuple.__len__, [torch.tensor(1)]))
+        self.assertTrue(method_fn(dict.get, [torch.tensor(1)]))
+        self.assertTrue(tuplegetter_fn(Point.__dict__["x"], [torch.tensor(1)]))
+
+    def test_member_getset_descriptor_wrong_object_type_errors(self):
+        class Foo:
+            __slots__ = ("x",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def member_fn(desc, obj):
+            try:
+                desc.__get__(obj, Foo)
+            except TypeError:
+                return True
+            return False
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def getset_fn(desc, obj):
+            try:
+                desc.__get__(obj, type)
+            except TypeError:
+                return True
+            return False
+
+        self.assertTrue(member_fn(Foo.__dict__["x"], [torch.tensor(1)]))
+        self.assertTrue(getset_fn(type.__dict__["__name__"], [torch.tensor(1)]))
+
+    def test_wrapper_descriptor_bound_subclass_preserves_c_dispatch(self):
+        class TupleSubclass(tuple):
+            __slots__ = ()
+
+            def __len__(self):
+                return 999
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc.__get__(obj, TupleSubclass)()
+
+        obj = TupleSubclass((torch.tensor(1), torch.tensor(2)))
+        self.assertEqual(fn(tuple.__len__, obj), 2)
+
+    def test_wrapper_descriptor_call_on_int_subclass_constant_receiver(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, a, b, x):
+            return desc(a, b) + x
+
+        self.assertEqual(
+            fn(
+                int.__lt__,
+                inspect._ParameterKind.POSITIONAL_ONLY,
+                inspect._ParameterKind.VAR_KEYWORD,
+                torch.tensor(3),
+            ),
+            torch.tensor(4),
+        )
+
+    def test_method_descriptor_bound_subclass_preserves_c_dispatch(self):
+        class DictSubclass(dict):
+            def get(self, key, default=None):
+                return torch.tensor(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj):
+            return desc.__get__(obj, DictSubclass)("x") + desc(obj, "x")
+
+        obj = DictSubclass({"x": torch.tensor(3)})
+        self.assertEqual(fn(dict.get, obj), torch.tensor(6))
+
+    def test_descriptor_get_none_owner_uses_real_type(self):
+        class FakeOwner:
+            marker = 100
+
+        class Foo:
+            marker = 0
+
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    return FakeOwner
+                return object.__getattribute__(self, name)
+
+            @classmethod
+            def class_plus_marker(cls, x):
+                return x + cls.marker
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, obj, x):
+            return desc.__get__(obj, None)(x)
+
+        self.assertEqual(
+            fn(Foo.__dict__["class_plus_marker"], Foo(), torch.tensor(3)),
+            torch.tensor(3),
+        )
+
+    def test_classmethod_descriptor_input_get(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(desc, x):
+            return desc.__get__(None, dict)(("x",), x)["x"]
+
+        self.assertEqual(
+            fn(dict.__dict__["fromkeys"], torch.tensor(3)), torch.tensor(3)
+        )
+
+    def test_torch_method_descriptor_input_uses_trace_rules(self):
+        from torch._dynamo.variables.functions import (
+            MethodDescriptorVariable,
+            WrapperDescriptorVariable,
+        )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def method_fn(desc, x):
+            return desc(x) + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def wrapper_fn(desc, x):
+            return desc(x, "shape")[0] + 1
+
+        with (
+            patch.object(
+                MethodDescriptorVariable,
+                "call_function",
+                side_effect=AssertionError(
+                    "torch descriptor used MethodDescriptorVariable"
+                ),
+            ),
+            patch.object(
+                WrapperDescriptorVariable,
+                "call_function",
+                side_effect=AssertionError(
+                    "torch descriptor used WrapperDescriptorVariable"
+                ),
+            ),
+        ):
+            self.assertEqual(
+                method_fn(torch.Tensor.detach, torch.tensor(3)), torch.tensor(4)
+            )
+            self.assertEqual(
+                wrapper_fn(torch.Tensor.__getattribute__, torch.ones(3)), 4
+            )
+
 
 def udf_mul(x, y):
     return x * y

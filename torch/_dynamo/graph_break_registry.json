@@ -4538,6 +4538,116 @@
       ]
     }
   ],
+  "GB5695": [
+    {
+      "Gb_type": "Unsupported raw dict.fromkeys descriptor owner",
+      "Context": "owner={owner_value}",
+      "Explanation": "Dynamo only supports raw dict.fromkeys descriptor calls on dict and plain dict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3063": [
+    {
+      "Gb_type": "unknown descriptor object type",
+      "Context": "descriptor={descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot determine whether a C descriptor applies to the object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4110": [
+    {
+      "Gb_type": "C descriptor dispatch on mutated object",
+      "Context": "descriptor={descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot directly invoke this C descriptor on an object with pending mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0746": [
+    {
+      "Gb_type": "Unsupported C classmethod descriptor call",
+      "Context": "descriptor={descriptor}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo can only call this C classmethod descriptor when all arguments are Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7763": [
+    {
+      "Gb_type": "unsupported C descriptor dispatch with constants",
+      "Context": "descriptor={descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot dispatch this C descriptor without going through normal attribute lookup, which could select subclass overrides.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9623": [
+    {
+      "Gb_type": "unknown tuplegetter object type",
+      "Context": "descriptor={self.descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot determine whether a tuplegetter applies to the object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6792": [
+    {
+      "Gb_type": "raw object.__getattribute__ descriptor with non-constant name",
+      "Context": "args={args}",
+      "Explanation": "Dynamo requires a constant attribute name when tracing object.__getattribute__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7703": [
+    {
+      "Gb_type": "direct member descriptor access without Python object",
+      "Context": "descriptor={self.descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot directly invoke this member descriptor without a concrete Python object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9278": [
+    {
+      "Gb_type": "direct getset descriptor access without Python object",
+      "Context": "descriptor={self.descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot directly invoke this getset descriptor without a concrete Python object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5293": [
+    {
+      "Gb_type": "direct tuplegetter access without tuple value",
+      "Context": "descriptor={self.descriptor}, obj={obj}",
+      "Explanation": "Dynamo cannot directly invoke this tuplegetter without a concrete tuple value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6055": [
+    {
+      "Gb_type": "object.__getattribute__ with non-constant name",
+      "Context": "object={self}, args={args}",
+      "Explanation": "Dynamo requires a constant attribute name when tracing object.__getattribute__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8435": [
     {
       "Gb_type": "missing_mp_subscript_impl",

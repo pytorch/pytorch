@@ -17,6 +17,7 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
+import _collections  # type: ignore[import-not-found]
 import abc
 import collections
 import contextlib
@@ -143,6 +144,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
@@ -165,6 +167,7 @@ from ..utils import (
     is_namedtuple,
     is_parameter_freezing,
     is_pybind11_enum_member,
+    is_torch_class,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -204,16 +207,25 @@ from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
+    ClassMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    InstanceMethodVariable,
+    MemberDescriptorVariable,
+    MethodDescriptorVariable,
+    PropertyVariable,
+    StaticMethodVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
+    TupleGetterVariable,
     UserFunctionVariable,
+    WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
@@ -338,6 +350,99 @@ VTTypeAlias = TypeVar("VTTypeAlias")
 T = TypeVar("T")
 
 DimList = list
+
+
+def _descriptor_owner_variable(
+    tx: "InstructionTranslatorBase",
+    descriptor: object,
+    source: Source | None,
+) -> VariableTracker:
+    owner = descriptor.__objclass__  # type: ignore[attr-defined]
+    owner_source = AttrSource(source, "__objclass__") if source else None
+    return VariableTracker.build(tx, owner, owner_source, realize=source is not None)
+
+
+def _uses_builtin_descriptor_get(value: object, descriptor_type: type) -> bool:
+    return isinstance(value, descriptor_type) and inspect.getattr_static(
+        type(value), "__get__", None
+    ) is inspect.getattr_static(descriptor_type, "__get__")
+
+
+def _guard_descriptor_subclass_protocol(
+    value: object,
+    source: Source | None,
+    descriptor_type: type,
+    protocol_name: str,
+) -> None:
+    if source is not None and type(value) is not descriptor_type:
+        protocol_source = AttrSource(TypeSource(source), protocol_name)
+        install_guard(protocol_source.make_guard(GuardBuilder.ID_MATCH))
+
+
+def _try_build_descriptor_variable(
+    tx: "InstructionTranslatorBase",
+    value: object,
+    source: Source | None = None,
+) -> VariableTracker | None:
+    def with_descriptor_guard(vt: VariableTracker) -> VariableTracker:
+        if source is not None:
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return vt
+
+    if _uses_builtin_descriptor_get(value, staticmethod):
+        _guard_descriptor_subclass_protocol(value, source, staticmethod, "__get__")
+        return with_descriptor_guard(
+            StaticMethodVariable(typing.cast(Any, value), source=source)
+        )
+    if _uses_builtin_descriptor_get(value, classmethod):
+        _guard_descriptor_subclass_protocol(value, source, classmethod, "__get__")
+        return with_descriptor_guard(
+            ClassMethodVariable(typing.cast(Any, value), source=source)
+        )
+    if _uses_builtin_descriptor_get(value, property):
+        _guard_descriptor_subclass_protocol(value, source, property, "__get__")
+        return with_descriptor_guard(
+            PropertyVariable(typing.cast(property, value), source=source)
+        )
+    if isinstance(value, types.MemberDescriptorType):
+        return with_descriptor_guard(MemberDescriptorVariable(value, source=source))
+    if isinstance(value, types.GetSetDescriptorType):
+        return with_descriptor_guard(GetSetDescriptorVariable(value, source=source))
+    if isinstance(value, _collections._tuplegetter):
+        return with_descriptor_guard(TupleGetterVariable(value, source=source))
+    if isinstance(value, types.ClassMethodDescriptorType):
+        return with_descriptor_guard(
+            ClassMethodDescriptorVariable(value, source=source)
+        )
+    if isinstance(value, types.WrapperDescriptorType):
+        if trace_rules.lookup(value) is TorchInGraphFunctionVariable:
+            return None
+        owner = value.__objclass__
+        if is_torch_class(owner):
+            return None
+        return with_descriptor_guard(
+            WrapperDescriptorVariable(
+                value,
+                owner=_descriptor_owner_variable(tx, value, source),
+                source=source,
+            )
+        )
+    if isinstance(value, types.MethodDescriptorType):
+        if trace_rules.lookup(value) is TorchInGraphFunctionVariable:
+            return None
+        owner = value.__objclass__
+        if is_torch_class(owner):
+            return None
+        return with_descriptor_guard(
+            MethodDescriptorVariable(
+                value,
+                owner=_descriptor_owner_variable(tx, value, source),
+                source=source,
+            )
+        )
+    if torch._C._dynamo.utils.is_instancemethod(value):  # type: ignore[attr-defined]
+        return with_descriptor_guard(InstanceMethodVariable(value, source=source))
+    return None
 
 
 def safe_has_grad(t: object) -> bool:
@@ -1477,6 +1582,10 @@ class VariableBuilder:
                 value.__name__,
                 py_type=type(value),
             )
+        elif descriptor_var := _try_build_descriptor_variable(
+            self.tx, value, self.source
+        ):
+            return descriptor_var
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1509,14 +1618,6 @@ class VariableBuilder:
             )
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
-        elif isinstance(value, types.GetSetDescriptorType):
-            # GetSet descriptors are C functions attached to an attribute lookup
-            # using PyGetSetDef. Python, on attribute lookup, can decide to
-            # create a new object on the fly, and therefore the `id` of the
-            # descriptors is not guaranteed to be same for different attribute
-            # accesses. Since these are unlikely to change during the program
-            # execution, we can skip guarding on them.
-            return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -4405,6 +4506,8 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
+        elif descriptor_var := _try_build_descriptor_variable(tx, value):
+            return descriptor_var
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
@@ -4567,9 +4670,31 @@ class SourcelessBuilder:
                 mutation_type=ValueMutationNew(),
             ),
         )
-        handlers[types.GetSetDescriptorType] = (
-            lambda tx, value: GetSetDescriptorVariable(value)
-        )
+
+        def descriptor_handler(
+            tx: "InstructionTranslator", value: object
+        ) -> VariableTracker:
+            descriptor_var = _try_build_descriptor_variable(tx, value)
+            if descriptor_var is not None:
+                return descriptor_var
+            if is_function_or_wrapper(value):
+                # pyrefly: ignore[not-callable, bad-argument-count]
+                return trace_rules.lookup(value)(value)
+            raise AssertionError(f"Unhandled descriptor type: {type(value)}")
+
+        for descriptor_type in (
+            staticmethod,
+            classmethod,
+            property,
+            types.MemberDescriptorType,
+            types.GetSetDescriptorType,
+            _collections._tuplegetter,
+            types.ClassMethodDescriptorType,
+            types.WrapperDescriptorType,
+            types.MethodDescriptorType,
+        ):
+            handlers[descriptor_type] = descriptor_handler
+
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
         )

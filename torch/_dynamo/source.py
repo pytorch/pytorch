@@ -287,6 +287,51 @@ class CallFunctionNoArgsSource(WeakRefCallSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class DescriptorGetSource(ChainedSource):
+    descriptor_source: Source
+    owner_source: Source | None = None
+    obj_is_none: bool = False
+
+    def __post_init__(self) -> None:
+        if self.obj_is_none and self.owner_source is None:
+            raise AssertionError(
+                "DescriptorGetSource requires an owner source when obj is None"
+            )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_descr_get() -> None:
+            codegen(self.descriptor_source)
+            codegen.extend_output(codegen.create_load_attrs("__get__"))
+
+        codegen.add_push_null(load_descr_get)
+        if self.obj_is_none:
+            codegen.append_output(codegen.create_load_const(None))
+        else:
+            codegen(self.base)
+        nargs = 1
+        if self.owner_source is not None:
+            codegen(self.owner_source)
+            nargs = 2
+        codegen.extend_output(create_call_function(nargs, False))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        descriptor = self.descriptor_source.reconstruct_pycode(codegen)
+        obj = "None" if self.obj_is_none else self.base.reconstruct_pycode(codegen)
+        if self.owner_source is None:
+            return f"{descriptor}.__get__({obj})"
+        owner = self.owner_source.reconstruct_pycode(codegen)
+        return f"{descriptor}.__get__({obj}, {owner})"
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        obj = "None" if self.obj_is_none else "{0}"
+        if self.owner_source is None:
+            return f"{self.descriptor_source.name}.__get__({obj})"
+        owner = "{0}" if self.obj_is_none else self.owner_source.name
+        return f"{self.descriptor_source.name}.__get__({obj}, {owner})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 

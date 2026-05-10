@@ -132,6 +132,7 @@ from .source import (
     CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
+    DescriptorGetSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -1944,6 +1945,29 @@ class GuardBuilder(GuardBuilderBase):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.call_function_no_args_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, DescriptorGetSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            descriptor = self.get(source.descriptor_source)
+            owner = self.get(source.owner_source) if source.owner_source else None
+
+            def descriptor_get(
+                base: Any,
+                descriptor: Any = descriptor,
+                owner: Any = owner,
+                obj_is_none: bool = source.obj_is_none,
+            ) -> Any:
+                obj = None if obj_is_none else base
+                if owner is None:
+                    return descriptor.__get__(obj)
+                return descriptor.__get__(obj, owner)
+
+            out = base_guard_manager.lambda_manager(
+                python_lambda=descriptor_get,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

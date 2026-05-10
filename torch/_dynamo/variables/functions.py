@@ -23,6 +23,7 @@ accurate graph capture while handling Python's various function-related behavior
 
 import _collections  # type: ignore[import-not-found]
 import builtins
+import collections
 import functools
 import importlib.metadata
 import importlib.util
@@ -69,9 +70,12 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DescriptorGetSource,
+    DictGetItemSource,
     GetItemSource,
     ImportSource,
     SkipGuardSource,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -88,6 +92,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3784,6 +3789,428 @@ class TritonSetAllocatorVariable(VariableTracker):
 # ---------------------------------------------------------------------------
 
 
+def _vt_python_type(vt: VariableTracker) -> type | None:
+    try:
+        return vt.python_type()
+    except NotImplementedError:
+        pass
+
+    try:
+        return type(vt.as_python_constant())
+    except NotImplementedError:
+        return None
+
+
+def _check_descriptor_applies_to_obj(
+    tx: "InstructionTranslator",
+    descriptor: Any,
+    obj: VariableTracker,
+) -> None:
+    obj_type = _vt_python_type(obj)
+    if obj_type is None:
+        unimplemented(
+            gb_type="unknown descriptor object type",
+            context=f"descriptor={descriptor}, obj={obj}",
+            explanation="Dynamo cannot determine whether a C descriptor applies to the object.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    objclass = descriptor.__objclass__
+    if not issubclass(obj_type, objclass):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for "
+            f"'{objclass.__name__}' objects doesn't apply to a "
+            f"'{obj_type.__name__}' object",
+        )
+
+
+def _descriptor_dispatch_obj(descriptor: Any, obj: VariableTracker) -> VariableTracker:
+    base_vt = getattr(obj, "_base_vt", None)
+    if base_vt is not None:
+        try:
+            if base_vt.python_type() is descriptor.__objclass__:
+                return base_vt
+        except NotImplementedError:
+            pass
+    return obj
+
+
+def _guarded_python_constant(
+    vt: VariableTracker,
+) -> Any:
+    if vt.source is not None:
+        return vt.guard_as_python_constant()
+    return vt.as_python_constant()
+
+
+def _call_c_descriptor_with_constants(
+    tx: "InstructionTranslator",
+    descriptor: Any,
+    obj: VariableTracker,
+    args: Sequence[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if tx.output.side_effects.has_pending_mutation(obj):
+        unimplemented(
+            gb_type="C descriptor dispatch on mutated object",
+            context=f"descriptor={descriptor}, obj={obj}",
+            explanation=(
+                "Dynamo cannot directly invoke this C descriptor on an object "
+                "with pending mutations."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        obj_value = _guarded_python_constant(obj)
+        arg_values = [_guarded_python_constant(arg) for arg in args]
+        kwarg_values = {
+            key: _guarded_python_constant(value) for key, value in kwargs.items()
+        }
+    except (NotImplementedError, Unsupported):
+        unimplemented(
+            gb_type="unsupported C descriptor dispatch with constants",
+            context=f"descriptor={descriptor}, obj={obj}",
+            explanation=(
+                "Dynamo cannot dispatch this C descriptor without going through "
+                "normal attribute lookup, which could select subclass overrides."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        result = descriptor.__get__(obj_value)(*arg_values, **kwarg_values)
+    except TypeError as exc:
+        raise_observed_exception(TypeError, tx, args=list(exc.args))
+    return VariableTracker.build(tx, result)
+
+
+def _call_c_descriptor(
+    tx: "InstructionTranslator",
+    descriptor: Any,
+    obj: VariableTracker,
+    args: Sequence[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    _check_descriptor_applies_to_obj(tx, descriptor, obj)
+    if (
+        descriptor.__objclass__ is object
+        and descriptor.__name__ == "__getattribute__"
+        and isinstance(obj, UserDefinedObjectVariable)
+        and not kwargs
+    ):
+        if len(args) != 1:
+            raise_type_error(
+                tx,
+                f"expected 1 argument, got {len(args)}",
+            )
+        try:
+            attr_name = args[0].as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="raw object.__getattribute__ descriptor with non-constant name",
+                context=f"args={args}",
+                explanation=(
+                    "Dynamo requires a constant attribute name when tracing "
+                    "object.__getattribute__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not isinstance(attr_name, str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{type(attr_name).__name__}'",
+            )
+        return obj.generic_getattr(tx, attr_name)
+    target = _descriptor_dispatch_obj(descriptor, obj)
+    target_type = _vt_python_type(target)
+    if target is obj and target_type is not descriptor.__objclass__:
+        return _call_c_descriptor_with_constants(tx, descriptor, obj, args, kwargs)
+    return target.call_method(tx, descriptor.__name__, list(args), kwargs)
+
+
+def _check_classmethod_descriptor_owner(
+    tx: "InstructionTranslator",
+    descriptor: types.ClassMethodDescriptorType,
+    owner: VariableTracker,
+) -> type:
+    try:
+        owner_value = owner.as_python_constant()
+    except NotImplementedError:
+        owner_value = None
+    if not isinstance(owner_value, type):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' for type "
+            f"'{descriptor.__objclass__.__name__}' needs a type, not a "
+            f"'{owner.python_type_name()}' as arg 2",
+        )
+    if not issubclass(owner_value, descriptor.__objclass__):
+        raise_type_error(
+            tx,
+            f"descriptor '{descriptor.__name__}' requires a subtype of "
+            f"'{descriptor.__objclass__.__name__}' but received "
+            f"'{owner_value.__name__}'",
+        )
+    return owner_value
+
+
+def _call_raw_dict_fromkeys_classmethod(
+    tx: "InstructionTranslator",
+    owner: VariableTracker,
+    owner_value: type,
+    args: Sequence[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if owner_value in {dict, collections.OrderedDict, collections.defaultdict}:
+        return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+            tx, owner_value, *args, **kwargs
+        )
+    if (
+        owner_value is not dict
+        and issubclass(owner_value, dict)
+        and not issubclass(
+            owner_value, (collections.OrderedDict, collections.defaultdict)
+        )
+    ):
+        from .builder import SourcelessBuilder
+
+        base_vt = variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+            tx, dict, *args, **kwargs
+        )
+        if not isinstance(base_vt, variables.ConstDictVariable):
+            raise AssertionError(f"Expected ConstDictVariable, got {type(base_vt)}")
+        result = tx.output.side_effects.track_new_user_defined_object(
+            SourcelessBuilder.create(tx, dict),
+            owner,
+            [],
+        )
+        if not isinstance(result, variables.UserDefinedDictVariable):
+            raise AssertionError(
+                f"Expected UserDefinedDictVariable, got {type(result)}"
+            )
+        result._base_vt = base_vt
+        return result
+    unimplemented(
+        gb_type="Unsupported raw dict.fromkeys descriptor owner",
+        context=f"owner={owner_value}",
+        explanation=(
+            "Dynamo only supports raw dict.fromkeys descriptor calls on "
+            "dict and plain dict subclasses."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
+def _call_classmethod_descriptor(
+    tx: "InstructionTranslator",
+    descriptor: types.ClassMethodDescriptorType,
+    owner: VariableTracker,
+    args: Sequence[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    owner_value = _check_classmethod_descriptor_owner(tx, descriptor, owner)
+    if descriptor.__name__ == "fromkeys" and descriptor.__objclass__ in {
+        dict,
+        collections.OrderedDict,
+    }:
+        return _call_raw_dict_fromkeys_classmethod(tx, owner, owner_value, args, kwargs)
+
+    if not check_constant_args(args, kwargs):
+        unimplemented(
+            gb_type="Unsupported C classmethod descriptor call",
+            context=f"descriptor={descriptor}, args={args}, kwargs={kwargs}",
+            explanation=(
+                "Dynamo can only call this C classmethod descriptor when all "
+                "arguments are Python constants."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        result = descriptor.__get__(None, owner_value)(
+            *[arg.as_python_constant() for arg in args],
+            **{key: value.as_python_constant() for key, value in kwargs.items()},
+        )
+    except TypeError as exc:
+        raise_observed_exception(TypeError, tx, args=list(exc.args))
+    if descriptor.__objclass__ is int and isinstance(result, int):
+        return ConstantVariable.create(int(result))
+    return VariableTracker.build(tx, result)
+
+
+def _descriptor_obj_value(obj: VariableTracker) -> object:
+    obj_value = obj.get_real_python_backed_value()
+    if obj_value is not NO_SUCH_SUBOBJ:
+        return obj_value
+    return obj.as_python_constant()
+
+
+def _load_pending_descriptor_attr(
+    tx: "InstructionTranslator",
+    obj: VariableTracker,
+    attr_name: str,
+) -> VariableTracker | None:
+    if not tx.output.side_effects.has_pending_mutation_of_attr(obj, attr_name):
+        return None
+    result = tx.output.side_effects.load_attr(obj, attr_name, deleted_ok=True)
+    if isinstance(result, variables.DeletedVariable):
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{obj.python_type_name()}' object has no attribute '{attr_name}'"],
+        )
+    return result
+
+
+def _lookup_resolves_to_descriptor(target_type: type, descriptor: Any) -> bool:
+    try:
+        return inspect.getattr_static(target_type, descriptor.__name__) is descriptor
+    except AttributeError:
+        return False
+
+
+def _bound_descriptor_source(
+    descriptor: types.WrapperDescriptorType
+    | types.MethodDescriptorType
+    | types.ClassMethodDescriptorType,
+    receiver: VariableTracker,
+) -> Source | None:
+    if receiver.source is None:
+        return None
+
+    if isinstance(descriptor, types.ClassMethodDescriptorType):
+        try:
+            receiver_type = receiver.as_python_constant()
+        except NotImplementedError:
+            return None
+        if not isinstance(receiver_type, type):
+            return None
+    else:
+        receiver_type = _vt_python_type(receiver)
+        if receiver_type is None:
+            return None
+
+    if not _lookup_resolves_to_descriptor(receiver_type, descriptor):
+        return None
+    return AttrSource(receiver.source, descriptor.__name__)
+
+
+def _descriptor_get_source(
+    descriptor_source: Source | None,
+    obj: VariableTracker | None,
+    owner: VariableTracker | None,
+) -> Source | None:
+    if descriptor_source is None:
+        return None
+    obj_source = None if obj is None else obj.source
+    owner_source = None if owner is None else owner.source
+    if obj is not None and obj_source is None:
+        return None
+    if obj is None and owner_source is None:
+        return None
+    return DescriptorGetSource(
+        obj_source if obj_source is not None else owner_source,  # type: ignore[arg-type]
+        descriptor_source,
+        owner_source,
+        obj is None,
+    )
+
+
+def _descriptor_subclass_as_user_object(
+    descriptor: object, source: Source | None
+) -> UserDefinedObjectVariable:
+    return UserDefinedObjectVariable(descriptor, source=source)
+
+
+def _guard_descriptor_subclass_protocol(
+    descriptor: object,
+    source: Source | None,
+    descriptor_type: type,
+    protocol_name: str,
+) -> None:
+    if source is not None and type(descriptor) is not descriptor_type:
+        protocol_source = AttrSource(TypeSource(source), protocol_name)
+        install_guard(protocol_source.make_guard(GuardBuilder.ID_MATCH))
+
+
+def _raw_builtin_descriptor_member(
+    descriptor: object, descriptor_type: type, member_name: str
+) -> Any:
+    return descriptor_type.__dict__[member_name].__get__(descriptor, type(descriptor))
+
+
+def _raw_builtin_descriptor_member_source(
+    descriptor_source: Source | None, descriptor_type: type, member_name: str
+) -> Source | None:
+    if descriptor_source is None:
+        return None
+    descriptor_type_source = AttrSource(
+        ImportSource("builtins"), descriptor_type.__name__
+    )
+    member_source = DictGetItemSource(
+        TypeDictSource(descriptor_type_source), member_name
+    )
+    return DescriptorGetSource(
+        descriptor_source, member_source, TypeSource(descriptor_source)
+    )
+
+
+def _build_class_dict_proxy_from_getset(
+    tx: "InstructionTranslator",
+    descriptor: types.GetSetDescriptorType,
+    obj: VariableTracker,
+    owner: VariableTracker,
+    result_source: Source | None,
+) -> VariableTracker:
+    obj_value = _descriptor_obj_value(obj)
+    mapping = descriptor.__get__(obj_value)
+    mapping_source = result_source
+    pending = tx.output.side_effects.store_attr_mutations.get(obj, {})
+    items: dict[VariableTracker, VariableTracker] = {}
+    for key, value in mapping.items():
+        if key in pending:
+            continue
+        value_source = mapping_source and GetItemSource(mapping_source, key)
+        items[variables.ConstantVariable.create(key)] = VariableTracker.build(
+            tx, value, value_source
+        )
+    for key, value in pending.items():
+        if isinstance(value, variables.DeletedVariable):
+            continue
+        items[variables.ConstantVariable.create(key)] = value
+    return variables.MappingProxyVariable(
+        variables.ConstDictVariable(items, mutation_type=ValueMutationNew())
+    )
+
+
+def _reconstruct_bound_c_descriptor(
+    codegen: "PyCodegen",
+    descriptor: types.WrapperDescriptorType
+    | types.MethodDescriptorType
+    | types.ClassMethodDescriptorType,
+    receiver: VariableTracker,
+) -> None:
+    objclass = descriptor.__objclass__
+    descriptor_name = (
+        f"__c_descriptor_{objclass.__module__}_"
+        f"{objclass.__qualname__}_{descriptor.__name__}_{id(descriptor)}"
+    )
+
+    def load_descr_get() -> None:
+        codegen.extend_output(
+            codegen.setup_globally_cached(descriptor_name, descriptor)
+        )
+        codegen.extend_output(codegen.create_load_attrs("__get__"))
+
+    codegen.add_push_null(load_descr_get)
+    if isinstance(descriptor, types.ClassMethodDescriptorType):
+        codegen.extend_output([codegen.create_load_const(None)])
+        codegen(receiver)
+        codegen.extend_output(create_call_function(2, False))
+    else:
+        codegen(receiver)
+        codegen.extend_output(create_call_function(1, False))
+
+
 class WrapperDescriptorVariable(VariableTracker):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
@@ -3852,25 +4279,32 @@ class WrapperDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        # Dispatch through the owner (UDCV for the defining class) rather
-        # than obj.call_method, which would do MRO resolution from type(obj)
-        # and find Python overrides on subclasses. Routing through the class
-        # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
-        return self.owner.call_method(
-            tx, self.descriptor.__name__, [obj, *rest], kwargs
-        )
+        return _call_c_descriptor(tx, self.descriptor, obj, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
-    ) -> "MethodWrapperVariable":
+        *,
+        use_bound_method_source: bool = False,
+    ) -> "MethodWrapperVariable | WrapperDescriptorVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
-        return MethodWrapperVariable(self.descriptor, obj, source=self.source)
+        if obj is None:
+            return self
+        _check_descriptor_applies_to_obj(tx, self.descriptor, obj)
+        return MethodWrapperVariable(
+            self.descriptor,
+            obj,
+            source=(
+                _bound_descriptor_source(self.descriptor, obj)
+                if use_bound_method_source
+                else None
+            ),
+        )
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -3914,11 +4348,10 @@ class MethodWrapperVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        return _call_c_descriptor(tx, self.descriptor, self.obj, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+        _reconstruct_bound_c_descriptor(codegen, self.descriptor, self.obj)
 
 
 class MethodDescriptorVariable(VariableTracker):
@@ -3987,34 +4420,32 @@ class MethodDescriptorVariable(VariableTracker):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        name = self.descriptor.__name__
-        try:
-            obj_type = obj.python_type()
-            if not issubclass(obj_type, self.descriptor.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' for "
-                    f"'{self.descriptor.__objclass__.__name__}' objects "
-                    f"doesn't apply to a '{obj_type.__name__}' object",
-                )
-        except NotImplementedError:
-            pass
-        # Dispatch through the owner (UDCV for the defining class) rather
-        # than obj.call_method, which would do MRO resolution from type(obj)
-        # and find Python overrides on subclasses.
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+        return _call_c_descriptor(tx, self.descriptor, obj, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
-    ) -> "BoundBuiltinMethodVariable":
+        *,
+        use_bound_method_source: bool = False,
+    ) -> "BoundBuiltinMethodVariable | MethodDescriptorVariable":
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
+        if obj is None:
+            return self
+        _check_descriptor_applies_to_obj(tx, self.descriptor, obj)
+        return BoundBuiltinMethodVariable(
+            self.descriptor,
+            obj,
+            source=(
+                _bound_descriptor_source(self.descriptor, obj)
+                if use_bound_method_source
+                else None
+            ),
+        )
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -4055,6 +4486,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
         return types.BuiltinMethodType
 
     def as_python_constant(self) -> Any:
+        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
+            return self.descriptor.__get__(None, self.obj.as_python_constant())
         return self.descriptor.__get__(self.obj.as_python_constant())  # type: ignore[union-attr]
 
     def call_function(
@@ -4063,9 +4496,21 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
+            return _call_classmethod_descriptor(
+                tx, self.descriptor, self.obj, args, kwargs
+            )
+        if isinstance(self.descriptor, types.MethodDescriptorType):
+            return _call_c_descriptor(tx, self.descriptor, self.obj, args, kwargs)
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if isinstance(
+            self.descriptor,
+            (types.MethodDescriptorType, types.ClassMethodDescriptorType),
+        ):
+            _reconstruct_bound_c_descriptor(codegen, self.descriptor, self.obj)
+            return
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
@@ -4120,16 +4565,42 @@ class ClassMethodDescriptorVariable(VariableTracker):
             return variables.ConstantVariable.create(self.descriptor.__name__)
         return super().var_getattr(tx, name)
 
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args:
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
+            )
+        owner, *rest = args
+        return _call_classmethod_descriptor(tx, self.descriptor, owner, rest, kwargs)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        use_bound_method_source: bool = False,
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
+        _check_classmethod_descriptor_owner(tx, self.descriptor, owner)
+        return BoundBuiltinMethodVariable(
+            self.descriptor,
+            owner,
+            source=(
+                _bound_descriptor_source(self.descriptor, owner)
+                if use_bound_method_source
+                else None
+            ),
+        )
 
 
 class StaticMethodVariable(VariableTracker):
@@ -4156,14 +4627,62 @@ class StaticMethodVariable(VariableTracker):
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        func = _raw_builtin_descriptor_member(self.descriptor, staticmethod, "__func__")
+        func_name = getattr(func, "__name__", "?")
         return f"StaticMethodVariable({func_name})"
 
     def python_type(self) -> type:
-        return staticmethod
+        return type(self.descriptor)
 
     def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
         return self.descriptor
+
+    def _uses_builtin_call(self) -> bool:
+        uses_builtin_call = inspect.getattr_static(
+            type(self.descriptor), "__call__", None
+        ) is inspect.getattr_static(staticmethod, "__call__")
+        if uses_builtin_call:
+            _guard_descriptor_subclass_protocol(
+                self.descriptor, self.source, staticmethod, "__call__"
+            )
+        return uses_builtin_call
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is staticmethod:
+            return super().var_getattr(tx, name)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is staticmethod:
+            return super().call_method(tx, name, args, kwargs)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).call_method(tx, name, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not self._uses_builtin_call():
+            return _descriptor_subclass_as_user_object(
+                self.descriptor, self.source
+            ).call_function(tx, args, kwargs)
+        func = _raw_builtin_descriptor_member(self.descriptor, staticmethod, "__func__")
+        func_source = _raw_builtin_descriptor_member_source(
+            self.source, staticmethod, "__func__"
+        )
+        func_vt = VariableTracker.build(tx, func, source=func_source, realize=True)
+        return func_vt.call_function(tx, args, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -4173,8 +4692,11 @@ class StaticMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # sm_descr_get returns sm->sm_callable unconditionally.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1418-L1428
-        func_source = AttrSource(self.source, "__func__") if self.source else None
-        return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+        func = _raw_builtin_descriptor_member(self.descriptor, staticmethod, "__func__")
+        func_source = _raw_builtin_descriptor_member_source(
+            self.source, staticmethod, "__func__"
+        )
+        return VariableTracker.build(tx, func, func_source)
 
 
 class ClassMethodVariable(VariableTracker):
@@ -4201,31 +4723,69 @@ class ClassMethodVariable(VariableTracker):
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
-        func_name = getattr(self.descriptor.__func__, "__name__", "?")
+        func = _raw_builtin_descriptor_member(self.descriptor, classmethod, "__func__")
+        func_name = getattr(func, "__name__", "?")
         return f"ClassMethodVariable({func_name})"
 
     def python_type(self) -> type:
-        return classmethod
+        return type(self.descriptor)
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         return self.descriptor
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is classmethod:
+            return super().var_getattr(tx, name)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is classmethod:
+            return super().call_method(tx, name, args, kwargs)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).call_method(tx, name, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if callable(self.descriptor):
+            return _descriptor_subclass_as_user_object(
+                self.descriptor, self.source
+            ).call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        use_bound_method_source: bool = False,
+        bound_method_source: Source | None = None,
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
-        func_source = AttrSource(self.source, "__func__") if self.source else None
-        bound_source = (
-            AttrSource(owner.source, self.descriptor.__func__.__name__)
-            if owner.source
-            else None
+        func = _raw_builtin_descriptor_member(self.descriptor, classmethod, "__func__")
+        func_source = _raw_builtin_descriptor_member_source(
+            self.source, classmethod, "__func__"
         )
+        if use_bound_method_source:
+            bound_source = bound_method_source
+        else:
+            bound_source = _descriptor_get_source(self.source, obj, owner)
         return UserMethodVariable(
-            self.descriptor.__func__,
+            func,
             owner,
             source_fn=func_source,
             source=bound_source,
@@ -4281,19 +4841,36 @@ class MemberDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        result_source: Source | None = None,
+        use_getattr_fallback: bool = False,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        if obj is None:
+            return self
+        _check_descriptor_applies_to_obj(tx, self.descriptor, obj)
         attr_name = self.descriptor.__name__
-        obj_value = getattr(obj, "value", None)
-        if obj_value is None:
-            try:
-                obj_value = obj.as_python_constant()
-            except NotImplementedError:
+        pending = _load_pending_descriptor_attr(tx, obj, attr_name)
+        if pending is not None:
+            return pending
+        try:
+            obj_value = _descriptor_obj_value(obj)
+        except NotImplementedError:
+            if use_getattr_fallback or not isinstance(obj, UserDefinedObjectVariable):
                 return obj.var_getattr(tx, attr_name)
+            unimplemented(
+                gb_type="direct member descriptor access without Python object",
+                context=f"descriptor={self.descriptor}, obj={obj}",
+                explanation=(
+                    "Dynamo cannot directly invoke this member descriptor without "
+                    "a concrete Python object."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         try:
             resolved = self.descriptor.__get__(obj_value)
         except AttributeError:
@@ -4304,7 +4881,10 @@ class MemberDescriptorVariable(VariableTracker):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=[str(exc)])
+        if result_source is None:
+            result_source = _descriptor_get_source(self.source, obj, owner)
         return VariableTracker.build(tx, resolved, result_source)
 
 
@@ -4338,10 +4918,7 @@ class GetSetDescriptorVariable(VariableTracker):
         return self.descriptor
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "__get__" and self.source:
-            source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.descriptor.__get__, source)
-        elif name in ("__objclass__", "__name__"):
+        if name in ("__objclass__", "__name__"):
             source = self.source and AttrSource(self.source, name)
             return VariableTracker.build(tx, getattr(self.descriptor, name), source)
         else:
@@ -4356,22 +4933,49 @@ class GetSetDescriptorVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        result_source: Source | None = None,
+        use_getattr_fallback: bool = False,
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L183-L197
+        if obj is None:
+            return self
+        _check_descriptor_applies_to_obj(tx, self.descriptor, obj)
         attr_name = self.descriptor.__name__
+        pending = _load_pending_descriptor_attr(tx, obj, attr_name)
+        if pending is not None:
+            return pending
+        if attr_name == "__dict__" and isinstance(
+            obj, variables.UserDefinedClassVariable
+        ):
+            return _build_class_dict_proxy_from_getset(
+                tx,
+                self.descriptor,
+                obj,
+                owner,
+                result_source or _descriptor_get_source(self.source, obj, owner),
+            )
         # Try to eagerly call the C getter when we can obtain the
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to var_getattr for
         # proxy-based VTs like TensorVariable.
-        obj_value = getattr(obj, "value", None)
-        if obj_value is None:
-            try:
-                obj_value = obj.as_python_constant()
-            except NotImplementedError:
+        try:
+            obj_value = _descriptor_obj_value(obj)
+        except NotImplementedError:
+            if use_getattr_fallback or not isinstance(obj, UserDefinedObjectVariable):
                 return obj.var_getattr(tx, attr_name)
+            unimplemented(
+                gb_type="direct getset descriptor access without Python object",
+                context=f"descriptor={self.descriptor}, obj={obj}",
+                explanation=(
+                    "Dynamo cannot directly invoke this getset descriptor without "
+                    "a concrete Python object."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         try:
             resolved = self.descriptor.__get__(obj_value)
         except AttributeError:
@@ -4382,7 +4986,10 @@ class GetSetDescriptorVariable(VariableTracker):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=[str(exc)])
+        if result_source is None:
+            result_source = _descriptor_get_source(self.source, obj, owner)
         return VariableTracker.build(tx, resolved, result_source)
 
 
@@ -4409,14 +5016,47 @@ class PropertyVariable(VariableTracker):
         self.descriptor = descriptor
 
     def __repr__(self) -> str:
-        fget_name = getattr(self.descriptor.fget, "__name__", "?")
+        fget = _raw_builtin_descriptor_member(self.descriptor, property, "fget")
+        fget_name = getattr(fget, "__name__", "?")
         return f"PropertyVariable({fget_name})"
 
     def python_type(self) -> type:
-        return property
+        return type(self.descriptor)
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is property:
+            return super().var_getattr(tx, name)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__get__" or type(self.descriptor) is property:
+            return super().call_method(tx, name, args, kwargs)
+        return _descriptor_subclass_as_user_object(
+            self.descriptor, self.source
+        ).call_method(tx, name, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if callable(self.descriptor):
+            return _descriptor_subclass_as_user_object(
+                self.descriptor, self.source
+            ).call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -4428,10 +5068,15 @@ class PropertyVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
         if obj is None:
             return self
-        fget_source = AttrSource(self.source, "fget") if self.source else None
-        fget_vt = VariableTracker.build(
-            tx, self.descriptor.fget, source=fget_source, realize=True
+        fget = _raw_builtin_descriptor_member(self.descriptor, property, "fget")
+        if fget is None:
+            raise_observed_exception(
+                AttributeError, tx, args=["property has no getter"]
+            )
+        fget_source = _raw_builtin_descriptor_member_source(
+            self.source, property, "fget"
         )
+        fget_vt = VariableTracker.build(tx, fget, source=fget_source, realize=True)
         return fget_vt.call_function(tx, [obj], {})
 
 
@@ -4478,14 +5123,51 @@ class TupleGetterVariable(VariableTracker):
         tx: "InstructionTranslator",
         obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        result_source: Source | None = None,
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
         if obj is None:
             return self
+        obj_type = _vt_python_type(obj)
+        if obj_type is None:
+            unimplemented(
+                gb_type="unknown tuplegetter object type",
+                context=f"descriptor={self.descriptor}, obj={obj}",
+                explanation="Dynamo cannot determine whether a tuplegetter applies to the object.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not issubclass(obj_type, tuple):
+            _, (idx, _) = self.descriptor.__reduce__()
+            raise_type_error(
+                tx,
+                f"descriptor for index '{idx}' for tuple subclasses "
+                f"doesn't apply to '{obj_type.__name__}' object",
+            )
         _, (idx, _) = self.descriptor.__reduce__()
-        return obj.call_method(
-            tx, "__getitem__", [variables.ConstantVariable.create(idx)], {}
-        )
+        if result_source is None:
+            result_source = _descriptor_get_source(self.source, obj, owner)
+        try:
+            obj_value = _descriptor_obj_value(obj)
+        except NotImplementedError:
+            base_vt = getattr(obj, "_base_vt", None)
+            items = getattr(base_vt, "items", None)
+            if isinstance(items, list) and idx < len(items):
+                if result_source is not None:
+                    return items[idx].realize().clone(source=result_source)
+                return items[idx].realize().clone(source=None)
+            unimplemented(
+                gb_type="direct tuplegetter access without tuple value",
+                context=f"descriptor={self.descriptor}, obj={obj}",
+                explanation=(
+                    "Dynamo cannot directly invoke this tuplegetter without "
+                    "a concrete tuple value."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        tuple_value = cast(tuple[Any, ...], obj_value)
+        resolved = tuple.__getitem__(tuple_value, idx)
+        return VariableTracker.build(tx, resolved, result_source)
 
 
 class InstanceMethodVariable(VariableTracker):
@@ -4526,16 +5208,44 @@ class InstanceMethodVariable(VariableTracker):
             return variables.ConstantVariable.create(self.descriptor.__name__)
         return super().var_getattr(tx, name)
 
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        func_vt = VariableTracker.build(
+            tx, self.descriptor.__func__, source=func_source, realize=True
+        )
+        return func_vt.call_function(tx, args, kwargs)
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslator",
         obj: VariableTracker | None,
         owner: VariableTracker,
+        *,
+        use_bound_method_source: bool = False,
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L168
         if obj is None:
             func_source = AttrSource(self.source, "__func__") if self.source else None
             return VariableTracker.build(tx, self.descriptor.__func__, func_source)
-        return BoundBuiltinMethodVariable(
-            self.descriptor.__func__, obj, source=self.source
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        if use_bound_method_source:
+            bound_source = (
+                AttrSource(obj.source, self.descriptor.__name__) if obj.source else None
+            )
+        else:
+            bound_source = _descriptor_get_source(self.source, obj, owner)
+        if not isinstance(self.descriptor.__func__, types.FunctionType):
+            return BoundBuiltinMethodVariable(
+                self.descriptor.__func__, obj, source=bound_source
+            )
+        return UserMethodVariable(
+            self.descriptor.__func__,
+            obj,
+            source_fn=func_source,
+            source=bound_source,
         )

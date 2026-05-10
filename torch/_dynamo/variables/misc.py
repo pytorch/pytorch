@@ -1363,6 +1363,34 @@ class LambdaVariable(VariableTracker):
         return self.fn(*args, **kwargs)
 
 
+class DescriptorGetMethodVariable(VariableTracker):
+    _nonvar_fields = {
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.source is None:
+            raise NotImplementedError(
+                "Python codegen not implemented for sourceless descriptor __get__"
+            )
+        return super().reconstruct(codegen)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.descriptor.call_method(tx, "__get__", list(args), kwargs)
+
+
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",

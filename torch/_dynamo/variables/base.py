@@ -29,7 +29,7 @@ from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, Source
+from ..source import AttrSource, Source, TypeSource
 from ..utils import cmp_name_to_op_mapping, format_source_range, istype
 
 
@@ -567,6 +567,40 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
+        if name == "__get__" and hasattr(self, "tp_descr_get_impl"):
+            try:
+                value = self.get_real_python_backed_value()
+                if value is NO_SUCH_SUBOBJ:
+                    value = self.as_python_constant()
+                instance_dict = object.__getattribute__(value, "__dict__")
+            except (AttributeError, NotImplementedError):
+                instance_dict = None
+            if isinstance(instance_dict, dict):
+                if "__get__" in instance_dict:
+                    source = self.source and AttrSource(self.source, "__get__")
+                    return VariableTracker.build(
+                        tx,
+                        instance_dict["__get__"],
+                        source,
+                        realize=source is not None,
+                    )
+                if self.source is not None:
+                    install_guard(
+                        AttrSource(self.source, "__dict__").make_guard(
+                            functools.partial(
+                                GuardBuilder.DICT_NOT_CONTAINS, key="__get__"
+                            )
+                        )
+                    )
+            if self.source is not None:
+                return variables.DescriptorGetMethodVariable(
+                    self, source=AttrSource(self.source, "__get__")
+                )
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(
+                    tx, "__get__", list(args), kwargs
+                )
+            )
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
@@ -808,8 +842,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
             # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
             if hasattr(self, "tp_descr_get_impl"):
-                obj = args[0]
-                owner = args[1] if len(args) > 1 else obj.var_getattr(tx, "__class__")
+
+                def normalize_none(
+                    value: VariableTracker,
+                ) -> VariableTracker | None:
+                    if (
+                        isinstance(value, variables.ConstantVariable)
+                        and value.as_python_constant() is None
+                    ):
+                        return None
+                    return value
+
+                def infer_owner(value: VariableTracker) -> VariableTracker:
+                    try:
+                        owner_type = value.python_type()
+                    except NotImplementedError:
+                        owner_type = type(value.as_python_constant())
+                    owner_source = TypeSource(value.source) if value.source else None
+                    return VariableTracker.build(tx, owner_type, owner_source)
+
+                obj = normalize_none(args[0])
+                if len(args) > 1:
+                    owner = normalize_none(args[1])
+                    if owner is None and obj is not None:
+                        owner = infer_owner(obj)
+                elif obj is not None:
+                    owner = infer_owner(obj)
+                else:
+                    owner = None
+                if obj is None and owner is None:
+                    raise_observed_exception(
+                        TypeError, tx, args=["__get__(None, None) is invalid"]
+                    )
                 return self.tp_descr_get_impl(tx, obj, owner)
         elif name == "__or__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233

@@ -241,6 +241,12 @@ def is_data_descriptor(obj: object) -> bool:
     )
 
 
+def uses_builtin_descriptor_get(obj: object, descriptor_type: type) -> bool:
+    return isinstance(obj, descriptor_type) and inspect.getattr_static(
+        type(obj), "__get__", None
+    ) is inspect.getattr_static(descriptor_type, "__get__")
+
+
 def is_hashable(obj: object) -> bool:
     try:
         hash(obj)
@@ -395,22 +401,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if name in klass.__dict__:
                 descriptor = klass.__dict__[name]
 
-                for absent_idx in range(1, idx):
+                for absent_idx in range(idx):
                     absent_klass = self.value.__mro__[absent_idx]
-                    cache_key = (id(absent_klass), name)
-                    if cache_key in tx.output.guarded_mro_absent_keys:
-                        continue
-                    tx.output.guarded_mro_absent_keys.add(cache_key)
                     mro_source = TypeMROSource(source)
                     klass_source: Source = GetItemSource(mro_source, absent_idx)
                     dict_source = TypeDictSource(klass_source)
+                    cache_key = (id(absent_klass), name, dict_source)
+                    if cache_key in tx.output.guarded_mro_absent_keys:
+                        continue
+                    tx.output.guarded_mro_absent_keys.add(cache_key)
                     install_guard(
                         dict_source.make_guard(
                             functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
                         )
                     )
 
-                cache_key = (id(descriptor), name)
+                cache_key = (id(descriptor), name, source)
                 cache = tx.output.mro_source_cache
                 if cache_key in cache:
                     return cache[cache_key]
@@ -426,6 +432,43 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return out_source
 
         raise RuntimeError(f"Attribute {name} not found in MRO of {self.value}")
+
+    def get_source_by_walking_metaclass_mro(
+        self, tx: "InstructionTranslator", name: str
+    ) -> DictGetItemSource:
+        source = self.source
+        if source is None:
+            raise RuntimeError("get_source_by_walking_metaclass_mro requires source")
+
+        metacls_source = TypeSource(source)
+        for idx, klass in enumerate(type(self.value).__mro__):
+            if name in klass.__dict__:
+                for absent_idx in range(idx):
+                    absent_klass = type(self.value).__mro__[absent_idx]
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source: Source = GetItemSource(mro_source, absent_idx)
+                    dict_source = TypeDictSource(klass_source)
+                    cache_key = (id(absent_klass), name, dict_source)
+                    if cache_key in tx.output.guarded_mro_absent_keys:
+                        continue
+                    tx.output.guarded_mro_absent_keys.add(cache_key)
+                    install_guard(
+                        dict_source.make_guard(
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                        )
+                    )
+
+                if idx != 0:
+                    mro_source = TypeMROSource(metacls_source)
+                    klass_source = GetItemSource(mro_source, idx)
+                else:
+                    klass_source = metacls_source
+                dict_source = TypeDictSource(klass_source)
+                return DictGetItemSource(dict_source, name)
+
+        raise RuntimeError(
+            f"Attribute {name} not found in MRO of metaclass {type(self.value)}"
+        )
 
     def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
@@ -520,21 +563,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ:
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
-            if isinstance(meta_attr, types.WrapperDescriptorType):
-                wd_vt = variables.WrapperDescriptorVariable(
-                    meta_attr, owner=metacls_vt, source=source
+            if isinstance(
+                meta_attr,
+                (
+                    types.WrapperDescriptorType,
+                    types.MethodDescriptorType,
+                    types.ClassMethodDescriptorType,
+                ),
+            ):
+                descriptor_source = (
+                    self.get_source_by_walking_metaclass_mro(tx, name)
+                    if self.source is not None
+                    else None
                 )
-                return wd_vt.tp_descr_get_impl(tx, self, metacls_vt)
-            if isinstance(meta_attr, types.MethodDescriptorType):
-                md_vt = variables.MethodDescriptorVariable(
-                    meta_attr, owner=metacls_vt, source=source
+                descriptor_vt = VariableTracker.build(
+                    tx, meta_attr, descriptor_source, realize=True
                 )
-                return md_vt.tp_descr_get_impl(tx, self, metacls_vt)
-            if isinstance(meta_attr, types.ClassMethodDescriptorType):
-                cmd_vt = variables.ClassMethodDescriptorVariable(
-                    meta_attr, source=source
+                if hasattr(descriptor_vt, "tp_descr_get_impl"):
+                    return descriptor_vt.tp_descr_get_impl(
+                        tx, self, metacls_vt, use_bound_method_source=True
+                    )
+                return variables.GetAttrVariable(
+                    self, name, type(meta_attr), source=source
                 )
-                return cmd_vt.tp_descr_get_impl(tx, self, metacls_vt)
             return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
@@ -565,10 +616,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """Handle data descriptors from the metaclass MRO (type.__dict__ slots)."""
         if name == "__dict__":
-            return VariableTracker.build(
+            from .functions import _build_class_dict_proxy_from_getset
+
+            metacls_source = TypeSource(self.source) if self.source else None
+            metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
+            return _build_class_dict_proxy_from_getset(
                 tx,
-                self.value.__dict__,
-                source=self.source and AttrSource(self.source, "__dict__"),
+                meta_attr,  # type: ignore[arg-type]
+                self,
+                metacls_vt,
+                source,
             )
         if name == "__mro__":
             attr_source = self.source and TypeMROSource(self.source)
@@ -592,7 +649,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
-        if isinstance(cls_attr, staticmethod):
+        if uses_builtin_descriptor_get(cls_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the staticmethod wrapper.
@@ -601,12 +658,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            sm_vt = variables.StaticMethodVariable(cls_attr, source=descriptor_source)
+            sm_vt = VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
             return sm_vt.tp_descr_get_impl(tx, self, self)
 
-        if isinstance(cls_attr, classmethod):
-            if isinstance(cls_attr.__func__, property):
-                fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
+        if uses_builtin_descriptor_get(cls_attr, classmethod):
+            raw_func = classmethod.__dict__["__func__"].__get__(
+                cls_attr, type(cls_attr)
+            )
+            if isinstance(raw_func, property):
+                fget = property.__dict__["fget"].__get__(raw_func, type(raw_func))
+                fget_vt = VariableTracker.build(tx, fget)
                 return fget_vt.call_function(tx, [self], {})
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -616,22 +677,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            cm_vt = variables.ClassMethodVariable(cls_attr, source=descriptor_source)
-            return cm_vt.tp_descr_get_impl(tx, self, self)
+            cm_vt = VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
+            return cm_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self,
+                use_bound_method_source=True,
+                bound_method_source=source,
+            )
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
-            return cmd_vt.tp_descr_get_impl(tx, self, self)
-
-        # property_descr_get with obj=NULL returns self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
-        if isinstance(cls_attr, property):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
                 else None
             )
-            return variables.PropertyVariable(cls_attr, source=descriptor_source)
+            cmd_vt = VariableTracker.build(
+                tx, cls_attr, descriptor_source, realize=True
+            )
+            return cmd_vt.tp_descr_get_impl(
+                tx, self, self, use_bound_method_source=True
+            )
+
+        # property_descr_get with obj=NULL returns self.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
+        if uses_builtin_descriptor_get(cls_attr, property):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            return VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -641,9 +717,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return variables.MemberDescriptorVariable(
-                cls_attr, source=descriptor_source
-            )
+            return VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
 
         if isinstance(cls_attr, _collections._tuplegetter):
             descriptor_source = (
@@ -651,7 +725,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
+            tg_vt = VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
@@ -678,9 +752,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.WrapperDescriptorVariable(
-                cls_attr, owner=self, source=source
-            )
+            return VariableTracker.build(tx, cls_attr, source, realize=True)
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
         if (
@@ -688,24 +760,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.MethodDescriptorVariable(
-                cls_attr, owner=self, source=source
-            )
+            return VariableTracker.build(tx, cls_attr, source, realize=True)
 
         # User-defined descriptor with Python __get__.
-        # For torch-internal classes or attributes in the class's own __dict__,
-        # defer descriptor invocation to runtime via VariableTracker.build to
-        # avoid compile-time side effects (e.g. deprecation warnings from
-        # _ClassPropertyDescriptor on torch.FloatStorage.dtype).
+        # For torch-internal classes, defer descriptor invocation to runtime
+        # via VariableTracker.build to avoid compile-time side effects (e.g.
+        # deprecation warnings from _ClassPropertyDescriptor on
+        # torch.FloatStorage.dtype).
         get_fn = inspect.getattr_static(type(cls_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
             if source and (
-                name in getattr(self.value, "__dict__", {})
-                or self.value.__module__.startswith("torch.")
+                self.value.__module__.startswith("torch.")
                 or self.value.__module__ == "torch"
             ):
-                return VariableTracker.build(tx, cls_attr, source)
-            return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
+                return VariableTracker.build(tx, cls_attr, descriptor_source)
+            return self.invoke_cls_descriptor_get(
+                tx, descriptor=cls_attr, descriptor_source=descriptor_source
+            )
 
         # instancemethod_descr_get with obj=NULL returns __func__.
         # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L160
@@ -715,7 +791,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            im_vt = variables.InstanceMethodVariable(cls_attr, source=descriptor_source)
+            im_vt = VariableTracker.build(tx, cls_attr, descriptor_source, realize=True)
             return im_vt.tp_descr_get_impl(tx, None, self)
 
         # Remaining C-level descriptors: wrapper/method descriptors on torch
@@ -749,17 +825,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def invoke_cls_descriptor_get(
         self,
         tx: "InstructionTranslator",
-        name: str,
         descriptor: object,
-        source: Source | None,
+        descriptor_source: Source | None,
     ) -> VariableTracker:
         """Trace a class-MRO descriptor's __get__(None, cls) call."""
         from .constant import ConstantVariable
 
-        descriptor_source = None
         descriptor_get_source = None
-        if self.source:
-            descriptor_source = AttrSource(self.source, name)
+        if descriptor_source:
             descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
             descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
         else:
@@ -931,6 +1004,30 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif (
+            self.value is not dict
+            and issubclass(self.value, dict)
+            and not issubclass(
+                self.value, (collections.OrderedDict, collections.defaultdict)
+            )
+            and name == "fromkeys"
+        ):
+            base_vt = variables.DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, dict, *args, **kwargs
+            )
+            if not isinstance(base_vt, ConstDictVariable):
+                raise AssertionError(f"Expected ConstDictVariable, got {type(base_vt)}")
+            result = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, dict),
+                self,
+                [],
+            )
+            if not isinstance(result, UserDefinedDictVariable):
+                raise AssertionError(
+                    f"Expected UserDefinedDictVariable, got {type(result)}"
+                )
+            result._base_vt = base_vt
+            return result
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
@@ -2117,6 +2214,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            if method is object.__getattribute__ and not kwargs:
+                if len(args) != 1:
+                    raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+                try:
+                    attr_name = args[0].as_python_constant()
+                except NotImplementedError:
+                    unimplemented(
+                        gb_type="object.__getattribute__ with non-constant name",
+                        context=f"object={self}, args={args}",
+                        explanation=(
+                            "Dynamo requires a constant attribute name when tracing "
+                            "object.__getattribute__."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if not isinstance(attr_name, str):
+                    raise_type_error(
+                        tx,
+                        f"attribute name must be string, not '{type(attr_name).__name__}'",
+                    )
+                return self.generic_getattr(tx, attr_name)
+
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
@@ -2487,9 +2606,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # fget is an instancemethod wrapper - https://docs.python.org/3/c-api/method.html#c.PyInstanceMethod_Check
 
         # If we have a PyCFunction, we make an assumption that there is no side effect.
+        fget = property.__dict__["fget"].__get__(subobj, type(subobj))
         return isinstance(
-            subobj.fget, types.BuiltinFunctionType
-        ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)  # type: ignore[attr-defined]
+            fget, types.BuiltinFunctionType
+        ) or torch._C._dynamo.utils.is_instancemethod(fget)  # type: ignore[attr-defined]
 
     def _getattr_static(self, name: str) -> object:
         if name in self._looked_up_attrs:
@@ -2593,20 +2713,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if name in klass.__dict__:
                 descriptor = klass.__dict__[name]
 
-                # Guard that intermediate MRO classes don't shadow this
-                # attribute, deduplicating by (id(klass), name) across
-                # subclasses that share the same intermediate MRO class.
+                # Guard that earlier MRO classes don't shadow this attribute,
+                # deduplicating by class/name/source context.
                 # Safe because TYPE_MATCH guards fix the MRO, so the same
                 # id(klass) always refers to the same class object.
-                for absent_idx in range(1, idx):
+                for absent_idx in range(idx):
                     absent_klass = type(self.value).__mro__[absent_idx]
-                    cache_key = (id(absent_klass), name)
-                    if cache_key in tx.output.guarded_mro_absent_keys:
-                        continue
-                    tx.output.guarded_mro_absent_keys.add(cache_key)
                     mro_source = TypeMROSource(self.cls_source)
                     klass_source: Source = GetItemSource(mro_source, absent_idx)
                     dict_source = TypeDictSource(klass_source)
+                    cache_key = (id(absent_klass), name, dict_source)
+                    if cache_key in tx.output.guarded_mro_absent_keys:
+                        continue
+                    tx.output.guarded_mro_absent_keys.add(cache_key)
                     install_guard(
                         dict_source.make_guard(
                             functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
@@ -2633,13 +2752,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         )
                     )
 
-                # Reuse the source if we've already resolved the same
-                # descriptor object for the same attribute name (e.g. same
-                # property reached via different subclasses) to avoid
-                # redundant ID_MATCH guards.  We include name in the key
-                # because distinct attributes can point to the same object
-                # (e.g. a = b = some_obj, or interned small integers).
-                cache_key = (id(descriptor), name)
+                # Reuse the source only within the same lookup context. The
+                # source encodes which type/MRO path was walked, so sharing it
+                # across unrelated classes would guard the wrong class dict.
+                cache_key = (id(descriptor), name, self.cls_source)
                 cache = tx.output.mro_source_cache
                 if cache_key in cache:
                     return cache[cache_key]
@@ -2849,29 +2965,55 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
         # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
-        if isinstance(type_attr, property) and not self._is_c_defined_property(
-            type_attr
-        ):
+        if uses_builtin_descriptor_get(
+            type_attr, property
+        ) and not self._is_c_defined_property(type_attr):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = variables.PropertyVariable(type_attr, source=source)
+            prop_vt = VariableTracker.build(tx, type_attr, source, realize=True)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.var_getattr(tx, "__class__")
             )
         if isinstance(type_attr, types.MemberDescriptorType):
-            md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-            return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            result_source = source
+            if self.source:
+                source = self.get_source_by_walking_mro(tx, name)
+            md_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            return md_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                result_source=result_source,
+                use_getattr_fallback=True,
+            )
 
         if isinstance(type_attr, types.GetSetDescriptorType):
-            gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-            return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            result_source = source
+            if self.source:
+                source = self.get_source_by_walking_mro(tx, name)
+            gs_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            return gs_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                result_source=result_source,
+                use_getattr_fallback=True,
+            )
 
         if isinstance(type_attr, _collections._tuplegetter):
-            tg_vt = variables.TupleGetterVariable(type_attr, source=source)
-            return tg_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            result_source = source
+            if self.source:
+                source = self.get_source_by_walking_mro(tx, name)
+            tg_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            return tg_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                result_source=result_source,
+            )
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -2911,37 +3053,73 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         can_use_mro_source = self.cls_source is not None and self.source is not None
 
-        if isinstance(type_attr, staticmethod):
+        if uses_builtin_descriptor_get(type_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the staticmethod wrapper.
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+            sm_vt = VariableTracker.build(tx, type_attr, source, realize=True)
             return sm_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
-        elif isinstance(type_attr, classmethod):
+        elif uses_builtin_descriptor_get(type_attr, classmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the classmethod wrapper.
+            result_source = source
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            cm_vt = variables.ClassMethodVariable(type_attr, source=source)
-            return cm_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            cm_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            return cm_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                use_bound_method_source=True,
+                bound_method_source=result_source,
+            )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
-            return cmd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            if can_use_mro_source:
+                source = self.get_source_by_walking_mro(tx, name)
+            cmd_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            return cmd_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                use_bound_method_source=True,
+            )
         elif isinstance(type_attr, types.WrapperDescriptorType):
+            if is_torch_class(type(self.value)):
+                return variables.GetAttrVariable(
+                    self, name, py_type=type(type_attr), source=source
+                )
+            result_source = source
             class_vt = self.var_getattr(tx, "__class__")
-            wd_vt = variables.WrapperDescriptorVariable(
-                type_attr, owner=class_vt, source=source
+            if can_use_mro_source:
+                source = self.get_source_by_walking_mro(tx, name)
+            wd_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            if hasattr(wd_vt, "tp_descr_get_impl"):
+                return wd_vt.tp_descr_get_impl(
+                    tx, self, class_vt, use_bound_method_source=True
+                )
+            return variables.GetAttrVariable(
+                self, name, py_type=type(type_attr), source=result_source
             )
-            return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
+            if is_torch_class(type(self.value)):
+                return variables.GetAttrVariable(
+                    self, name, py_type=type(type_attr), source=source
+                )
+            result_source = source
             class_vt = self.var_getattr(tx, "__class__")
-            md_vt = variables.MethodDescriptorVariable(
-                type_attr, owner=class_vt, source=source
+            if can_use_mro_source:
+                source = self.get_source_by_walking_mro(tx, name)
+            md_vt = VariableTracker.build(tx, type_attr, source, realize=True)
+            if hasattr(md_vt, "tp_descr_get_impl"):
+                return md_vt.tp_descr_get_impl(
+                    tx, self, class_vt, use_bound_method_source=True
+                )
+            return variables.GetAttrVariable(
+                self, name, py_type=type(type_attr), source=result_source
             )
-            return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
                 type_attr, "__wrapped__", self, source=source
@@ -2970,10 +3148,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if can_use_mro_source
                 else source
             )
-            im_vt = variables.InstanceMethodVariable(
-                type_attr, source=descriptor_source
+            im_vt = VariableTracker.build(
+                tx, type_attr, descriptor_source, realize=True
             )
-            return im_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return im_vt.tp_descr_get_impl(
+                tx,
+                self,
+                self.var_getattr(tx, "__class__"),
+                use_bound_method_source=True,
+            )
         if is_cython_function(type_attr):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
@@ -3002,7 +3185,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
-        owner_var = UserDefinedClassVariable(type(self.value))
+        if self.cls_source:
+            owner_var = VariableTracker.build(
+                tx, type(self.value), self.cls_source, realize=True
+            )
+        else:
+            owner_var = UserDefinedClassVariable(type(self.value))
         return variables.UserMethodVariable(
             descriptor.__get__.__func__,  # type: ignore[union-attr]
             descriptor_var,
