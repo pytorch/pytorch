@@ -1358,6 +1358,44 @@ class CommonTemplate:
         num_broadcasts = triton_code.count("tl.broadcast_to")
         self.assertEqual(num_broadcasts, 1)
 
+    def test_reduction_fused_with_as_strided_scatter_broadcast_error(self):
+        # Regression test for a fused pointwise+reduction kernel where the side
+        # output is materialized through as_strided_scatter. The pointwise load
+        # is rank-expanded to match the reduction loop, and the immediate store
+        # must preserve that singleton reduction dimension instead of lowering a
+        # [XBLOCK, 1] temporary to a [XBLOCK] store.
+        def fn(a, b, table):
+            dst = torch.zeros(
+                (a.shape[0], a.shape[1], a.shape[2] + 1),
+                dtype=a.dtype,
+                device=a.device,
+            )
+            side = torch.as_strided_scatter(
+                dst, a, list(a.shape), list(dst.stride()), 1
+            )
+            gathered = torch.embedding(table, a)
+            reduced = (b + gathered.unsqueeze(0)).sum(-1)
+            return side, reduced
+
+        device = torch.device(self.device)
+        base = torch.randint(0, 1024, (4, 64, 1), dtype=torch.int64, device=device)
+        a = base.expand(4, 64, 32)
+        b = torch.randn((4, 64, 32, 128), dtype=torch.float32, device=device)
+        table = torch.randn((1024, 128), dtype=torch.float32, device=device)
+
+        self._run_and_compare(
+            fn,
+            a,
+            b,
+            table,
+            atol=3e-5,
+            config_patches={
+                "triton.persistent_reductions": False,
+                "triton.max_tiles": 2,
+            },
+            expected_num_triton_kernels=2,
+        )
+
     def test_mul_broadcast_multi_output(self):
         def foo(x, y, z):
             a = x * y
