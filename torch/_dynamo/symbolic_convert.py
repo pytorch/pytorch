@@ -984,8 +984,6 @@ def _reconstruct_block_stack(
         cur_tx = cur_tx.parent
     for tx in reversed(all_txes):
         for b in tx.block_stack:
-            # Don't exit any modes we have entered,
-            # output bytecode will mutate the tf mode stack accordingly
             if isinstance(b.with_context, TorchFunctionModeVariable):
                 cg.extend_output(
                     b.resume_fn().try_except_torch_function_mode(
