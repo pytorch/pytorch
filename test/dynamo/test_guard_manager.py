@@ -593,6 +593,7 @@ user_stack=None)
     def test_call_function_no_args_guard(self):
         if not torch.accelerator.is_available():
             self.skipTest("Accelerator is not available")
+
         root = RootGuardManager()
         device = torch.accelerator.current_accelerator()
         # Use device.index which is device-agnostic (works on all accelerators)
