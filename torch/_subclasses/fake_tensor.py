@@ -3028,6 +3028,17 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
+                    # During joint graph tracing, the C++ autograd engine
+                    # can produce plain-Tensor views of FunctionalTensors
+                    # that wrap FakeTensors (e.g. when a backward function
+                    # reshapes a saved FunctionalTensor). Recover the
+                    # underlying FakeTensor view instead of raising.
+                    fake_view = _maybe_extract_fake_view(x, self)
+                    if fake_view is not None:
+                        out = fake_view
+                        flat_arg_fake_tensors.append(out)
+                        return out
+
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError(
                             f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
@@ -3418,6 +3429,33 @@ def _device_handler(args: Sequence[object]) -> torch.device:
         return torch.device("meta")
     else:
         return args[0].fake_device
+
+
+def _maybe_extract_fake_view(x: Tensor, fake_mode: FakeTensorMode) -> FakeTensor | None:
+    """If *x* is a plain-Tensor view of a FunctionalTensor whose innermost
+    storage is a FakeTensor belonging to *fake_mode*, return the
+    corresponding FakeTensor view.  Otherwise return ``None``.
+
+    During joint-graph tracing the C++ autograd engine can produce
+    plain-Tensor views of FunctionalTensors (e.g. when a backward
+    function reshapes a saved FunctionalTensor at the C++ level).
+    These views bypass FunctionalTensorMode wrapping, so they arrive
+    at FakeTensorMode as non-fake tensors.  Rather than raising, we
+    recover the underlying FakeTensor and re-apply the view."""
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    base = x._base
+    if base is None or not isinstance(base, FunctionalTensor):
+        return None
+    if not torch._is_functional_tensor(base.elem):
+        return None
+    inner_fake = torch._from_functional_tensor(base.elem)
+    if not fake_mode.is_our_fake(inner_fake):
+        return None
+    # as_strided on a FakeTensor produces a FakeTensor; the cast is
+    # only needed to satisfy the static type checker.
+    out = inner_fake.as_strided(x.shape, x.stride(), x.storage_offset())
+    return out  # pyrefly: ignore[bad-return]
 
 
 # [subclass inputs]
