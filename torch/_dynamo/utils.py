@@ -2838,6 +2838,10 @@ def specialize_symnode(arg: Any) -> Any:
             source = arg.original_source()
             value = arg.original_value()
 
+            # ComputedLazyConstantVariable has no source, so it can't be a symnode
+            if source is None:
+                return arg
+
             is_symnode_vt = is_torch_sym(value) or (
                 not config.specialize_int
                 and type(value) is int
@@ -2868,6 +2872,20 @@ def guard_if_dyn(arg: Any) -> Any:
 
 def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
+
+
+def check_args_peekable_as_constant(
+    args: Iterable[Any], kwargs: Mapping[Any, Any]
+) -> bool:
+    """Check if all args can be peeked as constants, including unrealized lazy constants.
+
+    Unlike check_constant_args (which uses is_python_constant and returns False
+    for containers with unrealized lazy items), this uses try_peek_constant to
+    check peekability without triggering realization. Use this when constant
+    folding is desired even if args contain lazy constants (e.g., Enum class
+    creation, namedtuple type creation).
+    """
+    return all(x.try_peek_constant()[0] for x in itertools.chain(args, kwargs.values()))
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
@@ -4974,6 +4992,19 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
+def is_torch_class(cls: type) -> bool:
+    """Check if cls is defined in torch or a torch submodule.
+
+    Torch-internal C-level descriptors (e.g. torch.Tensor.unsqueeze_) need
+    to go through VariableTracker.build / trace_rules so they get the right
+    VT (TorchInGraphFunctionVariable), which has guards like
+    inplace-view-on-input-tensor detection. This helper identifies classes
+    whose descriptors should take that path instead of descriptor VTs.
+    """
+    module = getattr(cls, "__module__", None)
+    return module is not None and (module == "torch" or module.startswith("torch."))
+
+
 def is_torch_function_object(value: Any) -> bool:
     return hasattr(value, "__torch_function__")
 
@@ -5487,27 +5518,6 @@ def is_pybind11_enum_member(value: Any) -> bool:
         return False
     name = getattr(value, "name", None)
     return name is not None and members.get(name) is value
-
-
-def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
-    from . import graph_break_hints
-    from .exc import unimplemented
-
-    is_overridden = type(obj).__dict__.get("__hash__", False)
-
-    if is_overridden and is_pybind11_enum_member(obj):
-        return
-
-    if is_overridden:
-        unimplemented(
-            gb_type="User-defined object with overridden __hash__",
-            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
-            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
-            hints=[
-                "Dynamo does not support hashing user-defined objects with overridden __hash__",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
 
 def _make_inlined(

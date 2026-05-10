@@ -759,7 +759,7 @@ _enable_checkpoint_early_stop: bool | None = None
 
 @contextlib.contextmanager
 def set_checkpoint_early_stop(enable: bool):
-    """Context manager that sets whether checkpoint should stop recomputation early.
+    """Controls whether checkpoint should stop recomputation early.
 
     By default, non-reentrant checkpoint stops recomputation as soon as it
     has computed all needed Tensors. This context manager can be used to disable
@@ -770,14 +770,14 @@ def set_checkpoint_early_stop(enable: bool):
 
     Example::
 
-    >>> # xdoctest: +SKIP(failing)
-    >>> message = "saved tensors default hooks are disabled"
-    >>> with set_checkpoint_early_stop(False):
-    ...     # Any checkpoint under this context manager will respect this
-    ...     # context manager, even if its backward is performed outside.
-    ...     out = checkpoint(fn, inputs)
-    ...
-    >>> out.backward()
+        >>> # xdoctest: +SKIP(failing)
+        >>> message = "saved tensors default hooks are disabled"
+        >>> with set_checkpoint_early_stop(False):
+        ...     # Any checkpoint under this context manager will respect this
+        ...     # context manager, even if its backward is performed outside.
+        ...     out = checkpoint(fn, inputs)
+        ...
+        >>> out.backward()
     """
     global _enable_checkpoint_early_stop
     try:
