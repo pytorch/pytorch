@@ -13,7 +13,10 @@ from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu_and_triton
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 aten = torch.ops.aten
@@ -24,7 +27,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-@unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
+@requires_gpu_and_triton
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -85,7 +88,7 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)
-                x = torch.randn(4, 400, 256, device=GPU_TYPE)
+                x = torch.randn(4, 400, 256).to(device_type)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -159,7 +162,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device=GPU_TYPE)
+            inp = torch.rand([10], device=device_type)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)
@@ -175,7 +178,7 @@ class TestCompilerBisector(TestCase):
 
     def test_rng(self):
         def foo():
-            return torch.rand([10], device=GPU_TYPE) + 1
+            return torch.rand([10], device=device_type) + 1
 
         def test_fn():
             torch._dynamo.reset()
