@@ -14,7 +14,7 @@ from typing_extensions import ParamSpec
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
-import torch._thread_safe_fork  # noqa: F401
+import torch._thread_safe_fork
 
 
 device_type = (
