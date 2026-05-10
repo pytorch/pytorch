@@ -1634,9 +1634,19 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         def fn(x, w):
             return loss_region(x, w)
 
-        x = torch.randn(64, 32, device=device_type, dtype=torch.bfloat16, requires_grad=True)
+        x = torch.randn(
+            64,
+            32,
+            device=device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True
+        )
         w = torch.randn(
-            out_features, 32, device=device_type, dtype=torch.bfloat16, requires_grad=True
+            out_features,
+            32,
+            device=device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True
         )
 
         x_ref = x.detach().clone().requires_grad_()
