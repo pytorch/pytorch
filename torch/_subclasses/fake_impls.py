@@ -696,6 +696,11 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     added = False
     for x in a_syms:
         for y in target_syms:
+            # Cheap pre-check: only attempt the equality (which adds a guard
+            # and may pollute the shape env with Ne(...)) if the runtime
+            # hints already match.
+            if x.node.hint != y.node.hint:
+                continue
             if bool(x == y):
                 added = True
                 break
