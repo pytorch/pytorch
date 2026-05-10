@@ -721,17 +721,18 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim,                                                \
           uint tid);                                                           \
-  template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
-      metal::binary_strided_cast<DTYPEI, NAME##_functor, OMT>(                 \
-          device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant long* sizes,                                                \
-          constant long* output_strides,                                       \
-          constant long* input_strides,                                        \
-          constant long* other_strides,                                        \
-          constant uint4& ndim_types,                                          \
-          uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+          c10::metal::binary_strided_cast<DTYPEI, NAME##_functor, OMT>(        \
+              device void* out,                                                \
+              constant void* input,                                            \
+              constant void* other,                                            \
+              constant long* sizes,                                            \
+              constant long* output_strides,                                   \
+              constant long* input_strides,                                    \
+              constant long* other_strides,                                    \
+              constant uint4& ndim_types,                                      \
+              uint tid);                                                       \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
@@ -748,14 +749,15 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEI * other_,                                            \
           constant uint & numel,                                               \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
-      metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(                   \
-          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
-              out_,                                                            \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant uint4& sizes_types,                                         \
-          uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+          c10::metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(          \
+              device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * \
+                  out_,                                                        \
+              constant void* input,                                            \
+              constant void* other,                                            \
+              constant uint4& sizes_types,                                     \
+              uint tid);                                                       \
   template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI)]]        \
   kernel void ::c10::metal::                                                   \
       binary_dense_broadcast<DTYPEI, NAME##_functor, OMT>(                     \
@@ -774,7 +776,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEI * input_,                                            \
           constant long& broadcast_numel,                                      \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEI)]]               \
+  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI)]]   \
   kernel void ::c10::metal::                                                   \
       binary_dense_broadcast_cast<DTYPEI, NAME##_functor, OMT>(                \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
@@ -784,8 +786,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long& broadcast_numel,                                      \
           constant uint4& sizes_types,                                         \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEI)]]           \
-  kernel void ::c10::metal::                                                   \
+  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEO              \
+                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
       binary_dense_broadcast_rhs_cast<DTYPEI, NAME##_functor, OMT>(            \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
               out_,                                                            \
@@ -808,7 +810,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           device DTYPEI * scalar_,                                             \
           constant DTYPEI * input_,                                            \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEI)]]                  \
+  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI)]]      \
   kernel void ::c10::metal::                                                   \
       binary_dense_scalar_cast<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
@@ -817,8 +819,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           device void* scalar_,                                                \
           constant uint4& sizes_types,                                         \
           uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEI)]]              \
-  kernel void ::c10::metal::                                                   \
+  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEO                 \
+                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
       binary_dense_scalar_lhs_cast<DTYPEI, NAME##_functor, OMT>(               \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
               out_,                                                            \
@@ -834,146 +836,146 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
 #define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO) \
   REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
 
-#define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)                 \
-  static_assert(                                                               \
-      ::metal::is_same_v<                                                      \
-          DTYPEO,                                                              \
-          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA>>,    \
-      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
-  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                   \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                    \
-          device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant DTYPEA& alpha,                                              \
-          constant long* sizes,                                                \
-          constant long* output_strides,                                       \
-          constant long* input_strides,                                        \
-          constant long* other_strides,                                        \
-          constant uint3& ndim,                                                \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_strided_cast_" #DTYPEI                          \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(               \
-          device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant DTYPEA& alpha,                                              \
-          constant long* sizes,                                                \
-          constant long* output_strides,                                       \
-          constant long* input_strides,                                        \
-          constant long* other_strides,                                        \
-          constant uint4& ndim_types,                                          \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                     \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                      \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant DTYPEI * input_,                                            \
-          constant DTYPEI * other_,                                            \
-          constant DTYPEA & alpha,                                             \
-          uint tid);                                                           \
-  template                                                                     \
-      [[host_name(#NAME "_dense_cast_" #DTYPEI "_" #DTYPEA)]] kernel void ::   \
-          c10::metal::binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>( \
-              device ::c10::metal::                                            \
-                      result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *      \
-                  out_,                                                        \
-              constant void* input,                                            \
-              constant void* other,                                            \
-              constant DTYPEA& alpha,                                          \
-              constant uint4& sizes_types,                                     \
-              uint tid);                                                       \
-  template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI           \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_broadcast<DTYPEI, DTYPEA, NAME##_functor>(            \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant DTYPEI * input_,                                            \
-          constant DTYPEI * broadcast_,                                        \
-          constant long& broadcast_numel,                                      \
-          constant DTYPEA& alpha,                                              \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI       \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_broadcast_rhs<DTYPEI, DTYPEA, NAME##_functor>(        \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant DTYPEI * broadcast_,                                        \
-          constant DTYPEI * input_,                                            \
-          constant long& broadcast_numel,                                      \
-          constant DTYPEA& alpha,                                              \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEI                  \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_broadcast_cast<DTYPEI, DTYPEA, NAME##_functor>(       \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant void* input_,                                               \
-          constant void* broadcast_,                                           \
-          constant long& broadcast_numel,                                      \
-          constant DTYPEA& alpha,                                              \
-          constant uint4& sizes_types,                                         \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEI              \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_broadcast_rhs_cast<DTYPEI, DTYPEA, NAME##_functor>(   \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant void* broadcast_,                                           \
-          constant void* input_,                                               \
-          constant long& broadcast_numel,                                      \
-          constant DTYPEA& alpha,                                              \
-          constant uint4& sizes_types,                                         \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI              \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_scalar<DTYPEI, DTYPEA, NAME##_functor>(               \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant DTYPEI * input_,                                            \
-          device DTYPEI * scalar_,                                             \
-          constant DTYPEA & alpha,                                             \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI          \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_scalar_lhs<DTYPEI, DTYPEA, NAME##_functor>(           \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          device DTYPEI * scalar_,                                             \
-          constant DTYPEI * input_,                                            \
-          constant DTYPEA & alpha,                                             \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEI                     \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_scalar_cast<DTYPEI, DTYPEA, NAME##_functor>(          \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          constant void* input_,                                               \
-          device void* scalar_,                                                \
-          constant DTYPEA& alpha,                                              \
-          constant uint4& sizes_types,                                         \
-          uint tid);                                                           \
-  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEI                 \
-                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
-      binary_alpha_dense_scalar_lhs_cast<DTYPEI, DTYPEA, NAME##_functor>(      \
-          device ::c10::metal::                                                \
-                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
-              out_,                                                            \
-          device void* scalar_,                                                \
-          constant void* input_,                                               \
-          constant DTYPEA& alpha,                                              \
-          constant uint4& sizes_types,                                         \
+#define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)                \
+  static_assert(                                                              \
+      ::metal::is_same_v<                                                     \
+          DTYPEO,                                                             \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA>>,   \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);    \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                  \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                   \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other_strides,                                       \
+          constant uint3& ndim,                                               \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(              \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other_strides,                                       \
+          constant uint4& ndim_types,                                         \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                    \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                     \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEI * other_,                                           \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI               \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>(                \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI          \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast<DTYPEI, DTYPEA, NAME##_functor>(           \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEI * broadcast_,                                       \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI      \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_rhs<DTYPEI, DTYPEA, NAME##_functor>(       \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * broadcast_,                                       \
+          constant DTYPEI * input_,                                           \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI     \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_cast<DTYPEI, DTYPEA, NAME##_functor>(      \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input_,                                              \
+          constant void* broadcast_,                                          \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEO "_" #DTYPEI \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_rhs_cast<DTYPEI, DTYPEA, NAME##_functor>(  \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* broadcast_,                                          \
+          constant void* input_,                                              \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar<DTYPEI, DTYPEA, NAME##_functor>(              \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          device DTYPEI * scalar_,                                            \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI         \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_lhs<DTYPEI, DTYPEA, NAME##_functor>(          \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          device DTYPEI * scalar_,                                            \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI        \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_cast<DTYPEI, DTYPEA, NAME##_functor>(         \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input_,                                              \
+          device void* scalar_,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEO "_" #DTYPEI    \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_lhs_cast<DTYPEI, DTYPEA, NAME##_functor>(     \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          device void* scalar_,                                               \
+          constant void* input_,                                              \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
           uint tid)
 
 // Ternary elementwise ops kernels
