@@ -7,7 +7,6 @@
  */
 #pragma once
 
-#include <tuple>
 #include <ATen/cuda/PhiloxUtils.cuh>
 #include <c10/util/Exception.h>
 
