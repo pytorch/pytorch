@@ -18,10 +18,16 @@ from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     set_default_dtype,
+    TEST_XPU, 
+    TEST_CUDA
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+TEST_GPU = TEST_XPU or TEST_CUDA
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
@@ -314,12 +320,8 @@ user_stack=None)
         guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
         self.assertTrue(guard(foo))
 
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         try:
-            device = torch.accelerator.current_accelerator()
-            torch.set_default_device(device)
+            torch.set_default_device(device_type)
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -588,14 +590,10 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
+    @unittest.skipIf(not TEST_GPU, "requires gpu")
     def test_call_function_no_args_guard(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         root = RootGuardManager()
-        device = torch.accelerator.current_accelerator()
-        # Use device.index which is device-agnostic (works on all accelerators)
-        x = device.index if device.index is not None else 0
+        x = torch.accelerator.current_device_index()
         guard = guards.EQUALS_MATCH(root, x, [0], None)
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
