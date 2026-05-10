@@ -16689,7 +16689,7 @@ class TestAutogradMultipleDispatch(TestCase):
                 torch._test_autograd_multiple_dispatch(dual_input)
 
     @skipIfXpu(
-        msg="Skip due to AssertionError: Tensor-likes are not close!, https://github.com/intel/torch-xpu-ops/issues/2914"
+        msg="The skip to test_view_copy as a permanent skip as mentioned here https://github.com/pytorch/pytorch/pull/180969"
     )
     def test_view_copy(self, device):
         # tests that view_copy derivative formulas are also generated per dispatch key
