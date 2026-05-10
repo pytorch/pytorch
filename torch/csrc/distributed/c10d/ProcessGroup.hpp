@@ -842,11 +842,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return !deviceTypeToBackendType_.empty();
   }
 
-  bool hasBackendForDeviceType(c10::DeviceType deviceType) {
-    return deviceTypeToBackendType_.find(deviceType) !=
-        deviceTypeToBackendType_.end();
-  }
-
   void setBackend(
       c10::DeviceType deviceType,
       BackendType backendType,
@@ -982,14 +977,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
-  bool getUsePgForSymmMemRendezvous() const {
-    return getDefaultBackend()->getUsePgForSymmMemRendezvous();
-  }
-
-  void setUsePgForSymmMemRendezvous(bool value) {
-    getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
-  }
-
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
@@ -997,8 +984,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const std::optional<std::chrono::milliseconds>& timeout,
       const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& name,
-      const std::optional<std::string>& groupDesc,
-      const std::optional<std::vector<c10::Device>>& devices = std::nullopt);
+      const std::optional<std::string>& groupDesc);
 
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.

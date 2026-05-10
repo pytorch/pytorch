@@ -282,8 +282,7 @@ struct Vectorized {
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
     Vectorized vector;
-    std::memcpy(
-        vector.values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
+    std::memcpy(vector.values, ptr, count * sizeof(T));
     return vector;
   }
   static Vectorized<T> loadu_one_fourth(const void* ptr) {
@@ -294,7 +293,7 @@ struct Vectorized {
   }
 
   void store(void* ptr, int count = size()) const {
-    std::memcpy(ptr, values, std::min<int64_t>(count, size()) * sizeof(T));
+    std::memcpy(ptr, values, count * sizeof(T));
   }
   int zero_mask() const {
     // returns an integer mask where all zero elements are translated to 1-bit

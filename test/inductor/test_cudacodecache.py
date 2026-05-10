@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
-import unittest
 
 import torch
 from torch._inductor.async_compile import AsyncCompile
@@ -37,7 +36,6 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
-@unittest.skipUnless(nvcc_exist(), "requires nvcc")
 class TestCUDACodeCache(InductorTestCase):
     @requires_cuda_and_triton
     def test_cuda_load(self):
@@ -98,4 +96,5 @@ class TestCUDACodeCache(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests("cuda")
+    if nvcc_exist():
+        run_tests("cuda")

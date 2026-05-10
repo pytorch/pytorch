@@ -9,7 +9,6 @@ import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
-from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -724,24 +723,18 @@ class CondTests(TestCase):
     def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
-        class PreGradPassCounter(CustomGraphPass):
-            def __call__(self, graph):
-                counters["pre_grad"] += 1
+        def pre_grad_pass_counter(gm):
+            counters["pre_grad"] += 1
 
-            def uuid(self):
-                return "PreGradPassCounter"
-
-        class PostGradPassCounter(CustomGraphPass):
-            def __call__(self, graph):
-                counters["post_grad"] += 1
-
-            def uuid(self):
-                return "PostGradPassCounter"
+        def post_grad_pass_counter(gm):
+            counters["post_grad"] += 1
 
         with torch._inductor.config.patch(
             {
-                "pre_grad_custom_pass": PreGradPassCounter(),
-                "post_grad_custom_pre_pass": PostGradPassCounter(),
+                "pre_grad_custom_pass": pre_grad_pass_counter,
+                "post_grad_custom_pre_pass": post_grad_pass_counter,
+                # The above patches don't pickle
+                "fx_graph_cache": False,
             }
         ):
             self._run_test(
@@ -2084,12 +2077,6 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
-        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
-        if autograd:
-            raise unittest.SkipTest(
-                "Fails due to issues with backward pass when compiled."
-            )
-
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)

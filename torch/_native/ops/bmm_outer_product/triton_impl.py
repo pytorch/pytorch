@@ -27,22 +27,12 @@ def _is_outer_product(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 
 def _bmm_outer_product_impl(
+    dispatch_keys: torch.DispatchKeySet,
     a: torch.Tensor,
     b: torch.Tensor,
-    *args,
-    **kwargs,
+    *,
+    fallback_kernel,
 ) -> torch.Tensor:
-    from .triton_kernels import bmm_outer_product
-
-    return bmm_outer_product(a, b)
-
-
-def _bmm_outer_product_cond(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    *args,
-    **kwargs,
-) -> bool:
     a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
     b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
     if (
@@ -52,17 +42,19 @@ def _bmm_outer_product_cond(
         and _is_outer_product(a, b)
         and not (a_is_cow or b_is_cow)
     ):
-        return True
-    return False
+        from .triton_kernels import bmm_outer_product
+
+        return bmm_outer_product(a, b)
+    return fallback_kernel.call_boxed(dispatch_keys, a, b)
 
 
 def _register_for_dispatch_key(dispatch_key: str) -> None:
+    fallback_kernel = torch.library.get_kernel("aten::bmm", dispatch_key)
     tu.register_op_override(
         "aten",
         "bmm",
         dispatch_key,
-        cond=_bmm_outer_product_cond,
-        impl=_bmm_outer_product_impl,
+        functools.partial(_bmm_outer_product_impl, fallback_kernel=fallback_kernel),
         allow_multiple_override=True,
     )
 

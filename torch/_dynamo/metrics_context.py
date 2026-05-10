@@ -95,8 +95,7 @@ class MetricsContext:
         At exit, call the provided on_exit function.
         """
         self._level -= 1
-        if self._level < 0:
-            raise AssertionError("MetricsContext level cannot become negative")
+        assert self._level >= 0
         if self._level == 0:
             try:
                 end_time_ns = time.time_ns()

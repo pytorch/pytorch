@@ -253,14 +253,10 @@ def gen_mkl_autotuner(
         input_nodes = graph.start_nodes
         if fx_model is None:
             fx_model = graph.fx_graph.owning_module
-            if fx_model is None:
-                raise AssertionError("fx_graph.owning_module must not be None")
             old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
         sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
         output_args = cast(list[fx.Node], [node.args[0] for node in graph.end_nodes])
-        if fx_model is None:
-            raise AssertionError("fx_model must not be None")
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
         def benchmark(f: Callable[[], object]) -> float:

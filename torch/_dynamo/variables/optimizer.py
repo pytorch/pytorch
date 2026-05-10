@@ -72,8 +72,7 @@ def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
         manager = get_manager(x.device.index, False)
         is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
         if manager:
-            if manager.current_node is None:
-                raise AssertionError("CUDA graph manager has no current node")
+            assert manager.current_node is not None
             return (
                 is_static_address
                 or manager.current_node._is_cuda_graph_recorded_tensor(x)
@@ -149,10 +148,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
         if name in ("_init_group"):
-            if not self.source:
-                raise AssertionError(
-                    "OptimizerVariable requires a source for var_getattr"
-                )
+            assert self.source
             return GetAttrVariable(
                 self,
                 name,
@@ -281,8 +277,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
-        if state_source is None:
-            raise AssertionError("state_source must not be None")
+        assert state_source is not None
         tx.output.guard_on_key_order.add(state_source)
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
@@ -399,10 +394,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                if not isinstance(py_arg, list):
-                    raise AssertionError(
-                        "py_arg should be a list in optimizer variable"
-                    )
+                assert isinstance(py_arg, list), (
+                    "py_arg should be a list in optimizer variable"
+                )
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

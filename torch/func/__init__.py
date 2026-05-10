@@ -10,7 +10,6 @@ from torch._functorch.eager_transforms import (
     linearize,
     vjp,
 )
-from torch._functorch.einops import rearrange
 from torch._functorch.functional_call import functional_call, stack_module_state
 
 
@@ -25,7 +24,6 @@ __all__ = [
     "jacrev",
     "jvp",
     "linearize",
-    "rearrange",
     "vjp",
     "functional_call",
     "stack_module_state",

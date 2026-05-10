@@ -66,7 +66,6 @@ from ..scheduler import (
     SchedulerNode,
 )
 from ..shape_propagation import get_broadcasted_shape
-from ..stream_utils import get_raw_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
@@ -3965,7 +3964,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         tma_compatibility_checker = None
         if mode is None or mode == "tma":
-            force = mode == "tma" or getattr(self, "tma_store", False)
+            force = mode == "tma"
             tma_compatibility_checker = self.tma_compatibility_checker_cls(
                 self,
                 dtype,
@@ -5466,7 +5465,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = get_raw_stream_name(index)
+                stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -5583,7 +5582,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "autotune_remote_cache": config.autotune_remote_cache,
             "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
-            "incremental_autotune": config.incremental_autotune,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
@@ -6950,8 +6948,6 @@ class TritonScheduling(SIMDScheduling):
             total_ms += ms
             total_clone_ms += ms_clone
             file_list.append(mod.__file__)
-            args = call = wrapped_jit_function = None
-            torch.accelerator.empty_cache()
         V.graph.removed_buffers = removed_buffers_orig
         V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list

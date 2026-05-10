@@ -2,7 +2,7 @@ import torch
 
 
 # LITERALINCLUDE START: CUSTOM OPERATOR META
-lib = torch.library.Library("openreg", "IMPL", "Meta")  # noqa: SCOPED_LIBRARY
+lib = torch.library.Library("openreg", "IMPL", "Meta")  # noqa: TOR901
 
 
 @torch.library.impl(lib, "custom_abs")

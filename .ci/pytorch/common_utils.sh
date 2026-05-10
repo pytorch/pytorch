@@ -295,20 +295,6 @@ function install_torchao() {
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
 }
 
-function install_torchcomms() {
-  local commit
-  commit=$(get_pinned_commit torchcomms)
-  export USE_GLOO=1
-  export USE_NCCLX=0
-  export USE_TRANSPORT=0
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    export USE_NCCL=1
-  else
-    export USE_NCCL=0
-  fi
-  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
-}
-
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
   pip_install flash-attn-4==4.0.0b5

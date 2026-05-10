@@ -1,4 +1,4 @@
-# Owner(s): ["module: cpp-extensions"]
+# Owner(s): ["module: unknown"]
 
 import sys
 import tempfile

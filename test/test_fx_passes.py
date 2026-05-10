@@ -894,13 +894,13 @@ class MultiOutputWithWithInvalidMatches:
 class QuantizationFp8Pattern:
     @classmethod
     def setup(cls):
-        cls.quantization = torch.library.Library("fp8_quantization", "DEF")  # noqa: SCOPED_LIBRARY
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")  # noqa: TOR901
         cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
         cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
 
     @classmethod
     def tearDown(cls):
-        cls.quantization._destroy()
+        del cls.quantization
 
     @staticmethod
     def forward(self, arg0_1, arg1_1):

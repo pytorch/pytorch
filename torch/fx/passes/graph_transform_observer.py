@@ -111,10 +111,11 @@ class GraphTransformObserver:
         if self.subsystem is None:
             return False
 
+        debug_info = lambda: self.passname  # noqa: E731
         from torch._inductor.compiler_bisector import CompilerBisector
 
         return CompilerBisector.disable_subsystem(
-            "inductor", self.subsystem, lambda: self.passname
+            "inductor", self.subsystem, debug_info
         )
 
     def __enter__(self) -> "GraphTransformObserver":
