@@ -905,6 +905,17 @@ class AllocateLine(MemoryPlanningLine):
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
+        from ..scheduler import NopKernelSchedulerNode
+
+        # The empty_strided lowering zeros the ComputedBuffer ranges to signal
+        # "no compute," which makes is_no_op() true and routes here via
+        # NopKernelSchedulerNode. This covers torch.empty / empty_like /
+        # empty_strided / empty_permuted. Used to trigger deterministic fill
+        # when torch.use_deterministic_algorithms is active.
+        self.is_uninitialized = isinstance(
+            V.graph.scheduler.current_node,
+            NopKernelSchedulerNode,
+        )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
@@ -961,7 +972,9 @@ class AllocateLine(MemoryPlanningLine):
         if self.comm_buffer:
             self._codegen_comm_buffer(code)
         else:
-            line = self.wrapper.make_buffer_allocation(self.node)
+            line = self.wrapper.make_buffer_allocation(
+                self.node, is_uninitialized=self.is_uninitialized
+            )
             code.writeline(line)
 
     def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
@@ -3600,7 +3613,9 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(self, buffer: BufferLike):
+    def make_buffer_allocation(
+        self, buffer: BufferLike, is_uninitialized: bool = False
+    ):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
@@ -3608,7 +3623,14 @@ class PythonWrapperCodegen(CodeGen):
         stride = tuple(buffer.get_stride())
         is_pinned = buffer.get_is_pinned()
         return self.make_allocation(
-            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned
+            buffer.get_name(),
+            device,
+            dtype,
+            shape,
+            stride,
+            allocation_shape,
+            is_pinned,
+            is_uninitialized=is_uninitialized,
         )
 
     @cache_on_self
@@ -3620,7 +3642,15 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(import_str, strip=True)
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        allocation_shape=None,
+        is_pinned=False,
+        is_uninitialized=False,
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -3630,6 +3660,13 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
+
+        is_deterministic = (
+            torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+            and is_uninitialized
+        )
+
         if torch._inductor.config.test_configs.track_memory_lifecycle:
             out = (
                 f"{name} = tracked_empty_strided("
@@ -3639,14 +3676,14 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device.type}', "
                 f"name='{name}')"
             )
-        elif device.type == "cpu" and is_pinned:
+        elif device.type == "cpu" and is_pinned and not is_deterministic:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
+        elif device.type in ("cpu", "cuda", "xpu", "mtia") and not is_deterministic:
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
@@ -3654,13 +3691,14 @@ class PythonWrapperCodegen(CodeGen):
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        # all other devices:
+        # all other devices (or deterministic mode):
+        # NOTE: For deterministic mode, fallback to the slower path which correctly fills the buffer with NaN or MAX_INT
         else:
             out = (
                 f"{name} = empty_strided("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"device='{device.type}', dtype={dtype}, pin_memory={is_pinned})"
             )
         if codegen_shape_tuple != codegen_allocation_shape_tuple:
             # need an extra as_strided call
