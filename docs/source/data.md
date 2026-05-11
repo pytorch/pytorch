@@ -327,8 +327,8 @@ It is generally not recommended to return CUDA tensors in multi-process
 loading because of many subtleties in using CUDA and sharing CUDA tensors in
 multiprocessing (see {ref}`multiprocessing-cuda-note`). Instead, we recommend
 using {ref}`automatic memory pinning <memory-pinning>` (i.e., setting
-{attr}`pin_memory=True`), which enables fast data transfer to CUDA-enabled
-GPUs.
+{attr}`pin_memory=True`), which enables fast data transfer to accelerator
+devices such as CUDA or MPS.
 :::
 
 (platform-specific-behaviors)=
@@ -382,13 +382,13 @@ loading.
 ## Memory Pinning
 
 Host to GPU copies are much faster when they originate from pinned (page-locked)
-memory. See {ref}`cuda-memory-pinning` for more details on when and how to use
-pinned memory generally.
+memory. See {ref}`cuda-memory-pinning` and {ref}`mps-memory-pinning` for more
+details on when and how to use pinned memory generally.
 
 For data loading, passing {attr}`pin_memory=True` to a
 {class}`~torch.utils.data.DataLoader` will automatically put the fetched data
-Tensors in pinned memory, and thus enables faster data transfer to CUDA-enabled
-GPUs.
+Tensors in pinned memory, and thus enables faster data transfer to accelerator
+devices such as CUDA or MPS.
 
 The default memory pinning logic only recognizes Tensors and maps and iterables
 containing Tensors. By default, if the pinning logic sees a batch that is a

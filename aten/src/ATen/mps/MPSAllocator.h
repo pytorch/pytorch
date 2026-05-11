@@ -294,6 +294,9 @@ class MPSHeapAllocatorImpl {
   // returns a CPU-mapping of the input buffer and its retainCount,
   // if only it has Shared storage-mode and allocated on MPSAllocator
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* buffer);
+  // returns the MTLBuffer for a shared allocation when the input is either
+  // the MTLBuffer or its CPU mapping
+  const void* getSharedBuffer(const void* ptr);
   // returns a CPU-device c10::Storage aliasing the host-visible contents of
   // the MTLBuffer backing `mps_storage`. The returned storage keeps the
   // source MPS storage alive for its lifetime. Raises if `mps_storage` is
@@ -364,6 +367,8 @@ class MPSHeapAllocatorImpl {
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
+  // allocated shared buffers by CPU mapping
+  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_shared_buffers_by_cpu_ptr;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
   // total memory allocated by HeapAllocator (including blocks in pools)
