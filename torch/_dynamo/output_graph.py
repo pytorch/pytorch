@@ -2769,6 +2769,114 @@ class OutputGraph(OutputGraphCommon):
 
                 compiled_fn = _tf_disabled_wrapper
 
+            # Propagate batch-invariant marks across graph breaks. Each
+            # subgraph compiles in its own ShapeEnv, so a mark on the
+            # user's input tensor doesn't reach the second subgraph's
+            # tracing automatically. Identify which output dims carry a
+            # batch-marked symbol in their shape and stamp the runtime
+            # output tensors with `_dynamo_batch_invariant_dims` before
+            # they flow to the resume function. The next subgraph's
+            # MetaTensorDescriber then picks the stamp up via the normal
+            # path. (Same shape used as for `_dynamo_dynamic_indices` —
+            # see `torch/_subclasses/meta_utils.py`.)
+            shape_env = (
+                old_fake_mode.shape_env if old_fake_mode is not None else None
+            )
+            if (
+                shape_env is not None
+                and getattr(shape_env, "batch_invariant_symbols", None)
+            ):
+                marked_set = shape_env.batch_invariant_symbols
+                output_nodes = gm.graph.find_nodes(op="output")
+                marked_outputs: list[tuple[int, list[int]]] = []
+                if output_nodes:
+                    args = output_nodes[0].args[0] if output_nodes[0].args else ()
+                    if not isinstance(args, (list, tuple)):
+                        args = (args,)
+                    for out_idx, arg in enumerate(args):
+                        if not hasattr(arg, "meta"):
+                            continue
+                        val = arg.meta.get("example_value")
+                        if val is None:
+                            val = arg.meta.get("val")
+                        if not isinstance(val, torch.Tensor):
+                            continue
+                        dims_with_mark: list[int] = []
+                        for d in range(val.dim()):
+                            sz = val.shape[d]
+                            if not isinstance(sz, torch.SymInt):
+                                continue
+                            expr = sz.node.expr
+                            free = getattr(expr, "free_symbols", None)
+                            if free and any(s in marked_set for s in free):
+                                dims_with_mark.append(d)
+                        if dims_with_mark:
+                            marked_outputs.append((out_idx, dims_with_mark))
+
+                if marked_outputs:
+                    real_compiled_fn_bi = compiled_fn
+
+                    def _bi_mark_wrapper(*args, **kwargs):
+                        outs = real_compiled_fn_bi(*args, **kwargs)
+                        seq = outs if isinstance(outs, (list, tuple)) else (outs,)
+                        for out_idx, dims in marked_outputs:
+                            if 0 <= out_idx < len(seq):
+                                t = seq[out_idx]
+                                if isinstance(t, torch.Tensor):
+                                    existing = getattr(
+                                        t, "_dynamo_batch_invariant_dims", None
+                                    )
+                                    if existing is None:
+                                        existing = set()
+                                        t._dynamo_batch_invariant_dims = existing
+                                    existing.update(dims)
+                        return outs
+
+                    compiled_fn = _bi_mark_wrapper
+
+                # F3: detect ops whose output Tensor's values literally
+                # depend on the batch-marked symbol (e.g. `x * x.size(0)`).
+                # Such ops are batch-variant by construction — BI cannot
+                # be satisfied. Warn once per offending graph.
+                def _bi_arg_carries_marked(a: Any) -> bool:
+                    if isinstance(a, torch.SymInt):
+                        expr = a.node.expr
+                    elif isinstance(a, torch.fx.Node):
+                        ev = a.meta.get("example_value")
+                        if ev is None:
+                            ev = a.meta.get("val")
+                        if not isinstance(ev, torch.SymInt):
+                            return False
+                        expr = ev.node.expr
+                    else:
+                        return False
+                    free = getattr(expr, "free_symbols", None)
+                    return bool(free) and any(s in marked_set for s in free)
+
+                value_dependent_nodes: list[str] = []
+                for node in gm.graph.nodes:
+                    if node.op not in ("call_function", "call_method"):
+                        continue
+                    node_val = node.meta.get("example_value")
+                    if node_val is None:
+                        node_val = node.meta.get("val")
+                    if not isinstance(node_val, torch.Tensor):
+                        continue
+                    flat_args = list(node.args) + list(node.kwargs.values())
+                    if any(_bi_arg_carries_marked(a) for a in flat_args):
+                        value_dependent_nodes.append(str(node.target))
+                if value_dependent_nodes:
+                    import warnings as _warnings
+                    sample = ", ".join(value_dependent_nodes[:3])
+                    more = f" (+{len(value_dependent_nodes) - 3} more)" if len(value_dependent_nodes) > 3 else ""
+                    _warnings.warn(
+                        f"mark_batch_invariant: graph contains op(s) whose "
+                        f"output value depends on the batch-marked dim "
+                        f"({sample}{more}). Such outputs are batch-variant by "
+                        f"construction and cannot satisfy batch invariance.",
+                        stacklevel=2,
+                    )
+
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )

@@ -105,6 +105,13 @@ class SizeVarAllocator:
         self.shape_env = shape_env
         self.backed_var_to_val = self.shape_env.backed_var_to_val
         self.var_to_hint_override = self.shape_env.var_to_hint_override
+        # Symbols that the user marked as batch-invariant via
+        # torch._dynamo.mark_batch_invariant. Heuristics that read size hints
+        # consult is_batch_invariant_expr() to decide whether a numerical
+        # decision may legally depend on a given expression.
+        self.batch_invariant_symbols: set[sympy.Symbol] = (
+            self.shape_env.batch_invariant_symbols
+        )
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: dict[Expr, Expr] | None = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -752,6 +759,38 @@ class SizeVarAllocator:
         return _guarding_hint_or_throw_base(
             self.shape_env, expr, self.inv_precomputed_replacements
         )
+
+    def is_batch_invariant_expr(self, expr: Expr | int) -> bool:
+        """True iff `expr` does not depend on any symbol the user marked as
+        batch-invariant via torch._dynamo.mark_batch_invariant.
+
+        Heuristics that read size hints (numel_hint, get_dep_size_hint, ...)
+        and use the result to make a numerical decision must guard the
+        decision behind this query: branching on a batch-marked quantity
+        means the decision varies with batch size, which is what we want
+        to forbid under batch-invariant compilation.
+
+        Rule is intentionally simple: any free symbol of `expr` in the
+        batch-marked set fails. No cleverness about modular arithmetic,
+        divisor-cancellation, etc.
+
+        TODO: when an unmarked symbol has been replaced (via equality guard)
+        with an expression containing a marked symbol, this query would
+        miss the dependency. Need to apply ShapeEnv replacements first —
+        not done yet because the naive xreplace also strips dependence
+        when the marked symbol itself was replaced with its concrete value
+        under static-shape specialization (which is the wrong direction).
+        Fix is to walk the replacement graph in the batch-marked direction
+        only.
+        """
+        if isinstance(expr, int):
+            return True
+        if not self.batch_invariant_symbols:
+            return True
+        free = getattr(expr, "free_symbols", None)
+        if not free:
+            return True
+        return not any(s in self.batch_invariant_symbols for s in free)
 
     def optimization_hint(self, expr: Expr | int, fallback: int | None = None) -> int:
         """

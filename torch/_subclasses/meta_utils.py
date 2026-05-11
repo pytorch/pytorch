@@ -4,6 +4,8 @@ import contextlib
 import dataclasses
 import functools
 import threading
+
+import sympy
 import typing
 import weakref
 from abc import abstractmethod
@@ -442,6 +444,9 @@ class MetaTensorDescriber:
             storage_offset=storage_offset,
             dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
+            dynamo_batch_invariant_dims=list(
+                getattr(t, "_dynamo_batch_invariant_dims", set())
+            ),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
             ),
@@ -646,6 +651,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     size: tuple[int, ...]
     dynamo_dynamic_indices: list[int]
     dynamo_hint_overrides: dict[int, int]
+    dynamo_batch_invariant_dims: list[int] = dataclasses.field(default_factory=list)
 
     layout: torch.layout = torch.strided
     is_inference: bool = False
@@ -1132,7 +1138,7 @@ class MetaConverter(Generic[_TensorT]):
                     t_storage_offset = shape_env._maybe_specialize_sym_int_with_hint(
                         t.storage_offset
                     )
-                    return shape_env._create_symbolic_sizes_strides_storage_offset(
+                    out = shape_env._create_symbolic_sizes_strides_storage_offset(
                         t_size,
                         t_stride,
                         t_storage_offset,
@@ -1141,6 +1147,45 @@ class MetaConverter(Generic[_TensorT]):
                         symbolic_context=symbolic_context,
                         hint_overrides=t.dynamo_hint_overrides,
                     )
+                    if t.dynamo_batch_invariant_dims:
+                        # Record symbols allocated for batch-marked dims so
+                        # Inductor heuristics can query is_batch_invariant_expr.
+                        # Record every free symbol of the dim's expression
+                        # (not just the bare-Symbol case): duck-shape mapping
+                        # and hint overrides may produce composite expressions
+                        # like 2*s_outer where the underlying batch identity is
+                        # one of the free symbols.
+                        sym_sizes = out[0]
+                        any_symbol_recorded = False
+                        for i in t.dynamo_batch_invariant_dims:
+                            if 0 <= i < len(sym_sizes):
+                                s = sym_sizes[i]
+                                if isinstance(s, torch.SymInt):
+                                    expr = s.node.expr
+                                    free = getattr(expr, "free_symbols", None)
+                                    if free:
+                                        shape_env.batch_invariant_symbols.update(
+                                            free
+                                        )
+                                        any_symbol_recorded = True
+                        if not any_symbol_recorded:
+                            import warnings as _warnings
+                            sizes_str = ", ".join(
+                                f"dim {i}: size={t.size[i] if 0 <= i < len(t.size) else '<oor>'}"
+                                for i in t.dynamo_batch_invariant_dims
+                            )
+                            _warnings.warn(
+                                f"mark_batch_invariant had no effect: no symbolic "
+                                f"dim was allocated for the marked dim(s) "
+                                f"({sizes_str}). The dim was specialized to a "
+                                f"concrete int (likely because mark_dynamic was "
+                                f"not called and dynamic=True was not set). "
+                                f"To enable batch-invariant compilation, also "
+                                f"call torch._dynamo.mark_dynamic(t, dim) or "
+                                f"compile with dynamic=True.",
+                                stacklevel=2,
+                            )
+                    return out
             else:
                 return (t.size, t.stride, t.storage_offset)
 

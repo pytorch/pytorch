@@ -3951,6 +3951,13 @@ class ShapeEnv:
         # want them to always be stored here, since this dict is used as
         # part of the FxGraphCache key.
         self.var_to_hint_override: dict[sympy.Symbol, int] = {}
+        # Symbols allocated for tensor dims that the user marked as batch-
+        # invariant via torch._dynamo.mark_batch_invariant. Inductor heuristics
+        # that read size hints query is_batch_invariant_expr() to decide
+        # whether a numerical decision may depend on a given expression. An
+        # expression is batch-invariant iff none of its free symbols is in
+        # this set.
+        self.batch_invariant_symbols: set[sympy.Symbol] = set()
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
         # Maps from sympy ints to expressions representing them
