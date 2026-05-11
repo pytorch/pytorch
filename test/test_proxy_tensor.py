@@ -2032,6 +2032,60 @@ L['a'].size()[1] <= 18""")
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
 
+    def test_make_fx_second_order_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/175477
+        weight = torch.randn(4, 3, requires_grad=True)
+
+        def fn(x, weight):
+            x = x.detach().requires_grad_(True)
+            h = x @ weight.T
+            mean = h.mean(-1, keepdim=True)
+            var = h.var(-1, keepdim=True, correction=0)
+            h = (h - mean) / torch.sqrt(var + 1e-5)
+            energy = (h ** 2).sum()
+            force = -torch.autograd.grad(energy, x, create_graph=True)[0]
+            return energy, force
+
+        traced = make_fx(fn, tracing_mode="symbolic", _allow_non_fake_inputs=True)(
+            torch.randn(3, 3), weight.clone().requires_grad_(True)
+        )
+
+        for node in traced.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(
+                    node.target, torch.ops.aten.detach.default,
+                )
+
+        x = torch.randn(3, 3)
+        target_energy = torch.randn(())
+        target_force = torch.randn(3, 3)
+
+        def loss_fn(e, f):
+            return (e - target_energy).pow(2) + (f - target_force).pow(2).sum()
+
+        w1 = weight.detach().clone().requires_grad_(True)
+        e1, f1 = fn(x, w1)
+        loss_fn(e1, f1).backward()
+
+        w2 = weight.detach().clone().requires_grad_(True)
+        e2, f2 = traced(x, w2)
+        loss_fn(e2, f2).backward()
+
+        self.assertEqual(w1.grad, w2.grad)
+
+        # Explicit decomposition_table={} should preserve detach nodes
+        # (only None triggers the default detach->alias decomposition).
+        traced_explicit = make_fx(
+            fn, decomposition_table={}, tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(torch.randn(3, 3), weight.clone().requires_grad_(True))
+        self.assertTrue(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced_explicit.graph.nodes
+            )
+        )
+
 
 make_fx_failures = {
     # unknown
