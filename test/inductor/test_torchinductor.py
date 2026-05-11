@@ -17903,6 +17903,10 @@ if RUN_GPU:
 
         def test_layer_norm_inplaces_after_matmul(self):
             # https://github.com/pytorch/pytorch/issues/132826
+            # Originally checked that the matmul output buffer is reused in-place
+            # by the LayerNorm Triton kernel. native_layer_norm is now a fallback
+            # (issue #168126), so there's no Triton kernel to do that reuse.
+            # Just keep the correctness check.
             batch_size = 32
             seq_length = 50
             hidden_size = 768
@@ -17919,8 +17923,6 @@ if RUN_GPU:
                 torch.randn(hidden_size, hidden_size, device=GPU_TYPE),
             ]
             fn_opt = torch.compile(fn)
-            code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         @torch._functorch.config.patch("donated_buffer", True)

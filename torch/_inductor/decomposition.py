@@ -116,7 +116,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
-    aten.native_layer_norm,  # inductor uses make_fallback
+    aten.native_layer_norm,  # inductor uses make_fallback (issue #168126)
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -126,6 +126,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.var_mean,  # routes through inductor's coherent var_mean lowering (issue #168126)
     aten.baddbmm,  # upcasts to fp32, perf issue
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.addcmul,
