@@ -173,11 +173,6 @@ class OpDispatcher:
             aten.bernoulli.default,
             aten.bernoulli_.float,
         }
-        self._squeeze_inplace_ops = {
-            aten.squeeze_.dim,
-            aten.squeeze_.default,
-            aten.squeeze_.dims,
-        }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
             aten.is_pinned.default: is_pinned_handler,
@@ -496,29 +491,17 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: squeeze_ inplace ops may change the tensor's metadata
-                # (shape/strides). We special-case them to update the spec.
-                if op_call in self._squeeze_inplace_ops:
-                    # update the spec to handle tensor meta changes
-                    args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
-                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
-                else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
-                    if args[0]._spec.placements != output_spec.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require placement changes "
-                            f"are not supported. The operation would change placement from "
-                            f"{args[0]._spec.placements} to {output_spec.placements}, "
-                            f"which requires redistribution and breaks aliasing semantics. "
-                            f"Please use the out-of-place version of this operation instead."
-                        )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                # Fast path: placements unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec.placements == output_spec.placements:
                     return args[0]
+
+                # Placement reindexed (e.g. squeeze_ removing a non-sharded
+                # dim: Shard(1) → Shard(0)). No redistribution — the local
+                # tensor data is unchanged, only dim indices shift.
+                # strict_view=True in sharding prop prevents the illegal
+                # case (squeezing a sharded dim) from reaching here.
+                args[0]._spec = output_spec
+                return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
                 return None
         elif is_out_variant_op:

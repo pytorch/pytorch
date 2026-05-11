@@ -132,3 +132,20 @@ jobs:
           else
             echo "No execution output found at ${OUTPUT_FILE}"
           fi
+
+      - name: Stage issue number for downstream workflows
+        if: always()
+        env:
+          ISSUE_NUM: ${{ steps.issue.outputs.number }}
+        run: |
+          mkdir -p /tmp/triage-out
+          echo "$ISSUE_NUM" > /tmp/triage-out/issue_number.txt
+
+      - name: Upload issue number artifact for downstream workflows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triage-completed-data
+          path: /tmp/triage-out/issue_number.txt
+          retention-days: 1
+          if-no-files-found: error
