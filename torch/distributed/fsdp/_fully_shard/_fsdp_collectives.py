@@ -91,7 +91,7 @@ class SymmMemAllocMixin:
         # Force initialization of communicator; otherwise, the rendezvous may
         # see empty communicator.
         # TODO: Remove this, maybe by warning user to perform eager dist init.
-        # For now, it is okay since it isjust a one-time cost at init.
+        # For now, it is okay since it is just a one-time cost at init.
         dist.barrier(group=group)
 
     def allocate(
