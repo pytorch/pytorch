@@ -148,9 +148,17 @@ on:
 
 jobs:
   build:
-    # Don't run on forked repos
-    if: github.repository_owner == 'pytorch' && !inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    # Don't run on forked repos.
+    # Experiment (https://github.com/pytorch/pytorch/issues/183242): on
+    # pull_request events, always run the EC2 route so that callers passing
+    # use-arc=true execute OSDC in shadow mode alongside EC2. Pushed commits
+    # and scheduled workflows continue to honor use-arc as usual.
+    if: github.repository_owner == 'pytorch' && (!inputs.use-arc || github.event_name == 'pull_request')
+    # Skip runner_prefix on the EC2 route during the OSDC shadow-mode
+    # experiment: the prefix (e.g. mt-) is meant for OSDC runner labels and
+    # would turn an EC2 label like linux.c7i.2xlarge into mt-linux.c7i.2xlarge,
+    # which is not a valid EC2 runner. Revert this once the experiment ends.
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 480
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
