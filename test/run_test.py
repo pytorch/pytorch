@@ -198,7 +198,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "higher_order_ops/test_inline_asm_elementwise",
     "distributed/pipelining/test_dtensor_pp_integration",
 ]
 
@@ -423,7 +422,9 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
-DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+DYNAMO_CORE_TESTS = [
+    test for test in TESTS if test.startswith("dynamo") and "cpython" not in test
+]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
