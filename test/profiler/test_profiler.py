@@ -82,15 +82,6 @@ if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
 
 
-def get_profiler_activities(device_type):
-    activities = [ProfilerActivity.CPU]
-    if device_type not in ("cpu", "meta"):
-        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
-        if device_activity and device_activity in supported_activities():
-            activities.append(device_activity)
-    return activities
-
-
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
@@ -517,12 +508,11 @@ class TestProfiler(TestCase):
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         device = "cuda" if use_cuda else "cpu"
-        use_device = "cuda" if use_cuda else None
-        with _profile(use_device=use_device, use_kineto=True):
+        with _profile(use_device=device if use_cuda else None, use_kineto=True):
             self.payload(device=device)
 
         # rerun to avoid initial start overhead
-        with _profile(use_device=use_device, use_kineto=True) as p:
+        with _profile(use_device=device if use_cuda else None, use_kineto=True) as p:
             self.payload(device=device)
 
         self.assertTrue("aten::mm" in str(p))
@@ -1260,7 +1250,7 @@ class TestProfiler(TestCase):
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         device = "cuda" if use_cuda else "cpu"
-        with _profile(use_device="cuda" if use_cuda else None, use_kineto=True):
+        with _profile(use_device=device if use_cuda else None, use_kineto=True):
             self.payload(device=device)
 
         with TemporaryDirectoryName() as dname:
@@ -2746,7 +2736,11 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 found_mm = True
         self.assertTrue(found_mm)
         if use_cuda:
+            from torch._C import _get_privateuse1_backend_name
+
             device_type_enum = getattr(DeviceType, device.upper(), None)
+            if device_type_enum is None and device == _get_privateuse1_backend_name():
+                device_type_enum = DeviceType.PrivateUse1
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
