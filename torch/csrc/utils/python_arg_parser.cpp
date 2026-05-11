@@ -617,7 +617,7 @@ auto handle_torch_function_no_python_arg_parser(
   // (5) FakeTensorMode.__torch_dispatch__ (infra modes next highest)
   // (6) FakeTensor.__torch_fake_dispatch__ (infra subclasses next highest)
 
-  // Why does do FunctionalTensor and FakeTensor even need to be special-cased
+  // Why do FunctionalTensor and FakeTensor even need to be special-cased
   // in the ordering?
   // In theory we could remove their __torch_dispatch__, but both of these
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
@@ -1739,7 +1739,7 @@ bool FunctionSignature::parse(
 
     int64_t failed_idx = -1;
     bool varargs_eligible = allow_varargs_intlist && arg_pos == 0 && !is_kwd;
-    if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
+    if ((!obj && param.optional) || (Py_IsNone(obj) && param.allow_none)) {
       dst[i++] = nullptr;
     } else if (!obj) {
       if (raise_exception) {

@@ -1082,8 +1082,20 @@ main()
                 call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
+            # Find the CALL that invokes the compiled graph function
+            # (not an earlier CALL from e.g. store_user_object_weakrefs).
+            # The compiled fn is loaded via LOAD_GLOBAL __compiled_fn_*.
+            load_graph_idx = next(
+                i
+                for i, inst in enumerate(insts)
+                if inst.opname == "LOAD_GLOBAL"
+                and isinstance(inst.argval, str)
+                and inst.argval.startswith("__compiled_fn")
+            )
             call_graph_idx = next(
-                i for i, inst in enumerate(insts) if inst.opname == call_op
+                i
+                for i, inst in enumerate(insts)
+                if i > load_graph_idx and inst.opname == call_op
             )
             # pre-graph should alias: inputs_ref_0 = inputs[0]
             matches = [
@@ -1155,8 +1167,19 @@ main()
                     call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
+                # Find the CALL that invokes the compiled graph function
+                # (not an earlier CALL from e.g. store_user_object_weakrefs).
+                load_graph_idx = next(
+                    i
+                    for i, inst in enumerate(insts)
+                    if inst.opname == "LOAD_GLOBAL"
+                    and isinstance(inst.argval, str)
+                    and inst.argval.startswith("__compiled_fn")
+                )
                 call_graph_idx = next(
-                    i for i, inst in enumerate(insts) if inst.opname == call_op
+                    i
+                    for i, inst in enumerate(insts)
+                    if i > load_graph_idx and inst.opname == call_op
                 )
                 # pre-graph should alias: inputs_ref_0 = inputs[0]
                 matches = [
@@ -3681,7 +3704,7 @@ class CompiledAutograd0(torch.nn.Module):
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
             )
 
     # https://github.com/pytorch/pytorch/issues/138920
@@ -3946,7 +3969,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
                 )
 
             self.check_output_and_recompiles(
@@ -4026,7 +4049,7 @@ class CompiledAutograd1(torch.nn.Module):
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
             )
 
         self.check_output_and_recompiles(
@@ -4106,7 +4129,7 @@ class CompiledAutograd1(torch.nn.Module):
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
-""",  # noqa: B950
+""",
                 )
 
             # 1 graph break on torch.load -> 2 dynamo graphs
@@ -5030,7 +5053,7 @@ Backward
 _set_multithreading_enabled
 backward
 _set_multithreading_enabled""",
-        )  # noqa: B950
+        )
 
     def test_torch_dispatch_mode(self):
         called_funcs = []
@@ -5088,7 +5111,7 @@ mul.Tensor
 mul.Tensor
 new_empty_strided.default
 copy_.default""",
-        )  # noqa: B950
+        )
 
 
 def load_test_module(name):
@@ -5327,6 +5350,7 @@ xfail_by_backend = {
         "test_select_sum",  # batched gradients
         "test_custom_autograd_no_early_free",  # batched gradients
         "test_grad_batched_grad",  # batched gradients
+        "test_grad_dict_inputs_batched_grads",  # batched gradients
         # Uncategorized
         "test_lobpcg",  # NaNs
         "test_autograd_simple_views_python",  # gradient is None

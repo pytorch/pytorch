@@ -136,13 +136,12 @@ docstring-code-format = true
 quote-style = "double"
 
 [tool.ruff.lint]
-# NOTE: Synchoronize the ignores with .flake8
+# NOTE: Synchronize the ignores with .flake8
 external = [
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",
     "T484",
-    "TOR901",
     # Codes that are preview-only in ruff, so flake8 is still the enforcer.
     # As ruff promotes these out of preview, move them to flake8's ignore list.
     "B901",
@@ -263,6 +262,7 @@ select = [
     "RUF033", # default values __post_init__ dataclass
     "RUF041", # simplify nested Literal
     "RUF048", # properly parse `__version__`
+    "RUF100", # unused noqa
     "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
@@ -350,7 +350,6 @@ select = [
 ]
 
 # torch/ folders still needing S101 migration
-"torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 
 [tool.codespell]
