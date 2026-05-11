@@ -226,6 +226,8 @@ aspects of the development process may seem unusual to you.
   make a bugfix to the code. This naturally leads to a higher standard
   of contribution.
 
+(common-mistakes-to-avoid)=
+
 ## Common Mistakes To Avoid
 
 - **Did you add tests?** (Or if the change is hard to test, did you
@@ -295,6 +297,8 @@ aspects of the development process may seem unusual to you.
   Sometimes another community member will provide a patch or fix to
   your pull request or branch. This is often needed for getting CI tests
   to pass.
+
+(on-documentation)=
 
 ## On Documentation
 
