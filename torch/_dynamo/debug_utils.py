@@ -684,12 +684,8 @@ class InputReader:
         self.args.append(t)
         return t  # for BC
 
-    def symint(self, val: Any, *, expr: str | None = None) -> Any:
+    def symint(self, val: Any) -> Any:
         self.args.append(val)
-        if expr is not None:
-            if not hasattr(self, "symint_exprs"):
-                self.symint_exprs: dict[int, str] = {}
-            self.symint_exprs[len(self.args) - 1] = expr
         return val  # for BC
 
     def const(self, name: str) -> None:
@@ -845,11 +841,8 @@ class InputWriter:
     # TODO: this doesn't actually symint atm
     def symint(self, name: str, val: Any) -> None:
         if isinstance(val, torch.SymInt):
-            expr_str = str(val.node.expr)
-            hint = val.node.hint
-            self._lines.append(f"reader.symint({hint!r}, expr={expr_str!r})  # {name}")
-        else:
-            self._lines.append(f"reader.symint({val!r})  # {name}")
+            val = val.node.hint
+        self._lines.append(f"reader.symint({val!r})  # {name}")
 
     def generator(self, name: str, arg: torch._C.Generator) -> None:
         device = arg.device
