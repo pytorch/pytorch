@@ -447,8 +447,34 @@ struct gcd_functor {
   }
 };
 
-DEFINE_BINARY_COMPARISON_FUNCTOR(eq, ==);
-DEFINE_BINARY_COMPARISON_FUNCTOR(ne, !=);
+// eq/ne are defined manually (rather than via DEFINE_BINARY_COMPARISON_FUNCTOR)
+// so they can carry complex overloads: `float2 == float2` returns `bool2` in
+// Metal, which doesn't implicitly convert to bool. The reduction `all(...)` /
+// `any(...)` is the equivalent of componentwise (real && imag) compare.
+struct eq_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a == b;
+  }
+  inline bool operator()(const float2 a, const float2 b) {
+    return all(a == b);
+  }
+  inline bool operator()(const half2 a, const half2 b) {
+    return all(a == b);
+  }
+};
+struct ne_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return a != b;
+  }
+  inline bool operator()(const float2 a, const float2 b) {
+    return any(a != b);
+  }
+  inline bool operator()(const half2 a, const half2 b) {
+    return any(a != b);
+  }
+};
 DEFINE_BINARY_COMPARISON_FUNCTOR(lt, <);
 DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
@@ -503,6 +529,14 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
   REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
+
+// Complex variants for eq/ne only -- lt/le/gt/ge are not well-defined on
+// complex numbers.
+#define REGISTER_COMPLEX_EQ_OP(NAME)              \
+  REGISTER_BINARY_OP(NAME, float2, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float2, bool); \
+  REGISTER_BINARY_OP(NAME, half2, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, half2, bool)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);
@@ -571,7 +605,9 @@ REGISTER_INTEGER_BINARY_OP(bitwise_xor);
 REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
 REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
 REGISTER_COMPARISON_OP(eq);
+REGISTER_COMPLEX_EQ_OP(eq);
 REGISTER_COMPARISON_OP(ne);
+REGISTER_COMPLEX_EQ_OP(ne);
 REGISTER_COMPARISON_OP(lt);
 REGISTER_COMPARISON_OP(le);
 REGISTER_COMPARISON_OP(gt);

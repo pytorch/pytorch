@@ -1170,16 +1170,19 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // use the no-cast scalar kernel and skip the per-element runtime switch.
   // Only safe when (a) the tensor already matches the common dtype (else the
   // matching no-cast kernel doesn't exist) and (b) `.to(common)` is bit-exact.
-  // Conservatively limited to int scalar -> float common: lossless on the
-  // host, and the GPU cast path also widens via op_math_t=float, so the two
-  // paths produce identical results. Other promotions fall through to the
-  // cast scalar kernel.
+  // Conservatively limited to int scalar with a float32-backed common (kFloat
+  // or kComplexFloat) -- both are lossless on the host, and the GPU cast path
+  // also widens via op_math_t=float, so the two paths produce identical
+  // results. Half/bfloat (and complex-half) are skipped because narrowing an
+  // int directly to half on host differs from the GPU widen-to-float-then-
+  // narrow-on-store sequence for values that overflow half range.
   if (use_scalar_kernel && cast_needed) {
     const auto common = iter.common_dtype();
     const auto& tensor_dtype = scalar_on_lhs ? other.scalar_type() : input.scalar_type();
     const auto& scalar_dtype = scalar_on_lhs ? input.scalar_type() : other.scalar_type();
+    const auto common_real = c10::isComplexType(common) ? c10::toRealValueType(common) : common;
     const bool safe_host_promote =
-        tensor_dtype == common && c10::isIntegralType(scalar_dtype, /*includeBool=*/true) && common == kFloat;
+        tensor_dtype == common && c10::isIntegralType(scalar_dtype, /*includeBool=*/true) && common_real == kFloat;
     if (safe_host_promote) {
       if (scalar_on_lhs) {
         input = input.to(common);
