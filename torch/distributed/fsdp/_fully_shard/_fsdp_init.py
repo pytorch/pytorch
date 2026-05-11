@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch._logging import warning_once
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
+from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh, Replicate
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import (
@@ -451,7 +451,7 @@ def _init_param_group(
     params, this creates a single group.
     """
     # Import here to avoid circular imports
-    from ._fsdp_common import FSDPMeshInfo, resolve_shard_placement
+    from ._fsdp_common import DDPMeshInfo, FSDPMeshInfo, resolve_shard_placement
     from ._fsdp_param_group import FSDPParamGroup
 
     if not params:
@@ -475,28 +475,46 @@ def _init_param_group(
         )
         return
 
-    # Group params by their process group to support per-param mesh,
+    # Group params by their process groups to support per-param mesh,
     # e.g., expert params using ep_mesh vs regular params using dp_mesh.
-    # For HSDP, also key by replicate_process_group to avoid grouping
-    # FSDPMeshInfo params with HSDPMeshInfo params that share the same
-    # shard_process_group but require different gradient reduction behavior.
+    # For HSDP/DDP, also key by replicate_process_group to avoid grouping
+    # params that require different gradient reduction behavior.
     if not isinstance(mesh_info, FSDPMeshInfo):
         raise ValueError(
             "Per-param mesh via shard_placement_fn is not supported with "
             f"{type(mesh_info).__name__}; it requires FSDPMeshInfo (or subclass)"
         )
     pg_to_group: dict[
-        tuple[dist.ProcessGroup, dist.ProcessGroup | None],
-        tuple[FSDPMeshInfo, list[nn.Parameter]],
+        tuple[dist.ProcessGroup | None, dist.ProcessGroup | None],
+        tuple[DataParallelMeshInfo, list[nn.Parameter]],
     ] = {}
+    default_ddp_mesh_info: DDPMeshInfo | None = None
     for param in params:
-        param_mesh_info = resolve_shard_placement(
-            shard_placement_fn(param),
-            mesh_info,
-        ).mesh_info
-        shard_pg = param_mesh_info.shard_process_group
+        placement_result = shard_placement_fn(param)
+        if isinstance(placement_result, Replicate):
+            if default_ddp_mesh_info is None:
+                if mesh_info.mesh.ndim != 1:
+                    raise ValueError(
+                        "Returning Replicate() directly from shard_placement_fn is "
+                        "only supported with a 1D mesh. For multi-dimensional "
+                        "meshes, return ShardPlacementResult(Replicate(), "
+                        "DDPMeshInfo(...)) to specify the replicate group explicitly."
+                    )
+                default_ddp_mesh_info = DDPMeshInfo(
+                    mesh_info.mesh,
+                    replicate_mesh_dim=0,
+                )
+            param_mesh_info = default_ddp_mesh_info
+        else:
+            param_mesh_info = resolve_shard_placement(
+                placement_result,
+                mesh_info,
+            ).mesh_info
+        shard_pg: dist.ProcessGroup | None = None
+        if isinstance(param_mesh_info, FSDPMeshInfo):
+            shard_pg = param_mesh_info.shard_process_group
         replicate_pg: dist.ProcessGroup | None = None
-        if isinstance(param_mesh_info, HSDPMeshInfo):
+        if isinstance(param_mesh_info, DDPMeshInfo):
             replicate_pg = param_mesh_info.replicate_process_group
         key = (shard_pg, replicate_pg)
         if key not in pg_to_group:
@@ -506,19 +524,24 @@ def _init_param_group(
             if existing_mesh_info is not param_mesh_info:
                 raise ValueError(
                     f"Params sharing the same process group must use the same "
-                    f"FSDPMeshInfo object, but got different objects: "
+                    f"DataParallelMeshInfo object, but got different objects: "
                     f"{existing_mesh_info} vs {param_mesh_info}"
                 )
             pg_to_group[key][1].append(param)
 
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
-        if group_mesh_info is not mesh_info:
+        if (
+            isinstance(group_mesh_info, FSDPMeshInfo)
+            and group_mesh_info is not mesh_info
+        ):
             group_post_forward = _get_post_forward_mesh_info(
                 reshard_after_forward, group_mesh_info
             )
-        else:
+        elif group_mesh_info is mesh_info:
             group_post_forward = post_forward_mesh_info
+        else:
+            group_post_forward = None
         state._fsdp_param_groups.append(
             FSDPParamGroup(
                 group_params,

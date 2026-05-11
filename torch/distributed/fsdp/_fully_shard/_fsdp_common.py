@@ -10,7 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 from ._fsdp_api import DataParallelMeshDims
@@ -173,23 +173,26 @@ def is_bw() -> bool:
 
 @dataclass
 class ShardPlacementResult:
-    placement: Shard | None
-    mesh_info: FSDPMeshInfo
+    placement: Shard | Replicate | None
+    mesh_info: DataParallelMeshInfo
 
 
-ShardPlacementFnResult = Shard | ShardPlacementResult | None
+ShardPlacementFnResult = Shard | Replicate | ShardPlacementResult | None
 
 
 def resolve_shard_placement(
     result: ShardPlacementFnResult,
-    default_mesh_info: FSDPMeshInfo,
+    default_mesh_info: DataParallelMeshInfo,
 ) -> ShardPlacementResult:
     """Resolve the shard_placement_fn result to a ShardPlacementResult.
 
     Handles different input types and applies defaults:
     - None: Use default sharding (Shard(0)) on default mesh
     - Shard: Use specified shard dimension on default mesh
-    - ShardPlacementResult: Use as-is
+    - Replicate: Use a replicated DDPMeshInfo on the default 1D mesh
+    - ShardPlacementResult: Use as-is. Its mesh_info may be FSDPMeshInfo,
+      HSDPMeshInfo, or DDPMeshInfo. For DDPMeshInfo, placement may be
+      Replicate() or None.
 
     Args:
         result: The return value from shard_placement_fn, or None if no fn provided.
@@ -202,6 +205,45 @@ def resolve_shard_placement(
         return ShardPlacementResult(placement=None, mesh_info=default_mesh_info)
     if isinstance(result, Shard):
         return ShardPlacementResult(placement=result, mesh_info=default_mesh_info)
+    if isinstance(result, Replicate):
+        if isinstance(default_mesh_info, DDPMeshInfo) and not isinstance(
+            default_mesh_info, FSDPMeshInfo
+        ):
+            return ShardPlacementResult(placement=None, mesh_info=default_mesh_info)
+        if default_mesh_info.mesh.ndim != 1:
+            raise ValueError(
+                "Returning Replicate() directly from shard_placement_fn is only "
+                "supported with a 1D mesh. For multi-dimensional meshes, return "
+                "ShardPlacementResult(Replicate(), DDPMeshInfo(...)) to specify "
+                "the replicate group explicitly."
+            )
+        return ShardPlacementResult(
+            placement=None,
+            mesh_info=DDPMeshInfo(default_mesh_info.mesh, replicate_mesh_dim=0),
+        )
     if isinstance(result, ShardPlacementResult):
+        if not isinstance(result.mesh_info, (FSDPMeshInfo, DDPMeshInfo)):
+            raise ValueError(
+                "ShardPlacementResult mesh_info must be FSDPMeshInfo, "
+                "HSDPMeshInfo, or DDPMeshInfo"
+            )
+        if isinstance(result.mesh_info, DDPMeshInfo) and not isinstance(
+            result.mesh_info, FSDPMeshInfo
+        ):
+            if result.placement is None or isinstance(result.placement, Replicate):
+                return ShardPlacementResult(
+                    placement=None,
+                    mesh_info=result.mesh_info,
+                )
+            raise ValueError(
+                "ShardPlacementResult with DDPMeshInfo must use placement=None "
+                "or Replicate() since DDPMeshInfo represents replicated/all-reduce "
+                "parameters"
+            )
+        if isinstance(result.placement, Replicate):
+            raise ValueError(
+                "ShardPlacementResult with FSDPMeshInfo or HSDPMeshInfo must use "
+                "a Shard placement or None"
+            )
         return result
     raise ValueError(f"Invalid shard_placement_fn result: {result}")
