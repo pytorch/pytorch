@@ -348,6 +348,7 @@ def _create_nested_fn(
 
 fn_known_dunder_attrs = {
     "__annotations__",
+    "__builtins__",
     "__closure__",
     "__code__",
     "__defaults__",
