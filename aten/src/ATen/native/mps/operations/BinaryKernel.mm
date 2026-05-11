@@ -178,16 +178,12 @@ static void hermite_polynomial_he_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hermite_polynomial_he");
 }
 
-// polar/complex take two real-typed inputs and produce a complex output. The
-// kernel's natural output is `toComplexType(common)` (e.g. float -> complex_float,
-// half -> complex_half), not common itself, so we declare it explicitly to
-// keep the output-cast dispatcher honest.
 static void polar_mps_kernel(TensorIterator& iter) {
-  lib.exec_binary_kernel(iter, "polar", std::nullopt, std::nullopt, c10::toComplexType(iter.common_dtype()));
+  lib.exec_binary_kernel(iter, "polar");
 }
 
 static void complex_mps_kernel(TensorIterator& iter) {
-  lib.exec_binary_kernel(iter, "make_complex", std::nullopt, std::nullopt, c10::toComplexType(iter.common_dtype()));
+  lib.exec_binary_kernel(iter, "make_complex");
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
