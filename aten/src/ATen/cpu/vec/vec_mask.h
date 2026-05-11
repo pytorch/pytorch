@@ -130,7 +130,7 @@ class VecMask {
       return static_cast<bool>(b);
     } else {
       using int_t = int_same_size_t<T>;
-      return b ? c10::bit_cast<T>(~(int_t)0) : static_cast<T>(0);
+      return b ? c10::bit_cast<T>(static_cast<int_t>(-1)) : static_cast<T>(0);
     }
   }
 
