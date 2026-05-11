@@ -4326,8 +4326,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        # On HIP, when xnumel is small relative to the CU count (256+ on
-        # MI300/MI350), default XBLOCK=2 launches too few programs to fill
+        # Default XBLOCK=2 launches too few programs to fill
         # the device. Prefer XBLOCK=1 so the autotuner has a candidate
         # that can saturate all CUs.
         1 if (torch.version.hip and size_hints.get("x", 0) <= 64)
