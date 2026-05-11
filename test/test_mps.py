@@ -10373,9 +10373,13 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float16, torch.float32])
     @parametrize("is_causal", [True, False])
-    def test_sdpa_enable_gqa(self, dtype, is_causal):
-        q_heads = 32
-        key_heads = 16
+    @parametrize("gqa_factor", [2, 4, 8])
+    def test_sdpa_enable_gqa(self, dtype, is_causal, gqa_factor):
+        # HS=23 keeps the dispatch on the MPSGraph general path (not in the
+        # set of kernel-supported head dims), so this exercises sdpa_general_mps
+        # with KV expansion happening inside the helper
+        key_heads = 4
+        q_heads = key_heads * gqa_factor
         L = 7
         S = 17
         HS = 23
@@ -10414,26 +10418,29 @@ class TestSDPA(TestCaseMPS):
         # 1 kB different maximum allowed value
         torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=1e-3, rtol=1e-3)
 
-    def generate_qkv(self, batch: int, NH: int, q_len: int, s_len: int, head_dim: int, layout: str, dtype: torch.dtype):
+    def generate_qkv(self, batch: int, NH: int, q_len: int, s_len: int, head_dim: int, layout: str,
+                     dtype: torch.dtype, NH_kv: int | None = None):
+        if NH_kv is None:
+            NH_kv = NH
         if layout == "contiguous":
             q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
-            k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+            k = torch.randn(batch, NH_kv, s_len, head_dim, dtype=dtype, device="mps")
         elif layout == "mT":
             # Transpose head dimension and length
             q = torch.randn(batch, NH, head_dim, q_len, dtype=dtype, device="mps").mT
-            k = torch.randn(batch, NH, head_dim, s_len, dtype=dtype, device="mps").mT
+            k = torch.randn(batch, NH_kv, head_dim, s_len, dtype=dtype, device="mps").mT
         elif layout == "transpose_seq_head":
             # Transpose length and number of heads
             q = torch.randn(batch, q_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
-            k = torch.randn(batch, s_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+            k = torch.randn(batch, s_len, NH_kv, head_dim, dtype=dtype, device="mps").transpose(1, 2)
         elif layout == "permute":
             # Permute head dimension and length
             q = torch.randn(batch, head_dim, NH, q_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
-            k = torch.randn(batch, head_dim, NH, s_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+            k = torch.randn(batch, head_dim, NH_kv, s_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
         else:
             raise ValueError(f"Unknown layout: {layout}")
 
-        v = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        v = torch.randn(batch, NH_kv, s_len, head_dim, dtype=dtype, device="mps")
         return q, k, v
 
     def run_fast_attention_test(
@@ -10447,6 +10454,7 @@ class TestSDPA(TestCaseMPS):
     ):
         q_len = q.shape[2]
         s_len = k.shape[2]
+        enable_gqa = q.shape[1] != k.shape[1]
 
         if with_mask:
             attn_mask = torch.zeros(q.shape[0], q.shape[1], q_len, s_len,
@@ -10459,6 +10467,7 @@ class TestSDPA(TestCaseMPS):
                     attn_mask=attn_mask,
                     dropout_p=dropout_p,
                     is_causal=is_causal,
+                    enable_gqa=enable_gqa,
                 )
             y_ref = F.scaled_dot_product_attention(
                 q.cpu(),
@@ -10467,6 +10476,7 @@ class TestSDPA(TestCaseMPS):
                 attn_mask=attn_mask.cpu(),
                 dropout_p=dropout_p,
                 is_causal=is_causal,
+                enable_gqa=enable_gqa,
             )
         else:
             with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
@@ -10474,6 +10484,7 @@ class TestSDPA(TestCaseMPS):
                     q, k, v,
                     dropout_p=dropout_p,
                     is_causal=is_causal,
+                    enable_gqa=enable_gqa,
                 )
             y_ref = F.scaled_dot_product_attention(
                 q.cpu(),
@@ -10481,25 +10492,28 @@ class TestSDPA(TestCaseMPS):
                 v.cpu(),
                 dropout_p=dropout_p,
                 is_causal=is_causal,
+                enable_gqa=enable_gqa,
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("dtype", [torch.float16, torch.float32, torch.bfloat16])
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
     @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
     @parametrize("is_causal", [False, True])
+    @parametrize("gqa_factor", [1, 4])
     def test_fast_vector_attention(
-        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool
+        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, gqa_factor: int
     ):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
         batch = 1
-        NH = 2
+        NH_kv = 2
+        NH_q = NH_kv * gqa_factor
         q_len = 4  # <8 so that vector fast is eligible
         s_len = 16  # smaller than 1024 so that we use the one–pass variant
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
+        q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
         self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal)
 
     @parametrize("dtype", [torch.float32])  # float16 underflows sometimes, which leads to flaky tests
@@ -10507,17 +10521,19 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
     @parametrize("is_causal", [False, True])
+    @parametrize("gqa_factor", [1, 4])
     def test_fast_vector_attention_2pass(
-        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool
+        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, gqa_factor: int
     ):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
         batch = 1
-        NH = 32
+        NH_kv = 8
+        NH_q = NH_kv * gqa_factor
         q_len = 8
         s_len = 1024  # large enough to trigger the two–pass path
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
+        q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
         self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal)
 
     def test_fast_vector_permuted_inputs_regression(self):
@@ -10650,19 +10666,21 @@ class TestSDPA(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("head_dim", [32, 64, 72, 80, 96, 128, 256])
     @parametrize("variant", ["plain", "causal", "bool_mask", "float_mask"])
-    def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant):
+    @parametrize("gqa_factor", [1, 4])
+    def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant, gqa_factor):
         torch.manual_seed(1729)
-        B, NH, qL, kL = 2, 4, 16, 32
-        q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
+        B, NH_kv, qL, kL = 2, 4, 16, 32
+        NH_q = NH_kv * gqa_factor
+        q, k, v = self._prefill_qkv(B, NH_q, NH_kv, qL, kL, head_dim, "contiguous", dtype)
         is_causal = False
         attn_mask = None
         if variant == "causal":
             is_causal = True
         elif variant == "bool_mask":
-            attn_mask = torch.ones(B, NH, qL, kL, dtype=torch.bool, device="mps")
+            attn_mask = torch.ones(B, NH_q, qL, kL, dtype=torch.bool, device="mps")
             attn_mask[..., kL // 2:] = False
         elif variant == "float_mask":
-            attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            attn_mask = torch.zeros(B, NH_q, qL, kL, dtype=dtype, device="mps")
             attn_mask[..., kL // 2:] = -1e4
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
