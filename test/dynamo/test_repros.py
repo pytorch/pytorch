@@ -8121,6 +8121,33 @@ SavedForBackwardsAOTOutput(idx=5)""",
         )
         self.assertEqual(result.dtype, torch.float32)
 
+    def test_empty_out_shape_mismatch_dynamic(self):
+        def f(size, out):
+            return torch.empty(size, out=out, dtype=torch.float32)
+
+        size = [2, 3]
+
+        # Mismatched out shape should be resized to match requested size
+        out_wrong = torch.empty([1])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            eager_result = f(size, out_wrong.clone())
+
+        cf = torch.compile(f, dynamic=True)
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            compiled_result = cf(size, out_wrong.clone())
+
+        self.assertEqual(compiled_result.shape, eager_result.shape)
+
+        # Compatible out should pass through unchanged
+        compiled_ok = cf(size, torch.empty([2, 3]))
+        self.assertEqual(compiled_ok.shape, torch.Size([2, 3]))
+
+        # Zero-element out should be resized
+        compiled_zero = cf(size, torch.empty([0]))
+        self.assertEqual(compiled_zero.shape, torch.Size([2, 3]))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
