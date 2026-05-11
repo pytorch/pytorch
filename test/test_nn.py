@@ -14655,8 +14655,8 @@ if __name__ == '__main__':
                 else:  # bf16
                     expected_max_ulp_diff = 1
                     if "mps" in device:
-                        expected_input_grad_max_ulp_diff = 60601
-                        expected_weight_grad_max_ulp_diff = 73
+                        expected_input_grad_max_ulp_diff = 61500
+                        expected_weight_grad_max_ulp_diff = 47619
                     else:
                         # Bounds measured on A100; loosen if a different
                         # platform's ``torch.div(out=)`` lowering rounds

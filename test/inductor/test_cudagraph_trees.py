@@ -840,7 +840,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 
@@ -869,7 +869,7 @@ if HAS_CUDA_AND_TRITON:
                 FxGraphCache.clear()
                 AOTAutogradCache.clear()
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -882,11 +882,9 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-                    # Run backward without complex memory overlap being set
-
-                # Run the backward without complex memory overlap reason
-                # cache should miss, but cudagraphs should not run
-                # because forward skipped it
+                # Run the backward without the force-disable knob; cache should
+                # miss for the backward, but cudagraphs should not run because
+                # the forward already skipped.
                 back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                 out.backward(back_inp)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
@@ -3959,7 +3957,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 

@@ -14588,11 +14588,7 @@ op_db: list[OpInfo] = [
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                    )),
+                    supports_autograd=False),
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
@@ -14614,11 +14610,7 @@ op_db: list[OpInfo] = [
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                    )),
+                    supports_autograd=False),
     UnaryUfuncInfo('imag',
                    ref=np.imag,
                    dtypes=complex_types_and(torch.chalf),
@@ -14675,11 +14667,7 @@ op_db: list[OpInfo] = [
                     aliases=('less_equal',),
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                    )),
+                    supports_autograd=False),
     OpInfo('linspace',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -14952,11 +14940,7 @@ op_db: list[OpInfo] = [
                     dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.int32),
                     always_returns_bool=True,
-                    supports_autograd=False,
-                    skips=(
-                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                    )),
+                    supports_autograd=False),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
