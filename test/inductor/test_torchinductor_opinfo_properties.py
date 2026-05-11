@@ -146,7 +146,7 @@ DTYPES = [
 
 
 def _batch_invariance_close_tolerances(dtype: torch.dtype) -> tuple[float, float]:
-    """ rtol / atol for comparing full-batch vs sliced-batch outputs.
+    """rtol / atol for comparing full-batch vs sliced-batch outputs.
 
     Batch invariance is a *numerical* property: each position should match the
     full-batch run up to normal float error.  Bitwise identity is not guaranteed
@@ -720,7 +720,6 @@ class TestOpInfoProperties(TestCase):
                     # Numerical match to full-batch slice (see _batch_invariance_close_tolerances)
                     rtol, atol = _batch_invariance_close_tolerances(dtype)
                     self.assertEqual(out, full_out[:size], rtol=rtol, atol=atol)
-
 
                     # Step down exponentially
                     size = size // 2
