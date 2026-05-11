@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import json
+import os
+import tempfile
 import unittest
 
 import torch
@@ -11,6 +14,10 @@ import torch.fx as fx
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 from torch._C import FileCheck
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.profile_guided_estimation import (
+    ProfileData,
+    ProfileGuidedEstimator,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -19,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -1049,6 +1057,58 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # Should not error in deterministic mode (would have errored before fix)
         schedule_overlap_bucketing(gm)
 
+    def test_assume_bucketed_latency_exceeds_exposed_time(self):
+        """
+        When assume_bucketing_reduces_latency is True and two same-type
+        collectives are in-flight, the latency subtraction in
+        _handle_collective_start must not go negative.
+
+        Trigger: custom_runtime_estimation returns a higher value for
+        override_size=0 (latency) than for override_size=None (full estimate).
+        This can happen after analytical model recalibration for small collectives.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm1 = torch.mm(a, b)
+
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return mm1.sum() + ag1_out.sum() + ag2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.randn(4, 4, device=self.device)
+            b = torch.randn(4, 4, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "all_gather" in str(node.target):
+                if override_size == 0:
+                    return 10.0  # latency only
+                return 3.0  # full estimate < latency
+            if "mm" in str(node.target):
+                return 5.0
+            return 0.0
+
+        schedule_overlap_bucketing(
+            gm,
+            custom_runtime_estimation=custom_runtime,
+            pre_bucketing_fsdp_collectives=False,
+        )
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1689,14 +1749,246 @@ class TestForeachGroupsUnit(InductorTestCase):
 
         # With and without groups should produce identical results
         result_with = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, groups
         )
         result_without = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+            ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
 
 
+def _make_pge_trace(
+    collectives=None,
+    matmuls=None,
+    sdpa_ops=None,
+    pg_config=None,
+):
+    """Build a minimal Chrome Trace JSON dict for PGE testing."""
+    events = []
+    eid = 1000
+
+    for coll in collectives or []:
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": coll["dur"],
+                "name": "nccl_kernel",
+                "args": {
+                    "Collective name": coll["name"],
+                    "Process Group Name": coll.get("pg_name", "0"),
+                    "Process Group Ranks": coll.get("ranks", "[0, 1]"),
+                    "Group size": coll.get("group_size", 2),
+                    "In msg nelems": coll.get("nelems", 1024),
+                    "Out msg nelems": coll.get("out_nelems", coll.get("nelems", 1024)),
+                    "dtype": coll.get("dtype", "Float"),
+                },
+            }
+        )
+
+    for mm in matmuls or []:
+        eid += 1
+        events.append(
+            {
+                "cat": "cpu_op",
+                "name": "aten::mm",
+                "dur": 0,
+                "args": {
+                    "External id": eid,
+                    "Input Dims": mm["shapes"],
+                    "Input Strides": mm.get(
+                        "strides", [[s[-1], 1] for s in mm["shapes"]]
+                    ),
+                    "Input type": mm.get("dtypes", ["float", "float"]),
+                },
+            }
+        )
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": mm["dur"],
+                "name": "sm80_xmma_gemm",
+                "args": {"External id": eid},
+            }
+        )
+
+    for sdpa in sdpa_ops or []:
+        eid += 1
+        op_name = sdpa.get("op_name", "aten::_scaled_dot_product_flash_attention")
+        events.append(
+            {
+                "cat": "cpu_op",
+                "name": op_name,
+                "dur": 0,
+                "args": {
+                    "External id": eid,
+                    "Input Dims": sdpa["input_dims"],
+                    "Input Strides": sdpa.get(
+                        "input_strides", [[1] * len(d) for d in sdpa["input_dims"]]
+                    ),
+                    "Input type": sdpa.get("dtypes", ["c10::BFloat16"]),
+                },
+            }
+        )
+        events.append(
+            {
+                "cat": "kernel",
+                "dur": sdpa["dur"],
+                "name": "flash_fwd_kernel",
+                "args": {"External id": eid},
+            }
+        )
+
+    dist_info = {}
+    if pg_config is not None:
+        dist_info["pg_config"] = pg_config
+    else:
+        dist_info["pg_config"] = {"0": {"ranks": [0, 1]}}
+
+    return {"traceEvents": events, "distributedInfo": dist_info}
+
+
+def _load_pge_profile(data):
+    """Write trace dict to a temp file and load via ProfileData."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(data, f)
+        f.flush()
+        path = f.name
+    try:
+        profile = ProfileData()
+        profile.load(path)
+        return profile
+    finally:
+        os.unlink(path)
+
+
+class TestProfileGuidedEstimation(TestCase):
+    def test_profile_loading_and_lookup(self):
+        """Load a trace with collectives, aten ops, and a custom op; verify lookups."""
+        with torch.library._scoped_library("test_pge", "DEF") as lib:
+            lib.define("my_op(Tensor x, Tensor w) -> Tensor")
+            lib.impl("my_op", lambda x, w: x @ w, "CPU")
+            lib.impl("my_op", lambda x, w: x @ w, "Meta")
+            trace = _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": 100.0,
+                        "nelems": 1000,
+                        "dtype": "Float",
+                        "ranks": "[0,2,4,6]",
+                        "group_size": 4,
+                    },
+                    {
+                        "name": "allreduce",
+                        "dur": 800.0,
+                        "nelems": 8000,
+                        "dtype": "Float",
+                        "ranks": "[0,2,4,6]",
+                        "group_size": 4,
+                    },
+                ],
+                matmuls=[
+                    {
+                        "shapes": [[128, 256], [256, 512]],
+                        "dur": 50.0,
+                        "dtypes": ["float", "float"],
+                    }
+                ],
+                pg_config={"0": {"ranks": [0, 2, 4, 6]}},
+            )
+            # Inject a custom op event
+            eid = 9000
+            trace["traceEvents"].extend(
+                [
+                    {
+                        "cat": "cpu_op",
+                        "name": "test_pge::my_op",
+                        "dur": 0,
+                        "args": {
+                            "External id": eid,
+                            "Input Dims": [[32, 64], [64, 128]],
+                            "Input Strides": [[64, 1], [128, 1]],
+                            "Input type": ["c10::BFloat16", "c10::BFloat16"],
+                        },
+                    },
+                    {
+                        "cat": "kernel",
+                        "dur": 42.0,
+                        "name": "custom_kernel",
+                        "args": {"External id": eid},
+                    },
+                ]
+            )
+            profile = _load_pge_profile(trace)
+
+            # Collectives
+            self.assertAlmostEqual(
+                profile.lookup_collective("all_reduce", (0, 2, 4, 6), 1000, "Float")[0],
+                0.1,
+                places=4,
+            )
+            self.assertGreater(
+                profile.lookup_collective("all_reduce", (0, 2, 4, 6), 4000, "Float")[0],
+                0.1,
+            )
+            self.assertIsNotNone(
+                profile.lookup_collective("all_reduce", (1, 3, 5, 7), 1000, "Float")
+            )
+            self.assertIsNone(
+                profile.lookup_collective("all_to_all", (0, 2, 4, 6), 1000, "Float")
+            )
+
+            # Aten op
+            self.assertAlmostEqual(
+                profile.lookup_op(
+                    "aten::mm",
+                    ((128, 256), (256, 512)),
+                    ((256, 1), (512, 1)),
+                    torch.float32,
+                ),
+                0.05,
+                places=4,
+            )
+            self.assertIsNone(
+                profile.lookup_op(
+                    "aten::mm", ((999,), (999,)), ((1,), (1,)), torch.float32
+                )
+            )
+
+            # Custom op
+            self.assertAlmostEqual(
+                profile.lookup_op(
+                    "test_pge::my_op",
+                    ((32, 64), (64, 128)),
+                    ((64, 1), (128, 1)),
+                    torch.bfloat16,
+                ),
+                0.042,
+                places=4,
+            )
+
+            # End-to-end: FX graph with custom op -> estimator match
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as f:
+                json.dump(trace, f)
+                f.flush()
+                trace_path = f.name
+            try:
+                estimator = ProfileGuidedEstimator(trace_path)
+                with FakeTensorMode():
+                    x = torch.randn(32, 64, dtype=torch.bfloat16, device="cpu")
+                    w = torch.randn(64, 128, dtype=torch.bfloat16, device="cpu")
+                    gm = make_fx(torch.ops.test_pge.my_op)(x, w)
+                self.assertTrue(
+                    any(estimator(n) is not None for n in gm.graph.nodes),
+                    "Estimator should match custom op",
+                )
+            finally:
+                os.unlink(trace_path)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestCoalescedCollectiveOverlap(InductorTestCase):
@@ -1861,6 +2153,226 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
         size = estimate_fx_collective_size(rs_nodes[0])
         # Should return non-zero for coalesced collectives
         self.assertGreater(size, 0)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestProfileGuidedEstimatorIntegration(InductorTestCase):
+    """Integration tests: ProfileGuidedEstimator.__call__ on traced FX graphs."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_estimator_call_on_fx_graph(self):
+        """ProfileGuidedEstimator returns estimates for collective and mm nodes in a traced graph."""
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        pg_ranks = tuple(sorted(dist.get_process_group_ranks(dist.group.WORLD)))
+
+        # Build a trace with matching collective and matmul data
+        trace = _make_pge_trace(
+            collectives=[
+                {
+                    "name": "allreduce",
+                    "dur": 200.0,
+                    "nelems": 256,
+                    "out_nelems": 256,
+                    "dtype": "Float",
+                    "ranks": json.dumps(list(pg_ranks)),
+                    "group_size": len(pg_ranks),
+                },
+            ],
+            matmuls=[
+                {
+                    "shapes": [[16, 16], [16, 16]],
+                    "dur": 50.0,
+                    "dtypes": ["float", "float"],
+                },
+            ],
+            pg_config={"0": {"ranks": list(pg_ranks)}},
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(trace, f)
+            f.flush()
+            trace_path = f.name
+
+        try:
+            estimator = ProfileGuidedEstimator(trace_path)
+
+            def func(a, b):
+                ar = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+                ar_out = torch.ops._c10d_functional.wait_tensor(ar)
+                mm = torch.mm(b, b)
+                return ar_out + mm
+
+            with FakeTensorMode():
+                a = torch.randn(16, 16, device=self.device)
+                b = torch.randn(16, 16, device=self.device)
+                gm = make_fx(func)(a, b)
+
+            # Call estimator on each node
+            collective_hit = False
+            mm_hit = False
+            for node in gm.graph.nodes:
+                est = estimator(node)
+                if "all_reduce" in str(node.target) and "wait" not in str(node.target):
+                    if est is not None:
+                        collective_hit = True
+                        self.assertGreater(est, 0)
+                if node.target == torch.ops.aten.mm.default:
+                    if est is not None:
+                        mm_hit = True
+                        self.assertAlmostEqual(est, 0.05, places=4)
+
+            self.assertTrue(
+                collective_hit, "Estimator should match the collective node"
+            )
+            self.assertTrue(mm_hit, "Estimator should match the mm node")
+        finally:
+            os.unlink(trace_path)
+
+
+@requires_accelerator_dist_backend()
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestPreBucketingFsdpCollectives(InductorTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=64, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_saturation_model(self):
+        """IB floor activates for small groups; NVLink uses formula; monotonic."""
+        from torch._inductor.comm_analysis import (
+            compute_min_saturation_bytes,
+            detect_interconnect,
+            INTERCONNECT_PROFILES,
+            NCCL_COLL,
+        )
+
+        _MB = 1024 * 1024
+        sat = compute_min_saturation_bytes
+
+        self.assertEqual(sat(1, NCCL_COLL.ALL_GATHER), 0)
+
+        ib_profile = INTERCONNECT_PROFILES[detect_interconnect(16)]
+        self.assertGreaterEqual(
+            sat(16, NCCL_COLL.ALL_GATHER), ib_profile.min_saturation_bytes
+        )
+
+        sat_64 = sat(64, NCCL_COLL.ALL_GATHER)
+        sat_128 = sat(128, NCCL_COLL.ALL_GATHER)
+        self.assertGreater(sat_64, sat(16, NCCL_COLL.ALL_GATHER))
+        self.assertGreater(sat_128, sat_64)
+
+        sat_nv = sat(8, NCCL_COLL.ALL_GATHER)
+        self.assertGreater(sat_nv, 50 * _MB)
+        self.assertLess(sat_nv, 200 * _MB)
+
+    def test_pre_bucketing_only_merges_fsdp_collectives(self):
+        """Pre-bucketing merges FSDP all-gathers but leaves TP all-gathers alone."""
+        from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
+        from torch._inductor.fx_passes.fsdp import (
+            _get_group_name,
+            pre_bucket_fsdp_collectives,
+        )
+
+        fsdp_group = dist.distributed_c10d._get_default_group().group_name
+        tp_group = "tp_test_group"
+
+        def func(fsdp_p1, fsdp_p2, tp_a1, tp_a2):
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                fsdp_p1, 64, fsdp_group
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                fsdp_p2, 64, fsdp_group
+            )
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            tp_ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                tp_a1 + tp_a2, 8, tp_group
+            )
+            tp_w = torch.ops._c10d_functional.wait_tensor(tp_ag)
+            return w1, w2, tp_w
+
+        with FakeTensorMode():
+            traced = make_fx(func)(
+                *(torch.ones(4, 4, device=self.device) for _ in range(4))
+            )
+
+        def count_ag(group):
+            return sum(
+                1
+                for n in traced.graph.nodes
+                if is_all_gather_into_tensor(n) and _get_group_name(n) == group
+            )
+
+        self.assertEqual(count_ag(fsdp_group), 2)
+        self.assertEqual(count_ag(tp_group), 1)
+
+        pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
+
+        self.assertEqual(count_ag(fsdp_group), 1)  # 2 merged into 1
+        self.assertEqual(count_ag(tp_group), 1)  # TP untouched
+
+    def test_pre_bucketing_handles_dtype_cast(self):
+        """Parameter -> dtype cast -> all_gather is identified as FSDP."""
+        from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
+        from torch._inductor.fx_passes.fsdp import (
+            _get_group_name,
+            pre_bucket_fsdp_collectives,
+        )
+
+        fsdp_group = dist.distributed_c10d._get_default_group().group_name
+
+        def func(p1, p2):
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                p1.to(torch.bfloat16), 64, fsdp_group
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                p2.to(torch.bfloat16), 64, fsdp_group
+            )
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            return w1, w2
+
+        with FakeTensorMode():
+            traced = make_fx(func)(
+                torch.ones(4, 4, device=self.device),
+                torch.ones(4, 4, device=self.device),
+            )
+
+        def count_ag(group):
+            return sum(
+                1
+                for n in traced.graph.nodes
+                if is_all_gather_into_tensor(n) and _get_group_name(n) == group
+            )
+
+        self.assertEqual(count_ag(fsdp_group), 2)
+
+        pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
+
+        self.assertEqual(count_ag(fsdp_group), 1)
 
 
 if __name__ == "__main__":

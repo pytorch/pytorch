@@ -121,7 +121,7 @@ class HopPartitionedGraph:
         are inputs that contain symints.
 
         To simplify downstream processing, this graph pass normalizes the output of fw_gm
-        to be consistent with the bacwkard inputs:
+        to be consistent with the backward inputs:
 
         fw_gm:
           - input: fw_args

@@ -293,6 +293,48 @@ TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
   MyFunction::apply(x, y);
 }
 
+// Regression test: CppNode<T> must override release_resources() to reset the
+// AutogradContext. Otherwise the weak self-reference in ctx_.grad_fn_ keeps
+// weakcount > 0 and leaks the CppNode<T>.
+TEST(CustomAutogradTest, CppNodeReleaseResourcesBreaksRefCycle) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable x,
+        Variable stashed) {
+      ctx->saved_data["stashed"] = stashed;
+      return x * 2;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      return {grad_output[0] * 2, Variable()};
+    }
+  };
+
+  c10::weak_intrusive_ptr<Node> weak_node(c10::intrusive_ptr<Node>{});
+  c10::weak_intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>
+      weak_stashed(
+          c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>{});
+  {
+    Variable x = torch::randn({5, 5}, torch::requires_grad());
+    Variable stashed = torch::randn({5, 5});
+    weak_stashed =
+        c10::weak_intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>(
+            stashed.getIntrusivePtr());
+    Variable y = MyFunction::apply(x, stashed);
+    weak_node = c10::weak_intrusive_ptr<Node>(y.grad_fn());
+  }
+  // After the scope exits, the CppNode should be destroyed. If
+  // release_resources() is not overridden, ctx_.grad_fn_ (a weak reference to
+  // the node itself) keeps the weakcount > 1 so the node is leaked, which
+  // also leaks anything stashed in ctx_->saved_data.
+  EXPECT_TRUE(weak_node.expired());
+  EXPECT_EQ(weak_node.weak_use_count(), 1);
+  EXPECT_TRUE(weak_stashed.expired());
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(
