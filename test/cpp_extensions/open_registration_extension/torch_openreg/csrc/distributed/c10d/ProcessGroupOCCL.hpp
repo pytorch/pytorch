@@ -158,11 +158,6 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
  protected:
   const c10::intrusive_ptr<Options> options_;
 };
-OPENREG_EXPORT c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int size,
-    const std::chrono::duration<float>& timeout);
 
 } // namespace c10d
 #endif // USE_DISTRIBUTED
