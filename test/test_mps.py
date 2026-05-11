@@ -10496,7 +10496,7 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("dtype", [torch.float16, torch.float32, torch.bfloat16])
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
     @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
