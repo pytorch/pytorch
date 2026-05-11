@@ -303,8 +303,14 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        a = torch.randn(M, K).to(GPU_TYPE).half()
-        b = torch.randn(N, K).to(GPU_TYPE).half().t()
+        # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
+        # between CUTLASS and ATen in half precision.
+        a = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        )
+        b = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        ).t()
 
         with config.patch(
             {
