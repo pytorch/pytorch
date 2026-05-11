@@ -407,6 +407,9 @@ class SuperVariable(VariableTracker):
             # e.g., tensor ops like `torch.Tensor.to`.
             fn_var = VariableTracker.build(tx, inner_fn, source, realize=True)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
+        elif isinstance(inner_fn, types.BuiltinFunctionType):
+            fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
+            return fn_vt.call_function(tx, args, kwargs)
 
         unimplemented(
             gb_type="Attempted to call a super() attribute that is "
