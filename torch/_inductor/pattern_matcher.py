@@ -70,12 +70,12 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
-from ..fx.experimental import _config as exp_config
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
+from ..fx.experimental import _config as exp_config
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type

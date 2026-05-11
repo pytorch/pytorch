@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -114,6 +114,10 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
 # to locate an unbacked binding. Or a runtime assertion not being lowered in the output
 # code.
 soft_pending_unbacked_not_found_error = False
+
+
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 
 install_config_module(sys.modules[__name__])
