@@ -343,17 +343,11 @@ coverage_ignore_functions = [
     "module_contains_param",
     "module_to_fqn",
     "swap_module",
-    # torch.ao.quantization.backend_config.executorch
-    "get_executorch_backend_config",
-    # torch.ao.quantization.backend_config.fbgemm
-    "get_fbgemm_backend_config",
     # torch.ao.quantization.backend_config.native
     "get_native_backend_config",
     "get_native_backend_config_dict",
     "get_test_only_legacy_native_backend_config",
     "get_test_only_legacy_native_backend_config_dict",
-    # torch.ao.quantization.backend_config.onednn
-    "get_onednn_backend_config",
     # torch.ao.quantization.backend_config.qnnpack
     "get_qnnpack_backend_config",
     # torch.ao.quantization.backend_config.tensorrt
@@ -401,16 +395,10 @@ coverage_ignore_functions = [
     "fold_bn_weights_into_conv_node",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
-    "get_default_qat_qconfig",
     "get_default_qat_qconfig_dict",
-    "get_default_qconfig",
     "get_default_qconfig_dict",
-    "qconfig_equals",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_fx
-    "attach_preserved_attrs_to_model",
-    "convert_to_reference_fx",
     # torch.ao.quantization.quantize_jit
     "convert_dynamic_jit",
     "convert_jit",
