@@ -932,10 +932,6 @@ coverage_ignore_functions = [
     "verify_aten_graph",
     # torch.overrides
     "enable_reentrant_dispatch",
-    # torch.profiler.profiler
-    "schedule",
-    "supported_activities",
-    "tensorboard_trace_handler",
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
