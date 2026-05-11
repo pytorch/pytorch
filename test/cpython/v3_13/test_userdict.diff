@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_userdict.py b/test/dynamo/cpython/3_13/test_userdict.py
+diff --git a/test/cpython/v3_13/test_userdict.py b/test/cpython/v3_13/test_userdict.py
 index 61e79f553e8..75b789633ed 100644
---- a/test/dynamo/cpython/3_13/test_userdict.py
-+++ b/test/dynamo/cpython/3_13/test_userdict.py
+--- a/test/cpython/v3_13/test_userdict.py
++++ b/test/cpython/v3_13/test_userdict.py
 @@ -1,3 +1,57 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_operator.py b/test/dynamo/cpython/3_13/test_operator.py
+diff --git a/test/cpython/v3_13/test_operator.py b/test/cpython/v3_13/test_operator.py
 index d90f820052c..20a56bd738b 100644
---- a/test/dynamo/cpython/3_13/test_operator.py
-+++ b/test/dynamo/cpython/3_13/test_operator.py
+--- a/test/cpython/v3_13/test_operator.py
++++ b/test/cpython/v3_13/test_operator.py
 @@ -1,3 +1,23 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

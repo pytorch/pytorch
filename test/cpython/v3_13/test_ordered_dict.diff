@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_ordered_dict.py b/test/dynamo/cpython/3_13/test_ordered_dict.py
+diff --git a/test/cpython/v3_13/test_ordered_dict.py b/test/cpython/v3_13/test_ordered_dict.py
 index a9b6a84996e..d9fce736a10 100644
---- a/test/dynamo/cpython/3_13/test_ordered_dict.py
-+++ b/test/dynamo/cpython/3_13/test_ordered_dict.py
+--- a/test/cpython/v3_13/test_ordered_dict.py
++++ b/test/cpython/v3_13/test_ordered_dict.py
 @@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

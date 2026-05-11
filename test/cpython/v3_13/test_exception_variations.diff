@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_exception_variations.py b/test/dynamo/cpython/3_13/test_exception_variations.py
+diff --git a/test/cpython/v3_13/test_exception_variations.py b/test/cpython/v3_13/test_exception_variations.py
 index a83a41d2975..c2d6eb3a41a 100644
---- a/test/dynamo/cpython/3_13/test_exception_variations.py
-+++ b/test/dynamo/cpython/3_13/test_exception_variations.py
+--- a/test/cpython/v3_13/test_exception_variations.py
++++ b/test/cpython/v3_13/test_exception_variations.py
 @@ -1,7 +1,62 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

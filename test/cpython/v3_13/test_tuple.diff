@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_tuple.py b/test/dynamo/cpython/3_13/test_tuple.py
+diff --git a/test/cpython/v3_13/test_tuple.py b/test/cpython/v3_13/test_tuple.py
 index 9ce80c5e8ea..c6eab3ff1e9 100644
---- a/test/dynamo/cpython/3_13/test_tuple.py
-+++ b/test/dynamo/cpython/3_13/test_tuple.py
+--- a/test/cpython/v3_13/test_tuple.py
++++ b/test/cpython/v3_13/test_tuple.py
 @@ -1,4 +1,58 @@
 -from test import support, seq_tests
 +# ======= BEGIN Dynamo patch =======

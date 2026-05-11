@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_defaultdict.py b/test/dynamo/cpython/3_13/test_defaultdict.py
+diff --git a/test/cpython/v3_13/test_defaultdict.py b/test/cpython/v3_13/test_defaultdict.py
 index bdbe9b81e8f..d8626c759a9 100644
---- a/test/dynamo/cpython/3_13/test_defaultdict.py
-+++ b/test/dynamo/cpython/3_13/test_defaultdict.py
+--- a/test/cpython/v3_13/test_defaultdict.py
++++ b/test/cpython/v3_13/test_defaultdict.py
 @@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

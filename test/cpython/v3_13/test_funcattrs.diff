@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_funcattrs.py b/test/dynamo/cpython/3_13/test_funcattrs.py
+diff --git a/test/cpython/v3_13/test_funcattrs.py b/test/cpython/v3_13/test_funcattrs.py
 index 375f456dfde..d3513da1dd4 100644
---- a/test/dynamo/cpython/3_13/test_funcattrs.py
-+++ b/test/dynamo/cpython/3_13/test_funcattrs.py
+--- a/test/cpython/v3_13/test_funcattrs.py
++++ b/test/cpython/v3_13/test_funcattrs.py
 @@ -1,3 +1,21 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_deque.py b/test/dynamo/cpython/3_13/test_deque.py
+diff --git a/test/cpython/v3_13/test_deque.py b/test/cpython/v3_13/test_deque.py
 index 4679f297fd7..57aa863406a 100644
---- a/test/dynamo/cpython/3_13/test_deque.py
-+++ b/test/dynamo/cpython/3_13/test_deque.py
+--- a/test/cpython/v3_13/test_deque.py
++++ b/test/cpython/v3_13/test_deque.py
 @@ -1,7 +1,30 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

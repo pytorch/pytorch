@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_baseexception.py b/test/dynamo/cpython/3_13/test_baseexception.py
+diff --git a/test/cpython/v3_13/test_baseexception.py b/test/cpython/v3_13/test_baseexception.py
 index e599b02c17d..9a17dc8ff02 100644
---- a/test/dynamo/cpython/3_13/test_baseexception.py
-+++ b/test/dynamo/cpython/3_13/test_baseexception.py
+--- a/test/cpython/v3_13/test_baseexception.py
++++ b/test/cpython/v3_13/test_baseexception.py
 @@ -1,10 +1,61 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]

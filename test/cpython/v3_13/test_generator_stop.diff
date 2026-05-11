@@ -1,7 +1,7 @@
-diff --git a/test/dynamo/cpython/3_13/test_generator_stop.py b/test/dynamo/cpython/3_13/test_generator_stop.py
+diff --git a/test/cpython/v3_13/test_generator_stop.py b/test/cpython/v3_13/test_generator_stop.py
 index bc235ceb00e..e3ff8d346a7 100644
---- a/test/dynamo/cpython/3_13/test_generator_stop.py
-+++ b/test/dynamo/cpython/3_13/test_generator_stop.py
+--- a/test/cpython/v3_13/test_generator_stop.py
++++ b/test/cpython/v3_13/test_generator_stop.py
 @@ -1,9 +1,63 @@
  from __future__ import generator_stop
  
