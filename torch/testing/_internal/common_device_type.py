@@ -1640,7 +1640,7 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type: Iterable):
+    def __init__(self, device_type: str | Iterable[str]):
         self.device_type = device_type
 
     def __call__(self, fn):
