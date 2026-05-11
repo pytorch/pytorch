@@ -4,7 +4,7 @@ import importlib.util
 import unittest
 from collections.abc import Callable, Iterator
 
-from sympy import I, Max, Min, Symbol, sympify
+from sympy import Eq, I, Max, Min, Symbol, sympify
 
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
@@ -31,6 +31,8 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.utils._sympy.functions import Identity, Mod
+
+
 class TestUtils(TestCase):
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
@@ -268,7 +270,7 @@ class TestUtils(TestCase):
         s0 = shape_env.create_unbacked_symint().node.expr
         s1 = shape_env.create_unbacked_symint().node.expr
         # Register as a runtime assert (this actually adds an axiom)
-        shape_env.defer_runtime_assert(sympy.Eq(Mod(s1, 16), 0), "test")
+        shape_env.guard_or_defer_runtime_assert(Eq(Mod(s1, 16), 0), "test")
 
         # If s1 is divisible by 16, then s0 * s1 should also be divisible by 16
         self.assertTrue(
