@@ -6,7 +6,7 @@ Uses the `wheel` Python package for unpack/pack/tags (not zip).
 Usage: repair_wheel.py <input_dir> <output_dir>
 
 Environment variables:
-    DESIRED_CUDA     - cpu, cu126, cu130, etc.
+    DESIRED_CUDA     - cpu, cu126, cu130, xpu, etc.
     GPU_ARCH_TYPE    - cpu, cuda, cuda-aarch64, rocm, xpu
     GPU_ARCH_VERSION - 12.6, 13.0, 13.2, etc. (empty for CPU)
     USE_CUDA         - "0" or "1"
@@ -130,11 +130,12 @@ def repair_wheel(
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         unpacked = unpack_wheel(wheel, work)
-        torch_lib = unpacked / "torch" / "lib"
+        torch_dir = unpacked / "torch"
+        torch_lib = torch_dir / "lib"
 
         # Bundle libgomp and rewrite NEEDED entries to point at our copy
         shutil.copy(libgomp_path, torch_lib / "libgomp.so.1")
-        for sofile in (unpacked / "torch").glob("*.so*"):
+        for sofile in torch_dir.glob("*.so*"):
             if sofile.is_file():
                 patchelf(
                     "--replace-needed",
@@ -148,7 +149,7 @@ def repair_wheel(
             shutil.copy(dep, torch_lib / dep.name)
 
         # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
-        for sofile in (unpacked / "torch").glob("*.so*"):
+        for sofile in torch_dir.glob("*.so*"):
             if sofile.is_file():
                 set_rpath(sofile, c_so_rpath, force_rpath)
         for sofile in torch_lib.glob("*.so*"):
@@ -174,6 +175,7 @@ def main() -> None:
 
     arch = platform.machine()
     use_cuda = os.environ.get("USE_CUDA", "0") == "1"
+    gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
     gpu_arch_version = os.environ.get("GPU_ARCH_VERSION", "")
 
     libgomp_path = detect_libgomp()
@@ -184,6 +186,12 @@ def main() -> None:
         rpaths = cuda_rpaths(gpu_arch_version)
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = f"{rpaths}:$ORIGIN"
+        force_rpath = True
+    elif gpu_arch_type == "xpu":
+        # XPU runtime libs come from pypi packages; set RPATHs like CUDA.
+        xpu_rpaths = "$ORIGIN/../../../.."
+        c_so_rpath = f"{xpu_rpaths}:$ORIGIN:$ORIGIN/lib"
+        lib_so_rpath = f"{xpu_rpaths}:$ORIGIN"
         force_rpath = True
     else:
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
