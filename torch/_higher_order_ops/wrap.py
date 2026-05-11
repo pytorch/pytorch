@@ -68,9 +68,9 @@ class InductorCompiledCode(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("inductor_compiled_code")
 
-    def __call__(self, func, *args, **kwargs):
+    def __call__(self, func, inputs, *, name: str | None = None):
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(func, *args, **kwargs)
+        return super().__call__(func, inputs, name=name)
 
 
 inductor_compiled_code = InductorCompiledCode()
@@ -88,10 +88,16 @@ class InductorCompiledCallable:
     Each instance gets a globally unique idx at creation (via atomic itertools.count).
     """
 
-    def __init__(self, compiled_callable, original_gm=None):
+    def __init__(
+        self,
+        compiled_callable,
+        original_gm=None,
+        compile_region_name: str | None = None,
+    ):
         self.idx = next(_inductor_compiled_callable_id)
         self.compiled_callable = compiled_callable
         self.original_gm = original_gm
+        self.compile_region_name = compile_region_name
         # AOT autograd needs this to know inputs are passed as a list
         self._boxed_call = True
 
@@ -160,7 +166,7 @@ def _resolve_inductor_callable(
 
 
 @inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
-def inductor_compiled_code_impl(func, inputs):
+def inductor_compiled_code_impl(func, inputs, *, name=None):
     resolved = _resolve_inductor_callable(func)
     return resolved.compiled_callable(inputs)
 
@@ -171,7 +177,7 @@ redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 
 @register_fake(inductor_compiled_code)
-def inductor_compiled_code_fake(func, inputs):
+def inductor_compiled_code_fake(func, inputs, *, name=None):
     resolved = _resolve_inductor_callable(func)
     if resolved.original_gm is None:
         raise RuntimeError(
@@ -184,22 +190,24 @@ def inductor_compiled_code_fake(func, inputs):
 
 
 @inductor_compiled_code.py_functionalize_impl
-def inductor_compiled_code_functionalize(ctx, func, inputs):
+def inductor_compiled_code_functionalize(ctx, func, inputs, *, name=None):
     # Unwrap the functional tensors to get the underlying tensors
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
 
     # Redispatch to the next handler in the dispatch chain
     with ctx.redispatch_to_next():
-        result = inductor_compiled_code(func, unwrapped_inputs)
+        kwargs = {"name": name} if name is not None else {}
+        result = inductor_compiled_code(func, unwrapped_inputs, **kwargs)
         return ctx.wrap_tensors(result)
 
 
 @inductor_compiled_code.py_impl(ProxyTorchDispatchMode)
-def inductor_compiled_code_proxy(mode, func, inputs):
+def inductor_compiled_code_proxy(mode, func, inputs, *, name=None):
     resolved = _resolve_inductor_callable(func)
 
     # Run the fake impl to get example outputs for tracing
-    example_out = inductor_compiled_code(func, inputs)
+    kwargs = {"name": name} if name is not None else {}
+    example_out = inductor_compiled_code(func, inputs, **kwargs)
 
     # Register in side table so the FX node stores a serializable int
     callable_idx = inductor_code_side_table.add_callable(resolved)
@@ -210,7 +218,7 @@ def inductor_compiled_code_proxy(mode, func, inputs):
         "call_function",
         inductor_compiled_code,
         (callable_idx, proxy_inputs),
-        {},
+        kwargs,
     )
 
     return track_tensor_tree(example_out, out_proxy, constant=None, tracer=mode.tracer)
@@ -229,7 +237,7 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
     ) -> _R:
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         @disable
@@ -262,7 +270,7 @@ class WrapWithAutocast(HigherOrderOperator):
     ) -> _R:
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         @disable
@@ -295,7 +303,7 @@ class DynamoBypassingWrapper(HigherOrderOperator):
     ):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
+        import torch._dynamo
         from torch._dynamo import disable
 
         is_compiling = isinstance(wrapper_fn_or_key, str)
@@ -419,22 +427,6 @@ class TagActivationCheckpoint(HigherOrderOperator):
         }
         return checkpoint_kwargs, gmod_kwargs
 
-    @staticmethod
-    def tag_nodes(gmod, is_sac):
-        from torch.utils.checkpoint import CheckpointPolicy
-
-        unique_graph_id = next(uid)
-        for node in gmod.graph.nodes:
-            if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["ac_graph_id"] = unique_graph_id
-                if is_sac:
-                    # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
-                    node.meta["recompute"] = None
-                else:
-                    # Under vanilla activation checkpointing, all nodes should be recomputed.
-                    node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
-        return gmod
-
     def __call__(self, gmod, *args, **kwargs):
         dispatch_key_set = torch._ops._compute_keyset(
             args, kwargs, self.non_fallthrough_keys
@@ -450,11 +442,22 @@ class TagActivationCheckpoint(HigherOrderOperator):
 tag_activation_checkpoint = TagActivationCheckpoint()
 
 
+def _always_prefer_recompute(ctx, op, *args, **kwargs):
+    from torch.utils.checkpoint import CheckpointPolicy
+
+    return CheckpointPolicy.PREFER_RECOMPUTE
+
+
 def tag_activation_checkpoint_impl(gmod, *args, **kwargs):
+    import functools
+
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
+    from torch.utils.checkpoint import create_selective_checkpoint_contexts
 
+    unique_graph_id = next(uid)
     if "_checkpoint_context_fn" in gmod.meta:
+        context_fn = gmod.meta["_checkpoint_context_fn"]
         warning_once(
             log,
             """
@@ -462,33 +465,47 @@ Detected that context_fn is passed to torch.utils.checkpoint under torch.compile
 Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
 """,
         )
-        # use_reentrant is set to False because this op is going to be traced.
-        # And we ensure that AOT Autograd traces through the non reentrant
-        # version of checkpointing.
-        kwargs["use_reentrant"] = False
-        # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
-        # `torch.random.fork_rng` op (which is not supported yet under CUDA).
-        # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
-        # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
-        # instead of in AOTAutograd).
-        kwargs["preserve_rng_state"] = False
-        kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
-        # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
-        # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-        gmod = TagActivationCheckpoint.tag_nodes(gmod, is_sac=True)
-        # Using interpreter allows preservation of metadata through torch.compile stack.
-        with fx_traceback.preserve_node_meta():
-            from torch.utils.checkpoint import checkpoint
-
-            return checkpoint(Interpreter(gmod).run, *args, **kwargs)
     else:
-        gmod = TagActivationCheckpoint.tag_nodes(gmod, is_sac=False)
-        # Using interpreter allows preservation of metadata through torch.compile stack.
-        # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
-        # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
-        # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
-        with fx_traceback.preserve_node_meta():
-            return Interpreter(gmod).run(*args)
+        # Vanilla AC: use the SAC path with a policy that always recomputes.
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, _always_prefer_recompute
+        )
+
+    def context_fn_with_graph_id():
+        fwd_ctx, recomp_ctx = context_fn()
+        # Plumb ac_graph_id so _CachingTorchDispatchMode tags all nodes
+        # (including ops from desugared HOPs like custom autograd.Function).
+        fwd_ctx.ac_graph_id = unique_graph_id
+        return fwd_ctx, recomp_ctx
+
+    # use_reentrant is set to False because this op is going to be traced.
+    # And we ensure that AOT Autograd traces through the non reentrant
+    # version of checkpointing.
+    kwargs["use_reentrant"] = False
+    # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
+    # `torch.random.fork_rng` op (which is not supported yet under CUDA).
+    # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
+    # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
+    # instead of in AOTAutograd).
+    kwargs["preserve_rng_state"] = False
+    kwargs["context_fn"] = context_fn_with_graph_id
+    # Disable early stop to prevent _StopRecomputationError from interrupting
+    # recomputation between _vmap_increment_nesting and _vmap_decrement_nesting,
+    # which would leak a functorch dynamic layer.
+    kwargs["early_stop"] = False
+    # Using interpreter allows preservation of metadata through torch.compile stack.
+    # We use a wrapper instead of passing Interpreter(gmod).run directly because
+    # checkpoint's recompute_fn captures the function in a closure. A bound method
+    # reference would keep the Interpreter alive, whose env dict retains the output
+    # tensors and prevents the autograd graph from being freed.
+
+    def run_with_interpreter(*args):
+        return Interpreter(gmod).run(*args)
+
+    with fx_traceback.preserve_node_meta():
+        from torch.utils.checkpoint import checkpoint
+
+        return checkpoint(run_with_interpreter, *args, **kwargs)
 
 
 @tag_activation_checkpoint.py_impl(ProxyTorchDispatchMode)

@@ -4,6 +4,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/Gauge.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -15,6 +16,25 @@ using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event> {
+  void free(void* ctx) override {
+    using Base = CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event>;
+    try {
+      Base::free(ctx);
+    } catch (...) {
+      if (!c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+              pinned_free_catch_all()) {
+        TORCH_WARN("Exception in pinned allocator free(), rethrowing");
+        throw;
+      }
+      // pinned_free_catch_all is enabled: suppress the exception to prevent
+      // it from escaping through ~StorageImpl() (implicitly noexcept), which
+      // would cause std::terminate. Allows graceful shutdown to proceed.
+      STATIC_GAUGE(pytorch.CUDACachingHostAllocator.free_fail_catch_all)
+          .record(1);
+      TORCH_WARN("Suppressed exception in pinned allocator free()");
+    }
+  }
+
  private:
   ska::flat_hash_map<void*, bool> use_host_register;
 
@@ -246,8 +266,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(CUDAStream s) const override {
-    return c10::cuda::isStreamCapturingMayInitCtx(
-        static_cast<cudaStream_t>(s));
+    return s.is_capturing();
   }
 };
 

@@ -27,8 +27,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/native/IndexKernel.h>
-#include <ATen/ops/count_nonzero.h>
-#include <ATen/ops/count_nonzero_native.h>
 #include <ATen/ops/embedding_dense_backward_native.h>
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
@@ -42,11 +40,10 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/view_as_real.h>
 #endif
-
-constexpr auto nonZeroMaxSize = 1UL << 24;
 
 namespace at::native {
 namespace mps {
@@ -292,150 +289,139 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   });
 }
 
-static Tensor nonzero_fallback(const Tensor& self) {
-  return at::nonzero(self.to("cpu")).to("mps");
-}
-
-static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
+// Metal kernel-based nonzero using prefix-sum + scatter.
+// Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
+// Step 2: GPU prefix sum of block totals → block offsets + total count.
+// Host (optional):   Read back total count, allocate output, unless max_element is provided
+// Step 3: Scatter multi-dimensional indices into the output.
+static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  int64_t nDim = self.dim();
+  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
+              "nonzero is not supported for tensors with more than INT_MAX elements, "
+              "See https://github.com/pytorch/pytorch/issues/51871");
+  TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
+  TORCH_CHECK(self.device() == out_.device(),
+              "expected self and out to be on the same device, but got out on ",
+              out_.device(),
+              " and self on ",
+              self.device());
+  TORCH_CHECK(out_.is_mps());
+
+  Tensor input = self.contiguous();
+  const int64_t nDim = self.dim();
+  const auto numel = static_cast<uint32_t>(input.numel());
+  const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
-  using CachedGraph = MPSUnaryCachedGraph;
 
+  auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
+  auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
+  auto pso_step3 = lib.getPipelineStateForFunc(fmt::format("scatter_nonzero_indices_{}", type_str));
+  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
+                        "nonzero: step 1 and step 3 threadgroup sizes must match");
+
+  uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
+  uint32_t num_blocks = (numel + threads_per_group - 1) / threads_per_group;
+
+  auto tmp = at::empty({input.numel() + 2 * num_blocks + 1}, input.options().dtype(kInt));
+  Tensor prefix_buf = tmp.slice(0, 0, numel);
+  Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks);
+  Tensor block_offsets_buf = tmp.slice(0, numel + num_blocks, numel + 2 * num_blocks);
+  Tensor total_nonzero_buf = tmp.slice(0, numel + 2 * num_blocks, numel + 2 * num_blocks + 1);
+
+  // Steps 1+2: compute prefix sums and block offsets entirely on GPU
   dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      [computeEncoder setComputePipelineState:pso_step1];
+      mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf);
+      mtl_dispatch1DJob(computeEncoder, pso_step1, numel);
+
+      [computeEncoder setComputePipelineState:pso_step2];
+      mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks);
+      uint32_t tg_size_blocks = std::min(1024u, ((num_blocks + 31) / 32) * 32);
+      [computeEncoder dispatchThreads:MTLSizeMake(tg_size_blocks, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(tg_size_blocks, 1, 1)];
+    }
   });
-  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
+
+  if (!max_elements) {
+    // Dynamic path: sync to learn output size
+    const int64_t total_nonzero = total_nonzero_buf.item<int>();
+    at::native::resize_output(out_, {total_nonzero, nDim});
+    max_elements = total_nonzero;
+  }
+
   if (out_.numel() == 0) {
-    return out_;
+    return;
   }
 
-  bool contiguous_output = !needsGather(out_);
-  Tensor out = out_;
-  if (!contiguous_output) {
-    out = at::empty_like(out_, MemoryFormat::Contiguous);
-  }
+  bool contiguous_output = out_.is_contiguous();
+  Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
-  @autoreleasepool {
-    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+  int ndim_int = static_cast<int>(nDim);
+  int max_entries = static_cast<int>(*max_elements);
 
-      MPSGraphTensor* outputTensor = [mpsGraph nonZeroIndicesOfTensor:inputTensor name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  // Step 3: scatter indices, capped at max_entries
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:pso_step3];
+      mtl_setArgs(computeEncoder, input, prefix_buf, out, ndim_int, input.sizes(), block_offsets_buf, max_entries);
+      mtl_dispatch1DJob(computeEncoder, pso_step3, numel);
+    }
+  });
 
   if (!contiguous_output) {
     out_.copy_(out);
   }
-
-  return out_;
 }
 
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
-  if (self.is_complex()) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes. ",
-                    "Falling back on CPU. This may have performance implications.");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  }
-
   int64_t nDim = self.dim();
   if (self.numel() == 0) {
     at::native::resize_output(out_, {0, nDim});
     return out_;
   }
 
-  using namespace mps;
-  const uint32_t maxDimensions = 16;
-
-  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
-              "nonzero is not supported for tensors with more than INT_MAX elements, \
-  See https://github.com/pytorch/pytorch/issues/51871");
-  TORCH_CHECK(
-      out_.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out_.dtype());
-  TORCH_CHECK(self.device() == out_.device(),
-              "expected self and out to be on the same device, but got out on ",
-              out_.device(),
-              " and self on ",
-              self.device());
-  TORCH_CHECK(self.dim() <= maxDimensions, "nonzero is not supported for tensor with more than ", 16, " dimensions");
-  TORCH_CHECK(out_.is_mps());
-
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
-      (self.numel() >= nonZeroMaxSize || self.is_complex())) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not natively supported for the provided input on MacOS14",
-                    "Falling back on CPU. This may have performance implications.",
-                    "See github.com/pytorch/pytorch/issues/122916 for further info");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  }
-
-  MPSStream* stream = getCurrentMPSStream();
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  });
-  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
-  if (out_.numel() == 0) {
-    return out_;
-  }
-
-  bool contiguous_output = !needsGather(out_);
-  Tensor out = out_;
-  if (!contiguous_output) {
-    out = at::empty_like(out_, MemoryFormat::Contiguous);
-  }
-
-  @autoreleasepool {
-    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      MPSGraphTensor* outputTensor = [mpsGraph nonZeroIndicesOfTensor:inputTensor name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (!contiguous_output) {
-    out_.copy_(out);
-  }
-
+  nonzero_impl_mps(self, out_, std::nullopt);
   return out_;
 }
 
 Tensor nonzero_mps(const Tensor& self) {
-  if (self.is_complex()) {
-    TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes ",
-                    "Falling back on CPU. This may have performance implications.");
-    return nonzero_fallback(self);
-  }
-
   Tensor out = at::empty({0}, self.options().dtype(kLong));
   return nonzero_out_mps(self, out);
+}
+
+Tensor& nonzero_static_out_mps(const Tensor& self, int64_t size, int64_t fill_value, Tensor& result) {
+  TORCH_CHECK(size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+
+  int64_t nDim = self.dim();
+  if (result.dim() != 2 || result.size(0) != size || result.size(1) != nDim) {
+    at::native::resize_output(result, {size, nDim});
+  }
+
+  if (result.size(0) == 0 || result.size(1) == 0) {
+    return result;
+  }
+
+  result.fill_(fill_value);
+
+  if (self.numel() == 0) {
+    return result;
+  }
+
+  nonzero_impl_mps(self, result, size);
+  return result;
+}
+
+Tensor nonzero_static_mps(const Tensor& self, int64_t size, int64_t fill_value) {
+  TORCH_CHECK(size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+  int64_t nDim = self.dim();
+  auto result = at::empty({size, nDim}, at::TensorOptions().dtype(kLong).device(kMPS));
+  nonzero_static_out_mps(self, size, fill_value, result);
+  return result;
 }
 
 Tensor masked_select_mps(const Tensor& self, const Tensor& mask) {
