@@ -2105,9 +2105,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         graph=None,  # for per-graph caching
     ) -> str:
         # Use id(graph) for caching to avoid circular references
+        # Bound methods have transient IDs, so we use the ID of the bound object instead.
+        writeline_id = (
+            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
+        )
         cache_key = (
             int_array,
-            id(writeline),
+            writeline_id,
             known_statically,
             id(graph) if graph else None,
         )
@@ -2155,7 +2159,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized accepted for API compatibility with AllocateLine.codegen
+    # but unused — the C++ wrapper doesn't do deterministic fills in codegen.
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -2164,11 +2170,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
             buffer.get_is_pinned(),
+            is_uninitialized=is_uninitialized,
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
-    ):
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        allocation_shape=None,
+        is_pinned=False,
+        is_uninitialized=False,
+    ):  # noqa: docstring_linter
+        if (
+            is_uninitialized
+            and torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+        ):
+            raise RuntimeError(
+                "torch.use_deterministic_algorithms(True) with fill_uninitialized_memory "
+                "is not supported with cpp_wrapper. Use the default Python wrapper instead."
+            )
         if allocation_shape is None:
             allocation_shape = shape
 
