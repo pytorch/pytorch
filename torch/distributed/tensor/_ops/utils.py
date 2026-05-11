@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, TypeAlias, TypeVar
+from typing import TypeAlias, TypeVar
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -22,6 +22,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_shard_like,
     _StridedShard,
     Partial,
     Placement,
@@ -205,7 +206,7 @@ def is_tensor_shardable(
     # number of shards in each tensor dimension
     num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard | _StridedShard):
+        if _is_shard_like(placement):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
@@ -229,7 +230,7 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     # number of shards in each tensor dimension
     num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard | _StridedShard):
+        if _is_shard_like(placement):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
@@ -254,17 +255,24 @@ def is_tensor_evenly_shardable_on_dim(
 
     num_shards = 1
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
-            if shard_dim == dim:
-                num_shards *= spec.mesh.size(i)
+        if _is_shard_like(placement) and placement.dim == dim:
+            num_shards *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                # _StridedShard._split_tensor first chunks into split_factor
+                # groups, then into num_shards within each group, so the dim
+                # must be divisible by the product of both.  This is stricter
+                # than the final num_shards check and implies it.  Note:
+                # num_shards already includes spec.mesh.size(i) from this
+                # iteration, so the check covers the full shard count.
+                if shape[dim] % (placement.split_factor * num_shards) != 0:
+                    return False
 
     return shape[dim] % num_shards == 0
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded."""
-    return any(p.is_shard(dim) for p in spec.placements)
+    return any(_is_shard_like(p) and p.dim == dim for p in spec.placements)
 
 
 def is_tensor_partial(spec: DTensorSpec) -> bool:
@@ -309,7 +317,7 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            if not isinstance(placement, Shard | _StridedShard):
+            if not _is_shard_like(placement):
                 raise AssertionError
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
@@ -367,6 +375,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
+    different_mesh_args: list[int] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -403,6 +412,18 @@ def expand_to_full_mesh_op_strategy(
     args_strategy = op_schema.args_strategy
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
+
+    # Propagate use_strided_shard_as_shard_order from inputs so that
+    # strategy specs with _StridedShard get the correct flag (and thus
+    # correct shard_order) at construction time, avoiding shard_order
+    # mismatches in redistribute_cost computation.
+    _input_use_strided: bool | None = None
+    for input_strat in input_args_strategy:
+        input_spec = input_strat.strategies[0].output_spec
+        if any(isinstance(p, _StridedShard) for p in input_spec.placements):
+            _input_use_strided = input_spec.use_strided_shard_as_shard_order
+            break
+
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
     blocking_inplace_input_placements: tuple[Placement, ...] | None = None
@@ -441,7 +462,20 @@ def expand_to_full_mesh_op_strategy(
                         input_strategy_counter += 1
 
                 # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                use_strided = (
+                    _input_use_strided
+                    if _input_use_strided is not None
+                    and any(isinstance(p, _StridedShard) for p in specs)
+                    else None
+                )
+                spec_list.append(
+                    DTensorSpec(
+                        mesh,
+                        specs,
+                        tensor_meta=tensor_meta,
+                        use_strided_shard_as_shard_order=use_strided,
+                    )
+                )
             else:
                 spec_list.append(None)
 
@@ -476,6 +510,52 @@ def expand_to_full_mesh_op_strategy(
                 f"input_specs({len(input_specs)}) != strategies({len(input_args_strategy)}: "
                 f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
             )
+
+        # Note [Multi-mesh args]
+        #
+        # Some ops accept args whose DTensor lives on a different DeviceMesh
+        # than the op's primary compute mesh.  We call these "multi-mesh
+        # args".  They arise in fused optimizer ops (e.g. _fused_adam_)
+        # where *state_steps* is a per-rank scalar counter allocated on a
+        # smaller sub-mesh (e.g. 1-D DP) while params and grads live on a
+        # larger mesh (e.g. 2-D DP × TP).
+        #
+        # Why must these args be Replicate?
+        #   Sharding implies a specific partitioning of a tensor's data
+        #   across the ranks of a mesh.  If a tensor doesn't even *exist*
+        #   on the compute mesh, there is no meaningful way to interpret a
+        #   Shard placement for it.  Replicate, on the other hand, is
+        #   mesh-agnostic: every rank already holds the full data, so the
+        #   op can simply read the value regardless of which mesh owns it.
+        #
+        # What we do here:
+        #   We preserve the original mesh and Replicate placement for these
+        #   args so the propagator does not try to redistribute them onto
+        #   the compute mesh (which would fail or produce wrong results).
+        #
+        # This is distinct from the *element_mesh* handling in
+        # single_dim_strategy.py, which deals with foreach ops where
+        # different *elements* in a tensor list may live on different
+        # sub-meshes (e.g. param group A on 2-D mesh, param group B on
+        # 1-D mesh).
+        # TODO: refactor fused_ops handling so that there are no longer
+        # args on different meshes
+        if different_mesh_args is not None:
+            for idx in different_mesh_args:
+                if idx < len(input_args_strategy):
+                    cross_mesh_input = input_args_strategy[idx]
+                    original_spec = cross_mesh_input.strategies[0].output_spec
+                    if original_spec.mesh != mesh:
+                        if not all(p == Replicate() for p in original_spec.placements):
+                            raise RuntimeError(
+                                f"Cross-mesh input at index {idx} must be Replicate, "
+                                f"but got {original_spec.placements}"
+                            )
+                        input_specs[idx] = DTensorSpec(
+                            mesh=original_spec.mesh,
+                            placements=original_spec.placements,
+                            tensor_meta=original_spec.tensor_meta,
+                        )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         redistribute_input = self_spec.placements != input_specs[0].placements
@@ -564,7 +644,11 @@ def shift_shard_dims_after_insert(
 ) -> Sequence[Placement]:
     normalized_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+        if isinstance(placement, _StridedShard) and placement.dim >= insert_dim:
+            normalized_placements.append(
+                _StridedShard(placement.dim + 1, split_factor=placement.split_factor)
+            )
+        elif isinstance(placement, Shard) and placement.dim >= insert_dim:
             normalized_placements.append(Shard(placement.dim + 1))
         else:
             normalized_placements.append(placement)
@@ -576,7 +660,11 @@ def shift_shard_dims_after_remove(
 ) -> Sequence[Placement]:
     normalized_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, Shard) and placement.dim > remove_dim:
+        if isinstance(placement, _StridedShard) and placement.dim > remove_dim:
+            normalized_placements.append(
+                _StridedShard(placement.dim - 1, split_factor=placement.split_factor)
+            )
+        elif isinstance(placement, Shard) and placement.dim > remove_dim:
             normalized_placements.append(Shard(placement.dim - 1))
         else:
             normalized_placements.append(placement)

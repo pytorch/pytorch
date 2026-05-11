@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -540,13 +540,15 @@ def _flatten_dynamic_shapes(
 
 
 def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
-    for attr in [
+    for attr in (
         "_dynamo_weak_dynamic_indices",
         "_dynamo_dynamic_indices",
         "_dynamo_dynamic_range",
         "_dynamo_static_indices",
         "_dynamo_unbacked_indices",
-    ]:
+        "_dynamo_propagated_dynamic_indices",
+        "_has_dynamo_dim_marking",
+    ):
         if hasattr(tensor, attr):
             delattr(tensor, attr)
 
@@ -623,7 +625,7 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
 
 
-def is_int(x: object) -> bool:
+def is_int(x: object) -> TypeGuard[int | torch.SymInt]:
     return isinstance(x, int) or (isinstance(x, torch.SymInt) and x.node.expr.is_number)
 
 

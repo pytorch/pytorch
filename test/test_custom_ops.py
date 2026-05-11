@@ -53,8 +53,10 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -67,6 +69,12 @@ from torch._custom_op.impl import custom_op  # usort: skip
 # Needed by TestTypeConversion.test_string_type:
 MyList = list
 MyTensor = torch.Tensor
+
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 
 
 def requires_compile(fun):
@@ -100,7 +108,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self.libraries.append(result)
         return result
 
@@ -214,6 +222,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             "Argument x is not defined to alias output but was aliasing",
         ):
             torch.library.opcheck(op, (x,), {})
+
+    # https://github.com/pytorch/pytorch/issues/149468
+    def test_opcheck_cpu_stride_mismatch(self, device):
+        @torch.library.custom_op("test::stride_mismatch", mutates_args=())
+        def stride_mismatch(x: torch.Tensor) -> torch.Tensor:
+            return x.clone().permute(2, 0, 1)
+
+        @stride_mismatch.register_fake
+        def _(x):
+            c, h, w = x.shape[2], x.shape[0], x.shape[1]
+            return x.new_empty(c, h, w)
+
+        x = torch.randn(4, 4, 3, device=device)
+        with self.assertRaisesRegex(optests.OpCheckError, "Stride mismatch"):
+            torch.library.opcheck(stride_mismatch, (x,))
 
     # https://github.com/pytorch/pytorch/issues/142410
     def test_opcheck_unbacked_stride(self, device):
@@ -1148,7 +1171,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "multiple times"):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            def foo(x: torch.Tensor) -> torch.Tensor:
                 raise NotImplementedError
 
         # Unless we delete the original op.
@@ -1156,14 +1179,14 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         # Smoke test
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+        def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
@@ -1585,7 +1608,8 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1595,7 +1619,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo_cpu(x):
             return x.sin()
 
-        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types="cuda")
+        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)
         def foo_cuda(x):
             return x.cos()
 
@@ -1604,12 +1628,13 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x)
         self.assertEqual(result, foo_cpu(x))
 
-        x_cuda = x.cuda()
+        x_cuda = x.to(device_type)
         op = self.get_op(f"{self.test_ns}::foo")
         result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1624,7 +1649,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x)
         self.assertEqual(result, foo_impl(x))
 
-        x_cuda = x.cuda()
+        x_cuda = x.to(device_type)
         result = op(x_cuda)
         self.assertEqual(result, foo_impl(x_cuda))
 
@@ -1669,7 +1694,9 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+            @torch.library.register_fake(
+                f"{TestCustomOp.test_ns}::foo", lib=self.lib(), allow_override=False
+            )
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1765,7 +1792,7 @@ def forward(self, x_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
     numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
-    return numpy_view_copy""",  # noqa: B950
+    return numpy_view_copy""",
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
@@ -1874,7 +1901,9 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=False
+            )
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1889,6 +1918,34 @@ Dynamic shape operator
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
             torch.library.register_fake(qualname, foo_impl, lib=self.lib())
+
+    def test_register_fake_does_not_leak_on_failure(self):
+        lib = self.lib()
+        lib.define("foo(Tensor x) -> Tensor")
+        qualname = f"{self.test_ns}::foo"
+
+        def foo_impl(x):
+            return x.sin()
+
+        # CompositeImplicitAutograd kernel makes lib.impl(..., "Meta", ...)
+        # inside FakeImplHolder.register raise *after* the kernel has been
+        # appended to the holder's singleton kernel list.
+        lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
+
+        # allow_override=True bypasses the early guard and exercises the
+        # exception-safety path in FakeImplHolder.register.
+        with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=True
+            )
+
+        # The failed registration must not leave a dangling kernel in the
+        # process-wide FakeImplHolder; otherwise teardown leaks it and
+        # corrupts subsequent register_fake() calls for the same qualname.
+        self.assertEqual(len(entry.fake_impl.kernels), 0)
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -2168,11 +2225,11 @@ Dynamic shape operator
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
-        self._test_impl_device("foo4", "default", "cuda")
-        self._test_impl_device("foo5", ["cuda"], "cuda")
-        self._test_impl_device("foo6", ["cpu", "cuda"], "cuda")
+        self._test_impl_device("foo4", "default", device_type)
+        self._test_impl_device("foo5", [device_type], device_type)
+        self._test_impl_device("foo6", ["cpu", device_type], device_type)
 
     def test_impl_device_function(self):
         lib = self.lib()
@@ -2210,10 +2267,10 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "CPU")
+            lib.impl("foo", foo_impl2, "CPU", allow_override=False)
 
         # Override cpu impl to foo_impl2
-        lib.impl(op_name, foo_impl2, "CPU", allow_override=True)
+        lib.impl(op_name, foo_impl2, "CPU")
         self.assertEqual(op(torch.ones(3)), torch.ones(6))
 
     def test_override_fake(self):
@@ -2235,20 +2292,20 @@ Dynamic shape operator
         def foo_impl2(x):
             return torch.cat([x, x])
 
-        with self.assertRaisesRegex(RuntimeError, "already has an fake impl"):
-            torch.library.register_fake(op_name, foo_impl2, lib=lib)
+        with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
+            torch.library.register_fake(
+                op_name, foo_impl2, lib=lib, allow_override=False
+            )
 
         # Override fake kernel to foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            torch.library.register_fake(
-                op_name, foo_impl1, lib=lib2, allow_override=True
-            )
+            torch.library.register_fake(op_name, foo_impl1, lib=lib2)
             with torch._subclasses.FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
@@ -2275,22 +2332,22 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "Meta")
+            lib.impl("foo", foo_impl2, "Meta", allow_override=False)
 
         # Override Meta kernel to foo_impl2
-        lib.impl("foo", foo_impl2, "Meta", allow_override=True)
+        lib.impl("foo", foo_impl2, "Meta")
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Meta kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            lib2.impl("foo", foo_impl1, "Meta", allow_override=True)
+            lib2.impl("foo", foo_impl1, "Meta")
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Meta kernel should go back to foo_impl2
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use register_fake to override Meta kernel to foo_impl1
-        torch.library.register_fake(op_name, foo_impl1, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl1, lib=lib)
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
     def test_override_cea(self):
@@ -2312,7 +2369,7 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         # Override Meta/fake kernel with foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
@@ -2370,6 +2427,56 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
             OSError, "Could not load this library: .*libnoexist.so"
         ):
             torch.ops.load_library("libnoexist.so")
+
+    def test_list_scalar_type(self):
+        lib = self.lib()
+        lib.define("scalar_list(Tensor x, ScalarType[] dts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "scalar_list", "CPU")
+        def _(x, dts):
+            nonlocal received
+            received = dts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.scalar_list(x, [torch.float32, torch.bfloat16])
+        self.assertEqual(received, [torch.float32, torch.bfloat16])
+
+    def test_list_layout(self):
+        lib = self.lib()
+        lib.define("layout_list(Tensor x, Layout[] layouts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "layout_list", "CPU")
+        def _(x, layouts):
+            nonlocal received
+            received = layouts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.layout_list(x, [torch.strided, torch.sparse_coo])
+        self.assertEqual(received, [torch.strided, torch.sparse_coo])
+
+    def test_list_memory_format(self):
+        lib = self.lib()
+        lib.define("memfmt_list(Tensor x, MemoryFormat[] fmts) -> Tensor")
+
+        received = None
+
+        @torch.library.impl(lib, "memfmt_list", "CPU")
+        def _(x, fmts):
+            nonlocal received
+            received = fmts
+            return x.clone()
+
+        x = torch.randn(3)
+        torch.ops._test_custom_op.memfmt_list(
+            x, [torch.contiguous_format, torch.channels_last]
+        )
+        self.assertEqual(received, [torch.contiguous_format, torch.channels_last])
 
 
 def op_with_incorrect_schema(testcase, name):
@@ -3000,6 +3107,27 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_default_none(self):
+        @torch.library.custom_op(
+            "_torch_testing::copy_optional_out", mutates_args={"out"}
+        )
+        def copy_optional_out(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is not None:
+                out.copy_(x)
+                return x.new_empty(0)
+            return x.clone()
+
+        x = torch.randn(3)
+        self.assertEqual(copy_optional_out(x), x)
+
+        out = torch.empty_like(x)
+        version = out._version
+        result = copy_optional_out(x, out=out)
+        self.assertEqual(result.numel(), 0)
+        self.assertEqual(out, x)
+        self.assertGreater(out._version, version)
 
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once
@@ -4467,7 +4595,6 @@ Please use `add.register_fake` to add an fake impl.""",
                     "arange.start",
                     partial(conditional_arange_cpu2, new_original_kernel),
                     "CPU",
-                    allow_override=True,
                     with_keyset=True,
                 )
 
@@ -4498,6 +4625,32 @@ Please use `add.register_fake` to add an fake impl.""",
                 RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
             ):
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
+
+
+class TestLibrarySourceLocation(TestCase):
+    def test_library_source_location(self):
+        # Library.__init__ uses sys._getframe(1) to capture the caller's
+        # filename and line number. Verify this works correctly by creating
+        # a Library and checking the source location in the error message
+        # that appears when a duplicate DEF library is created.
+        script = """\
+import torch
+lib1 = torch.library.Library("_test_loc", "DEF")
+lib1.define("foo(Tensor x) -> Tensor")
+try:
+    lib2 = torch.library.Library("_test_loc", "DEF")
+except RuntimeError as e:
+    print(str(e))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The error message should reference <string>:2, since
+        # lib1 = torch.library.Library(...) is on line 2 of the script.
+        self.assertIn("<string>:2", result.stdout)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
@@ -4760,6 +4913,7 @@ class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
 
     def setUp(self):
+        super().setUp()
         self.supported_base_types = [
             int,
             float,

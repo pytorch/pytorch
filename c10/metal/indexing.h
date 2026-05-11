@@ -44,13 +44,48 @@ inline long offset_from_thread_index(
   return offset_from_coord(pos, strides, ndim);
 }
 
+// One thread per element. Used for small dense tensors where the ILP variant's
+// per-thread overhead isn't amortized (see ILP_DISPATCH_THRESHOLD on the host).
 template <typename T, typename F>
-kernel void unary_dense(
+kernel void unary_dense_scalar(
     device result_of<F, T>* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   output[index] = f(input[index]);
+}
+
+// Each thread loads ILP_PER_THREAD elements into thread-local memory, applies
+// the functor, then writes them back. Increases memory-level parallelism and
+// lets the compiler issue wide loads/stores when alignment permits.
+template <typename T, typename F>
+kernel void unary_dense(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant uint& numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<result_of<F, T>, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      output[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      output[i] = f(input[i]);
+    }
+  }
 }
 
 template <typename T, typename F>
@@ -79,7 +114,14 @@ kernel void unary_strided(
       c10::metal::unary_dense<DTYPE0, NAME##_functor>(                         \
           device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
           constant DTYPE0 * input,                                             \
+          constant uint & numel,                                               \
           uint index);                                                         \
+  template                                                                     \
+      [[host_name(#NAME "_dense_scalar_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
+          c10::metal::unary_dense_scalar<DTYPE0, NAME##_functor>(              \
+              device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output, \
+              constant DTYPE0 * input,                                         \
+              uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
       c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
           device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
@@ -334,6 +376,44 @@ kernel void binary_dense(
   F f;
   using res_t = result_of<F, T, T>;
   out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(other[tid])));
+}
+
+// ILP variant of binary_dense: each thread processes ILP_PER_THREAD elements.
+// Mirrors unary_dense; selected on the host when both inputs and the output
+// are contiguous, share dtype (no cast), and the iterator has neither a scalar
+// nor a broadcast operand. See ILP_DISPATCH_THRESHOLD in OperationUtils.mm.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_ilp(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_a;
+    array<T, ILP_PER_THREAD> tmp_b;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_a[j] = input[base + j];
+      tmp_b[j] = other[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = static_cast<res_t>(f(om_t(tmp_a[j]), om_t(tmp_b[j])));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      out[i] = static_cast<res_t>(f(om_t(input[i]), om_t(other[i])));
+    }
+  }
 }
 
 template <typename T, typename T2, typename F>
@@ -648,6 +728,15 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEI * input_,                                            \
           constant DTYPEI * other_,                                            \
           uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI)]] kernel void ::    \
+          c10::metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(           \
+              device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * \
+                  out_,                                                        \
+              constant DTYPEI * input_,                                        \
+              constant DTYPEI * other_,                                        \
+              constant uint & numel,                                           \
+              uint tid);                                                       \
   template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
       metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \

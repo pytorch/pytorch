@@ -93,7 +93,7 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When False: Emits UserWarning on aliasing violations.
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
-# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
 # is True only in CI.
 check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
@@ -229,6 +229,10 @@ activation_offload_sink_wait = False
 
 # activation reloading with prefetching when using separate streams (bwd graph)
 activation_reload_prefetch = False
+
+# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
+# scheduling. This is hardware-specific and should be set by the user.
+activation_offload_cpu_gpu_bw: float = 50.0
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
@@ -399,7 +403,8 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = False
+guess_tangent_strides_as_outputs = not is_fbcode()
+
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will ultimately be removed once we share size_hints across ranks through compiler collectives
@@ -432,7 +437,7 @@ selective_decompose: bool = False
 
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 # adds patch, save_config, invalid config checks, etc

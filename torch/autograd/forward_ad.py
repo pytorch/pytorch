@@ -29,8 +29,12 @@ def enter_dual_level():
     This function also updates the current level that is used by default
     by the other functions in this API.
     """
+    from torch._functorch.predispatch import (
+        _enter_dual_level as _predispatch_enter_dual_level,
+    )
+
     global _current_level
-    new_level = torch._C._enter_dual_level()
+    new_level = _predispatch_enter_dual_level()
     if new_level != _current_level + 1:
         raise RuntimeError(
             "Entering a new forward AD level but the current level "
@@ -57,7 +61,11 @@ def exit_dual_level(*, level=None):
             "Trying to exit a forward AD level that was not the last one "
             "that was created. This is not supported."
         )
-    torch._C._exit_dual_level(level=level)
+    from torch._functorch.predispatch import (
+        _exit_dual_level as _predispatch_exit_dual_level,
+    )
+
+    _predispatch_exit_dual_level(level=level)
     _current_level = level - 1
 
 
@@ -125,7 +133,9 @@ def make_dual(tensor, tangent, *, level=None):
             f"Expected tangent to be floating point or complex, but got: {tangent.dtype}"
         )
 
-    return torch._VF._make_dual(tensor, tangent, level=level)
+    from torch._functorch.predispatch import _make_dual as _predispatch_make_dual
+
+    return _predispatch_make_dual(tensor, tangent, level=level)
 
 
 class UnpackedDualTensor(NamedTuple):
@@ -165,7 +175,9 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return UnpackedDualTensor(tensor, None)
 
-    primal, dual = torch._VF._unpack_dual(tensor, level=level)
+    from torch._functorch.predispatch import _unpack_dual as _predispatch_unpack_dual
+
+    primal, dual = _predispatch_unpack_dual(tensor, level=level)
 
     return UnpackedDualTensor(primal, dual)
 

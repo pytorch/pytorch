@@ -71,7 +71,7 @@ BREAKPOINT_MARKER = _BreakpointMarker()
 
 # Import NULL_STACK_VALUE sentinel from C++ module
 # This is returned by _get_frame_value_stack_with_depth for NULL stack slots
-from torch._C._dynamo.eval_frame import NULL_STACK_VALUE  # noqa: F401
+from torch._C._dynamo.eval_frame import NULL_STACK_VALUE
 
 
 @dataclass
@@ -599,7 +599,8 @@ class _DebugContext:
                         start = view_state.list_index
                     end = start + num_lines
 
-                assert end is not None
+                if end is None:
+                    raise AssertionError("end must be set before listing instructions")
                 end = min(len(view_state.instructions), end)
                 if start >= len(view_state.instructions):
                     print("(End of bytecode)")
@@ -734,7 +735,10 @@ class _DebugContext:
         """Common instruction handling logic for both tracing backends."""
         if frame is None:
             frame = self._find_frame_for_code(code)
-            assert frame is not None
+            if frame is None:
+                raise AssertionError(
+                    f"Could not find frame for code object {code.co_name}"
+                )
         state = self._get_or_create_frame_state(code, frame)
 
         # Update stack depth based on the previous instruction's effect.
@@ -1076,7 +1080,10 @@ class _DebugContext:
                     pass
             else:
                 # Restore outer context's monitoring callbacks and events
-                assert isinstance(prev, types.MethodType)
+                if not isinstance(prev, types.MethodType):
+                    raise AssertionError(
+                        f"Expected prev callback to be a MethodType, got {type(prev)}"
+                    )
                 outer = cast("_DebugContext", prev.__self__)
                 sys.monitoring.register_callback(
                     self._tool_id,
