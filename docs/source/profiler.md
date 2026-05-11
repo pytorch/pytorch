@@ -9,6 +9,16 @@
 .. automodule:: torch.profiler
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.profiler.profiler
+
+.. autofunction:: schedule
+
+.. autofunction:: supported_activities
+
+.. autofunction:: tensorboard_trace_handler
+```
+
 ## API Reference
 ```{eval-rst}
 
@@ -21,12 +31,6 @@
 
 .. autoclass:: torch.profiler.ProfilerActivity
   :members:
-
-.. autofunction:: torch.profiler.schedule
-
-.. autofunction:: torch.profiler.tensorboard_trace_handler
-
-.. autofunction:: torch.profiler.supported_activities
 ```
 
 ## Intel Instrumentation and Tracing Technology APIs
