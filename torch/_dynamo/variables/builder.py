@@ -165,6 +165,7 @@ from ..utils import (
     is_namedtuple,
     is_parameter_freezing,
     is_pybind11_enum_member,
+    is_torch_class,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -362,14 +363,18 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     if isinstance(method_self, random.Random):
         return None
 
+    owner = method_self if isinstance(method_self, type) else type(method_self)
+
+    # Torch-internal bound methods already have dedicated Dynamo paths. Do not
+    # route them through the generic bound-builtin descriptor VT, which changes
+    # graph break boundaries for calls like Tensor.mul(...).
+    if is_torch_class(owner):
+        return None
+
     # BoundBuiltinMethodVariable needs the descriptor that created this bound
     # method.  For class-bound methods, look on the class object itself (e.g.
     # dict.fromkeys); for instance-bound methods, look on type(self).
-    return inspect.getattr_static(
-        method_self if isinstance(method_self, type) else type(method_self),
-        value.__name__,
-        None,
-    )
+    return inspect.getattr_static(owner, value.__name__, None)
 
 
 class _missing:
