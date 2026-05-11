@@ -209,11 +209,15 @@ def fully_shard(
               ``fully_shard``.
             - :class:`Shard`: Shard the parameter on the specified dimension
               using the mesh passed to ``fully_shard``.
+            - :class:`Replicate`: Replicate and all-reduce the parameter on the
+              1D mesh passed to ``fully_shard``.
             - :class:`ShardPlacementResult`: Specify both the shard placement
-              and a custom :class:`FSDPMeshInfo`. This allows different
-              parameters to be sharded across different process groups, enabling
-              use cases like Mixture of Experts where expert params use a
-              different mesh than regular params.
+              and a custom data parallel mesh info. This allows different
+              parameters to use different process groups or data parallel
+              policies, enabling use cases like Mixture of Experts where expert
+              params use a different mesh than regular params. Returning a
+              ``DDPMeshInfo`` with ``placement=None`` or ``Replicate()`` makes
+              that parameter replicated and all-reduced instead of sharded.
 
             If sharding on a nonzero dim, we currently require even sharding,
             i.e. the tensor dim size on that dim must be divisible by the FSDP

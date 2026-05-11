@@ -33,11 +33,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
     ShardPlacementResult,
 )
-from torch.distributed.tensor import DTensor, init_device_mesh, Shard
+from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -1426,6 +1427,59 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_shard_placement_fn_replicated_param(self):
+        self._test_shard_placement_fn_replicated_param(use_explicit_ddp_mesh=False)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_shard_placement_fn_replicated_param_explicit_mesh_info(self):
+        self._test_shard_placement_fn_replicated_param(use_explicit_ddp_mesh=True)
+
+    def _test_shard_placement_fn_replicated_param(self, use_explicit_ddp_mesh: bool):
+        torch.manual_seed(42)
+        model = nn.Linear(4, 4, device=device_type)
+        ref_model = copy.deepcopy(model)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        ddp_mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
+        replicated_params = {model.bias}
+
+        def shard_placement_fn(
+            param: nn.Parameter,
+        ) -> Shard | Replicate | ShardPlacementResult | None:
+            if param in replicated_params:
+                if use_explicit_ddp_mesh:
+                    return ShardPlacementResult(Replicate(), ddp_mesh_info)
+                return Replicate()
+            return Shard(0)
+
+        fully_shard(model, mesh=mesh, shard_placement_fn=shard_placement_fn)
+        self.assertIsInstance(model.weight, DTensor)
+        self.assertIsInstance(model.bias, DTensor)
+        self.assertEqual(model.bias.placements, (Replicate(),))
+
+        optim = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, foreach=True)
+        ref_optim = torch.optim.SGD(
+            ref_model.parameters(), lr=0.1, momentum=0.9, foreach=True
+        )
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, 4), device=device_type.type)
+        ref_loss = ref_model(inp).pow(2).sum()
+        loss = model(inp).pow(2).sum()
+        self.assertEqual(loss, ref_loss)
+
+        ref_loss.backward()
+        loss.backward()
+        for param in ref_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+
+        self.assertEqual(model.bias.grad.to_local(), ref_model.bias.grad)
+        optim.step()
+        ref_optim.step()
+        self.assertEqual(model.weight.full_tensor(), ref_model.weight)
+        self.assertEqual(model.bias.full_tensor(), ref_model.bias)
 
 
 class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):

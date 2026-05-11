@@ -231,7 +231,7 @@ class FSDPParam:
         if callable(shard_placement_fn):
             shard_result = resolve_shard_placement(
                 shard_placement_fn(param),
-                cast(FSDPMeshInfo, mesh_info),
+                mesh_info,
             )
             self.mesh_info = shard_result.mesh_info
             fsdp_placement = shard_result.placement
@@ -246,6 +246,10 @@ class FSDPParam:
         if not param.is_contiguous():
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
+            )
+        if isinstance(fsdp_placement, Replicate):
+            raise AssertionError(
+                f"Expected Shard or None, got {type(fsdp_placement)}: {fsdp_placement}"
             )
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
