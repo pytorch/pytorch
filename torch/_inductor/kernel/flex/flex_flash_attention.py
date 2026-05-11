@@ -443,8 +443,6 @@ def create_flex_flash_attention_kernel(
     if not choices:
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
-    if not choices:
-        raise RuntimeError(f"CuteDSL template failed: {error}")
     input_gen_fns: dict[int, Callable] | None = None
     if has_full_blocks:
         input_gen_fns = {
