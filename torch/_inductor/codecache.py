@@ -134,7 +134,7 @@ from .cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from .output_code import CompiledFxGraph
-from .remote_cache import create_cache
+from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
@@ -879,28 +879,56 @@ def build_code_hash(
         hasher.update(digest)
 
 
-def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
-    """
-    This function is a reimplementation of functools.lru_cache with a
-    set function that allows prepopulating the cache.
-    """
-    # Use list for reference semantics
-    _cache: list[bytes] = []
+_MISSING = object()
 
-    def wrapper() -> bytes:
-        if len(_cache) == 0:
-            _cache.append(func())
-        return _cache[0]
 
-    def set_val(val: bytes) -> None:
-        assert len(_cache) == 0
-        _cache.append(val)
+def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
+    """
+    Like functools.cache but with a prefetch() method that starts computing
+    the value in a background thread, and a set() method for prepopulating.
+    """
+    _cache: T | object = _MISSING
+    _lock = threading.Lock()
+    _future: Future[T] | None = None
+
+    def wrapper() -> T:
+        nonlocal _cache, _future
+        with _lock:
+            if _cache is not _MISSING:
+                return _cache  # type: ignore[return-value]
+            if _future is not None:
+                _cache = _future.result()
+                _future = None
+                return _cache  # type: ignore[return-value]
+            _cache = func()
+            return _cache  # type: ignore[return-value]
+
+    def set_val(val: T) -> None:
+        nonlocal _cache
+        with _lock:
+            assert _cache is _MISSING
+            _cache = val
 
     def clear() -> None:
-        _cache.clear()
+        nonlocal _cache, _future
+        with _lock:
+            _cache = _MISSING
+            _future = None
+
+    def prefetch() -> None:
+        nonlocal _future
+        from concurrent.futures import ThreadPoolExecutor
+
+        with _lock:
+            if _cache is not _MISSING or _future is not None:
+                return
+            executor = ThreadPoolExecutor(max_workers=1)
+            _future = executor.submit(func)
+            executor.shutdown(wait=False)
 
     wrapper.set = set_val  # type: ignore[attr-defined]
     wrapper.clear = clear  # type: ignore[attr-defined]
+    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
     return wrapper
 
 
@@ -1701,6 +1729,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_hit_count",
@@ -1716,6 +1745,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 key,
             )
         if local_miss:
+            cache_stats.miss("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_miss_count",
@@ -1967,6 +1997,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
+                cache_stats.put("LocalFxGraphCache")
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)

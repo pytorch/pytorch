@@ -74,6 +74,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
@@ -1090,9 +1091,9 @@ class skip_if_cpp_wrapper:
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
 
-    def __call__(self, fn, *args, **kwargs):
+    def __call__(self, fn):
         @functools.wraps(fn)
-        def wrapper(test_self):
+        def wrapper(test_self, *args, **kwargs):
             if config.cpp_wrapper:
                 raise unittest.SkipTest(f"cpp wrapper bug to be fixed: {self.reason}")
             return fn(test_self, *args, **kwargs)
@@ -4076,6 +4077,11 @@ class CommonTemplate:
         if torch.device(self.device).type == GPU_TYPE:
             getattr(torch, GPU_TYPE).empty_cache()
 
+        # MPS routes eager eq/all through MPSGraph, which rejects tensor
+        # dims > INT_MAX
+        # TODO remove this once MPSGraph is gone from eq/all
+        if torch.device(self.device).type == "mps":
+            actual = actual.cpu()
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
@@ -5106,6 +5112,24 @@ class CommonTemplate:
             fn,
             (torch.randn([10]),),
         )
+
+    @requires_gpu()
+    def test_to_copy_fp64_to_no_fp64_device(self):
+        # See https://github.com/pytorch/pytorch/issues/180664
+        # When the target device does not support fp64, _to_copy should
+        # convert dtype on CPU before the device transfer so that no fp64
+        # buffer is allocated on the target device.
+        def fn(x):
+            return x.to(dtype=torch.float32, device=GPU_TYPE)
+
+        x = torch.randn(4, 4, dtype=torch.float64, device="cpu")
+        with patch("torch._inductor.utils.device_supports_fp64", return_value=False):
+            _, code = run_and_get_code(torch.compile(fn), x)
+
+        # The Triton kernel should not have any fp64 pointer arguments.
+        # Without the fix, the kernel signature would contain '*fp64'.
+        code = "\n".join(code)
+        self.assertNotIn("'*fp64'", code)
 
     @requires_gpu()
     @xfail_if_triton_cpu
@@ -7674,6 +7698,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 RuntimeError, r".*(not implemented|aoti_torch_).*"
             ):
                 c_fn(x)
+
+    def test_convolution_errors_on_input_weight_dtype_mismatch(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only")
+
+        def fn(x):
+            return torch.nn.functional.conv2d(x, weight, bias=None)
+
+        weight = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float32)
+        x = torch.randn((1, 1, 1, 1), device=self.device, dtype=torch.float16)
+        c_fn = torch.compile(fn)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Input type.*and weight type.*should be the same",
+        ):
+            c_fn(x)
 
     def test_log1p(self):
         def fn(x):
@@ -10707,7 +10748,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
-    @xfail_if_mps  # 100% are not close
     def test_like_rands(self):
         def fn(x):
             return torch.rand_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
@@ -10940,7 +10980,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
@@ -10972,7 +11012,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
@@ -13207,6 +13247,95 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         deterministic=deterministic,
                     )
 
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    @parametrize("dtype", test_dtypes)
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    def test_empty_deterministic(self, dtype):
+        def test_helper(fn, args):
+            cfunc = torch.compile(fn, fullgraph=True)
+
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
+                eager = fn(*args)
+                compiled = cfunc(*args)
+                torch.testing.assert_close(eager, compiled, equal_nan=True)
+
+        def fn():
+            return torch.empty(4, 4, device=self.device, dtype=dtype)
+
+        test_helper(fn, ())
+
+        def fn(x):
+            return torch.empty_like(x, device=self.device, dtype=dtype)
+
+        test_helper(fn, (torch.empty(4, 4, device=self.device),))
+
+        def fn():
+            return torch.empty_strided((2, 2), (2, 1), device=self.device, dtype=dtype)
+
+        test_helper(fn, ())
+
+        def fn():
+            return torch.empty_permuted(
+                (2, 3, 5), (1, 0, 2), device=self.device, dtype=dtype
+            )
+
+        test_helper(fn, ())
+
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    def test_empty_deterministic_pin_memory(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Test only runs on CPU")
+
+        def fn():
+            return torch.empty(
+                4, 4, device=self.device, dtype=torch.float32, pin_memory=True
+            )
+
+        cfunc = torch.compile(fn, fullgraph=True)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            eager = fn()
+            compiled = cfunc()
+            torch.testing.assert_close(eager, compiled, equal_nan=True)
+            self.assertTrue(eager.is_pinned())
+            self.assertTrue(compiled.is_pinned())
+
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    def test_deterministic_skip_fill_for_ops(self):
+        # Output buffers of real ops (e.g. add) should not get a deterministic
+        # NaN fill — only truly uninitialized buffers (torch.empty) need it.
+        def fn(a, b):
+            return a + b
+
+        a = torch.randn(4, 4, device=self.device)
+        b = torch.randn(4, 4, device=self.device)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            _, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+            code = " ".join(code)
+            # The deterministic path uses the generic empty_strided(... device=...)
+            # while the fast path uses empty_strided_cuda / empty_strided_cpu.
+            # Op output buffers should take the fast path even under deterministic mode.
+            if self.device == "cpu":
+                self.assertIn("empty_strided_cpu(", code)
+            else:
+                self.assertIn("empty_strided_cuda(", code)
+
+    @config.patch("cpp_wrapper", True)
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    def test_deterministic_fill_not_supported_cpp_wrapper(self):
+        def fn():
+            return torch.empty(4, 4, device=self.device)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            with self.assertRaisesRegex(RuntimeError, "not supported with cpp_wrapper"):
+                torch.compile(fn, fullgraph=True)()
+
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
@@ -14238,6 +14367,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             actual = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(ref, actual)
         self.assertTrue(called)
+
+    @requires_gpu()
+    @parametrize("inplace", [False, True])
+    def test_index_add_device_mismatch(self, inplace):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires GPU for device mismatch test")
+
+        def fn(x, source):
+            index = torch.randperm(x.size(0))
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 3, device=self.device)
+        source = torch.randn(10, 3, device=self.device)
+
+        with self.assertRaises(RuntimeError):
+            fn(x, source)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
 
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
@@ -16807,6 +16959,11 @@ if RUN_GPU:
                 expected_divisible = {
                     # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
+                }
+            elif SM100OrLater:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    0: (0, 1, 3),
                 }
             else:
                 self.assertEqual(len(kernels), 2)
