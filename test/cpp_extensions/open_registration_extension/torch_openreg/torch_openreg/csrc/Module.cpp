@@ -10,7 +10,7 @@
 #include <pybind11/pybind11.h>
 
 #if USE_DISTRIBUTED
-#include "distributed/ProcessGroupInit.hpp"
+#include "distributed/init.hpp"
 #endif
 #include <runtime/OpenRegFunctions.h>
 

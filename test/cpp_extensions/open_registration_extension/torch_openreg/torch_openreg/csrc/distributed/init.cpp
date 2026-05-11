@@ -4,7 +4,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <pybind11/chrono.h>
-#include <pybind11/pybind11.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
