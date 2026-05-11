@@ -10203,6 +10203,44 @@ class TestSDPA(TestCaseMPS):
         out = ep.module()(q2, mask2)
         self.assertEqual(out.shape, (1, 4, 7, 128))
 
+    @unittest.skipIf(IS_CI, "Score-matrix > 2^32 elements; ~50 GB peak RAM, too heavy for CI")
+    @unittest.skipIf(total_memory < 64_000_000_000, "Needs at least 64 GB system RAM")
+    @parametrize("variant", ["no_mask", "causal", "add_mask"])
+    def test_sdpa_large_score_matrix_179352(self, variant):
+        # Regression test for https://github.com/pytorch/pytorch/issues/179352.
+        # Apple's MPSGraph corrupts SDPA outputs when the score matrix
+        # B*H*Nq*Nkv exceeds 2^32 total elements. sdpa_general_mps now chunks
+        # along the Q axis to keep each impl call under the threshold; this
+        # exercises that path on the smallest "canary" shape from the issue.
+        torch.manual_seed(1729)
+        # 1 * 8 * 16384 * 65536 = 2^33 -- crosses the 2^32 score-element threshold.
+        B, H, Nq, Nkv, D = 1, 8, 16384, 65536, 64
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            q = torch.randn(B, H, Nq, D, dtype=torch.float32, device="mps")
+            k = torch.randn(B, H, Nkv, D, dtype=torch.float32, device="mps")
+            v = torch.randn(B, H, Nkv, D, dtype=torch.float32, device="mps")
+
+            mask = None
+            is_causal = False
+            if variant == "causal":
+                is_causal = True
+            elif variant == "add_mask":
+                mask = torch.randn(Nq, Nkv, dtype=torch.float32, device="mps") * 0.1
+
+            y = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
+            )
+            y_ref = F.scaled_dot_product_attention(
+                q.cpu(), k.cpu(), v.cpu(),
+                attn_mask=(mask.cpu() if mask is not None else None),
+                dropout_p=0.0, is_causal=is_causal,
+            )
+            # Tolerances are loose enough for fp32 reduction noise on a ~1B
+            # element score matrix but tight enough to catch the broken-path
+            # corruption (which produced max_rel_err ~ 1.0 on this shape).
+            self.assertEqual(y.cpu(), y_ref, atol=1e-3, rtol=1e-3)
+
     def test_sdpa_no_mask_causal_fp16_L7(self):
         self._test_sdpa_no_mask(True, torch.float16, 7)
 
