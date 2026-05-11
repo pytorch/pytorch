@@ -1,12 +1,12 @@
 # Owner(s): ["module: inductor"]
-from torch._inductor.heuristics.triton_template.base import TemplateConfigHeuristics
-from torch._inductor.heuristics.triton_template.registry import (
+from torch._inductor.heuristics.template.base import TemplateConfigHeuristics
+from torch._inductor.heuristics.template.registry import (
     _TEMPLATE_HEURISTIC_REGISTRY,
     clear_registry,
     get_template_heuristic,
     register_template_heuristic,
 )
-from torch._inductor.heuristics.triton_template.triton import BlackwellGPUGemmConfig
+from torch._inductor.heuristics.template.triton import BlackwellGPUGemmConfig
 from torch._inductor.test_case import run_tests, TestCase
 
 
