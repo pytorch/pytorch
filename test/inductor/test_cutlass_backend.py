@@ -144,10 +144,7 @@ def _maybe_patch_cutlass_dir_from_checkout(*, patch_env: bool = False):
                     )
                 stack.enter_context(
                     config.patch(
-                        {
-                            key: checkout_cutlass_dir_str
-                            for key in cutlass_dir_config_keys
-                        }
+                        dict.fromkeys(cutlass_dir_config_keys, checkout_cutlass_dir_str)
                     )
                 )
                 # config.patch is thread-local, but CUTLASS precompilation uses
