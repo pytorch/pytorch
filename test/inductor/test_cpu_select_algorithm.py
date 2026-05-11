@@ -3137,7 +3137,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         Test that qlinear_pointwise (unary) lowering correctly handles x_zp and
         x_scale when they are ComputedBuffers.
-
         """
         torch._dynamo.reset()
 
@@ -3183,6 +3182,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
             expected = mod(qx)
+            counters.clear()
             compiled_mod = torch.compile(mod)
             result = compiled_mod(qx)
 
@@ -3192,7 +3192,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         if not torch.version.hip:
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
 
     @skipIfNoONEDNN
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -3257,6 +3256,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
             expected = mod(qx, other)
+            counters.clear()
             compiled_mod = torch.compile(mod)
             result = compiled_mod(qx, other)
 
