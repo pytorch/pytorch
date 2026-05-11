@@ -118,7 +118,6 @@ Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output
   if (repeat.size(0) == 0) {
     return at::empty_like(repeat, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  Tensor repeat_ = repeat.contiguous();
   Tensor cumsum = repeat.cumsum(0);
   int64_t total = 0;
   if (output_size.has_value()) {
@@ -140,7 +139,7 @@ Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
 
       [computeEncoder setComputePipelineState:pipelineState];
-      mps::mtl_setArgs(computeEncoder, repeat_, cumsum, result, repeat.size(0));
+      mps::mtl_setArgs(computeEncoder, repeat, cumsum, result, repeat.stride(0));
       mps::mtl_dispatch1DJob(computeEncoder, pipelineState, repeat.size(0));
 
       getMPSProfiler().endProfileKernel(pipelineState);
