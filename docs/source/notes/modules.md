@@ -137,7 +137,7 @@ class Net(nn.Module):
     return x
 ```
 
-This module is composed of two "children" or "submodules" (\ `l0` and `l1`\ ) that define the layers of
+This module is composed of two "children" or "submodules" (`l0` and `l1`) that define the layers of
 the neural network and are utilized for computation within the module's `forward()` method. Immediate
 children of a module can be iterated through via a call to {func}`~torch.nn.Module.children` or
 {func}`~torch.nn.Module.named_children`:
@@ -283,7 +283,7 @@ In the next section, we give a full example of training a neural network.
 For more information, check out:
 
 - Library of PyTorch-provided modules: [torch.nn](https://pytorch.org/docs/stable/nn.html)
-- Defining neural net modules: https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html
+- Defining neural net modules: <https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html>
 
 (Neural Network Training with Modules)=
 ## Neural Network Training with Modules
@@ -329,7 +329,7 @@ key parts of training are present:
   - calls optimizer.step() to apply the gradients to the parameters.
 
 After the above snippet has been run, note that the network's parameters have changed. In particular, examining the
-value of `l1`\ 's `weight` parameter shows that its values are now much closer to 0 (as may be expected):
+value of `l1`'s `weight` parameter shows that its values are now much closer to 0 (as may be expected):
 
 ```{code-block} python
 print(net.l1.weight)
@@ -372,9 +372,9 @@ print('evaluation mode output: {}'.format(m(x)))
 ```
 Training neural networks can often be tricky. For more information, check out:
 
-- Using Optimizers: https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html.
-- Neural network training: https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html
-- Introduction to autograd: https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html
+- Using Optimizers: <https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html>.
+- Neural network training: <https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html>
+- Introduction to autograd: <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>
 
 ## Module State
 
@@ -398,8 +398,8 @@ module's parameters. For some modules, it may be useful to have state beyond par
 computation but is not learnable. For such cases, PyTorch provides the concept of "buffers", both "persistent"
 and "non-persistent". Following is an overview of the various types of state a module can have:
 
-- **Parameters**\ : learnable aspects of computation; contained within the `state_dict`
-* **Buffers**\ : non-learnable aspects of computation
+- **Parameters** : learnable aspects of computation; contained within the `state_dict`
+* **Buffers** : non-learnable aspects of computation
 
   - **Persistent** buffers: contained within the `state_dict` (i.e. serialized when saving & loading)
   - **Non-persistent** buffers: not contained within the `state_dict` (i.e. left out of serialization)
@@ -527,9 +527,9 @@ print(m_loaded.state_dict())
 
 For more information, check out:
 
-- Saving and loading: https://pytorch.org/tutorials/beginner/saving_loading_models.html
-- Serialization semantics: https://pytorch.org/docs/main/notes/serialization.html
-- What is a state dict? https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html
+- Saving and loading: <https://pytorch.org/tutorials/beginner/saving_loading_models.html>
+- Serialization semantics: <https://pytorch.org/docs/main/notes/serialization.html>
+- What is a state dict? <https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html>
 
 ## Module Initialization
 
@@ -575,7 +575,7 @@ in these areas for your custom module by conforming to the convention demonstrat
 
 For more information, check out:
 
-- Skipping module parameter initialization: https://pytorch.org/tutorials/prototype/skip_param_init.html
+- Skipping module parameter initialization: <https://pytorch.org/tutorials/prototype/skip_param_init.html>
 
 ## Module Hooks
 
