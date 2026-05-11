@@ -807,6 +807,13 @@ struct CachingHostAllocatorImpl {
   void maybe_cache_block(B* block, BlockPool& pool,
                          const std::shared_ptr<c10::GatheredContext>& context) {
     if (C10_UNLIKELY(record_history_.load(std::memory_order_relaxed))) {
+      // Unlike other record_trace call sites (where the block is exclusively
+      // owned by the calling thread, e.g., just allocated or being freed by
+      // sole owner), here the block is transitioning from event-pending to
+      // free and can be concurrently read (e.g., by getSegments).  The
+      // fine-grained per-block locking in the host allocator (vs. a single
+      // allocator lock in CUDACachingAllocator) means we must hold the
+      // block mutex to safely read/reset context_when_allocated_.
       std::lock_guard<std::mutex> g(block->mutex_);
       record_trace(
           TraceEntry::FREE_COMPLETED,
