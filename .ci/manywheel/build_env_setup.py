@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """GPU/toolchain environment setup (runs once before any wheel is built).
 
-When running on a standard manylinux container (no pre-installed GPU
-toolkits), installs CUDA, cuDNN, NCCL, MAGMA, cuSPARSELt, etc. via the
-.ci/docker/common/install_*.sh scripts.
+Assumes the manywheel builder image (.ci/docker/manywheel/Dockerfile_2_28)
+has already installed CUDA, cuDNN, NCCL, MAGMA, cuSPARSELt, MKL, and the
+OS packages the build needs. This script only:
+
+  * Installs the two packages historically added at wheel-build time
+    (zip, openssl) to match the legacy build_common.sh contract.
+  * Wires the symlinks/env required to target the requested CUDA version
+    among those baked into the image.
 
 Build-flag exports (USE_CUDA, TH_BINARY_BUILD, ...) are written to the file
 given by --env-out; the caller (build.sh) sources it so the values reach
@@ -22,7 +27,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -147,53 +151,19 @@ def os_name() -> str:
 
 
 def install_os_packages() -> None:
+    # Everything else the build needs is baked into the manywheel image
+    # (.ci/docker/manywheel/Dockerfile_2_28). Only zip + openssl are not,
+    # matching the legacy build_common.sh contract.
     name = os_name()
     if any(distro in name for distro in ("AlmaLinux", "CentOS", "Red Hat")):
         subprocess.run(
-            [
-                "yum",
-                "install",
-                "-q",
-                "-y",
-                "zip",
-                "openssl",
-                "openssl-devel",
-                "sudo",
-                "wget",
-                "curl",
-                "perl",
-                "util-linux",
-                "xz",
-                "bzip2",
-                "git",
-                "patch",
-                "which",
-                "zlib-devel",
-            ],
+            ["yum", "install", "-q", "-y", "zip", "openssl"],
             check=True,
         )
     elif "Ubuntu" in name:
-        # Disable nvidia apt repos that may 404 on plain Ubuntu images
-        for entry in Path("/etc/apt").rglob("*.list"):
-            text = entry.read_text()
-            new = "\n".join(
-                f"# {line}" if "nvidia" in line else line for line in text.splitlines()
-            )
-            if new != text:
-                entry.write_text(new + ("\n" if text.endswith("\n") else ""))
         subprocess.run(["apt-get", "update", "-qq"], check=True)
         subprocess.run(
-            [
-                "apt-get",
-                "-y",
-                "-qq",
-                "install",
-                "zip",
-                "openssl",
-                "wget",
-                "curl",
-                "git",
-            ],
+            ["apt-get", "-y", "-qq", "install", "zip", "openssl"],
             check=True,
         )
 
@@ -234,58 +204,35 @@ def cuda_version_from_env() -> str:
     return arch_version.removesuffix("-aarch64")
 
 
-def install_cuda_toolkit(cuda_version: str) -> None:
-    """Stage install_cuda.sh + its required siblings, then run install_cuda + install_magma."""
-    root = repo_root()
-    docker_common = root / ".ci/docker/common"
-    pins = root / ".ci/docker/ci_commit_pins"
-
-    with tempfile.TemporaryDirectory() as tmp:
-        stage = Path(tmp)
-        for name in ("install_cuda.sh", "install_nccl.sh", "install_cusparselt.sh"):
-            shutil.copy(docker_common / name, stage / name)
-        (stage / "ci_commit_pins").mkdir()
-        for nccl_pin in pins.glob("nccl*"):
-            shutil.copy(nccl_pin, stage / "ci_commit_pins" / nccl_pin.name)
-
-        subprocess.run(["bash", "install_cuda.sh", cuda_version], cwd=stage, check=True)
-
-    subprocess.run(
-        ["bash", str(docker_common / "install_magma.sh"), cuda_version], check=True
-    )
-    print(f"CUDA {cuda_version} toolkit installation complete")
-
-
 def setup_cuda(cuda_version: str) -> None:
     arch = platform.machine()
     cuda_dir = Path(f"/usr/local/cuda-{cuda_version}")
 
     if not cuda_dir.is_dir():
-        print(f"CUDA {cuda_version} not found, installing from scratch...")
-        install_cuda_toolkit(cuda_version)
-    else:
-        print(f"CUDA {cuda_version} already installed, switching symlinks...")
-        symlink = Path("/usr/local/cuda")
-        if symlink.is_symlink() or symlink.exists():
-            symlink.unlink()
-        symlink.symlink_to(cuda_dir)
-
-    if arch != "aarch64" and not (cuda_dir / "magma").is_dir():
-        print("MAGMA not found, installing...")
-        subprocess.run(
-            [
-                "bash",
-                str(repo_root() / ".ci/docker/common/install_magma.sh"),
-                cuda_version,
-            ],
-            check=True,
+        sys.exit(
+            f"CUDA {cuda_version} not found at {cuda_dir}. "
+            "The manywheel builder image is expected to ship this toolkit; "
+            "rebuild .ci/docker/manywheel/Dockerfile_2_28 if it is missing."
         )
 
+    print(f"CUDA {cuda_version} found, switching symlinks...")
+    symlink = Path("/usr/local/cuda")
+    if symlink.is_symlink() or symlink.exists():
+        symlink.unlink()
+    symlink.symlink_to(cuda_dir)
+
     if arch != "aarch64":
+        magma_dir = cuda_dir / "magma"
+        if not magma_dir.is_dir():
+            sys.exit(
+                f"MAGMA not found at {magma_dir}. "
+                "The manywheel builder image is expected to ship MAGMA; "
+                "rebuild .ci/docker/manywheel/Dockerfile_2_28 if it is missing."
+            )
         magma_link = Path("/usr/local/magma")
         if magma_link.is_symlink() or magma_link.exists():
             magma_link.unlink()
-        magma_link.symlink_to(cuda_dir / "magma")
+        magma_link.symlink_to(magma_dir)
 
     create_cudnn_unversioned_symlinks()
     verify_cudnn()
@@ -368,12 +315,11 @@ def main() -> None:
 
     ensure_pip_on_path()
 
-    # MKL: x86_64 only; aarch64 uses OpenBLAS/ACL from the builder image.
     if arch == "x86_64" and not Path("/opt/intel/lib").is_dir():
-        print("MKL not found, installing...")
-        subprocess.run(
-            ["bash", str(repo_root() / ".ci/docker/common/install_mkl.sh")],
-            check=True,
+        sys.exit(
+            "MKL not found at /opt/intel/lib. The manywheel builder image is "
+            "expected to ship MKL; rebuild .ci/docker/manywheel/Dockerfile_2_28 "
+            "if it is missing."
         )
 
     if gpu_arch_type in ("cuda", "cuda-aarch64"):
