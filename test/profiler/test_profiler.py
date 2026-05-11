@@ -73,10 +73,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
-    TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
-    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -2092,7 +2090,9 @@ class TestProfilerDevice(TestCase):
         with _profile(use_device=device_type if use_device else None, use_kineto=True):
             self.payload(device=device)
 
-        with _profile(use_device=device_type if use_device else None, use_kineto=True) as p:
+        with _profile(
+            use_device=device_type if use_device else None, use_kineto=True
+        ) as p:
             self.payload(device=device)
 
         self.assertTrue("aten::mm" in str(p))
@@ -2321,7 +2321,9 @@ class TestProfilerDevice(TestCase):
 
         def trace_handler(p):
             output = p.key_averages().table(
-                sort_by="self_device_time_total" if use_device else "self_cpu_time_total",
+                sort_by="self_device_time_total"
+                if use_device
+                else "self_cpu_time_total",
                 row_limit=-1,
             )
             called_num[0] += 1
@@ -2804,7 +2806,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             from torch._C import _get_privateuse1_backend_name
 
             device_type_enum = getattr(DeviceType, device_type.upper(), None)
-            if device_type_enum is None and device_type == _get_privateuse1_backend_name():
+            if (
+                device_type_enum is None
+                and device_type == _get_privateuse1_backend_name()
+            ):
                 device_type_enum = DeviceType.PrivateUse1
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
