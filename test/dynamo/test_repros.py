@@ -105,11 +105,9 @@ if HAS_MSGSPEC:
     import msgspec
 
 
-HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
-if HAS_OMEGACONG:
+HAS_OMEGACONF = importlib.util.find_spec("omegaconf")
+if HAS_OMEGACONF:
     from omegaconf import OmegaConf
-
-HAS_CUDA = torch.cuda.is_available()
 
 
 def exists(val):
@@ -6628,7 +6626,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x), opt_fn(x))
 
-    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    @unittest.skipIf(not HAS_OMEGACONF, "missing omegaconf package")
     def test_omegaconf_dictconfig(self):
         def fn(cfg, x):
             a = cfg["foo"].a * x
@@ -6648,7 +6646,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(config, x), opt_fn(config, x))
         self.assertEqual(cloned_config.baz, 4)
 
-    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
+    @unittest.skipIf(not HAS_OMEGACONF, "missing omegaconf package")
     def test_omegaconf_listconfig_contains(self):
         def fn(cfg, x):
             if 1 in cfg:
@@ -7269,7 +7267,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
-    @torch._dynamo.config.patch("use_recursive_dict_tags_for_guards", True)
     def test_guard_tag_safe_tensor_metadata_segfault(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180741
         # When a submodule becomes a tag-safe root, the recording pass stashes
