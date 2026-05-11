@@ -1479,6 +1479,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
             if fill_value.is_tensor():
+                if fill_value.python_type() is torch.nn.Parameter:
+                    raise_type_error_exc(
+                        tx,
+                        "torch.full(): fill_value must be a Python number, not torch.nn.Parameter. "
+                        "Use a scalar such as fill_value=param.item().",
+                    )
+                if torch.distributed.is_available() and (
+                    fill_value.python_type() is torch.distributed.tensor.DTensor
+                ):
+                    from ..polyfills.tensor import dtensor_full_via_local_full
+
+                    return tx.inline_user_function_return(
+                        VariableTracker.build(tx, dtensor_full_via_local_full),
+                        [fill_value, size],
+                        kwargs,
+                    )
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
