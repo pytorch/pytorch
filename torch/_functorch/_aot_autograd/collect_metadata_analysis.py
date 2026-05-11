@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from torch._subclasses.complex_tensor._core import ComplexTensor
+
 
 """
 This module is one of the analysis modules - it takes as input a function or graph
@@ -188,6 +190,8 @@ def run_functionalized_fw_and_collect_metadata(
 
     @simple_wraps(f)
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
+        from .. import config
+
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
             isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
@@ -214,6 +218,21 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending, disable_autocast_cache():
+            if config.enable_complex_wrapper:
+                complex_tensor_indices = tuple(
+                    i for i, t in enumerate(flat_args) if t.dtype.is_complex
+                )
+                flat_args = tuple(
+                    ComplexTensor.from_interleaved(t)
+                    if isinstance(t, Tensor)
+                    and t.dtype.is_complex
+                    and not isinstance(t, ComplexTensor)
+                    else t
+                    for t in flat_args
+                )
+            else:
+                complex_tensor_indices = None
+
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -877,6 +896,7 @@ from a multi-output view call"
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
+            complex_tensor_indices=complex_tensor_indices,
         )
         return metadata
 

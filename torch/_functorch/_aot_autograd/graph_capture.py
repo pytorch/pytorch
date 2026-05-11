@@ -224,6 +224,10 @@ def _prepare_graph_capture_tracing(
 ) -> _GraphCaptureTracingResult:
     if aot_config.disable_functionalization:
         updated_flat_args, updated_flat_args_descs = flat_args, flat_args_descs
+        if config.enable_complex_wrapper:
+            raise RuntimeError(
+                "ComplexTensor wrapper is enabled but cannot be applied, as it requires functionalization."
+            )
     else:
         fn_to_trace, updated_flat_args, updated_flat_args_descs = (
             create_functionalized_fn(
@@ -237,16 +241,16 @@ def _prepare_graph_capture_tracing(
             )
         )
 
-    complex_wrapper = ComplexWrapper()
-    flat_fn, updated_flat_args, updated_flat_args_descs, fw_metadata = (
-        complex_wrapper.pre_compile(
-            flat_fn,
-            updated_flat_args,
-            updated_flat_args_descs,
-            aot_config=aot_config,
-            fw_metadata=fw_metadata,
+        complex_wrapper = ComplexWrapper()
+        flat_fn, updated_flat_args, updated_flat_args_descs, fw_metadata = (
+            complex_wrapper.pre_compile(
+                flat_fn,
+                updated_flat_args,
+                updated_flat_args_descs,
+                aot_config=aot_config,
+                fw_metadata=fw_metadata,
+            )
         )
-    )
 
     subclass_tracing_info = aot_dispatch_subclass(
         fn_to_trace,
@@ -270,7 +274,6 @@ def _prepare_graph_capture_tracing(
                 trace_joint=trace_joint,
             )
         )
-
     return _GraphCaptureTracingResult(
         fn_to_trace=fn_to_trace,
         flat_args=updated_flat_args,

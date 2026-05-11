@@ -554,6 +554,9 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    # a list of indices of inputs that are complex tensor inputs in the graph
+    complex_tensor_indices: tuple[int, ...] | None = None
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -1166,8 +1169,6 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
-    # Whether the complex wrapper has been applied to the function.
-    _did_wrap_complex: bool = False
 
     def to_cacheable(self) -> CacheableAOTConfig:
         return CacheableAOTConfig(

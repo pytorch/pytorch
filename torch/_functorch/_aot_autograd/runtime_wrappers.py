@@ -12,6 +12,7 @@ import copy
 import functools
 import itertools
 import pprint
+import textwrap
 import typing
 import warnings
 from collections.abc import Callable, Generator, Sequence
@@ -22,8 +23,6 @@ from typing import Any
 
 import torch
 import torch.fx as fx
-import torch.utils._pytree as pytree
-import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
@@ -1457,9 +1456,7 @@ class ComplexWrapper(CompilerWrapper):
                 new_args.append(arg)
             else:
                 self.wrapped_arg_indices.append(i)
-                complex_arg = ComplexTensor.from_interleaved(arg)
-                new_args.append(complex_arg.re)
-                new_args.append(complex_arg.im)
+                new_args.append(ComplexTensor.from_interleaved(arg))
         return new_args
 
     def pre_compile(
@@ -1480,9 +1477,7 @@ class ComplexWrapper(CompilerWrapper):
                 outs, out_descs = call_and_expect_output_descs(flat_fn, args)
             return outs, out_descs
 
-        wrapped_args = pytree.tree_map(self.wrap, flat_args)
-        if len(self.wrapped_arg_indices) == 0:
-            return flat_fn, flat_args, flat_args_descs, fw_metadata
+        wrapped_args = self.wrap_args(flat_args)
         wrapped_args_descs = [
             ComplexWrappedAOTInput(inp_desc)
             if i in self.wrapped_arg_indices
@@ -1495,7 +1490,6 @@ class ComplexWrapper(CompilerWrapper):
             static_input_indices=aot_config.static_input_indices,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*wrapped_args)
-        aot_config._did_wrap_complex = True
         return wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata
 
     def post_compile(
@@ -1505,18 +1499,40 @@ class ComplexWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        if not (config.enable_complex_wrapper and aot_config._did_wrap_complex):
+        if (
+            not config.enable_complex_wrapper
+            or runtime_metadata.complex_tensor_indices is None
+        ):
             return compiled_fn
 
-        @wraps(compiled_fn)
-        def wrapped_compiled_fn(args: list[Any]):
-            wrapped_args = self.wrap_args(args)
-            args.clear()
-            outs = compiled_fn(wrapped_args)
-            outs_unwrapped = pytree.tree_map(self.unwrap, outs)
-            return outs_unwrapped
+        from .subclass_codegen import _compile_and_exec_source
 
-        return wrapped_compiled_fn
+        source = textwrap.dedent(
+            r"""
+            def _complex_tensor_wrapper(args):
+                new_args = [_wrap_arg(arg) for arg in args]
+                args.clear()
+                outs = _compiled_fn_(new_args)
+                if outs is None:
+                    return None
+                return type(outs)(_unwrap_out(out) for out in outs)
+            """.strip()
+        )
+
+        inner_fn = _compile_and_exec_source(
+            source,
+            {
+                "_compiled_fn_": compiled_fn,
+                "_wrap_arg": self.wrap,
+                "_unwrap_out": self.unwrap,
+            },
+            "_complex_tensor_wrapper",
+            "complex_tensor_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+
+        return inner_fn
 
 
 @dataclass
