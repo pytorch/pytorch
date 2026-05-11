@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -1218,6 +1219,79 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         result = traced(inp)
         expected = inp + 1
         torch.testing.assert_close(result, expected)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_sac_cached_value_fifo_mismatch(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/175258
+
+        When SAC is used with wrap_inductor_compiled_regions=True and a global
+        cache causes different op sequences between forward and recompute, the
+        SAC FIFO queue should not return the wrong cached value.
+
+        The bug: all inductor_compiled_code HOP calls share one FIFO queue keyed
+        by func identity. If a compiled region is skipped during recompute
+        (because its result was cached in a global dict during forward), the queue
+        returns the wrong entry, causing DTensor.__tensor_unflatten__ to receive
+        int tensors when it expects float tensors.
+        """
+        import torch.distributed as dist
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        fake_store = FakeStore()
+        dist.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
+
+        try:
+            mesh = init_device_mesh("cpu", mesh_shape=(1,), mesh_dim_names=("dp",))
+
+            @torch.compile(dynamic=False, fullgraph=True)
+            def compute_int_stuff(n):
+                return torch.arange(n, dtype=torch.int32)
+
+            @torch.compile(dynamic=False, fullgraph=True)
+            def compute_float(q, cached_ints):
+                ql = q.to_local()
+                out = ql * cached_ints.float().sum()
+                return DTensor.from_local(
+                    out, device_mesh=q.device_mesh, placements=q.placements
+                )
+
+            _cache: dict = {}
+
+            def outer_fn(x):
+                # Forward: cache miss, compute_int_stuff runs as inductor_compiled_code.
+                # Recompute: cache hit, compute_int_stuff is skipped; only compute_float
+                # runs. With a single shared FIFO queue this would pop the int-tensor
+                # entry and feed it to compute_float.
+                if "data" not in _cache:
+                    _cache["data"] = compute_int_stuff(x.shape[-1])
+                return compute_float(x, _cache["data"])
+
+            def policy_fn(ctx, op, *args, **kwargs):
+                if isinstance(op, torch._ops.HigherOrderOperator):
+                    if op.name() == "inductor_compiled_code":
+                        return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+
+            x = DTensor.from_local(
+                torch.randn(4, 4, dtype=torch.float32, requires_grad=True),
+                mesh,
+                (Replicate(),),
+            )
+
+            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+                out = checkpoint(
+                    outer_fn, x, use_reentrant=False, context_fn=context_fn
+                )
+                out.sum().backward()
+        finally:
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
