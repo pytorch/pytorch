@@ -8,8 +8,7 @@ import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("distributed package not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("distributed package not available, skipping tests")
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 

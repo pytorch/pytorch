@@ -7,6 +7,7 @@
 
 import copy
 import sys
+import unittest
 from contextlib import contextmanager, nullcontext
 from typing import Any, cast
 
@@ -17,8 +18,7 @@ import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 from torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook import (
     hook_with_zero_step,
     hook_with_zero_step_interleaved,

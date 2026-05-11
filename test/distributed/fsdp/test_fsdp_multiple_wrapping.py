@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+import unittest
 
 import torch
 from torch import distributed as dist
@@ -15,14 +16,9 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_AS
 device_type = torch.device(get_devtype())
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 class InnerModel(Module):

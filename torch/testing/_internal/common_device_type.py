@@ -69,6 +69,32 @@ except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
 
+try:
+    import pytest as _pytest_module
+except ImportError:
+    _pytest_module = None  # type: ignore[assignment]
+
+
+def _set_device_restriction(fn, device_types):
+    if isinstance(device_types, str):
+        device_types = [device_types]
+    fn._only_on_devices = list(device_types)
+
+
+def _apply_pytest_device_markers(fn, device_type):
+    # Tag each device-instantiated test with its device_type as a pytest marker
+    # so downstream tools (e.g. tools/zippo) can route tests to the runner that
+    # matches their instantiation. Tests are coupled to their instantiation's
+    # device (the class sets self.device_type, the test passes that to the body),
+    # so the marker should track that, not @onlyOn. If @onlyOn excludes the
+    # instantiation's device the test will skip at runtime — that's a small
+    # constant-cost waste, accepted to keep the marker set complete.
+    if _pytest_module is None:
+        return
+    marks = list(getattr(fn, "pytestmark", []))
+    marks.append(getattr(_pytest_module.mark, device_type))
+    fn.pytestmark = marks
+
 log = logging.getLogger(__name__)
 
 # Note [Writing Test Templates]
@@ -559,6 +585,7 @@ class DeviceTypeTestBase(TestCase):
 
                 return result
 
+            _apply_pytest_device_markers(instantiated_test, cls.device_type)
             if hasattr(cls, name):
                 raise AssertionError(f"Redefinition of test {name}")
             setattr(cls, name, instantiated_test)
@@ -1579,6 +1606,7 @@ class onlyOn:
 
             return fn(slf, *args, **kwargs)
 
+        _set_device_restriction(only_fn, self.device_type)
         return only_fn
 
 
@@ -1825,6 +1853,7 @@ def onlyAccelerator(fn):
             raise unittest.SkipTest(reason)
         return fn(self, *args, **kwargs)
 
+    _set_device_restriction(only_fn, "accelerator")
     return only_fn
 
 
@@ -1837,6 +1866,9 @@ def onlyCUDAAndPRIVATEUSE1(fn):
 
         return fn(self, *args, **kwargs)
 
+    _set_device_restriction(
+        only_fn, ["cuda", torch._C._get_privateuse1_backend_name()]
+    )
     return only_fn
 
 

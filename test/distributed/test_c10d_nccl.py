@@ -9,6 +9,7 @@ import random
 import re
 import signal
 import sys
+import unittest
 import tempfile
 import threading
 import time
@@ -26,8 +27,7 @@ from torch.distributed.distributed_c10d import SHRINK_ABORT as NCCL_SHRINK_ABORT
 
 
 if not c10d.is_available() or not c10d.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d NCCL not available, skipping tests")
 
 
 import test_c10d_common
@@ -81,10 +81,7 @@ from torch.testing._internal.common_utils import (
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip ASAN as torch + multiprocessing spawn have known issues")
 
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None

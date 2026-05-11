@@ -4,6 +4,7 @@ import contextlib
 import itertools
 import os
 import sys
+import unittest
 from functools import partial
 from itertools import product
 from typing import Any
@@ -57,15 +58,10 @@ skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 # Various mixed precision configs to test under.
 default_mp = MixedPrecision(

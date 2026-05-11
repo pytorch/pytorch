@@ -17,3 +17,4 @@ psutil
 spin
 sympy>=1.13.3
 wheel
+pytest>=9.0.3,<10.0

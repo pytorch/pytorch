@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import unittest
 import warnings
 
 import torch
@@ -8,8 +9,7 @@ import torch.distributed as dist
 
 
 if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d NCCL not available, skipping tests")
 
 try:
     from torch.testing._internal.common_distributed import (
@@ -17,8 +17,7 @@ try:
         skip_if_lt_x_gpu,
     )
 except ImportError:
-    print("common_distributed not importable, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("common_distributed not importable, skipping tests")
 
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase

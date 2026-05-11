@@ -2,6 +2,7 @@
 
 import io
 import sys
+import unittest
 import traceback
 
 import torch
@@ -37,11 +38,7 @@ from torch.testing._internal.distributed.distributed_utils import with_fake_comm
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 def create_sharded_tensor(rank, world_size, shards_per_rank):

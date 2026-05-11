@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -8,8 +9,7 @@ from torch import nn
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.distributed.algorithms.ddp_comm_hooks import (
     DDPCommHookType,
@@ -25,8 +25,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_AS
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Multiprocessing spawn is not compatible with dev/dbg asan")
 
 
 device_type = (

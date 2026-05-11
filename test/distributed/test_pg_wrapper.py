@@ -12,8 +12,7 @@ from torch._C._distributed_c10d import _ProcessGroupWrapper
 
 
 if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d not available, skipping tests")
 
 from test_c10d_common import LOOPBACK
 

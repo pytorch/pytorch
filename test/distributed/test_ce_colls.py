@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -13,8 +14,7 @@ from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_t
 
 
 if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d NCCL not available, skipping tests")
 
 
 # NCCL Copy Engine Collectives

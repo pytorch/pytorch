@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+import unittest
 from functools import reduce
 
 import torch
@@ -15,8 +16,7 @@ import torch.distributed as c10d
 
 
 if not c10d.is_available() or not c10d.is_ucc_available():
-    print("c10d UCC not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("c10d UCC not available, skipping tests")
 
 import test_c10d_common
 from test_c10d_common import (

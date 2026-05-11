@@ -17,8 +17,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,

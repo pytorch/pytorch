@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 from contextlib import closing
 
 import torch.distributed as dist
@@ -10,8 +11,7 @@ from torch.distributed.elastic.utils import get_socket_with_port
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -25,10 +25,7 @@ def path(script):
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip ASAN as torch + multiprocessing spawn have known issues")
 
 
 class TestDistributedLaunch(TestCase):

@@ -3,6 +3,7 @@
 import io
 import itertools
 import sys
+import unittest
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
@@ -69,15 +70,10 @@ from torch.testing._internal.common_utils import (
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 INNER_SHAPE = [4, 4]
 OUTER_SHAPE = [4, 5]

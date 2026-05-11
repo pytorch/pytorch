@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -28,11 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 
 class TestStorageWriter(StorageWriter):

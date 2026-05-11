@@ -3,6 +3,7 @@
 import contextlib
 import os
 import sys
+import unittest
 from typing import Any
 
 import torch
@@ -10,8 +11,7 @@ import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.testing._internal.common_distributed import (
@@ -22,11 +22,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_AS
 
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print(
-        "Skip dev-asan as torch + multiprocessing spawn have known issues",
-        file=sys.stderr,
-    )
-    sys.exit(0)
+    raise unittest.SkipTest("Skip dev-asan as torch + multiprocessing spawn have known issues")
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))

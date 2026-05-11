@@ -46,8 +46,7 @@ def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_wor
 
 
 if IS_WINDOWS or IS_MACOS:
-    print("tests incompatible with tsan or asan", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("tests incompatible with tsan or asan")
 
 
 class DistributedUtilTest(TestCase):

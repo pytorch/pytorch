@@ -2,14 +2,14 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("Distributed not available, skipping tests")
 
 from torch.testing._internal.common_utils import IS_CI, run_tests
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
