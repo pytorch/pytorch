@@ -210,6 +210,7 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    MemberDescriptorVariable,
     MethodWrapperVariable,
     SysFunctionVariable,
     TritonKernelVariable,
@@ -353,6 +354,12 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     # BuiltinMethodType also covers module-level C functions like len and
     # torch.add.  Keep those on the existing function/trace-rule path.
     if method_self is None or isinstance(method_self, types.ModuleType):
+        return None
+
+    # random.Random methods mutate RNG state.  Existing random handling either
+    # records RandomValueSource calls from a RandomVariable, or graph-breaks for
+    # pre-bound module helpers like random.random.
+    if isinstance(method_self, random.Random):
         return None
 
     # BoundBuiltinMethodVariable needs the descriptor that created this bound
@@ -1538,6 +1545,8 @@ class VariableBuilder:
             # accesses. Since these are unlikely to change during the program
             # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
+        elif isinstance(value, types.MemberDescriptorType):
+            return MemberDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -4604,6 +4613,9 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+        handlers[types.MemberDescriptorType] = (
+            lambda tx, value: MemberDescriptorVariable(value)
         )
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
