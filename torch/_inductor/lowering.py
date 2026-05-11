@@ -963,7 +963,7 @@ def _foreach_map(subgraph, *args, **kwargs):
     For non-pointwise ops (e.g. mm) that cannot be fused, we fall back to FallbackSubgraphLowering
     which delegates buffer creation to the root graph and skips horizontal fusion registration.
     """
-    from .exc import SubgraphLoweringException
+    from .exc import SubgraphBufferCreationException
     from .subgraph_lowering import FallbackSubgraphLowering, PointwiseSubgraphLowering
 
     inputs = args
@@ -973,8 +973,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
         with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
             pw_subgraph.run(*inputs)
-        sub_outputs = pw_subgraph.graph_outputs
-    except SubgraphLoweringException:
+    except SubgraphBufferCreationException:
         fallback_subgraph = FallbackSubgraphLowering(gm, root_graph_lowering=V.graph)
         with V.set_graph_handler(fallback_subgraph):  # type: ignore[arg-type]
             fallback_subgraph.run(*inputs)

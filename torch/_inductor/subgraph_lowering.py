@@ -14,7 +14,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from . import ir
-from .exc import SubgraphLoweringException
+from .exc import SubgraphBufferCreationException, SubgraphLoweringException
 from .graph import GraphLowering
 from .ops_handler import OpsHandler, SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
@@ -92,7 +92,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             name = self.root_graph.register_buffer(buffer, set_name=set_name)
             return name
         else:
-            raise SubgraphLoweringException(
+            raise SubgraphBufferCreationException(
                 "Buffers cannot be created while lowering a pointwise subgraph. "
                 "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
                 "but it could also be a bug. Please file a bug report if you think this should be supportable."
