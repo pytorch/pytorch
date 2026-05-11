@@ -12,6 +12,8 @@
 
 namespace at::native {
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+
 namespace {
 
 template <typename IndexType>
@@ -122,7 +124,6 @@ void launch_populate_cublas_grouped_args(
 
 } // namespace
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
 cublasGroupedArgs::cublasGroupedArgs(
     const Tensor& mat1,
     const Tensor& mat2,
@@ -255,6 +256,7 @@ cublasGroupedArgs::cublasGroupedArgs(
       d_offs_stride, d_idx_stride,
       stream);
 }
+
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
 
 } // namespace at::native

@@ -1,10 +1,12 @@
 #pragma once
 
-#include <cuda.h>
-
 #include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/ScalarType.h>
+
+#if !defined(USE_ROCM)
+#include <cuda.h>
+#endif
 
 namespace at::native {
 
