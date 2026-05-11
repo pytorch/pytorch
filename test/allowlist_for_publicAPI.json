@@ -36,6 +36,7 @@
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn",
     "torch.distributed.tensor.device_mesh": "torch.distributed.device_mesh"
   },
+  "torch.cfg": [],
   "torch.backends": [
     "contextmanager"
   ],

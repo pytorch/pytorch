@@ -1126,4 +1126,5 @@ Operator Tags
 .. toctree::
     :hidden:
 
+    torch.cfg.rst
     torch.aliases.md
