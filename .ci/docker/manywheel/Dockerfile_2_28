@@ -18,6 +18,16 @@ RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 
+# Build CPython 3.15.0 / 3.15.0t from source; quay.io/pypa does not ship them yet.
+# openssl-devel is needed only to build CPython's _ssl module; install and remove
+# it in the same layer so it isn't carried into the base stage.
+COPY ./common/install_cpython.sh install_cpython.sh
+RUN yum install -y openssl-devel && \
+    CPYTHON_VERSIONS="3.15.0 3.15.0t" bash ./install_cpython.sh && \
+    yum remove -y openssl-devel && \
+    yum clean all && \
+    rm install_cpython.sh
+
 FROM base as cuda
 ARG BASE_CUDA_VERSION=12.6
 # Install CUDA
