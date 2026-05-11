@@ -9,21 +9,25 @@
 #define C10_METAL_CONSTEXPR constexpr
 #endif
 
+// Per-type X-macro: (EnumName, EnumValue, MetalType). Drives the ScalarType
+// enum (host + device) and the runtime-typed read/store helpers in indexing.h
+// (device only). MetalType is the in-shader spelling and is only meaningful
+// in Metal shader compilation contexts.
 #define C10_METAL_ALL_TYPES_FUNCTOR(_) \
-  _(Byte, 0)                           \
-  _(Char, 1)                           \
-  _(Short, 2)                          \
-  _(Int, 3)                            \
-  _(Long, 4)                           \
-  _(Half, 5)                           \
-  _(Float, 6)                          \
-  _(ComplexHalf, 8)                    \
-  _(ComplexFloat, 9)                   \
-  _(Bool, 11)                          \
-  _(BFloat16, 15)                      \
-  _(UInt16, 27)                        \
-  _(UInt32, 28)                        \
-  _(UInt64, 29)
+  _(Byte, 0, uchar)                    \
+  _(Char, 1, char)                     \
+  _(Short, 2, short)                   \
+  _(Int, 3, int)                       \
+  _(Long, 4, long)                     \
+  _(Half, 5, half)                     \
+  _(Float, 6, float)                   \
+  _(ComplexHalf, 8, half2)             \
+  _(ComplexFloat, 9, float2)           \
+  _(Bool, 11, bool)                    \
+  _(BFloat16, 15, bfloat)              \
+  _(UInt16, 27, uint16_t)              \
+  _(UInt32, 28, uint32_t)              \
+  _(UInt64, 29, uint64_t)
 
 namespace c10 {
 namespace metal {
@@ -61,7 +65,7 @@ inline T round_up(T a, T b) {
 }
 
 enum class ScalarType {
-#define _DEFINE_ENUM_VAL_(_v, _n) _v = _n,
+#define _DEFINE_ENUM_VAL_(_v, _n, _t) _v = _n,
   C10_METAL_ALL_TYPES_FUNCTOR(_DEFINE_ENUM_VAL_)
 #undef _DEFINE_ENUM_VAL_
 };

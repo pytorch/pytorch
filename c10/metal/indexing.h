@@ -216,42 +216,36 @@ inline T val_at_offs(device void* ptr, long offs) {
 template <typename T, typename P>
 inline T val_at_offs(P ptr, long offs, ScalarType type) {
   switch (type) {
-    case ScalarType::Bool:
-      return cast_to<T>(val_at_offs<bool>(ptr, offs));
-    case ScalarType::Byte:
-      return cast_to<T>(val_at_offs<uchar>(ptr, offs));
-    case ScalarType::Char:
-      return cast_to<T>(val_at_offs<char>(ptr, offs));
-    case ScalarType::Short:
-      return cast_to<T>(val_at_offs<short>(ptr, offs));
-    case ScalarType::UInt16:
-      return cast_to<T>(val_at_offs<uint16_t>(ptr, offs));
-    case ScalarType::Int:
-      return cast_to<T>(val_at_offs<int>(ptr, offs));
-    case ScalarType::UInt32:
-      return cast_to<T>(val_at_offs<uint32_t>(ptr, offs));
-    case ScalarType::Long:
-      return cast_to<T>(val_at_offs<long>(ptr, offs));
-    case ScalarType::UInt64:
-      return cast_to<T>(val_at_offs<uint64_t>(ptr, offs));
-    // Floats
-    case ScalarType::Float:
-      return cast_to<T>(val_at_offs<float>(ptr, offs));
-    case ScalarType::Half:
-      return cast_to<T>(val_at_offs<half>(ptr, offs));
-    case ScalarType::BFloat16:
-      return cast_to<T>(val_at_offs<bfloat>(ptr, offs));
-      // Complex
-    case ScalarType::ComplexHalf:
-      return cast_to<T>(val_at_offs<half2>(ptr, offs));
-    case ScalarType::ComplexFloat:
-      return cast_to<T>(val_at_offs<float2>(ptr, offs));
+#define _CASE_(EnumName, EnumValue, MetalType) \
+  case ScalarType::EnumName:                   \
+    return cast_to<T>(val_at_offs<MetalType>(ptr, offs));
+    C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
+#undef _CASE_
   }
 }
 
 template <typename T>
 inline device T& ref_at_offs(device void* ptr, long offs) {
   return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
+// Store with dynamic cast to provided type. Mirrors val_at_offs's runtime
+// switch and is the store-side counterpart used by binary_*_castout kernels
+// (output dtype not known at compile time).
+template <typename T>
+inline void store_at_offs(
+    device void* ptr,
+    long offs,
+    ScalarType type,
+    T value) {
+  switch (type) {
+#define _CASE_(EnumName, EnumValue, MetalType)                     \
+  case ScalarType::EnumName:                                       \
+    ref_at_offs<MetalType>(ptr, offs) = cast_to<MetalType>(value); \
+    return;
+    C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
+#undef _CASE_
+  }
 }
 
 // Binary elementwise ops kernels
@@ -340,6 +334,39 @@ kernel void binary_strided_cast(
   const auto b = val_at_offs<om_t>(
       other, other_offs, static_cast<ScalarType>(ndim_types.z));
   ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
+}
+
+// Variant of binary_strided_cast that also runtime-casts on store: the output
+// buffer's dtype is passed via ndim_types.w. Selected when the user-facing
+// output dtype diverges from the kernel's natural output (the iterator's
+// `cast_common_dtype_to_outputs(true)` path). The kernel's natural output
+// `res_t` is computed in compile-time precision, then runtime-cast to the
+// buffer's dtype on store.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_strided_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint4& ndim_types [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a = val_at_offs<om_t>(
+      input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b = val_at_offs<om_t>(
+      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  const res_t result = static_cast<res_t>(f(a, b));
+  store_at_offs<res_t>(
+      output, output_offs, static_cast<ScalarType>(ndim_types.w), result);
 }
 
 template <typename T, typename T2, typename F>
@@ -733,6 +760,18 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               constant long* other_strides,                                    \
               constant uint4& ndim_types,                                      \
               uint tid);                                                       \
+  template [[host_name(#NAME "_strided_castout_" #DTYPEO                       \
+                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
+      binary_strided_castout<DTYPEI, NAME##_functor, OMT>(                     \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other,                                                \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other_strides,                                        \
+          constant uint4& ndim_types,                                          \
+          uint tid);                                                           \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
