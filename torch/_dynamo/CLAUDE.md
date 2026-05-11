@@ -32,6 +32,12 @@ The compilation pipeline, in execution order:
 
 ## Key Abstractions
 
+Before changing Python object protocol behavior (`tp_*`, `nb_*`, `sq_*`,
+`mp_*`, descriptors, or dunder dispatch), read
+[`CPYTHON_MIRRORING.md`](CPYTHON_MIRRORING.md). Dynamo is being refactored to
+mirror CPython's object model more systematically; slot work should fit that
+direction instead of adding isolated special cases.
+
 ### VariableTracker (`variables/`)
 
 Every Python value encountered during tracing is wrapped in a `VariableTracker`

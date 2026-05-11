@@ -29,7 +29,6 @@ Allowed manager actions:
   git log --oneline -20
   git diff --stat
   git diff --cached --stat
-  ./scripts/autoreview.py
   ```
 
 - Append one audit line to `.logs/cpython_dynamo_agent_manager.txt`.
@@ -47,8 +46,9 @@ Manager:
 
 - Reads the active gate from `test/dynamo/cpython/cpython_test_coverage.md`.
 - Chooses one coherent cluster inside the active gate.
-- Delegates implementation, testing, plan updates, staging, and any authorized
-  commit/amend work to subagents.
+- Delegates implementation, testing, plan updates, staging, and commit/amend
+  work to subagents.
+- Delegates review to a different subagent than the implementation subagent.
 - Reviews subagent reports using only lightweight inspection commands.
 - Rejects false gate-completion or exit-criteria rescoping.
 - Logs each cycle.
@@ -59,34 +59,44 @@ Implementation subagent:
 - May edit source, tests, sentinels, and `cpython_test_coverage.md`.
 - May run targeted and gate-level tests.
 - May stage intended changes.
-- May commit or amend only when the human has authorized committing and the
-  manager explicitly prompts for that step.
+- May commit or amend when the manager explicitly prompts for that step.
 
-Deep-replan subagent:
+Review subagent:
 
-- Fresh subagent, separate from the implementation subagent.
-- Runs investigation and experiments only when the manager triggers a deep
-  replan.
-- May update `cpython_test_coverage.md` with findings and proposals.
-- Must not silently change gate exit criteria or gate status.
+- Must be a fresh subagent, separate from the implementation subagent. Never
+  reuse the implementation subagent as the review subagent.
+- Reviews the implementation subagent's changed files, test evidence, sentinel
+  changes, and plan updates.
+- Must not edit files, stage changes, move sentinels, commit, or amend.
+- Reports findings in code-review style: bugs, behavioral regressions, missing
+  tests, unsupported gate-completion claims, accidental files, or stale plan
+  updates.
+- Sends no fixes directly; the manager routes valid review feedback back to the
+  implementation subagent.
 
 ## Cycle Workflow
 
 1. Inspect active state with allowed commands and the current plan context.
 2. Spawn one implementation subagent.
 3. Prompt it to read `test/dynamo/cpython/cpython_test_coverage.md`, identify
-   the active gate, and work one coherent cluster.
+   the active gate, read `torch/_dynamo/CPYTHON_MIRRORING.md`, and work one
+   coherent cluster.
 4. Reuse the same implementation subagent for the whole cycle.
 5. If the subagent reports unfinished work, failing tests, accidental files, or
    incomplete plan updates, ask it to continue or repair.
-6. When it reports a clean stopping point, inspect only `git status --short`,
-   `git diff --stat`, `git diff --cached --stat`, and optionally
-   `./scripts/autoreview.py`.
-7. If committing has been authorized by the human, ask the same implementation
-   subagent to run final validation, stage only intended files, run
-   `lintrunner -a`, and create the commit/amend. The manager does not commit.
-8. Append the audit log line.
-9. Start the next cycle unless the plan is complete or a blocker requires human
+6. When it reports a clean stopping point, spawn a fresh review subagent that
+   is different from the implementation subagent.
+7. Ask the review subagent to inspect the implementation subagent's changes and
+   report findings.
+8. If the review subagent reports valid findings, send them back to the
+   implementation subagent to fix, then repeat the review step as needed.
+9. Inspect only `git status --short`, `git diff --stat`, and
+   `git diff --cached --stat`.
+10. Ask the same implementation subagent to run final validation, stage only
+   intended files, run `lintrunner -a`, and create the commit/amend. The
+   manager does not commit.
+11. Append the audit log line.
+12. Start the next cycle unless the plan is complete or a blocker requires human
    input.
 
 ## Implementation Prompt
@@ -94,9 +104,14 @@ Deep-replan subagent:
 Use this prompt shape for the implementation subagent:
 
 ```
-Read `test/dynamo/cpython/cpython_test_coverage.md` and identify the active
-gate. Work on one coherent cluster that advances that gate's exit criteria. Do
-not skip ahead to a later gate.
+Read `test/dynamo/cpython/cpython_test_coverage.md` and
+`torch/_dynamo/CPYTHON_MIRRORING.md` before designing the fix. Identify the
+active gate and work on one coherent cluster that advances that gate's exit
+criteria. Do not skip ahead to a later gate.
+
+Use `CPYTHON_MIRRORING.md` so the change follows the broader CPython
+object-protocol direction. The local CPython checkout is available at
+`../cpython` for source reference.
 
 Do not relax gate exit criteria, do not mark a gate complete without measured
 evidence, and do not add new expected-failure or skip sentinels unless the human
@@ -129,10 +144,39 @@ Report:
 - Recommended next cluster
 ```
 
-## Review Prompt
+## Review Subagent Prompt
 
-If lightweight inspection or `./scripts/autoreview.py` finds issues, send the
-same implementation subagent:
+Use this prompt shape for the review subagent:
+
+```
+You are the review subagent, not the implementation subagent. Review the
+implementation subagent's current CPython Dynamo coverage changes. Read
+`test/dynamo/cpython/cpython_test_coverage.md`,
+`test/dynamo/cpython/agent_manager.md`, and
+`torch/_dynamo/CPYTHON_MIRRORING.md`.
+
+Do not edit files, stage changes, move sentinels, commit, or amend.
+
+Review for:
+- Bugs or behavioral regressions in implementation changes
+- Missing focused Dynamo regression tests
+- CPython object-protocol inconsistencies
+- Incorrect sentinel removals or additions
+- Unsupported gate-completion claims
+- Plan updates that change exit criteria or status without evidence
+- Accidental files, caches, logs, or scratch output
+- Test evidence that is too narrow for the claimed fix
+
+Report:
+- Findings, ordered by severity, with file/line references when possible
+- Open questions or assumptions
+- Whether the active gate criteria advanced
+- Whether staged or unstaged files look intentional
+```
+
+## Review Feedback Prompt
+
+If the review subagent reports issues, send the same implementation subagent:
 
 ```
 Fix the following review feedback if correct. If any feedback is incorrect,
@@ -141,16 +185,19 @@ push back with evidence.
 <review feedback>
 ```
 
-Do not fix review feedback as the manager.
+Do not fix review feedback as the manager or review subagent.
 
 ## Commit Prompt
 
-Use only after the human has explicitly asked for a commit or amend:
+Use after review has settled and the current cycle is ready to land:
 
 ```
-Run final validation for the staged CPython Dynamo coverage work. Use the repo
+Run final validation for the CPython Dynamo coverage work. Use the repo
 instructions: run `lintrunner -a` before committing, fix any lint issues, then
-commit or amend as requested.
+commit or amend the current cycle.
+
+You are the implementation subagent responsible for the commit/amend. The
+manager must not stage or commit.
 
 Only stage intended project files. Do not stage `agent_space/`, unrelated
 untracked files, caches, logs, or generated scratch output.
@@ -176,44 +223,8 @@ Report:
   were active at the start of the cycle.
 - If a subagent claims a gate is complete, verify that claim using its reported
   commands, sentinel removals, and lightweight diff/status inspection.
-- If criteria appear unreachable, trigger deep replan or stop for human input.
-  Do not rescope the gate yourself.
-
-## Deep Replan
-
-Trigger a deep replan when:
-
-- Three consecutive cycles remove no sentinels from the active gate.
-- The same failure reason appears across many tests and the source abstraction
-  remains unclear.
-- The likely fix requires broad bytecode, exception, or side-effect modeling
-  changes.
-- A gate's quantitative exit criteria appear unreachable because most remaining
-  tests are CPython implementation details.
-- A fix improves CPython tests but lacks a focused normal Dynamo test strategy.
-
-Spawn a fresh deep-replan subagent with this prompt:
-
-```
-Run a deep replan for the CPython Dynamo coverage project. Read
-`test/dynamo/cpython/cpython_test_coverage.md` and recent history. Do not
-implement production code.
-
-Investigate the active gate blocker, run targeted experiments as needed, and
-update `test/dynamo/cpython/cpython_test_coverage.md` with findings. Do not
-change active gate exit criteria or gate status. Put any proposed criteria,
-status, or ordering changes under "Proposed Gate Changes Awaiting Human
-Approval".
-
-Report:
-- Active gate and blocker
-- Exact commands run
-- Failure histogram or repro table
-- Top three hypotheses with evidence
-- Recommended next coherent cluster
-- Plan diff summary
-- Final `git status --short`
-```
+- If criteria appear unreachable, stop for human input. Do not rescope the gate
+  yourself.
 
 ## Audit Log
 
@@ -238,7 +249,6 @@ amend
 continue
 discard
 gate-complete
-deep-replan
 stop
 ```
 
