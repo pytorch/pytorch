@@ -6317,6 +6317,13 @@ class CPUReproTests(TestCase):
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
 
+    def test_vector_norm_negative_dim_size_one(self):
+        def fn(x):
+            return x.norm(dim=-1)
+
+        x = torch.rand(5, 7, 1)
+        self.common(fn, [x])
+
     def test_fractional_max_pool2d_3d_input(self):
         """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
 

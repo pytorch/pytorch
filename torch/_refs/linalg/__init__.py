@@ -185,7 +185,8 @@ def vector_norm(
             elif dim is None:
                 return to_result_dtype(x).flatten()[0]
             else:
-                new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
+                canon_dim = {d % x.ndim for d in dim}
+                new_shape = [s for d, s in enumerate(x.shape) if d not in canon_dim]
                 return to_result_dtype(x.view(new_shape)).contiguous()
 
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
