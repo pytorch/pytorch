@@ -170,8 +170,8 @@ EOF
     echo "deb [trusted=yes] https://rocm.nightlies.amd.com/packages-multi-arch/deb/${RELEASE_ID} stable main" \
       | tee /etc/apt/sources.list.d/rocm-multiarch-nightly.list
     apt update
-    apt install amdrocm
-    apt install amdrocm-core-sdk
+    apt install -y amdrocm
+    apt install -y amdrocm-core-sdk
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
