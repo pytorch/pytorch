@@ -74,6 +74,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
@@ -10979,7 +10980,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
@@ -11011,7 +11012,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
@@ -16846,6 +16847,11 @@ if RUN_GPU:
                 expected_divisible = {
                     # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
+                }
+            elif SM100OrLater:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    0: (0, 1, 3),
                 }
             else:
                 self.assertEqual(len(kernels), 2)
