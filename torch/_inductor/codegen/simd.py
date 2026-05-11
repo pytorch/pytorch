@@ -1117,6 +1117,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
+        if isinstance(index, sympy.Expr):
+            index = index.expand(identity=True)
         index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
@@ -1777,7 +1779,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-        # a extra round of reduction
+        # an extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + split_size - 1) // split_size
@@ -1795,13 +1797,18 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
 
-            # Check if the original reduction used keepdim=True by comparing dimensions.
-            # Without keepdim, reduction produces [rnumel]; with keepdim, [1, rnumel].
+            # Restore the exact original shape via .view() to handle keepdim
+            # and multi-dimensional reductions correctly.
             buffer = V.graph.get_buffer(buffer_name)
-            keepdim = buffer is not None and len(buffer.get_layout().size) > 1
-
-            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0, keepdim={keepdim})"
+            if buffer is not None:
+                final_shape = [
+                    V.graph.wrapper_code.codegen_python_sizevar(s)
+                    for s in buffer.get_layout().size
+                ]
+                final_shape_str = f"[{', '.join(final_shape)}]"
+                final_reduce += f".view({final_shape_str})"
 
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.

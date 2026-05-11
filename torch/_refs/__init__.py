@@ -4410,7 +4410,7 @@ def squeeze(a: TensorLikeType, dim: DimsType | None = None) -> TensorLikeType:
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    # would it be better if we just not allow 1 for unbacked at runtiume?
+    # would it be better if we just not allow 1 for unbacked at runtime?
     dims = tuple(d for d in dims if guard_or_false(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
@@ -5266,14 +5266,11 @@ def new_full(
 
 @aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 def empty_out(
-    size: TensorLikeType,
+    size: ShapeType,
     out: TensorLikeType,
     memory_format: torch.memory_format | None = None,
 ) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_or_true, sym_eq
-
-    if guard_or_true(torch.sym_not(sym_eq(tuple(out.shape), tuple(size)))):
-        out.resize_(*size)
+    _maybe_resize_out(out, size, memory_format)
     return out
 
 
