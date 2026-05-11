@@ -7,8 +7,6 @@ import ctypes
 import torch
 from torch._utils import _dummy_type
 
-from ._utils import _get_device_index
-
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
@@ -155,16 +153,7 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            streamdata = torch._C._cuda_getStreamFromExternal(
-                stream_ptr, _get_device_index(device, optional=True)
-            )
-            return super().__new__(
-                cls,
-                stream_id=streamdata[0],
-                device_index=streamdata[1],
-                device_type=streamdata[2],
-                **kwargs,
-            )
+            return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
 class Event(torch._C._CudaEventBase):
