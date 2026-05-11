@@ -8,7 +8,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.heuristics.triton_template.params import DictKernelTemplateParams
+from torch._inductor.heuristics.template.params import DictKernelTemplateParams
 from torch._inductor.kernel_template_choice import KernelTemplateChoice
 
 
