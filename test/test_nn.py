@@ -14597,6 +14597,40 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         w = torch.randn(128, dtype=torch.float16, device="cuda")
         self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
 
+    def test_fwd_cond_false_on_weight_shape_mismatch(self):
+        # Weight shape must equal normalized_shape; otherwise fall through so
+        # aten raises the usual shape-check error.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(64, dtype=torch.float16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_input_shape_mismatch(self):
+        # input.shape[-n:] must equal normalized_shape.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 64, dtype=torch.float16, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], None, 1e-5))
+
+    def test_fwd_cond_false_on_weight_dtype_mismatch(self):
+        # Weight dtype must match input dtype; aten casts, quack doesn't.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        w = torch.randn(128, dtype=torch.float32, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
+    def test_fwd_cond_false_on_non_contiguous_weight(self):
+        # Non-contiguous weight would need a copy; not measured, fall through.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
+        base = torch.randn(256, dtype=torch.float16, device="cuda")
+        w = base[::2]
+        self.assertFalse(w.is_contiguous())
+        self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
+
     @parametrize_test(
         "output_mask",
         [

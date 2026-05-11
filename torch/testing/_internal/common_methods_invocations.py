@@ -4664,7 +4664,8 @@ def sample_inputs_rms_norm_cutedsl(opinfo, device, dtype, requires_grad, **kwarg
         ((4, 32, 1024), (1024,), {'eps': 1e-5}),
         # multi-dim normalized_shape: exercises the override's reshape logic
         ((2, 4, 8, 16), (8, 16), {'eps': 1e-5}),
-        # eps=None exercises the finfo(dtype).eps fallback in _fused_rms_norm_impl
+        # eps=None exercises the finfo(float32).eps fallback in _fused_rms_norm_impl
+        # (accumulator dtype, matching aten/src/ATen/native/cuda/layer_norm_kernel.cu).
         ((8, 128), (128,), {}),
     )
     for input_shape, normalized_shape, kw in cases:

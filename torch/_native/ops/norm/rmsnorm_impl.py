@@ -18,6 +18,24 @@ def _is_supported(input: torch.Tensor) -> bool:
     return major in (9, 10)
 
 
+def _shape_is_valid(
+    input: torch.Tensor,
+    normalized_shape: list[int],
+    weight: torch.Tensor | None,
+) -> bool:
+    # Mirror aten's _check_layer_norm_inputs: on any mismatch the aten path
+    # raises, so we fall through and let it produce the proper error rather
+    # than silently running the override on ill-shaped inputs.
+    n = len(normalized_shape)
+    if n < 1 or input.ndim < n:
+        return False
+    if list(input.shape[-n:]) != list(normalized_shape):
+        return False
+    if weight is not None and list(weight.shape) != list(normalized_shape):
+        return False
+    return True
+
+
 def _fused_rms_norm_cond(
     input: torch.Tensor,
     normalized_shape: list[int],
@@ -26,11 +44,23 @@ def _fused_rms_norm_cond(
 ) -> bool:
     if not _is_supported(input):
         return False
+    if not _shape_is_valid(input, normalized_shape, weight):
+        return False
+    # Weight must match input dtype and device for quack's kernel; mismatches
+    # are legal under aten (it casts), so fall through.
+    if weight is not None and (
+        weight.dtype != input.dtype or weight.device != input.device
+    ):
+        return False
     # Empty inputs crash quack with cudaErrorInvalidConfiguration -- the bad
     # launch config poisons the CUDA context for subsequent calls. Quack's own
     # rmsnorm_bwd guards against this with `if x.numel() > 0` (rmsnorm.py:1111)
     # but the fwd path doesn't.
     if input.numel() == 0:
+        return False
+    # Non-contiguous weight would require a reshape+copy that we haven't
+    # measured; fall through to aten until we do.
+    if weight is not None and not weight.is_contiguous():
         return False
     # The override reshapes + makes contiguous, which materializes a COW input.
     # Match the bmm_outer_product cond (triton_impl.py:46) and fall through to
@@ -50,7 +80,10 @@ def _fused_rms_norm_impl(
     eps: float | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if eps is None:
-        eps = torch.finfo(input.dtype).eps
+        # Match aten/src/ATen/native/cuda/layer_norm_kernel.cu:1841-1847:
+        # aten picks eps from the *accumulator* dtype, which is float32 for
+        # fp16/bf16/fp32 inputs (the only dtypes our cond accepts).
+        eps = torch.finfo(torch.float32).eps
 
     from .norms import quack_rmsnorm_fwd
 
@@ -67,7 +100,15 @@ def _fused_rms_norm_backward_cond(
 ) -> bool:
     if not _is_supported(input):
         return False
+    if not _shape_is_valid(input, normalized_shape, weight):
+        return False
+    if weight is not None and (
+        weight.dtype != input.dtype or weight.device != input.device
+    ):
+        return False
     if input.numel() == 0:
+        return False
+    if weight is not None and not weight.is_contiguous():
         return False
     is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
     for t in (grad_out, input, rstd, weight):
