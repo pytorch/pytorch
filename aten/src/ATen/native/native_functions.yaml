@@ -9178,8 +9178,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ne_Scalar_out
-    MPS: ne_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: ne_Scalar_out
     QuantizedCPU: ne_out_quantized_cpu
   tags: pointwise
 
@@ -9196,8 +9195,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ne_Tensor_out
-    MPS: ne_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: ne_Tensor_out
     QuantizedCPU: ne_out_quantized_cpu
   tags: pointwise
 
@@ -9241,8 +9239,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: eq_Scalar_out
-    MPS: eq_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: eq_Scalar_out
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
 
@@ -9260,8 +9257,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: eq_Tensor_out
-    MPS: eq_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: eq_Tensor_out
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
 
@@ -9279,8 +9275,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ge_Scalar_out
-    MPS: ge_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: ge_Scalar_out
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
 
@@ -9298,8 +9293,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ge_Tensor_out
-    MPS: ge_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: ge_Tensor_out
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
 
@@ -9343,8 +9337,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: le_Scalar_out
-    MPS: le_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: le_Scalar_out
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
 
@@ -9361,8 +9354,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: le_Tensor_out
-    MPS: le_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: le_Tensor_out
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
 
@@ -9406,8 +9398,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA,MTIA: gt_Scalar_out
-    MPS: gt_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: gt_Scalar_out
     QuantizedCPU: gt_out_quantized_cpu
   tags: pointwise
 
@@ -9425,8 +9416,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: gt_Tensor_out
-    MPS: gt_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: gt_Tensor_out
     QuantizedCPU: gt_out_quantized_cpu
   tags: pointwise
 
@@ -9470,8 +9460,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: lt_Scalar_out
-    MPS: lt_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: lt_Scalar_out
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
 
@@ -9488,8 +9477,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: lt_Tensor_out
-    MPS: lt_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: lt_Tensor_out
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
 
