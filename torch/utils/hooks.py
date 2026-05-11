@@ -7,6 +7,60 @@ from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
+_lazy_backward_hook_registry: dict[int, tuple[Any, tuple[Any, ...], tuple[Any, ...]]] = {}
+_lazy_backward_hook_next_id = 0
+
+
+def register_lazy_backward_hook(module, user_hooks, user_pre_hooks) -> int:
+    global _lazy_backward_hook_next_id
+    hook_id = _lazy_backward_hook_next_id
+    _lazy_backward_hook_next_id += 1
+    _lazy_backward_hook_registry[hook_id] = (
+        module,
+        tuple(user_hooks),
+        tuple(user_pre_hooks),
+    )
+    return hook_id
+
+
+def _call_lazy_compiled_backward_hook(hook, *args):
+    import torch._dynamo.config
+
+    with torch._dynamo.config.patch(
+        error_on_nested_fx_trace=False,
+        force_compile_during_fx_trace=True,
+    ):
+        return torch.compile(hook, backend="eager", fullgraph=True)(*args)
+
+
+def _lazy_backward_hook(hook, module):
+    def wrapped(_module, grad_input, grad_output):
+        def call_hook(grad_input, grad_output):
+            return hook(module, grad_input, grad_output)
+
+        return _call_lazy_compiled_backward_hook(call_hook, grad_input, grad_output)
+
+    return wrapped
+
+
+def _lazy_backward_pre_hook(hook, module):
+    def wrapped(_module, grad_output):
+        def call_hook(grad_output):
+            return hook(module, grad_output)
+
+        return _call_lazy_compiled_backward_hook(call_hook, grad_output)
+
+    return wrapped
+
+
+def make_lazy_backward_hook(hook_id):
+    module, user_hooks, user_pre_hooks = _lazy_backward_hook_registry[hook_id]
+    return BackwardHook(
+        module,
+        tuple(_lazy_backward_hook(hook, module) for hook in user_hooks),
+        tuple(_lazy_backward_pre_hook(hook, module) for hook in user_pre_hooks),
+    )
+
 class RemovableHandle:
     r"""
     A handle which provides the capability to remove a hook.

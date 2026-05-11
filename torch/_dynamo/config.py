@@ -792,6 +792,10 @@ skip_fwd_side_effects_in_bwd_under_checkpoint = False
 # traced checkpointed forward, instead of using the partitioner tag path.
 lazy_compile_activation_checkpoint = False
 
+# Prototype: install module backward hooks in the forward graph, but compile the
+# user hook bodies when autograd invokes them.
+lazy_compile_backward_hooks = False
+
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
