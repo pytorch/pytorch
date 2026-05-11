@@ -59,11 +59,11 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto key = key_;
   auto value = value_;
   if (key_.size(1) != query.size(1)) {
-    int64_t q_heads = query.size(1);
-    int64_t k_heads = key_.size(1);
+    auto q_heads = query.size(1);
+    auto k_heads = key_.size(1);
     TORCH_CHECK(
         q_heads % k_heads == 0, "For GQA, q_heads (", q_heads, ") must be divisible by k_heads (", k_heads, ")");
-    int64_t repeat_factor = q_heads / k_heads;
+    auto repeat_factor = q_heads / k_heads;
     key = key_.repeat_interleave(repeat_factor, /*dim=*/-3);
     value = value_.repeat_interleave(repeat_factor, /*dim=*/-3);
   }
