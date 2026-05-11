@@ -743,6 +743,23 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
                     num_init_leaves,
                 )
+                # Shape padding can produce same-sized carry values with padded strides.
+                # while_loop requires loop-carried metadata to remain stable.
+                next_carry = [
+                    (
+                        next_carry_elem
+                        if next_carry_elem.stride() == carry_elem.stride()
+                        else torch.empty_strided(
+                            next_carry_elem.size(),
+                            carry_elem.stride(),
+                            device=next_carry_elem.device,
+                            dtype=next_carry_elem.dtype,
+                            layout=next_carry_elem.layout,
+                            requires_grad=next_carry_elem.requires_grad,
+                        ).copy_(next_carry_elem)
+                    )
+                    for next_carry_elem, carry_elem in zip(next_carry, carry)
+                ]
                 for y, y_out in zip(ys, ys_outs):
                     y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_int)
                     y_out_slice.copy_(y)
