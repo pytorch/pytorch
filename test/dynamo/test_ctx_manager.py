@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 
 
@@ -3002,7 +3003,8 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    @onlyCUDA
+    @skipIfXpu(msg="autocast with float64 may not suppport on XPU, https://github.com/intel/torch-xpu-ops/issues/3598")
+	@onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
 
