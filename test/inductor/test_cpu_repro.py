@@ -5000,8 +5000,10 @@ class CPUReproTests(TestCase):
             metrics.reset()
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
-            # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(4)
+            # Originally expected 4 vec kernels from LayerNorm decomposition.
+            # native_layer_norm is now a fallback (issue #168126); the remaining
+            # vec kernel count for the reshape/permute path is ISA-dependent.
+            self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -6202,7 +6204,10 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             metrics.reset()
             torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(5)
+            # The original test checked for 5 vec kernels to verify add+layernorm
+            # fusion. native_layer_norm is now a fallback (extern kernel), so the
+            # remaining vec kernel count varies by ISA (1 on AVX2, 3 on AVX-512).
+            self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
 
     def test_dropout(self):
         class Model(nn.Module):

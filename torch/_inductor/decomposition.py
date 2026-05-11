@@ -35,7 +35,6 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
@@ -87,7 +86,6 @@ inductor_decompositions = get_decompositions(
         aten.batch_norm_backward,
         aten.native_batch_norm,
         aten.native_group_norm,
-        aten.native_layer_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
         aten.rrelu_with_noise_backward,
@@ -118,7 +116,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
-    aten.native_layer_norm,  # we fall back on mtia
+    aten.native_layer_norm,  # inductor uses make_fallback (issue #168126)
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -128,6 +126,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.var_mean,  # routes through inductor's coherent var_mean lowering (issue #168126)
     aten.baddbmm,  # upcasts to fp32, perf issue
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.addcmul,
@@ -202,20 +201,6 @@ def _embedding_dense_backward(
     return decomp_embedding_dense_backward(
         grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
     )
-
-
-@register_decomposition(aten.native_layer_norm)
-def _native_layer_norm(
-    input: torch.Tensor,
-    normalized_shape: utils.ShapeType,
-    weight: torch.Tensor | None,
-    bias: torch.Tensor | None,
-    eps: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if input.is_mtia:
-        return NotImplemented
-    # We can write a util function to update decomp table if we have more ops to fallback.
-    return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
