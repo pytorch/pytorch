@@ -471,6 +471,7 @@ class SimpleElasticAgent(ElasticAgent):
         self._exit_barrier_timeout = exit_barrier_timeout
         self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
+        self._in_exit_barrier: bool = False
 
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
         return self._worker_group
@@ -747,7 +748,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
+            logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval, timeout=self._shutdown_timeout)
@@ -988,6 +989,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._exit_barrier_timeout,
         )
         start = time.time()
+        self._in_exit_barrier = True
         try:
             store_util.barrier(
                 store=self._store,
@@ -1007,3 +1009,5 @@ class SimpleElasticAgent(ElasticAgent):
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start,
             )
+        finally:
+            self._in_exit_barrier = False

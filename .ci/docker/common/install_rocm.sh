@@ -26,87 +26,131 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
+    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
+    # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
-      echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+      apt-get install -y --no-install-recommends pkg-config
 
-      # Clean any previous ROCm installation in the base CI image.
       if [[ -d /opt/rocm ]]; then
-        echo "Removing existing /opt/rocm from base image"
         rm -rf /opt/rocm
       fi
 
-      # Determine theRock nightly URL based on GPU architecture
-      # Check BUILD_ENVIRONMENT or PYTORCH_ROCM_ARCH for the target GPU
-      if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
+      # Determine GPU family based on target architecture
+      AMDGPU_FAMILY="${THEROCK_AMDGPU_FAMILY:-}"
+      if [[ -z "${AMDGPU_FAMILY}" ]]; then
         if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
-          # MI350 (gfx950)
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/"
-          echo "Detected gfx950 architecture - using MI350 theRock nightly repository"
+          AMDGPU_FAMILY="gfx950-dcgpu"
         else
-          # Default to MI300 (gfx942/gfx94X)
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/"
-          echo "Using gfx94X (MI300) theRock nightly repository"
+          AMDGPU_FAMILY="gfx94X-dcgpu"
         fi
       fi
 
-      export THEROCK_NIGHTLY_INDEX_URL
-      echo "TheRock Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
+      # Auto-detect latest nightly version if not pinned
+      VERSION="${THEROCK_VERSION:-}"
+      if [[ -z "${VERSION}" ]]; then
+        VERSION=$(curl -fsSL "https://rocm.nightlies.amd.com/tarball/" \
+          | grep -oP "therock-dist-linux-${AMDGPU_FAMILY}-\K[^\"]+(?=\.tar\.gz)" \
+          | grep -v ADHOCBUILD \
+          | sort -V \
+          | tail -1)
+        if [[ -z "${VERSION}" ]]; then
+          echo "Error: Could not find a nightly tarball for ${AMDGPU_FAMILY}"
+          exit 1
+        fi
+      fi
 
-      python3 -m pip install \
-        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
-        "rocm[libraries,devel]"
+      # URL-encode '+' as '%2B' in VERSION (required for devreleases)
+      VERSION_ENCODED="${VERSION//+/%2B}"
 
-      # Use the rocm-sdk CLI helper to populate environment defaults
-      ROCM_HOME="$(rocm-sdk path --root)"
-      ROCM_BIN="$(rocm-sdk path --bin)"
-      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+      TARBALL_URL="https://rocm.nightlies.amd.com/tarball/therock-dist-linux-${AMDGPU_FAMILY}-${VERSION_ENCODED}.tar.gz"
 
-      echo "ROCM_HOME=${ROCM_HOME}"
-      echo "ROCM_BIN=${ROCM_BIN}"
-      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+      echo "=============================================="
+      echo "ROCm Tarball Installation"
+      echo "=============================================="
+      echo "Version:         ${VERSION}"
+      echo "AMDGPU Family:   ${AMDGPU_FAMILY}"
+      echo "Tarball URL:     ${TARBALL_URL}"
+      echo "=============================================="
 
-      export ROCM_HOME
-      export ROCM_PATH="${ROCM_HOME}"
-      export PATH="${ROCM_BIN}:${PATH}"
-      export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+      # Download tarball
+      TARBALL_FILE="/tmp/rocm-tarball.tar.gz"
 
-      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
-      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
-      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
-      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+      echo "Downloading tarball..."
+      curl -fsSL -o "$TARBALL_FILE" "$TARBALL_URL" || {
+        echo "Error: Failed to download tarball from $TARBALL_URL"
+        exit 1
+      }
 
-      # Write environment to file that can be sourced by CI scripts and users
+      # Verify download
+      if [ ! -f "$TARBALL_FILE" ] || [ ! -s "$TARBALL_FILE" ]; then
+        echo "Error: Downloaded file is empty or does not exist"
+        exit 1
+      fi
+
+      # Install directory is fixed to /opt/rocm-{VERSION}
+      ROCM_INSTALL_DIR="/opt/rocm-${VERSION}"
+
+      # Extract tarball to versioned directory
+      echo "Extracting tarball to ${ROCM_INSTALL_DIR}..."
+      mkdir -p "$ROCM_INSTALL_DIR"
+      tar -xzf "$TARBALL_FILE" -C "$ROCM_INSTALL_DIR"
+
+      # Clean up downloaded file
+      rm -f "$TARBALL_FILE"
+      echo "Tarball extracted and cleaned up"
+
+      # Create symlink /opt/rocm -> /opt/rocm-{VERSION} for compatibility
+      ln -sfn "$ROCM_INSTALL_DIR" /opt/rocm
+      echo "Created symlink: /opt/rocm -> $ROCM_INSTALL_DIR"
+
+      # Verify bin and lib folder exists after extraction
+      echo "Verifying installation..."
+      for dir in bin clients include lib libexec share; do
+        if [ ! -d "$ROCM_INSTALL_DIR/$dir" ]; then
+          echo "Error: ROCm $dir directory not found"
+          exit 1
+        fi
+        echo "ROCm $dir found in $ROCM_INSTALL_DIR/$dir"
+      done
+
+      echo "=============================================="
+      echo "ROCm installed successfully to $ROCM_INSTALL_DIR"
+      echo "ROCM_PATH=$ROCM_INSTALL_DIR"
+      echo "PATH should include: $ROCM_INSTALL_DIR/bin"
+      echo "=============================================="
+
+      # Write environment file (sourced by CI scripts and interactive shells)
       cat > /etc/rocm_env.sh << ROCM_ENV
 # ROCm paths
-export ROCM_PATH="${ROCM_HOME}"
-export ROCM_HOME="${ROCM_HOME}"
-export ROCM_SOURCE_DIR="${ROCM_HOME}"
-export ROCM_BIN="${ROCM_BIN}"
-export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
-export PATH="${ROCM_BIN}:\${PATH}"
-export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
-# Device library paths
-export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
-export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
-# theRock system dependencies
-export ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS_INCLUDE}"
-export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
-export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
-export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
-export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
-export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
-export MAGMA_HOME="${ROCM_HOME}/magma"
+export ROCM_PATH=/opt/rocm
+export ROCM_HOME=/opt/rocm
+export ROCM_SOURCE_DIR=/opt/rocm
+export ROCM_BIN=/opt/rocm/bin
+export ROCM_CMAKE=/opt/rocm
+export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
+export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
+# Sysdeps include paths (libdrm headers, etc.)
+export CPLUS_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${CPLUS_INCLUDE_PATH:-}
+export C_INCLUDE_PATH=/opt/rocm/lib/rocm_sysdeps/include:\${C_INCLUDE_PATH:-}
+# Device library path
+export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export MAGMA_HOME=/opt/rocm/magma
+# Tarball bundles sysdeps (libdrm, liblzma, etc.); expose their libs and .pc files
+if [ -d /opt/rocm/lib/rocm_sysdeps/lib ]; then
+  export LD_LIBRARY_PATH=/opt/rocm/lib/rocm_sysdeps/lib:\${LD_LIBRARY_PATH}
+  export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
+fi
 # Disable MSLK for theRock nightly (not yet supported)
 export USE_MSLK=0
 ROCM_ENV
 
-      # Append to bash.bashrc so interactive shells get the env vars
       echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
-      echo "install_rocm.sh: TheRock nightly ROCm install complete"
-      exit 0
-    fi
+      # --- End of theRock nightly tarball installation ---
+    else
+      # =========================================================================
+      # Non-nightly: install ROCm from repo.radeon.com apt packages
+      # =========================================================================
 
     # Make sure rocm packages from repo.radeon.com have highest priority
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
@@ -118,6 +162,11 @@ EOF
     # we want the patch version of 6.4 instead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
         ROCM_VERSION="${ROCM_VERSION}.2"
+    fi
+
+    # we want the patch version of 7.2 instead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
+        ROCM_VERSION="${ROCM_VERSION}.1"
     fi
 
     # Default url values
@@ -152,29 +201,6 @@ EOF
       else
         DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
       fi
-    fi
-
-    # ROCm 7.2 needs a fix from procprof sdk that isn't available until 7.2.1
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
-        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
-        pushd rocm-systems/
-        git sparse-checkout init --cone
-        git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
-        git checkout develop
-        git checkout rocm-7.2.0
-        git config --global user.email "you@example.com"
-        git config --global user.name "Your Name"
-        git cherry-pick a71cc3cc88ed68b24c40cefec77d764053044862
-        sudo apt install -y cmake libdw-dev libsqlite3-dev
-        cmake                                         \
-              -B rocprofiler-sdk-build                \
-              -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
-              -DCMAKE_PREFIX_PATH=/opt/rocm           \
-              -DGPU_TARGETS="${PYTORCH_ROCM_ARCH}"    \
-              projects/rocprofiler-sdk
-        cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
-        cmake --build rocprofiler-sdk-build --target install
-        popd
     fi
 
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
@@ -217,7 +243,7 @@ EOF
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
-    # Write environment to file that can be sourced by CI scripts and users
+    # Write environment file (sourced by CI scripts and interactive shells)
     cat > /etc/rocm_env.sh << ROCM_ENV
 # ROCm paths
 export ROCM_PATH=/opt/rocm
@@ -226,85 +252,18 @@ export ROCM_SOURCE_DIR=/opt/rocm
 export ROCM_BIN=/opt/rocm/bin
 export ROCM_CMAKE=/opt/rocm
 export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
-# Device library paths
-export ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
+# Device library path
 export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
 export MAGMA_HOME=/opt/rocm/magma
 ROCM_ENV
 
-    # Append to bash.bashrc so interactive shells get the env vars
     echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-}
-
-install_centos() {
-
-  yum update -y
-  yum install -y kmod
-  yum install -y wget
-  yum install -y openblas-devel
-
-  yum install -y epel-release
-  yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
-
-  # Add amdgpu repository
-  local amdgpu_baseurl
-  if [[ $OS_VERSION == 9 ]]; then
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.0/main/x86_64"
-  else
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
-  fi
-  echo "[AMDGPU]" > /etc/yum.repos.d/amdgpu.repo
-  echo "name=AMDGPU" >> /etc/yum.repos.d/amdgpu.repo
-  echo "baseurl=${amdgpu_baseurl}" >> /etc/yum.repos.d/amdgpu.repo
-  echo "enabled=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
-
-  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}"
-  echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
-  echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
-  echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
-  echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
-  echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
-
-  yum update -y
-
-  yum install -y \
-                   rocm-dev \
-                   rocm-utils \
-                   rocm-libs \
-                   rccl \
-                   rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
-
-  # precompiled miopen kernels; search for all unversioned packages
-  # if search fails it will abort this script; use true to avoid case where search fails
-  MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
-  if [[ "x${MIOPENHIPGFX}" = x ]]; then
-    echo "miopen-hip-gfx package not available" && exit 1
-  else
-    yum install -y ${MIOPENHIPGFX}
-  fi
-
-  # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
-  for kdb in /opt/rocm/share/miopen/db/*.kdb
-  do
-      sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
-  done
-
-  pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
-
-  # Cleanup
-  yum clean all
-  rm -rf /var/cache/yum
-  rm -rf /var/lib/yum/yumdb
-  rm -rf /var/lib/yum/history
+    fi
 }
 
 # Install Python packages depending on the base OS
@@ -312,9 +271,6 @@ ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
   ubuntu)
     install_ubuntu
-    ;;
-  centos)
-    install_centos
     ;;
   *)
     echo "Unable to determine OS..."

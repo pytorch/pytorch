@@ -70,7 +70,9 @@ _IS_WINDOWS = sys.platform == "win32"
 
 MINGW_GXX = "x86_64-w64-mingw32-g++"
 
-SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (
+    (locale.getpreferredencoding(), "replace") if _IS_WINDOWS else ()
+)
 
 log = logging.getLogger(__name__)
 
@@ -437,6 +439,56 @@ def convert_cubin_to_obj(
     return obj_file
 
 
+def batch_convert_cubins_to_obj(
+    cubins: list[tuple[str, str]],
+    output_dir: str,
+    cpp_compiler: str = "gcc",
+) -> str:
+    """Convert multiple cubin files to a single .o using batched .incbin assembly.
+
+    Instead of spawning 3 subprocesses per cubin (ld + 2x objcopy), generates
+    a single .S file with .incbin directives for all cubins and compiles it
+    with one compiler invocation. Produces bit-identical rodata and symbols
+    as the per-cubin convert_cubin_to_obj approach.
+
+    Args:
+        cubins: list of (cubin_file_path, kernel_name) tuples.
+        output_dir: directory for the generated .S and .o files.
+        cpp_compiler: C compiler to use for assembling (default: gcc).
+
+    Returns:
+        Path to the combined .o file.
+    """
+    asm_path = os.path.join(output_dir, "cubins_combined.S")
+    obj_path = os.path.join(output_dir, "cubins_combined.o")
+
+    with open(asm_path, "w") as f:
+        f.write(".section .rodata\n")
+        for cubin_file, kernel_name in cubins:
+            # Use absolute path to avoid issues with working directory
+            abs_cubin = os.path.abspath(cubin_file)
+            escaped_path = abs_cubin.replace("\\", "\\\\").replace('"', '\\"')
+            f.write(
+                f".balign 16\n"
+                f".global __{kernel_name}_start\n"
+                f".global __{kernel_name}_end\n"
+                f"__{kernel_name}_start:\n"
+                f'.incbin "{escaped_path}"\n'
+                f"__{kernel_name}_end:\n"
+                f".global __{kernel_name}_size\n"
+                f".set __{kernel_name}_size, "
+                f"__{kernel_name}_end - __{kernel_name}_start\n"
+            )
+
+    subprocess.run(
+        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return obj_path
+
+
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
@@ -688,9 +740,10 @@ class BuildOptionsBase:
         self._preprocessing: bool = preprocessing
 
     def _process_compile_only_options(self) -> None:
-        if self._compile_only:
+        if self._compile_only or self._precompiling or self._preprocessing:
             self._libraries_dirs = []
             self._libraries = []
+            self._ldflags = []
 
     def _remove_duplicate_options(self) -> None:
         self._definitions = _remove_duplication_in_list(self._definitions)
@@ -770,7 +823,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
@@ -802,7 +855,7 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
             "Zc:__cplusplus",
             # Enable max compatible to msvc for oneAPI headers.
-            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358
             "permissive-",
         ]
     else:
@@ -911,6 +964,12 @@ def _get_optimization_cflags(
         debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags()
         cflags += debug_cflags
         ldflags += debug_ldflags
+
+    if config.aot_inductor.enable_frame_pointer:
+        if _IS_WINDOWS:
+            cflags.append("Oy-")
+        else:
+            cflags.append("fno-omit-frame-pointer")
 
     cflags += _get_ffast_math_flags()
 
@@ -1063,7 +1122,10 @@ class CppOptions(BuildOptionsBase):
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    defs = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.cpp_cache_precompile_headers:
+        defs.append("TORCH_INDUCTOR_PRECOMPILE_HEADERS")
+    return defs
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -1078,6 +1140,11 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
+            if platform.machine() == "x86_64":
+                fb_internal_macros += [
+                    "ATEN_MKL_ENABLED_FBCODE=1",
+                    "ATEN_MKLDNN_ENABLED_FBCODE=1",
+                ]
             return fb_internal_macros
         else:
             return []
@@ -1089,12 +1156,13 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_relative_path: bool,
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     cflags: list[str] = []
     include_dirs: list[str] = []
     passthrough_args: list[str] = []
+    ldflags: list[str] = []
     if _IS_WINDOWS:
-        return cflags, include_dirs, passthrough_args
+        return cflags, include_dirs, passthrough_args, ldflags
 
     if config.is_fbcode():
         # TODO(T203137008) Can we unify these flags with triton_cc_command?
@@ -1119,12 +1187,12 @@ def _setup_standard_sys_libs(
 
         if _is_clang(cpp_compiler):
             passthrough_args.append(" --rtlib=compiler-rt")
-            passthrough_args.append(" -fuse-ld=lld")
-            passthrough_args.append(f" -Wl,--script={linker_script}")
             passthrough_args.append(" -B" + build_paths.glibc_lib)
-            passthrough_args.append(" -L" + build_paths.glibc_lib)
+            ldflags.append("fuse-ld=lld")
+            ldflags.append(f"Wl,--script={linker_script}")
+            ldflags.append("L" + build_paths.glibc_lib)
 
-    return cflags, include_dirs, passthrough_args
+    return cflags, include_dirs, passthrough_args, ldflags
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> tuple[list[str], list[str]]:
@@ -1159,6 +1227,8 @@ def _get_torch_related_args(
         libraries_dirs = [TORCH_LIB_PATH]
         if sys.platform != "darwin" and not config.is_fbcode():
             libraries.extend(["torch", "torch_cpu"])
+            if _IS_WINDOWS:
+                libraries.append("c10")
             if not aot_mode:
                 libraries.append("torch_python")
     else:
@@ -1289,8 +1359,8 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implemented more math libraries than clang, for performance proposal.
-    We need preload them like openmp library.
+    Intel Compiler implemented more math libraries than clang, for performance purposes.
+    We need to preload them like openmp library.
     """
     preload_list = [
         "libiomp5md.dll",  # openmp
@@ -1393,9 +1463,8 @@ def _get_openmp_args(
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
 
-            openmp_lib = build_paths.openmp_lib_so
-            fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
-            passthrough_args.append(fb_openmp_extra_flags)
+            passthrough_args.append("-Wp,-fopenmp")
+            lib_dir_paths.append(os.path.dirname(build_paths.openmp_lib_so))
 
             libs.append("omp")
         else:
@@ -1483,6 +1552,7 @@ def get_cpp_torch_options(
         sys_libs_cflags,
         sys_libs_include_dirs,
         sys_libs_passthrough_args,
+        sys_libs_ldflags,
     ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
@@ -1524,7 +1594,7 @@ def get_cpp_torch_options(
         + omp_include_dir_paths
     )
     cflags = sys_libs_cflags + omp_cflags
-    ldflags = omp_ldflags
+    ldflags = sys_libs_ldflags + omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
@@ -1632,6 +1702,183 @@ def _find_libcudart_static(path: str) -> Path | None:
     return None
 
 
+def _gen_mingw_import_lib(dll_path: str, def_path: str, import_lib_path: str) -> None:
+    """Generate a MinGW import library (.a) from a DLL using gendef and dlltool."""
+    dll_name = os.path.basename(dll_path)
+    with open(def_path, "w") as def_file:
+        subprocess.run(
+            ["gendef", "-", dll_path],
+            stdout=def_file,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+
+    subprocess.run(
+        [
+            "x86_64-w64-mingw32-dlltool",
+            "-d",
+            def_path,
+            "-l",
+            import_lib_path,
+            "-D",
+            dll_name,
+        ],
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    log.info("Generated MinGW import library %s from %s", import_lib_path, dll_name)
+
+
+# MSVC /GS buffer security check stubs for MinGW cross-compilation.
+# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference
+# these symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck).
+# When cross-compiling with MinGW, we provide no-op stubs so the linker can
+# resolve them. At runtime on Windows, the CUDA runtime DLL handles its own
+# security checks internally; the static loader code that references these
+# symbols is a thin shim whose /GS instrumentation is safe to stub out.
+_MSVC_GS_STUBS_SOURCE = """\
+#include <stdint.h>
+uint64_t __security_cookie = 0x00002B992DDFA232ULL;
+void __security_check_cookie(uint64_t cookie) { (void)cookie; }
+void __GSHandlerCheck(void) {}
+"""
+
+
+def _create_msvc_gs_stubs_lib(output_dir: str) -> str | None:
+    """
+    Create a static library with MSVC GS security symbol stubs for MinGW.
+
+    Returns the library name (without lib prefix / .a suffix) if successful,
+    or None on failure.
+    """
+    stubs_lib = os.path.join(output_dir, "libmsvc_gs_stubs.a")
+    if os.path.exists(stubs_lib):
+        return "msvc_gs_stubs"
+
+    src_path = ""
+    obj_path = ""
+    try:
+        src_path = os.path.join(output_dir, "_msvc_gs_stubs.c")
+        obj_path = os.path.join(output_dir, "_msvc_gs_stubs.o")
+        with open(src_path, "w") as f:
+            f.write(_MSVC_GS_STUBS_SOURCE)
+
+        mingw_gcc = MINGW_GXX.replace("g++", "gcc")
+        subprocess.run(
+            [mingw_gcc, "-c", src_path, "-o", obj_path],
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        mingw_ar = MINGW_GXX.replace("g++", "ar")
+        subprocess.run(
+            [mingw_ar, "rcs", stubs_lib, obj_path],
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        log.info("Created MSVC GS stubs library: %s", stubs_lib)
+        return "msvc_gs_stubs"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.warning(
+            "Failed to create MSVC GS stubs library.",
+            exc_info=True,
+        )
+        if os.path.exists(stubs_lib):
+            os.remove(stubs_lib)
+        return None
+    finally:
+        for f in [src_path, obj_path]:
+            if f and os.path.exists(f):
+                os.remove(f)
+
+
+def _ensure_mingw_cudart_import_lib(libraries_dirs: list[str]) -> list[str]:
+    """
+    Auto-generate a MinGW-compatible import library (libcudart.a)
+    from the CUDA runtime DLL. This avoids linking against the hybrid cudart.lib
+    which contains MSVC-compiled static objects with /GS security symbols that
+    MinGW cannot resolve.
+
+    Falls back to creating MSVC GS security stubs if the DLL is unavailable,
+    and falls back gracefully to the original cudart.lib if that also fails.
+
+    Returns a list of extra library names to link (e.g. ["msvc_gs_stubs"]).
+    """
+    import glob
+
+    windows_cuda_home = os.environ.get("WINDOWS_CUDA_HOME")
+    if not windows_cuda_home:
+        log.debug(
+            "WINDOWS_CUDA_HOME not set, skipping MinGW cudart import lib generation"
+        )
+        return []
+
+    for lib_dir in libraries_dirs:
+        if os.path.exists(os.path.join(lib_dir, "libcudart.a")):
+            log.debug("libcudart.a already exists in %s, skipping generation", lib_dir)
+            return []
+
+    # Find the CUDA runtime DLL for import lib generation
+    bin_dir = os.path.join(windows_cuda_home, "bin", "x64")
+    if not os.path.isdir(bin_dir):
+        bin_dir = os.path.join(windows_cuda_home, "bin")
+    dll_candidates = glob.glob(os.path.join(bin_dir, "cudart64_*.dll"))
+
+    # Find a writable directory containing cudart.lib for output
+    output_dir = None
+    for lib_dir in libraries_dirs:
+        if os.path.isdir(lib_dir) and os.access(lib_dir, os.W_OK):
+            if os.path.exists(os.path.join(lib_dir, "cudart.lib")):
+                output_dir = lib_dir
+                break
+
+    if not dll_candidates:
+        log.warning(
+            "No cudart64_*.dll found in %s. Cannot generate MinGW import library. "
+            "Will create MSVC GS security stubs as fallback.",
+            bin_dir,
+        )
+        # Fallback: create GS stubs so the hybrid cudart.lib can link
+        if output_dir is not None:
+            stub_lib = _create_msvc_gs_stubs_lib(output_dir)
+            if stub_lib:
+                return [stub_lib]
+        return []
+
+    if output_dir is None:
+        log.warning(
+            "No writable directory containing cudart.lib found. "
+            "Cannot generate MinGW import library. "
+            "If linking fails with undefined references to __security_cookie, "
+            "ensure cudart.lib is present in one of: %s",
+            libraries_dirs,
+        )
+        return []
+
+    dll_path = dll_candidates[0]
+    dll_name = os.path.basename(dll_path)
+
+    def_path = os.path.join(output_dir, dll_name.replace(".dll", ".def"))
+    import_lib_path = os.path.join(output_dir, "libcudart.a")
+
+    try:
+        _gen_mingw_import_lib(dll_path, def_path, import_lib_path)
+        return []
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        log.warning(
+            "Failed to generate MinGW cudart import library. "
+            "Falling back to MSVC GS stubs.",
+            exc_info=True,
+        )
+        for f in [def_path, import_lib_path]:
+            if os.path.exists(f):
+                os.remove(f)
+        # Fallback: create GS stubs
+        stub_lib = _create_msvc_gs_stubs_lib(output_dir)
+        if stub_lib:
+            return [stub_lib]
+        return []
+
+
 def _transform_cuda_paths(lpaths: list[str]) -> None:
     # This handles two cases:
     # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
@@ -1645,6 +1892,20 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
             stub_dir = lib_dir / "stubs"
             if stub_dir.exists():
                 lpaths.append(str(stub_dir))
+
+    # Internal path needs special care, using the SDK lib path directly.
+    if config.is_fbcode():
+        stub_dir = Path(build_paths.sdk_lib) / "stubs"
+        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
+            lpaths.append(str(stub_dir))
+
+
+def _transform_rocm_paths(lpaths: list[str]) -> None:
+    # Internal path needs special care, using the SDK lib path directly.
+    if config.is_fbcode():
+        sdk_lib = build_paths.sdk_lib
+        if os.path.isdir(sdk_lib) and sdk_lib not in lpaths:
+            lpaths.append(sdk_lib)
 
 
 def get_cpp_torch_device_options(
@@ -1694,13 +1955,15 @@ def get_cpp_torch_device_options(
             else:
                 libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
+            _transform_rocm_paths(libraries_dirs)
         else:
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
                 libraries += ["cuda", "torch_cuda"]
             if config.aot_inductor.cross_target_platform == "windows":
-                libraries += ["cudart"]
+                extra_libs = _ensure_mingw_cudart_import_lib(libraries_dirs)
+                libraries += ["cudart"] + extra_libs
             _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":
@@ -1781,6 +2044,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
+        compiler: str = "",
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1794,6 +2058,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
+            compiler=compiler,
         )
 
         device_definitions: list[str] = []
@@ -1994,6 +2259,11 @@ class CppBuilder:
             assert len(sources) == 1
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
+            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
+                # Store PCH paths relative to -isysroot so the .pch can
+                # be used from a different build directory.  The matching
+                # -isysroot is injected by build_fbcode_re().
+                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
 
@@ -2017,6 +2287,13 @@ class CppBuilder:
                 )
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "
+                if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
+                    # Skip clang's own PCH validation during consumption.
+                    # _precompile_header() already handles cache invalidation
+                    # via content hashing, and -fno-validate-pch allows the
+                    # PCH to be used even when the original source file is at
+                    # a different path (e.g. across Remote Execution workers).
+                    self._cflags_args += " -Xclang -fno-validate-pch "
 
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
@@ -2098,7 +2375,7 @@ class CppBuilder:
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
-            command = self.get_command_line().split()
+            command = shlex.split(self.get_command_line())
             try:
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
@@ -2112,9 +2389,43 @@ class CppBuilder:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
-                    # Run the build
+
+                    # Copy precompiled header (.h and .gch/.pch) into the
+                    # build directory and rewrite the -include flag so the
+                    # compiler can find it.
+                    pch_header = self._build_option.precompiled_header
+                    if pch_header and os.path.isfile(pch_header):
+                        pch_ext = ".pch" if _IS_WINDOWS or not is_gcc() else ".gch"
+                        pch_compiled = pch_header + pch_ext
+                        pch_basename = os.path.basename(pch_header)
+                        shutil.copy(pch_header, os.path.join(tmp_dir, pch_basename))
+                        if os.path.isfile(pch_compiled):
+                            shutil.copy(
+                                pch_compiled,
+                                os.path.join(tmp_dir, pch_basename + pch_ext),
+                            )
+                        command = [
+                            pch_basename if arg == pch_header else arg
+                            for arg in command
+                        ]
+
+                    # Relocatable PCH stores include paths relative to
+                    # -isysroot.  Set sysroot to the tmp build dir so
+                    # paths resolve correctly in both precompilation and
+                    # later kernel compilations that consume the PCH.
+                    if self._precompiling or (
+                        pch_header and os.path.isfile(pch_header)
+                    ):
+                        command[1:1] = ["-isysroot", "."]
+
+                    # Run the build, raising RuntimeError on failure instead of
+                    # SkipFrame so compilation errors propagate rather than
+                    # silently falling back to eager execution.
                     tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
+                        command,
+                        tmp_dir,
+                        os.path.basename(output_path),
+                        exception_class=RuntimeError,
                     )
                     # Copy output from the build
                     if os.path.exists(output_path):
@@ -2125,8 +2436,7 @@ class CppBuilder:
                     elif output_path.endswith(".so"):
                         os.chmod(output_path, 0o755)
             except subprocess.CalledProcessError as e:
-                output = e.output.decode("utf-8")
-                raise exc.CppCompileError(command, output) from e
+                raise exc.CppCompileError(command, e.output.decode("utf-8")) from e
 
     def build(self) -> None:
         """
@@ -2165,7 +2475,7 @@ class CppBuilder:
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
             project({self._target_name} LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
+            set(CMAKE_CXX_STANDARD 20)
 
             # Set a library target
             add_library({self._target_name} {target_library_type})

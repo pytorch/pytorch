@@ -135,7 +135,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules, or interfacing with PyTorch's Tensor API, was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
@@ -260,15 +260,6 @@ pip install mkl-static mkl-include
 # Run from the pytorch directory after cloning
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
-```
-
-**On MacOS**
-
-```bash
-# Add this package on intel x86 processor machines only
-pip install mkl-static mkl-include
-# Add these packages if torch.distributed is needed
-conda install pkg-config libuv
 ```
 
 **On Windows**

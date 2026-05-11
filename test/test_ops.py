@@ -39,6 +39,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types_and,
+    highest_precision_float,
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -69,7 +70,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
@@ -467,6 +467,7 @@ class TestCommon(TestCase):
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
     # XPU test will be enabled step by step. Skip the tests temporarily.
+    # MPS does not support double precision, so single precision has to be used instead.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -479,11 +480,11 @@ class TestCommon(TestCase):
             and dtype == torch.float64
             and ("cuda" in device or "xpu" in device)
             or "cpu" in device
-        ):  # noqa: E121
+        ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double
-        with set_default_dtype(torch.double):
+        with set_default_dtype(highest_precision_float(device)):
             for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
@@ -515,7 +516,8 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            atol, rtol = 0, 0
+            atol = None if torch.xpu.is_available() else 0
+            rtol = None if torch.xpu.is_available() else 0
             if dtype.is_floating_point or dtype.is_complex:
                 atol, rtol = 1e-3, 1e-3
             self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
@@ -635,9 +637,13 @@ class TestCommon(TestCase):
                 # precise dtypes -- they simply must be close
                 precise_dtype = dtype
             if prims.utils.is_float_dtype(dtype):
-                precise_dtype = torch.double
+                precise_dtype = highest_precision_float(device)
             if prims.utils.is_complex_dtype(dtype):
-                precise_dtype = torch.cdouble
+                precise_dtype = (
+                    torch.complex32
+                    if torch.device(device).type == "mps"
+                    else torch.cdouble
+                )
 
             # Checks if the results are close
             try:
@@ -730,12 +736,6 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation

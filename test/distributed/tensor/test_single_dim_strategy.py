@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
-from itertools import permutations
+from itertools import chain, permutations, product
 from unittest.mock import patch
 
 import torch
@@ -28,10 +28,10 @@ from torch.distributed.tensor._ops._pointwise_ops import (
     _common_pointwise_single_dim_strategy,
     _MUL_RULES,
     _UNARY_LINEAR_RULES,
-    single_mesh_dim_linear_pointwise_strategy,
 )
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
+    _dijkstra_expand_single_dim_strategy_to_mesh,
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
     _get_num_tensor_inputs,
@@ -42,6 +42,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
@@ -91,7 +92,7 @@ def _get_mm_specs(
 class TestExpandPlaceholder(TestCase):
     def setUp(self):
         super().setUp()
-        self.world_size = 8
+        self.world_size = 64
         store = FakeStore()
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
@@ -134,8 +135,9 @@ class TestExpandPlaceholder(TestCase):
             output_meta = [spec.tensor_meta for spec in out_spec.children]
 
             op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
-            strategy_fn = single_mesh_dim_linear_pointwise_strategy(
-                linearity=linearity or -1
+            extra_rules = _BINARY_ADDITIVE_RULES if linearity == 1 else None
+            strategy_fn = _common_pointwise_single_dim_strategy(
+                partial_extra_rules=extra_rules
             )
             expanded = _expand_single_dim_strategy_to_mesh(
                 mesh, op_schema, _SingleDimStrategyInfo(strategy_fn), output_meta
@@ -152,9 +154,8 @@ class TestExpandPlaceholder(TestCase):
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
-                self.assertEqual(
-                    len(strategy.children[0].strategies), 125
-                )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
+                # See test_expand_foreach_add_to_3d_mesh for derivation of 634.
+                self.assertEqual(len(strategy.children[0].strategies), 634)
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -256,7 +257,9 @@ class TestExpandPlaceholder(TestCase):
                 mesh,
                 op_schema,
                 _SingleDimStrategyInfo(
-                    single_mesh_dim_linear_pointwise_strategy(linearity=1)
+                    _common_pointwise_single_dim_strategy(
+                        partial_extra_rules=_BINARY_ADDITIVE_RULES
+                    )
                 ),
                 output_tensor_meta,
             )
@@ -268,9 +271,20 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(strategy, TupleStrategy)
             return strategy
 
-        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S0, S1, R, Psum, Pavg) ** 3 = 125
-        expected_num_strategies = (125, 8)
+        # Sizes are multiples of mesh dims so every shard option is valid.
+        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 6 partial rules
+        # (1 Psum, 3 Pavg, 1 Pmax, 1 Pmin). Mixed-partial filter allows
+        # Psum+Pavg to coexist but rejects other mixes. By inclusion-exclusion
+        # on a 3D mesh (n=4 non-partial, partial rule counts by type):
+        #   no partials:    4^3                                    =  64
+        #   Psum only:      (4+1)^3 - 4^3                         =  61
+        #   Pavg only:      (4+3)^3 - 4^3                         = 279
+        #   Pmax only:      (4+1)^3 - 4^3                         =  61
+        #   Pmin only:      (4+1)^3 - 4^3                         =  61
+        #   Psum+Pavg mix:  (4+1+3)^3 - (4+3)^3 - (4+1)^3 + 4^3  = 108
+        #   total: 634
+        # For scalars (no Shard), n=1 (R only): same formula gives 139.
+        expected_num_strategies = (634, 139)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -284,8 +298,9 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle
-            (Partial("sum"), Partial("sum"), Replicate()),
+            # P(avg),P(avg),R rule lets dim 2 keep P(avg) from input_a, only
+            # redistributing input_b to R (cheaper than both inputs → R)
+            (Partial("sum"), Partial("sum"), Partial("avg")),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -295,19 +310,23 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(child, OpStrategy)
             self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
 
-            # _select_min_cost_strategy can have multiple min-cost strategies,
-            # so just assert the expected placement has equal cost.
             def sum_cost(x):
                 return sum(sum(y) for y in x)
 
+            # Multiple strategies can produce the same output placement but
+            # with different input specs (and costs, including inf). Check
+            # that the cheapest strategy with the expected output ties with
+            # the overall minimum.
             expected = expected_output_placements[child_i]
             min_cost_strategy = _select_min_cost_strategy(child)
-            for strategy in child.strategies:
-                if strategy.output_spec.placements == expected:
-                    self.assertEqual(
-                        sum_cost(strategy.redistribute_cost),
-                        sum_cost(min_cost_strategy.redistribute_cost),
-                    )
+            min_cost = sum_cost(min_cost_strategy.redistribute_cost)
+            expected_costs = [
+                sum_cost(s.redistribute_cost)
+                for s in child.strategies
+                if s.output_spec.placements == expected
+            ]
+            self.assertTrue(len(expected_costs) > 0)
+            self.assertAlmostEqual(min(expected_costs), min_cost, places=5)
 
     def test_expand_cat_strategy_to_3d_mesh(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
@@ -853,6 +872,60 @@ class TestExpandPlaceholder(TestCase):
         self.assertEqual(prepared.num_outputs, 1)
         self.assertEqual(prepared.num_inputs, 3)
 
+    def test_out_variant_partial_propagation(self):
+        """Test that partial rules work correctly for .out variant ops.
+
+        For mul.out with rule [P(sum), P(sum), R, P(sum)]
+        (output=P(sum), arg1=P(sum), arg2=R, out_kwarg=P(sum)),
+        the out kwarg should get P(sum) matching the output.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        partial_spec = DTensorSpec(mesh, (Partial("sum"),), meta)
+        replicate_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(partial_spec)]),
+                OpStrategy([OpSpec(replicate_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(partial_spec)])},
+        )
+
+        # [output, arg1, arg2, out_kwarg] — includes out kwarg placement
+        single_mesh_dim_strategies = [
+            [Partial("sum"), Partial("sum"), Replicate(), Partial("sum")],
+            [Replicate(), Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+            input_index=1,
+        )
+
+        self.assertIsInstance(result, OpStrategy)
+        # Should have strategies where output=P(sum) and out_kwarg=P(sum)
+        found_partial_strategy = False
+        for strategy in result.strategies:
+            if strategy.output_spec.placements == (Partial("sum"),):
+                found_partial_strategy = True
+                # The out kwarg (last input) must match the output
+                out_kwarg_placement = strategy.input_specs[2].placements
+                self.assertEqual(
+                    out_kwarg_placement,
+                    (Partial("sum"),),
+                    "out kwarg should be P(sum) matching the output, not R",
+                )
+        self.assertTrue(
+            found_partial_strategy,
+            "Expected a strategy with Partial('sum') output for mul.out",
+        )
+
     def test_expand_multi_output_strategy(self):
         """Test expanding single-dim strategies for multi-output ops.
 
@@ -1141,6 +1214,633 @@ class TestExpandPlaceholder(TestCase):
         self.assertTrue(
             found_sum_avg_mix,
             "Should include mixed (P_sum, P_avg) strategies since sum+avg commute",
+        )
+
+
+class TestDijkstraExpandSingleDimStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=64, store=store)
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def _get_mm_output_meta(self, M=64, K=32, N=64):
+        return TensorMeta(
+            shape=torch.Size([M, N]),
+            stride=(N, 1),
+            dtype=torch.float32,
+        )
+
+    def _compare_pq_vs_full_expansion(self, mesh, left_placements, right_placements):
+        """Run both PQ search and full expansion, verify same min cost."""
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+        left_spec, right_spec = _get_mm_specs(
+            mesh, left_meta, right_meta, left_placements, right_placements
+        )
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        # PQ search
+        pq_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
+        )
+        self.assertIsNotNone(pq_strategy)
+        self.assertIsInstance(pq_strategy, OpStrategy)
+        self.assertEqual(len(pq_strategy.strategies), 1)
+        pq_cost = sum(chain.from_iterable(pq_strategy.strategies[0].redistribute_cost))
+
+        # Full expansion reference using graph-based (min-cost) redistribution
+        # planning. PQ's Dijkstra search over all per-dim transition orderings
+        # finds the globally optimal ordering (accounting for comm_bytes updates),
+        # which can be strictly cheaper than even the graph-based planner.
+        with use_min_cost_redistribution_plan():
+            expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                mesh,
+                op_schema,
+                _SingleDimStrategyInfo(mm_single_dim_strategy),
+                output_meta,
+            )
+            ref_strategy = expanded_strategy_fn(
+                torch.ops.aten.mm.default,
+                op_schema.args_meta,
+                op_schema.kwargs_meta,
+            )
+        ref_min_cost = min(
+            sum(chain.from_iterable(s.redistribute_cost))
+            for s in ref_strategy.strategies
+        )
+
+        self.assertLessEqual(
+            pq_cost,
+            ref_min_cost + 1e-9,
+            msg=(
+                f"PQ cost {pq_cost} > ref min cost {ref_min_cost} for "
+                f"left={left_placements}, right={right_placements}"
+            ),
+        )
+
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_basic(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
+        left_meta, right_meta = _get_mm_metas()
+        output_meta = self._get_mm_output_meta()
+        left_spec, right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Shard(0), Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate(), Replicate()),
+        )
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
+        )
+
+        self.assertIsInstance(strategy, OpStrategy)
+        self.assertEqual(len(strategy.strategies), 1)
+
+        op_spec = strategy.strategies[0]
+        output_spec = op_spec.output_spec
+        input_specs = op_spec.input_specs
+
+        # Zero-cost match: left stays Shard(0), right stays Replicate
+        self.assertEqual(output_spec.placements, (Shard(0), Replicate(), Replicate()))
+        self.assertEqual(
+            input_specs[0].placements, (Shard(0), Replicate(), Replicate())
+        )
+        self.assertEqual(
+            input_specs[1].placements, (Replicate(), Replicate(), Replicate())
+        )
+        # Verify output has tensor_meta
+        self.assertIsNotNone(output_spec.tensor_meta)
+        self.assertEqual(output_spec.tensor_meta.shape, torch.Size([64, 64]))
+
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_hard(self):
+        """Verify PQ search matches full expansion min cost on 3D mesh."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
+        self._compare_pq_vs_full_expansion(
+            mesh,
+            left_placements=(Shard(0), Replicate(), Replicate()),
+            right_placements=(Shard(1), Shard(0), Replicate()),
+        )
+
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_hard_4d(self):
+        """Verify PQ search matches full expansion min cost on 4D mesh."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(16).reshape(2, 2, 2, 2))
+        self._compare_pq_vs_full_expansion(
+            mesh,
+            left_placements=(Replicate(), Shard(0), Replicate(), Replicate()),
+            right_placements=(Shard(0), Shard(1), Shard(0), Replicate()),
+        )
+
+    def test_pq_vs_full_expansion_data_driven(self):
+        """Data-driven comparison across mesh shapes, all placement types for mm.
+
+        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
+        both inputs, across 1D/2D/3D meshes.
+        """
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
+        mesh_configs = [
+            ("1d", torch.arange(4)),
+            ("2d", torch.arange(4).reshape(2, 2)),
+            ("3d", torch.arange(8).reshape(2, 2, 2)),
+        ]
+
+        for mesh_name, mesh_tensor in mesh_configs:
+            mesh = DeviceMesh("cpu", mesh=mesh_tensor)
+            ndim = mesh.ndim
+
+            all_placements = list(product(placement_options, repeat=ndim))
+
+            for left_pl in all_placements:
+                for right_pl in all_placements:
+                    with self.subTest(mesh=mesh_name, left=left_pl, right=right_pl):
+                        self._compare_pq_vs_full_expansion(mesh, left_pl, right_pl)
+
+    def test_strided_shard_fallback(self):
+        """Verify PQ search returns None for StridedShard inputs."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        left_meta, right_meta = _get_mm_metas()
+        output_meta = self._get_mm_output_meta()
+        left_spec = DTensorSpec(
+            mesh,
+            (_StridedShard(0, split_factor=2), Replicate()),
+            tensor_meta=left_meta,
+        )
+        right_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=right_meta,
+        )
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        result = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
+        )
+        self.assertIsNone(result)
+
+    def test_if_elif_dead_end_fix(self):
+        """Counterexample: state has R dims but chunking is useless, needs allgather.
+
+        On a 2D mesh with strategies [R, S(0) -> S(0)] + [R, R -> R],
+        input state left=(S(0), R), right=(R, S(0)).
+        Optimal = 1 allgather on right dim1: left=(S(0), R), right=(R, R)
+        -> matches [S(0),R->S(0)] on dim0 and [R,R->R] on dim1, cost = 1 allgather.
+
+        Old if/elif code would try to chunk first (since some dims are R),
+        miss the direct allgather path, and find a 2-allgather solution.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+
+        left_spec = DTensorSpec(
+            mesh,
+            (Shard(0), Replicate()),
+            tensor_meta=left_meta,
+        )
+        right_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Shard(0)),
+            tensor_meta=right_meta,
+        )
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
+        )
+        self.assertIsNotNone(strategy)
+        self.assertIsInstance(strategy, OpStrategy)
+        self.assertEqual(len(strategy.strategies), 1)
+
+        # The optimal strategy should have the same cost as full expansion
+        pq_cost = sum(chain.from_iterable(strategy.strategies[0].redistribute_cost))
+
+        # Full expansion reference
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            op_schema,
+            _SingleDimStrategyInfo(mm_single_dim_strategy),
+            output_meta,
+        )
+        ref_strategy = expanded_strategy_fn(
+            torch.ops.aten.mm.default,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
+        )
+        ref_min_cost = min(
+            sum(chain.from_iterable(s.redistribute_cost))
+            for s in ref_strategy.strategies
+        )
+
+        self.assertAlmostEqual(pq_cost, ref_min_cost, places=5)
+
+    def test_transitions_tracked(self):
+        """Verify that PQ search tracks transitions for TransformInfo."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        left_meta, right_meta = _get_mm_metas()
+        output_meta = self._get_mm_output_meta()
+
+        # Use placements that require redistribution to verify transitions are tracked
+        left_spec = DTensorSpec(
+            mesh,
+            (Shard(0), Shard(0)),
+            tensor_meta=left_meta,
+        )
+        right_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=right_meta,
+        )
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
+        )
+        self.assertIsNotNone(strategy)
+
+        # The _pq_transitions attribute should exist
+        transitions = getattr(strategy, "_pq_transitions", None)
+        self.assertIsNotNone(transitions)
+        self.assertIsInstance(transitions, list)
+        # Each transition should be (input_idx, mesh_dim, src, dst)
+        for t in transitions:
+            self.assertEqual(len(t), 4)
+
+    def test_pq_reachability_collect_all_2d(self):
+        """On a 2D mesh, verify PQ search can reach all valid strategies.
+
+        For every starting placement combo, run _dijkstra_expand_single_dim_strategy_to_mesh with
+        _collect_all_matches and union all collected sets. Assert the full
+        expansion reference set is a subset of the collected union.
+        """
+        from itertools import product
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
+        all_placements = list(product(placement_options, repeat=mesh.ndim))
+
+        # Get full expansion reference set
+        ref_left_spec, ref_right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate()),
+        )
+        wrapped_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(ref_left_spec)]),
+                OpStrategy([OpSpec(ref_right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+        expanded_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            wrapped_schema,
+            _SingleDimStrategyInfo(mm_single_dim_strategy),
+            output_meta,
+        )
+        ref_strategy = expanded_fn(
+            torch.ops.aten.mm.default,
+            wrapped_schema.args_meta,
+            wrapped_schema.kwargs_meta,
+        )
+        full_expansion_set = {
+            tuple(spec.placements for spec in s.input_specs)
+            for s in ref_strategy.strategies
+        }
+
+        # Collect all reachable matches from every starting placement
+        collected_union: set[tuple[tuple[Placement, ...], ...]] = set()
+        for left_pl in all_placements:
+            for right_pl in all_placements:
+                left_spec, right_spec = _get_mm_specs(
+                    mesh,
+                    left_meta,
+                    right_meta,
+                    left_pl,
+                    right_pl,
+                )
+                op_schema = OpSchema(
+                    op=torch.ops.aten.mm.default,
+                    args_schema=(
+                        OpStrategy([OpSpec(left_spec)]),
+                        OpStrategy([OpSpec(right_spec)]),
+                    ),
+                    kwargs_schema={},
+                )
+                matches: set[tuple[tuple[Placement, ...], ...]] = set()
+                _dijkstra_expand_single_dim_strategy_to_mesh(
+                    mesh,
+                    op_schema,
+                    mm_single_dim_strategy,
+                    output_tensor_meta=output_meta,
+                    _collect_all_matches=matches,
+                )
+                collected_union.update(matches)
+
+        missing = full_expansion_set - collected_union
+        self.assertEqual(
+            missing,
+            set(),
+            f"PQ search missed {len(missing)} strategies reachable by full expansion",
+        )
+
+    def test_single_dim_transition_reachability(self):
+        """Verify single-dim transition rules form a connected graph.
+
+        For mm on a 2D mesh, collect all placements that appear per input
+        position, build a directed graph from transition rules, and BFS from
+        each placement to assert all others are reachable.
+        """
+        from collections import deque
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+
+        ref_left_spec, ref_right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate()),
+        )
+        wrapped_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(ref_left_spec)]),
+                OpStrategy([OpSpec(ref_right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+        expanded_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            wrapped_schema,
+            _SingleDimStrategyInfo(mm_single_dim_strategy),
+            output_meta,
+        )
+        ref_strategy = expanded_fn(
+            torch.ops.aten.mm.default,
+            wrapped_schema.args_meta,
+            wrapped_schema.kwargs_meta,
+        )
+
+        # Collect all placements per input position per mesh dim
+        for input_idx in range(2):
+            for mesh_dim in range(mesh.ndim):
+                all_placements: set[Placement] = set()
+                for s in ref_strategy.strategies:
+                    all_placements.add(s.input_specs[input_idx].placements[mesh_dim])
+
+                # Build directed graph from transition rules
+                def is_sharding(p: Placement) -> bool:
+                    return isinstance(p, Shard)
+
+                edges: dict[Placement, set[Placement]] = {
+                    p: set() for p in all_placements
+                }
+                for src in all_placements:
+                    for dst in all_placements:
+                        if src == dst:
+                            continue
+                        # R -> S, R -> P (free)
+                        if isinstance(src, Replicate) and (
+                            is_sharding(dst) or isinstance(dst, Partial)
+                        ):
+                            edges[src].add(dst)
+                        # S -> R (allgather), S -> S' (all-to-all)
+                        if is_sharding(src) and (
+                            isinstance(dst, Replicate) or is_sharding(dst)
+                        ):
+                            edges[src].add(dst)
+                        # P -> R (allreduce), P -> S (reduce-scatter)
+                        if isinstance(src, Partial) and (
+                            isinstance(dst, Replicate) or is_sharding(dst)
+                        ):
+                            edges[src].add(dst)
+
+                # BFS from each placement, assert all others reachable
+                for start in all_placements:
+                    visited: set[Placement] = set()
+                    q = deque([start])
+                    while q:
+                        node = q.popleft()
+                        if node in visited:
+                            continue
+                        visited.add(node)
+                        q.extend(edges.get(node, set()))
+                    self.assertEqual(
+                        visited,
+                        all_placements,
+                        f"input_idx={input_idx}, mesh_dim={mesh_dim}: "
+                        f"from {start}, unreachable: {all_placements - visited}",
+                    )
+
+    def test_pq_cost_not_underestimated(self):
+        """Verify PQ per-input costs >= graph-based redistribute cost.
+
+        The PQ computes costs per-dim independently. This test checks that
+        each per-input PQ cost is at least as high as the graph-based
+        (min-cost) redistribute planner's cost for the same source→target.
+
+        The graph-based planner is the right baseline because both it and
+        the PQ find optimal transition orderings. The greedy planner uses
+        a fixed ordering that can be more expensive, so comparing against
+        greedy would flag the PQ's ordering optimizations as false positives.
+        """
+        from torch.distributed.tensor._collective_utils import redistribute_cost
+        from torch.distributed.tensor._redistribute import _gen_transform_infos
+
+        # Clear cached transform infos so use_min_cost_redistribution_plan()
+        # takes effect (earlier tests may have cached greedy results).
+        _gen_transform_infos.cache_clear()
+
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        output_meta = self._get_mm_output_meta(M, K, N)
+        all_placements = list(product(placement_options, repeat=mesh.ndim))
+
+        underestimated = []
+        for left_pl in all_placements:
+            for right_pl in all_placements:
+                left_meta, right_meta = _get_mm_metas(M, K, N)
+                left_spec, right_spec = _get_mm_specs(
+                    mesh, left_meta, right_meta, left_pl, right_pl
+                )
+                op_schema = OpSchema(
+                    op=torch.ops.aten.mm.default,
+                    args_schema=(
+                        OpStrategy([OpSpec(left_spec)]),
+                        OpStrategy([OpSpec(right_spec)]),
+                    ),
+                    kwargs_schema={},
+                )
+                pq_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+                    mesh,
+                    op_schema,
+                    mm_single_dim_strategy,
+                    output_tensor_meta=output_meta,
+                )
+                self.assertIsNotNone(pq_strategy)
+                pq_spec = pq_strategy.strategies[0]
+                with use_min_cost_redistribution_plan():
+                    for input_idx, (init_spec, target_spec) in enumerate(
+                        zip([left_spec, right_spec], pq_spec.input_specs)
+                    ):
+                        pq_input_cost = pq_spec.redistribute_cost[input_idx][0]
+                        actual_cost = redistribute_cost(init_spec, target_spec)
+                        if pq_input_cost < actual_cost - 1e-9:
+                            underestimated.append(
+                                f"left={left_pl} right={right_pl} "
+                                f"input_idx={input_idx}: "
+                                f"pq={pq_input_cost:.4f} < "
+                                f"actual={actual_cost:.4f} "
+                                f"target={target_spec.placements}"
+                            )
+
+        self.assertEqual(
+            underestimated,
+            [],
+            f"PQ underestimated cost for {len(underestimated)} cases:\n"
+            + "\n".join(underestimated[:20]),
+        )
+
+    def test_pq_selects_optimal_actual_cost_strategy(self):
+        """Verify PQ-selected strategy has graph-based cost <= full expansion min.
+
+        Both the PQ and the reference use graph-based (min-cost) redistribution
+        planning for a fair comparison. This catches cases where the PQ selects
+        a genuinely worse strategy, not just ordering differences.
+        """
+        from torch.distributed.tensor._collective_utils import redistribute_cost
+        from torch.distributed.tensor._redistribute import _gen_transform_infos
+
+        _gen_transform_infos.cache_clear()
+
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        output_meta = self._get_mm_output_meta(M, K, N)
+        all_placements = list(product(placement_options, repeat=mesh.ndim))
+
+        wrong_strategy = []
+        for left_pl in all_placements:
+            for right_pl in all_placements:
+                left_meta, right_meta = _get_mm_metas(M, K, N)
+                left_spec, right_spec = _get_mm_specs(
+                    mesh, left_meta, right_meta, left_pl, right_pl
+                )
+                op_schema = OpSchema(
+                    op=torch.ops.aten.mm.default,
+                    args_schema=(
+                        OpStrategy([OpSpec(left_spec)]),
+                        OpStrategy([OpSpec(right_spec)]),
+                    ),
+                    kwargs_schema={},
+                )
+                pq_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+                    mesh,
+                    op_schema,
+                    mm_single_dim_strategy,
+                    output_tensor_meta=output_meta,
+                )
+                self.assertIsNotNone(pq_strategy)
+                pq_spec = pq_strategy.strategies[0]
+
+                with use_min_cost_redistribution_plan():
+                    # Actual cost of PQ-selected strategy (graph-based)
+                    pq_actual = sum(
+                        redistribute_cost(init, tgt)
+                        for init, tgt in zip(
+                            [left_spec, right_spec], pq_spec.input_specs
+                        )
+                    )
+
+                    # Reference: full expansion with graph-based planning
+                    expanded_fn = _expand_single_dim_strategy_to_mesh(
+                        mesh,
+                        op_schema,
+                        _SingleDimStrategyInfo(mm_single_dim_strategy),
+                        output_meta,
+                    )
+                    ref = expanded_fn(
+                        torch.ops.aten.mm.default,
+                        op_schema.args_meta,
+                        op_schema.kwargs_meta,
+                    )
+                ref_min = min(
+                    sum(chain.from_iterable(s.redistribute_cost))
+                    for s in ref.strategies
+                )
+
+                if pq_actual > ref_min + 1e-9:
+                    wrong_strategy.append(
+                        f"left={left_pl} right={right_pl}: "
+                        f"pq_actual={pq_actual:.4f} > "
+                        f"ref_min={ref_min:.4f} "
+                        f"target_left={pq_spec.input_specs[0].placements} "
+                        f"target_right={pq_spec.input_specs[1].placements}"
+                    )
+
+        self.assertEqual(
+            wrong_strategy,
+            [],
+            f"PQ selected worse strategy in {len(wrong_strategy)} cases:\n"
+            + "\n".join(wrong_strategy[:20]),
         )
 
 

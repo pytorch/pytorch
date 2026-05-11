@@ -11,12 +11,24 @@ namespace {
   constexpr int kStreamPerGreenContextPool = 32;
 }
 
+// Workqueue sharing scope for green contexts.
+// Values match the CUDA driver API's CUdevWorkqueueConfigScope enum.
+enum class WorkqueueScope : int32_t {
+  DeviceCtx = 0,
+  Balanced = 1,
+};
+
 class TORCH_CUDA_CPP_API GreenContext {
  public:
-  // Green context creation
   static std::unique_ptr<GreenContext> create(
-      uint32_t num_sms,
-      std::optional<uint32_t> device_id);
+    std::optional<uint32_t> device_id,
+    std::optional<uint32_t> num_sms,
+    std::optional<int32_t> workqueue_scope = std::nullopt,
+    std::optional<uint32_t> workqueue_concurrency_limit = std::nullopt);
+
+  static uint32_t max_workqueue_concurrency(
+      std::optional<uint32_t> device_id = std::nullopt);
+
   ~GreenContext() noexcept;
 
   // Delete copy constructor and assignment
@@ -31,7 +43,12 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUDAStream Stream();
 
  private:
-  GreenContext(uint32_t device_id, uint32_t num_sms);
+  GreenContext(
+    uint32_t device_id,
+    std::optional<uint32_t> num_sms,
+    std::optional<int32_t> workqueue_scope,
+    std::optional<uint32_t> workqueue_concurrency_limit);
+
   // Implement move operations
   GreenContext(GreenContext&& other) noexcept;
   GreenContext& operator=(GreenContext&& other) noexcept;
