@@ -449,6 +449,9 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
+# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
+dedup_reduce_scatters: bool = False
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
@@ -2027,6 +2030,10 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Controls TMA load enablement in template epilogues
+    enable_tma_load_for_template_epilogue = (
+        os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
+    )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
