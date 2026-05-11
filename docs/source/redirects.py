@@ -159,4 +159,9 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
+    # Redirects for RST to MyST Markdown conversions (Docathon 2026)
+    "cudnn_persistent_rnn": "cudnn_persistent_rnn.html",
+    "community/index": "community/index.html",
+    "cpp_extension": "cpp_extension.html",
+    "nativert": "nativert.html",
 }
