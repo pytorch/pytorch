@@ -51,7 +51,7 @@ endif()
 # source tree before setuptools ran.  With scikit-build-core the wheel is
 # built from the cmake install prefix, so we install them via cmake instead.
 if(WIN32 AND BUILD_PYTHON)
-  # OpenMP runtime (libiomp5md.dll) — required by torch_cpu.dll when MKL
+  # OpenMP runtime (libiomp5md.dll) - required by torch_cpu.dll when MKL
   # threading uses Intel OpenMP.
   if(MKL_OPENMP_LIBRARY AND MKL_OPENMP_LIBRARY MATCHES "libiomp5md\\.lib$")
     get_filename_component(_omp_lib_dir "${MKL_OPENMP_LIBRARY}" DIRECTORY)
@@ -77,7 +77,9 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
-  # libuv (uv.dll) — required by torch distributed (gloo transport).
+  # libuv (uv.dll) - required by torch distributed (gloo transport).
+  # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
+  # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
   if(USE_DISTRIBUTED)
     if(libuv_DLL_PATH AND EXISTS "${libuv_DLL_PATH}")
       install(FILES "${libuv_DLL_PATH}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -89,7 +91,7 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
-  # CUDA runtime DLLs — only for CUDA builds.
+  # CUDA runtime DLLs - only for CUDA builds.
   if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
     # CUDA 13+ moves DLLs to bin/x64.
     if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")

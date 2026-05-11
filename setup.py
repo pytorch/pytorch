@@ -1076,7 +1076,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if IS_DARWIN:
             self._embed_libomp()
 
-
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
