@@ -223,10 +223,9 @@ class BuiltinTest(CPythonTestCase):
         # other
         self.assertRaises(TypeError, abs)
         self.assertRaises(TypeError, abs, None)
-        with torch._dynamo.error_on_graph_break(False):
-            class AbsClass(object):
-                def __abs__(self):
-                    return -5
+        class AbsClass(object):
+            def __abs__(self):
+                return -5
         self.assertEqual(abs(AbsClass()), -5)
 
     def test_all(self):
@@ -308,9 +307,8 @@ class BuiltinTest(CPythonTestCase):
         def f(): pass
         self.assertTrue(callable(f))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C1:
-                def meth(self): pass
+        class C1:
+            def meth(self): pass
         self.assertTrue(callable(C1))
         c = C1()
         self.assertTrue(callable(c.meth))
@@ -324,15 +322,13 @@ class BuiltinTest(CPythonTestCase):
         del c.__call__
         self.assertFalse(callable(c))
 
-        with torch._dynamo.error_on_graph_break(False):
-            class C2(object):
-                def __call__(self): pass
+        class C2(object):
+            def __call__(self): pass
         c2 = C2()
         self.assertTrue(callable(c2))
         c2.__call__ = None
         self.assertTrue(callable(c2))
-        with torch._dynamo.error_on_graph_break(False):
-            class C3(C2): pass
+        class C3(C2): pass
         c3 = C3()
         self.assertTrue(callable(c3))
 
@@ -594,9 +590,8 @@ class BuiltinTest(CPythonTestCase):
         self.assertIn('exit', dir(sys))
 
         # dir(module_with_invalid__dict__)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(types.ModuleType):
-                __dict__ = 8
+        class Foo(types.ModuleType):
+            __dict__ = 8
         f = Foo("foo")
         self.assertRaises(TypeError, dir, f)
 
@@ -605,64 +600,57 @@ class BuiltinTest(CPythonTestCase):
         self.assertNotIn("__mro__", dir(str))
 
         # dir(obj)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __init__(self):
-                    self.x = 7
-                    self.y = 8
-                    self.z = 9
+        class Foo(object):
+            def __init__(self):
+                self.x = 7
+                self.y = 8
+                self.z = 9
         f = Foo()
         self.assertIn("y", dir(f))
 
         # dir(obj_no__dict__)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                __slots__ = []
+        class Foo(object):
+            __slots__ = []
         f = Foo()
         self.assertIn("__repr__", dir(f))
 
         # dir(obj_no__class__with__dict__)
         # (an ugly trick to cause getattr(f, "__class__") to fail)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                __slots__ = ["__class__", "__dict__"]
-                def __init__(self):
-                    self.bar = "wow"
+        class Foo(object):
+            __slots__ = ["__class__", "__dict__"]
+            def __init__(self):
+                self.bar = "wow"
         f = Foo()
         self.assertNotIn("__repr__", dir(f))
         self.assertIn("bar", dir(f))
 
         # dir(obj_using __dir__)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __dir__(self):
-                    return ["kan", "ga", "roo"]
+        class Foo(object):
+            def __dir__(self):
+                return ["kan", "ga", "roo"]
         f = Foo()
         self.assertTrue(dir(f) == ["ga", "kan", "roo"])
 
         # dir(obj__dir__tuple)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __dir__(self):
-                    return ("b", "c", "a")
+        class Foo(object):
+            def __dir__(self):
+                return ("b", "c", "a")
         res = dir(Foo())
         self.assertIsInstance(res, list)
         self.assertTrue(res == ["a", "b", "c"])
 
         # dir(obj__dir__iterable)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __dir__(self):
-                    return {"b", "c", "a"}
+        class Foo(object):
+            def __dir__(self):
+                return {"b", "c", "a"}
         res = dir(Foo())
         self.assertIsInstance(res, list)
         self.assertEqual(sorted(res), ["a", "b", "c"])
 
         # dir(obj__dir__not_sequence)
-        with torch._dynamo.error_on_graph_break(False):
-            class Foo(object):
-                def __dir__(self):
-                    return 7
+        class Foo(object):
+            def __dir__(self):
+                return 7
         f = Foo()
         self.assertRaises(TypeError, dir, f)
 
@@ -716,10 +704,9 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError, eval, ())
         self.assertRaises(SyntaxError, eval, bom[:2] + b'a')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class X:
-                def __getitem__(self, key):
-                    raise ValueError
+        class X:
+            def __getitem__(self, key):
+                raise ValueError
         self.assertRaises(ValueError, eval, "foo", {}, X())
 
     def test_eval_kwargs(self):
@@ -730,15 +717,14 @@ class BuiltinTest(CPythonTestCase):
     def test_general_eval(self):
         # Tests that general mappings can be used for the locals argument
 
-        with torch._dynamo.error_on_graph_break(False):
-            class M:
-                "Test mapping interface versus possible calls from eval()."
-                def __getitem__(self, key):
-                    if key == 'a':
-                        return 12
-                    raise KeyError
-                def keys(self):
-                    return list('xyz')
+        class M:
+            "Test mapping interface versus possible calls from eval()."
+            def __getitem__(self, key):
+                if key == 'a':
+                    return 12
+                raise KeyError
+            def keys(self):
+                return list('xyz')
 
         m = M()
         g = globals()
@@ -748,22 +734,20 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(eval('globals()', g, m), g)
         self.assertEqual(eval('locals()', g, m), m)
         self.assertRaises(TypeError, eval, 'a', m)
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                "Non-mapping"
-                pass
+        class A:
+            "Non-mapping"
+            pass
         m = A()
         self.assertRaises(TypeError, eval, 'a', g, m)
 
         # Verify that dict subclasses work as well
-        with torch._dynamo.error_on_graph_break(False):
-            class D(dict):
-                def __getitem__(self, key):
-                    if key == 'a':
-                        return 12
-                    return dict.__getitem__(self, key)
-                def keys(self):
-                    return list('xyz')
+        class D(dict):
+            def __getitem__(self, key):
+                if key == 'a':
+                    return 12
+                return dict.__getitem__(self, key)
+            def keys(self):
+                return list('xyz')
 
         d = D()
         self.assertEqual(eval('a', g, d), 12)
@@ -776,14 +760,13 @@ class BuiltinTest(CPythonTestCase):
         eval('[locals() for i in (2,3)]', g, d)
         eval('[locals() for i in (2,3)]', g, collections.UserDict())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class SpreadSheet:
-                "Sample application showing nested, calculated lookups."
-                _cells = {}
-                def __setitem__(self, key, formula):
-                    self._cells[key] = formula
-                def __getitem__(self, key):
-                    return eval(self._cells[key], globals(), self)
+        class SpreadSheet:
+            "Sample application showing nested, calculated lookups."
+            _cells = {}
+            def __setitem__(self, key, formula):
+                self._cells[key] = formula
+            def __getitem__(self, key):
+                return eval(self._cells[key], globals(), self)
 
         ss = SpreadSheet()
         ss['a1'] = '5'
@@ -793,12 +776,11 @@ class BuiltinTest(CPythonTestCase):
 
         # Verify that dir() catches a non-list returned by eval
         # SF bug #1004669
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                def __getitem__(self, item):
-                    raise KeyError(item)
-                def keys(self):
-                    return 1 # used to be 'a' but that's no longer an error
+        class C:
+            def __getitem__(self, item):
+                raise KeyError(item)
+            def keys(self):
+                return 1 # used to be 'a' but that's no longer an error
         self.assertRaises(TypeError, eval, 'dir()', globals(), C())
 
     def test_exec(self):
@@ -848,13 +830,12 @@ class BuiltinTest(CPythonTestCase):
                           exec, code, {'__builtins__': 123})
 
     def test_exec_globals_frozen(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class frozendict_error(Exception):
-                pass
+        class frozendict_error(Exception):
+            pass
 
-            class frozendict(dict):
-                def __setitem__(self, key, value):
-                    raise frozendict_error("frozendict is readonly")
+        class frozendict(dict):
+            def __setitem__(self, key, value):
+                raise frozendict_error("frozendict is readonly")
 
         # read-only builtins
         if isinstance(__builtins__, types.ModuleType):
@@ -882,13 +863,12 @@ class BuiltinTest(CPythonTestCase):
 
     def test_exec_globals_error_on_get(self):
         # custom `globals` or `builtins` can raise errors on item access
-        with torch._dynamo.error_on_graph_break(False):
-            class setonlyerror(Exception):
-                pass
+        class setonlyerror(Exception):
+            pass
 
-            class setonlydict(dict):
-                def __getitem__(self, key):
-                    raise setonlyerror
+        class setonlydict(dict):
+            def __getitem__(self, key):
+                raise setonlyerror
 
         # globals' `__getitem__` raises
         code = compile("globalname", "test", "exec")
@@ -901,9 +881,8 @@ class BuiltinTest(CPythonTestCase):
                           {'__builtins__': setonlydict({'superglobal': 1})})
 
     def test_exec_globals_dict_subclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class customdict(dict):  # this one should not do anything fancy
-                pass
+        class customdict(dict):  # this one should not do anything fancy
+            pass
 
         code = compile("superglobal", "test", "exec")
         # works correctly
@@ -1053,12 +1032,11 @@ class BuiltinTest(CPythonTestCase):
             return 1
         filter(identity, Squares(5))
         self.assertRaises(TypeError, filter)
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq(object):
-                def __getitem__(self, index):
-                    if index<4:
-                        return 42
-                    raise ValueError
+        class BadSeq(object):
+            def __getitem__(self, index):
+                if index<4:
+                    return 42
+                raise ValueError
         self.assertRaises(ValueError, list, filter(lambda x: x, BadSeq()))
         def badfunc():
             pass
@@ -1108,15 +1086,13 @@ class BuiltinTest(CPythonTestCase):
 
         # Check that hasattr propagates all exceptions outside of
         # AttributeError.
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __getattr__(self, what):
-                    raise SystemExit
+        class A:
+            def __getattr__(self, what):
+                raise SystemExit
         self.assertRaises(SystemExit, hasattr, A(), "b")
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                def __getattr__(self, what):
-                    raise ValueError
+        class B:
+            def __getattr__(self, what):
+                raise ValueError
         self.assertRaises(ValueError, hasattr, B(), "b")
 
     def test_hash(self):
@@ -1131,15 +1107,13 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError, hash, [])
         self.assertRaises(TypeError, hash, {})
         # Bug 1536021: Allow hash to return long objects
-        with torch._dynamo.error_on_graph_break(False):
-            class X:
-                def __hash__(self):
-                    return 2**100
+        class X:
+            def __hash__(self):
+                return 2**100
         self.assertEqual(type(hash(X())), int)
-        with torch._dynamo.error_on_graph_break(False):
-            class Z(int):
-                def __hash__(self):
-                    return self
+        class Z(int):
+            def __hash__(self):
+                return self
         self.assertEqual(hash(Z(42)), hash(42))
 
     def test_hex(self):
@@ -1169,13 +1143,12 @@ class BuiltinTest(CPythonTestCase):
             self.assertRaises(StopIteration, next, i)
 
     def test_isinstance(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                pass
-            class D(C):
-                pass
-            class E:
-                pass
+        class C:
+            pass
+        class D(C):
+            pass
+        class E:
+            pass
         c = C()
         d = D()
         e = E()
@@ -1188,13 +1161,12 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError, isinstance)
 
     def test_issubclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                pass
-            class D(C):
-                pass
-            class E:
-                pass
+        class C:
+            pass
+        class D(C):
+            pass
+        class E:
+            pass
         c = C()
         d = D()
         e = E()
@@ -1212,35 +1184,29 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(len([1, 2, 3, 4]), 4)
         self.assertEqual(len({}), 0)
         self.assertEqual(len({'a':1, 'b': 2}), 2)
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __len__(self):
-                    raise ValueError
+        class BadSeq:
+            def __len__(self):
+                raise ValueError
         self.assertRaises(ValueError, len, BadSeq())
-        with torch._dynamo.error_on_graph_break(False):
-            class InvalidLen:
-                def __len__(self):
-                    return None
+        class InvalidLen:
+            def __len__(self):
+                return None
         self.assertRaises(TypeError, len, InvalidLen())
-        with torch._dynamo.error_on_graph_break(False):
-            class FloatLen:
-                def __len__(self):
-                    return 4.5
+        class FloatLen:
+            def __len__(self):
+                return 4.5
         self.assertRaises(TypeError, len, FloatLen())
-        with torch._dynamo.error_on_graph_break(False):
-            class NegativeLen:
-                def __len__(self):
-                    return -10
+        class NegativeLen:
+            def __len__(self):
+                return -10
         self.assertRaises(ValueError, len, NegativeLen())
-        with torch._dynamo.error_on_graph_break(False):
-            class HugeLen:
-                def __len__(self):
-                    return sys.maxsize + 1
+        class HugeLen:
+            def __len__(self):
+                return sys.maxsize + 1
         self.assertRaises(OverflowError, len, HugeLen())
-        with torch._dynamo.error_on_graph_break(False):
-            class HugeNegativeLen:
-                def __len__(self):
-                    return -sys.maxsize-10
+        class HugeNegativeLen:
+            def __len__(self):
+                return -sys.maxsize-10
         self.assertRaises(ValueError, len, HugeNegativeLen())
         class NoLenMethod(object): pass
         self.assertRaises(TypeError, len, NoLenMethod())
@@ -1296,11 +1262,10 @@ class BuiltinTest(CPythonTestCase):
         )
         self.assertRaises(TypeError, map)
         self.assertRaises(TypeError, map, lambda x: x, 42)
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __iter__(self):
-                    raise ValueError
-                    yield None
+        class BadSeq:
+            def __iter__(self):
+                raise ValueError
+                yield None
         self.assertRaises(ValueError, list, map(lambda x: x, BadSeq()))
         def badfunc(x):
             raise RuntimeError
@@ -1334,10 +1299,9 @@ class BuiltinTest(CPythonTestCase):
             r'max\(\) iterable argument is empty'
         ):
             max(())
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __getitem__(self, index):
-                    raise ValueError
+        class BadSeq:
+            def __getitem__(self, index):
+                raise ValueError
         self.assertRaises(ValueError, max, BadSeq())
 
         for stmt in (
@@ -1398,10 +1362,9 @@ class BuiltinTest(CPythonTestCase):
             r'min\(\) iterable argument is empty'
         ):
             min(())
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __getitem__(self, index):
-                    raise ValueError
+        class BadSeq:
+            def __getitem__(self, index):
+                raise ValueError
         self.assertRaises(ValueError, min, BadSeq())
 
         for stmt in (
@@ -1448,12 +1411,11 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(StopIteration, next, it)
         self.assertEqual(next(it, 42), 42)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class Iter(object):
-                def __iter__(self):
-                    return self
-                def __next__(self):
-                    raise StopIteration
+        class Iter(object):
+            def __iter__(self):
+                return self
+            def __next__(self):
+                raise StopIteration
 
         it = iter(Iter())
         self.assertEqual(next(it, 42), 42)
@@ -1653,17 +1615,16 @@ class BuiltinTest(CPythonTestCase):
             fp.close()
 
     def test_input_gh130163(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class X(io.StringIO):
-                def __getattribute__(self, name):
-                    nonlocal patch
-                    if patch:
-                        patch = False
-                        sys.stdout = X()
-                        sys.stderr = X()
-                        sys.stdin = X('input\n')
-                        support.gc_collect()
-                    return io.StringIO.__getattribute__(self, name)
+        class X(io.StringIO):
+            def __getattribute__(self, name):
+                nonlocal patch
+                if patch:
+                    patch = False
+                    sys.stdout = X()
+                    sys.stderr = X()
+                    sys.stdin = X('input\n')
+                    support.gc_collect()
+                return io.StringIO.__getattribute__(self, name)
 
         with (support.swap_attr(sys, 'stdout', None),
               support.swap_attr(sys, 'stderr', None),
@@ -1748,13 +1709,12 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError, round)
 
         # test generic rounding delegation for reals
-        with torch._dynamo.error_on_graph_break(False):
-            class TestRound:
-                def __round__(self):
-                    return 23
+        class TestRound:
+            def __round__(self):
+                return 23
 
-            class TestNoRound:
-                pass
+        class TestNoRound:
+            pass
 
         self.assertEqual(round(TestRound()), 23)
 
@@ -1850,10 +1810,9 @@ class BuiltinTest(CPythonTestCase):
         self.assertRaises(TypeError, sum, [], b'')
         self.assertRaises(TypeError, sum, [], bytearray())
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __getitem__(self, index):
-                    raise ValueError
+        class BadSeq:
+            def __getitem__(self, index):
+                raise ValueError
         self.assertRaises(ValueError, sum, BadSeq())
 
         empty = []
@@ -1885,11 +1844,10 @@ class BuiltinTest(CPythonTestCase):
         b = 2
         return vars()
 
-    with torch._dynamo.error_on_graph_break(False):
-        class C_get_vars(object):
-            def getDict(self):
-                return {'a':2}
-            __dict__ = property(fget=getDict)
+    class C_get_vars(object):
+        def getDict(self):
+            return {'a':2}
+        __dict__ = property(fget=getDict)
 
     def test_vars(self):
         self.assertEqual(set(vars()), set(dir()))
@@ -1917,43 +1875,39 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(list(zip(a, b)), t)
         b = (4, 5, 6, 7)
         self.assertEqual(list(zip(a, b)), t)
-        with torch._dynamo.error_on_graph_break(False):
-            class I:
-                def __getitem__(self, i):
-                    if i < 0 or i > 2: raise IndexError
-                    return i + 4
+        class I:
+            def __getitem__(self, i):
+                if i < 0 or i > 2: raise IndexError
+                return i + 4
         self.assertEqual(list(zip(a, I())), t)
         self.assertEqual(list(zip()), [])
         self.assertEqual(list(zip(*[])), [])
         self.assertRaises(TypeError, zip, None)
-        with torch._dynamo.error_on_graph_break(False):
-            class G:
-                pass
+        class G:
+            pass
         self.assertRaises(TypeError, zip, a, G())
         self.assertRaises(RuntimeError, zip, a, TestFailingIter())
 
         # Make sure zip doesn't try to allocate a billion elements for the
         # result list when one of its arguments doesn't say how long it is.
         # A MemoryError is the most likely failure mode.
-        with torch._dynamo.error_on_graph_break(False):
-            class SequenceWithoutALength:
-                def __getitem__(self, i):
-                    if i == 5:
-                        raise IndexError
-                    else:
-                        return i
+        class SequenceWithoutALength:
+            def __getitem__(self, i):
+                if i == 5:
+                    raise IndexError
+                else:
+                    return i
         self.assertEqual(
             list(zip(SequenceWithoutALength(), range(2**30))),
             list(enumerate(range(5)))
         )
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadSeq:
-                def __getitem__(self, i):
-                    if i == 5:
-                        raise ValueError
-                    else:
-                        return i
+        class BadSeq:
+            def __getitem__(self, i):
+                if i == 5:
+                    raise ValueError
+                else:
+                    return i
         self.assertRaises(ValueError, list, zip(BadSeq(), BadSeq()))
 
     def test_zip_pickle(self):
@@ -1985,10 +1939,9 @@ class BuiltinTest(CPythonTestCase):
     def test_zip_bad_iterable(self):
         exception = TypeError()
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadIterable:
-                def __iter__(self):
-                    raise exception
+        class BadIterable:
+            def __iter__(self):
+                raise exception
 
         with self.assertRaises(TypeError) as cm:
             zip(BadIterable())
@@ -2015,20 +1968,19 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(next(z), 1)
 
     def test_zip_strict_error_handling(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Error(Exception):
-                pass
+        class Error(Exception):
+            pass
 
-            class Iter:
-                def __init__(self, size):
-                    self.size = size
-                def __iter__(self):
-                    return self
-                def __next__(self):
-                    self.size -= 1
-                    if self.size < 0:
-                        raise Error
-                    return self.size
+        class Iter:
+            def __init__(self, size):
+                self.size = size
+            def __iter__(self):
+                return self
+            def __next__(self):
+                self.size -= 1
+                if self.size < 0:
+                    raise Error
+                return self.size
 
         l1 = self.iter_error(zip("AB", Iter(1), strict=True), Error)
         self.assertEqual(l1, [("A", 0)])
@@ -2048,17 +2000,16 @@ class BuiltinTest(CPythonTestCase):
         self.assertEqual(l8, [(2, "A"), (1, "B")])
 
     def test_zip_strict_error_handling_stopiteration(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Iter:
-                def __init__(self, size):
-                    self.size = size
-                def __iter__(self):
-                    return self
-                def __next__(self):
-                    self.size -= 1
-                    if self.size < 0:
-                        raise StopIteration
-                    return self.size
+        class Iter:
+            def __init__(self, size):
+                self.size = size
+            def __iter__(self):
+                return self
+            def __next__(self):
+                self.size -= 1
+                if self.size < 0:
+                    raise StopIteration
+                return self.size
 
         l1 = self.iter_error(zip("AB", Iter(1), strict=True), ValueError)
         self.assertEqual(l1, [("A", 0)])
@@ -2097,22 +2048,21 @@ class BuiltinTest(CPythonTestCase):
         # Returns some classes to use for various tests.  There's
         #  an old-style version, and a new-style version
         def classes_new():
-            with torch._dynamo.error_on_graph_break(False):
-                class A(object):
-                    def __init__(self, x):
-                        self.x = x
-                    def __format__(self, format_spec):
-                        return str(self.x) + format_spec
-                class DerivedFromA(A):
-                    pass
+            class A(object):
+                def __init__(self, x):
+                    self.x = x
+                def __format__(self, format_spec):
+                    return str(self.x) + format_spec
+            class DerivedFromA(A):
+                pass
 
-                class Simple(object): pass
-                class DerivedFromSimple(Simple):
-                    def __init__(self, x):
-                        self.x = x
-                    def __format__(self, format_spec):
-                        return str(self.x) + format_spec
-                class DerivedFromSimple2(DerivedFromSimple): pass
+            class Simple(object): pass
+            class DerivedFromSimple(Simple):
+                def __init__(self, x):
+                    self.x = x
+                def __format__(self, format_spec):
+                    return str(self.x) + format_spec
+            class DerivedFromSimple2(DerivedFromSimple): pass
             return A, DerivedFromA, DerivedFromSimple, DerivedFromSimple2
 
         def class_test(A, DerivedFromA, DerivedFromSimple, DerivedFromSimple2):
@@ -2142,10 +2092,9 @@ class BuiltinTest(CPythonTestCase):
         empty_format_spec(None)
 
         # TypeError because self.__format__ returns the wrong type
-        with torch._dynamo.error_on_graph_break(False):
-            class BadFormatResult:
-                def __format__(self, format_spec):
-                    return 1.0
+        class BadFormatResult:
+            def __format__(self, format_spec):
+                return 1.0
         self.assertRaises(TypeError, format, BadFormatResult(), "")
 
         # TypeError because format_spec is not unicode or str
@@ -2165,21 +2114,19 @@ class BuiltinTest(CPythonTestCase):
         # --------------------------------------------------------------------
         # Issue #7994: object.__format__ with a non-empty format string is
         # disallowed
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def __format__(self, fmt_str):
-                    return format('', fmt_str)
+        class A:
+            def __format__(self, fmt_str):
+                return format('', fmt_str)
 
         self.assertEqual(format(A()), '')
         self.assertEqual(format(A(), ''), '')
         self.assertEqual(format(A(), 's'), '')
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                pass
+        class B:
+            pass
 
-            class C(object):
-                pass
+        class C(object):
+            pass
 
         for cls in [object, B, C]:
             obj = cls()
@@ -2191,8 +2138,7 @@ class BuiltinTest(CPythonTestCase):
         # --------------------------------------------------------------------
 
         # make sure we can take a subclass of str as a format spec
-        with torch._dynamo.error_on_graph_break(False):
-            class DerivedFromStr(str): pass
+        class DerivedFromStr(str): pass
         self.assertEqual(format(0, DerivedFromStr('10')), '         0')
 
     def test_bin(self):
@@ -2681,10 +2627,9 @@ class TestType(CPythonTestCase):
         self.assertIs(type(x), A)
         self.assertIs(x.__class__, A)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                def ham(self):
-                    return 'ham%d' % self
+        class B:
+            def ham(self):
+                return 'ham%d' % self
         C = type('C', (B, int), {'spam': lambda self: 'spam%s' % self})
         self.assertEqual(C.__name__, 'C')
         self.assertEqual(C.__qualname__, 'C')
@@ -2768,9 +2713,8 @@ class TestType(CPythonTestCase):
         self.assertEqual(A.__dict__['__firstlineno__'], 43)
 
     def test_type_typeparams(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A[T]:
-                pass
+        class A[T]:
+            pass
         T, = A.__type_params__
         self.assertIsInstance(T, typing.TypeVar)
         A.__type_params__ = "whatever"
@@ -2830,9 +2774,8 @@ class TestType(CPythonTestCase):
         with self.assertRaises(TypeError):
             type('A', (), {'__slots__': ('__weakref__', '__weakref__')})
 
-        with torch._dynamo.error_on_graph_break(False):
-            class B:
-                pass
+        class B:
+            pass
         with self.assertRaises(TypeError):
             type('A', (B,), {'__slots__': '__dict__'})
         with self.assertRaises(TypeError):

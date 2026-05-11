@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import dataclasses
 import functools
@@ -288,10 +289,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
         self.device_codegen = get_device_op_overrides(self.device)
-        # only need to include each header once
-        self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
-            self._include_extra_header
-        )
+        self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
 
     @staticmethod
@@ -304,6 +302,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
+
+    @contextlib.contextmanager
+    def _target_buf(self, attr: str, buf: IndentedBuffer):
+        """Temporarily redirect self.<attr> to a specific buffer."""
+        saved = getattr(self, attr)
+        setattr(self, attr, buf)
+        try:
+            yield
+        finally:
+            setattr(self, attr, saved)
 
     @staticmethod
     def _generate_temporary_array_pointer(
@@ -511,8 +519,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-    def _include_extra_header(self, header: str):
+    def include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
+        if header in self._included_extra_headers:
+            return
+        self._included_extra_headers.add(header)
         self.header.splice(f"#include <{header}>")
 
     def mark_output_type(self):
@@ -943,6 +954,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_wrapper_decl(self):
         self._write_entry_point_signature()
         with self.prefix.indent():
+            self._codegen_entry_impl_prologue()
             self._write_input_preamble()
             self._write_input_unpacking()
             self._write_constants_unpacking()
@@ -1331,34 +1343,31 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.write_wrapper_decl()
             return super().generate(is_inference)
 
-    def _codegen_aoti_model_class(self, buf: IndentedBuffer):
-        """Emit AOTI model class, constructor, and const_run driver into buf.
-
-        codegen_model_kernels / codegen_model_constructor / codegen_const_run_driver
-        write to self.prefix, so the caller is expected to set self.prefix == buf.
-        """
-        buf.writeline("namespace torch::aot_inductor {")
+    def _codegen_aoti_model_class(self):
+        """Emit AOTI model class, constructor, and const_run driver into self.prefix."""
+        self.prefix.writeline("namespace torch::aot_inductor {")
         self.codegen_model_kernels()
         self.codegen_model_constructor()
         self.codegen_const_run_driver()
-        buf.writeline("} // namespace torch::aot_inductor")
-        buf.writeline("using namespace torch::aot_inductor;")
+        self.prefix.writeline("} // namespace torch::aot_inductor")
+        self.prefix.writeline("using namespace torch::aot_inductor;")
 
     def finalize_prefix(self):
         prior = self.prefix
-        self.prefix = aot_mode_decls = IndentedBuffer()
+        aot_mode_decls = IndentedBuffer()
         if V.graph.aot_mode and not V.graph.is_const_graph:
-            self._codegen_aoti_model_class(aot_mode_decls)
+            with self._target_buf("prefix", aot_mode_decls):
+                self._codegen_aoti_model_class()
 
-        self.prefix = cache_decls = make_codegen_buffer()
+        self.prefix = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
-            cache_decls.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            self.prefix.writeline(f"CACHE_TORCH_DTYPE({dtype});")
         for device in self.used_cached_devices:
-            cache_decls.writeline(f"CACHE_TORCH_DEVICE({device});")
+            self.prefix.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
-            cache_decls.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+            self.prefix.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         for memory_format in self.used_cached_memory_formats:
-            cache_decls.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
+            self.prefix.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
 
         # Includes are needed whenever a kernel was *defined* (the model
         # kernels class references `CpuTritonLauncherFn`); `call_<k>` bodies
@@ -1500,6 +1509,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if output not in output2idx:
                 output2idx[output] = idx
+
+    def _codegen_entry_impl_prologue(self):
+        """Hook for subclasses to emit code at the top of inductor_entry_impl,
+        before the GIL is released. Default no-op."""
 
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
@@ -2100,9 +2113,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         graph=None,  # for per-graph caching
     ) -> str:
         # Use id(graph) for caching to avoid circular references
+        # Bound methods have transient IDs, so we use the ID of the bound object instead.
+        writeline_id = (
+            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
+        )
         cache_key = (
             int_array,
-            id(writeline),
+            writeline_id,
             known_statically,
             id(graph) if graph else None,
         )
@@ -2150,7 +2167,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized accepted for API compatibility with AllocateLine.codegen
+    # but unused — the C++ wrapper doesn't do deterministic fills in codegen.
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -2159,11 +2178,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
             buffer.get_is_pinned(),
+            is_uninitialized=is_uninitialized,
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
-    ):
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        allocation_shape=None,
+        is_pinned=False,
+        is_uninitialized=False,
+    ):  # noqa: docstring_linter
+        if (
+            is_uninitialized
+            and torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+        ):
+            raise RuntimeError(
+                "torch.use_deterministic_algorithms(True) with fill_uninitialized_memory "
+                "is not supported with cpp_wrapper. Use the default Python wrapper instead."
+            )
         if allocation_shape is None:
             allocation_shape = shape
 
@@ -2983,13 +3020,17 @@ if (!custom_op_wrapper) {
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
             elif isinstance(raw_arg, torch.device):
+                self.include_extra_header("torch/csrc/Device.h")
                 device_str, device_index = self.codegen_device(raw_arg).split(", ")
                 return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
             elif isinstance(raw_arg, torch.dtype):
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             elif isinstance(raw_arg, torch.layout):
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
+                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
                 return (
                     "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
                     f"{self.codegen_memory_format(raw_arg)})))"
@@ -3239,6 +3280,9 @@ if (!custom_op_wrapper) {
         int_call_str = self._generate_temporary_array_pointer(
             "int64_t", int_call_args, force_mutable=True
         )
+        tensor_call_args = self.codegen_runtime_lookup_tensor_call_args(
+            tensor_call_args
+        )
         tensor_call_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", tensor_call_args, force_mutable=True
         )
@@ -3252,6 +3296,11 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        return tensor_call_args
 
     def generate_reset_kernel_saved_flags(self):
         pass
