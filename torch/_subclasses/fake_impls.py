@@ -927,7 +927,7 @@ def _padded_dense_to_jagged_forward(
             f"Only one jagged dim is supported, got {len(offsets)} offsets"
         )
 
-    if not total_L:
+    if total_L is None:
         if (
             fake_mode.shape_env is None
             or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1257,7 +1257,7 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
-# takes in multiple-devices, dont default to default device handling
+# takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -1346,6 +1346,18 @@ def conv(
     )
     input_ = new_kwargs["input"]
     weight = new_kwargs["weight"]
+    # Internal passes such as Inductor freezing may run fake propagation over
+    # folded convs that do not need to match eager's public input checks.
+    if (
+        func is aten.convolution.default
+        and input_.fake_device.type == "cuda"
+        and input_.dtype != weight.dtype
+        and not fake_mode.allow_non_fake_inputs
+    ):
+        raise RuntimeError(
+            f"Input type ({input_.dtype}) and weight type "
+            f"({weight.dtype}) should be the same"
+        )
     device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:

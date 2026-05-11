@@ -56,6 +56,10 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 import torch.fx
 from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
+    set_external_object_by_index,
+)
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
@@ -424,11 +428,15 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
-
+        compile_id = kwargs.get("compile_id", "")
         if int_key is None:
-            log.info("Recording cudagraph tree for graph without symints")
+            log.info(
+                "[%s] Recording cudagraph tree for graph without symints", compile_id
+            )
         else:
-            log.info("Recording cudagraph tree for symint key %s", int_key)
+            log.info(
+                "[%s] Recording cudagraph tree for symint key %s", compile_id, int_key
+            )
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -633,6 +641,19 @@ def _use_cuda_memory_pool_manager(
     torch.cuda.current_stream().wait_stream(stream)
 
 
+@contextlib.contextmanager
+def _update_current_stream_external_object() -> Generator[None, None, None]:
+    """Update the external object registry so custom ops see the capture stream.
+
+    During cudagraph recording/warmup the current stream differs from the
+    trace-time default stream.  The external object at CURRENT_STREAM_INDEX
+    must reflect the actual current stream so that custom ops (e.g. event
+    record/wait) executed during capture use the right stream.
+    """
+    set_external_object_by_index(CURRENT_STREAM_INDEX, torch.cuda.current_stream())
+    yield
+
+
 def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     if not isinstance(t, torch.Tensor):
         assert t is None
@@ -725,6 +746,8 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            # NB: must go after _use_cuda_memory_pool_manager which switches the stream
+            _update_current_stream_external_object(),
             ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
@@ -1081,7 +1104,7 @@ class CUDAGraphNode:
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
         # if it is, we cached the output tensor and adjust storage liveness tracking to also
         # check if the output tensor does not have an additional python reference.
-        # If a descendent node discovers it has an alias of a prior output, then the output
+        # If a descendant node discovers it has an alias of a prior output, then the output
         # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
         # significant additional complexity with marginal gains
@@ -1334,6 +1357,8 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            # NB: must go after torch.cuda.graph which switches the stream
+            _update_current_stream_external_object(),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
@@ -1577,7 +1602,7 @@ class CUDAGraphNode:
         return True
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
-        "Adds node as a a child of self"
+        "Adds node as a child of self"
         self.children[function_id].append(node)
 
     @staticmethod

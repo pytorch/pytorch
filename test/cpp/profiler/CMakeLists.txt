@@ -22,4 +22,24 @@ if(USE_KINETO)
     set_target_properties(test_privateuse1_profiler PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
     install(TARGETS test_privateuse1_profiler DESTINATION bin)
   endif()
+
+  if(USE_DISTRIBUTED)
+    add_executable(test_comms_id
+      ${TORCH_ROOT}/test/cpp/common/main.cpp
+      ${PROFILER_TEST_ROOT}/comms_id.cpp
+    )
+
+    target_compile_definitions(test_comms_id PRIVATE USE_GTEST USE_KINETO USE_DISTRIBUTED)
+
+    target_link_libraries(test_comms_id PRIVATE ${PROFILER_TEST_DEPENDENCIES})
+    target_include_directories(test_comms_id PRIVATE
+      ${ATen_CPU_INCLUDE}
+      ${KINETO_SOURCE_DIR}/include
+    )
+
+    if(INSTALL_TEST)
+      set_target_properties(test_comms_id PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+      install(TARGETS test_comms_id DESTINATION bin)
+    endif()
+  endif()
 endif()

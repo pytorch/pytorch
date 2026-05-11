@@ -19,7 +19,6 @@ from tools.testing.test_run import TestRun
 
 class CorrelatedWithHistoricalFailures(HeuristicInterface):
     def __init__(self, **kwargs: dict[str, Any]) -> None:
-        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
