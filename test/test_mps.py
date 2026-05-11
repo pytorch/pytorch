@@ -10373,9 +10373,13 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float16, torch.float32])
     @parametrize("is_causal", [True, False])
-    def test_sdpa_enable_gqa(self, dtype, is_causal):
-        q_heads = 32
-        key_heads = 16
+    @parametrize("gqa_factor", [2, 4, 8])
+    def test_sdpa_enable_gqa(self, dtype, is_causal, gqa_factor):
+        # HS=23 keeps the dispatch on the MPSGraph general path (not in the
+        # set of kernel-supported head dims), so this exercises sdpa_general_mps
+        # with KV expansion happening inside the helper
+        key_heads = 4
+        q_heads = key_heads * gqa_factor
         L = 7
         S = 17
         HS = 23
@@ -10497,7 +10501,7 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
     @parametrize("is_causal", [False, True])
-    @parametrize("gqa_factor", [1, 4])  # 1 = no GQA; >1 exercises kernel-native GQA
+    @parametrize("gqa_factor", [1, 4])
     def test_fast_vector_attention(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, gqa_factor: int
     ):
@@ -10517,17 +10521,19 @@ class TestSDPA(TestCaseMPS):
     @parametrize("head_dim", [64, 96, 128, 256])  # supported by the fast kernel
     @parametrize("with_mask", [True, False])
     @parametrize("is_causal", [False, True])
+    @parametrize("gqa_factor", [1, 4])
     def test_fast_vector_attention_2pass(
-        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool
+        self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, gqa_factor: int
     ):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         torch.manual_seed(1729)
         batch = 1
-        NH = 32
+        NH_kv = 8
+        NH_q = NH_kv * gqa_factor
         q_len = 8
         s_len = 1024  # large enough to trigger the two–pass path
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
+        q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
         self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal)
 
     def test_fast_vector_permuted_inputs_regression(self):
@@ -10660,19 +10666,21 @@ class TestSDPA(TestCaseMPS):
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("head_dim", [32, 64, 72, 80, 96, 128, 256])
     @parametrize("variant", ["plain", "causal", "bool_mask", "float_mask"])
-    def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant):
+    @parametrize("gqa_factor", [1, 4])
+    def test_prefill_attention_correctness_sweep(self, dtype, head_dim, variant, gqa_factor):
         torch.manual_seed(1729)
-        B, NH, qL, kL = 2, 4, 16, 32
-        q, k, v = self._prefill_qkv(B, NH, NH, qL, kL, head_dim, "contiguous", dtype)
+        B, NH_kv, qL, kL = 2, 4, 16, 32
+        NH_q = NH_kv * gqa_factor
+        q, k, v = self._prefill_qkv(B, NH_q, NH_kv, qL, kL, head_dim, "contiguous", dtype)
         is_causal = False
         attn_mask = None
         if variant == "causal":
             is_causal = True
         elif variant == "bool_mask":
-            attn_mask = torch.ones(B, NH, qL, kL, dtype=torch.bool, device="mps")
+            attn_mask = torch.ones(B, NH_q, qL, kL, dtype=torch.bool, device="mps")
             attn_mask[..., kL // 2:] = False
         elif variant == "float_mask":
-            attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            attn_mask = torch.zeros(B, NH_q, qL, kL, dtype=dtype, device="mps")
             attn_mask[..., kL // 2:] = -1e4
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
