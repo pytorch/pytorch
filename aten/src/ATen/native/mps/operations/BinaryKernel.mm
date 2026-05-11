@@ -314,28 +314,30 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "bitwise_right_shift");
 }
 
+// Comparison kernels naturally produce bool; passing kBool tells the
+// dispatcher to allocate a bool temp when the user's `out=` is non-bool.
 static void eq_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "eq");
+  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool);
 }
 
 static void ne_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "ne");
+  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool);
 }
 
 static void lt_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "lt");
+  lib.exec_binary_kernel(iter, "lt", std::nullopt, std::nullopt, kBool);
 }
 
 static void le_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "le");
+  lib.exec_binary_kernel(iter, "le", std::nullopt, std::nullopt, kBool);
 }
 
 static void gt_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "gt");
+  lib.exec_binary_kernel(iter, "gt", std::nullopt, std::nullopt, kBool);
 }
 
 static void ge_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "ge");
+  lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool);
 }
 
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
