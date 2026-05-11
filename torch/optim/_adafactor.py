@@ -499,11 +499,8 @@ def _multi_tensor_adafactor(
         device_grads = cast(list[Tensor], device_grads_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
         if eps1 is None:
-            if dtype is None:
-                raise AssertionError(
-                    "dtype is needed to compute eps1 when eps1 is unset"
-                )
-            eps1 = torch.finfo(dtype).eps
+            eps_dtype = dtype if dtype is not None else device_params[0].dtype
+            eps1 = torch.finfo(eps_dtype).eps
 
         if TYPE_CHECKING:
             assert device_state_steps[0] is not None
