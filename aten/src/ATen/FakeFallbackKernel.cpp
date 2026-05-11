@@ -335,10 +335,6 @@ void fakeFallback(
 
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
 
-  // in python fake tensor we check has unrecognized types here
-  // and throw an error if so to pass control to the next torch dispatch
-  // but since C++ fake sits below python i dont think we need that here
-
   bool has_symints = has_symbolic_sizes(stack, arguments_begin, num_arguments);
 
   std::vector<at::Tensor> flat_arg_fake_tensors;
@@ -537,24 +533,25 @@ void fakeFallback(
         });
   };
 
-  // For ops with symbolic sizes, try decompositions before the Meta kernel
-
-  // use in_kernel_invocation_ flag to guard re-entry
-  // a lot of ops register using @register_decomposition which registers as both
-  // meta kernel and decomposition
-  // so reentering the decomp path would just be calling the same function again
+  // For ops with symbolic sizes, try decompositions before the Meta kernel.
+  // Guard re-entry only for the specific op being decomposed (not all ops),
+  // since @register_decomposition registers the same function as both decomp
+  // and meta kernel, so re-entering the decomp for the SAME op would loop.
+  // Sub-ops are different ops and must be allowed to use their own decomps.
+  bool is_same_op_reentry = mode && mode->decomposing_op_ == &op;
   if (has_symints && !cpp_meta_supports_symint(op) && mode &&
-      !mode->in_kernel_invocation_) {
+      !is_same_op_reentry) {
     if (mode->decomp_fn_) {
-      mode->in_kernel_invocation_ = true;
+      auto prev_decomposing = mode->decomposing_op_;
+      mode->decomposing_op_ = &op;
       bool found = false;
       try {
         found = mode->decomp_fn_(&op, stack);
       } catch (...) {
-        mode->in_kernel_invocation_ = false;
+        mode->decomposing_op_ = prev_decomposing;
         throw;
       }
-      mode->in_kernel_invocation_ = false;
+      mode->decomposing_op_ = prev_decomposing;
       if (found) {
         wrap_meta_outputs_with_default_device_logic();
         return;
@@ -655,10 +652,12 @@ void fakeFallback(
 
   // TODO: user-registered fake implementations (torch.library.register_fake)
 
-  // Handlers registered via register_op_impl (e.g. local_scalar_dense for
-  // .item()). Matches Python FakeTensorMode._dispatch_impl at
-  // fake_tensor.py:2926-2930.
-  if (mode && mode->op_impl_fn_) {
+  // Handlers registered via register_op_impl (e.g. unique_consecutive,
+  // _local_scalar_dense). Try these first for ops that have no Meta kernel.
+  // For ops WITH Meta kernels, we try Meta first and fall back to op_impl_fn_
+  // if Meta raises (see below).
+  bool has_meta_kernel = op.hasKernelForDispatchKey(c10::DispatchKey::Meta);
+  if (!has_meta_kernel && mode && mode->op_impl_fn_) {
     if (mode->op_impl_fn_(&op, stack)) {
       return;
     }
@@ -679,12 +678,13 @@ void fakeFallback(
     return;
   }
 
-  // Try the Meta kernel. If it raises NotImplementedError (no working meta
-  // implementation), fall back to running the real kernel with zero-filled
-  // inputs to discover output metadata. We must save the arguments first
-  // because redispatchBoxed consumes them from the stack.
+  // Try the Meta kernel. If it raises, fall back to:
+  //   1. Python op_impl handlers (for ops like _local_scalar_dense whose
+  //      Meta kernel raises but have a Python fake impl), or
+  //   2. The unsafe fallback with zero-filled inputs.
+  // Save arguments first because callBoxed consumes them from the stack.
   torch::jit::Stack saved_args;
-  if (can_run_unsafe_fallback(schema)) {
+  {
     auto arguments = torch::jit::last(*stack, num_arguments);
     saved_args.insert(saved_args.end(), arguments.begin(), arguments.end());
   }
@@ -694,30 +694,43 @@ void fakeFallback(
         c10::DispatchKeySet(c10::DispatchKey::Fake) |
         c10::DispatchKeySet(c10::DispatchKey::Python) |
         c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
-        // c10::autograd_dispatch_keyset |
-        // c10::DispatchKeySet(
-        //     c10::DispatchKey::CompositeExplicitAutograd) |
-        // c10::DispatchKeySet(
-        //     c10::DispatchKey::CompositeExplicitAutogradNonFunctional));
     c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
     op.callBoxed(stack);
     wrap_meta_outputs_with_default_device_logic();
-  } catch (c10::NotImplementedError&) {
-    // Meta kernel failed. With symbolic sizes we cannot run the unsafe
-    // fallback (it materializes real tensors from symbolic shapes).
-    // Match Python FakeTensorMode: raise UnsupportedOperatorException.
-    TORCH_CHECK(
-        !has_symints,
-        "Unsupported operator for C++ FakeTensor with symbolic sizes: ",
-        op.operator_name());
+  } catch (...) {
+    auto eptr = std::current_exception();
 
-    // Restore the stack and run the real kernel with zero-filled inputs
-    // to discover output metadata.
+    // Meta kernel failed. Try the Python op_impl handler as a fallback
+    // (e.g. _local_scalar_dense has a Meta kernel that raises but a Python
+    // handler that creates unbacked symbolic values).
     stack->resize(arguments_begin);
-    for (auto& arg : saved_args) {
-      stack->push_back(std::move(arg));
+    for (const auto& arg : saved_args) {
+      stack->push_back(arg);
     }
-    maybe_run_unsafe_fallback(op, stack, arguments_begin, num_arguments, mode);
+
+    if (mode && mode->op_impl_fn_) {
+      if (mode->op_impl_fn_(&op, stack)) {
+        return;
+      }
+    }
+
+    // Python handler didn't handle it either. For NotImplementedError,
+    // try the unsafe fallback. For other errors, rethrow.
+    try {
+      std::rethrow_exception(eptr);
+    } catch (c10::NotImplementedError&) {
+      TORCH_CHECK(
+          !has_symints,
+          "Unsupported operator for C++ FakeTensor with symbolic sizes: ",
+          op.operator_name());
+
+      stack->resize(arguments_begin);
+      for (auto& arg : saved_args) {
+        stack->push_back(std::move(arg));
+      }
+      maybe_run_unsafe_fallback(
+          op, stack, arguments_begin, num_arguments, mode);
+    }
   }
 }
 

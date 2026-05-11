@@ -1058,7 +1058,9 @@ class MetaConverter(Generic[_TensorT]):
             " will perform operations on them which need fake tensor mode to"
             " be active.  You will segfault if you are in a no_dispatch() block."
         )
-        if torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python):
+        if torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        ) and not torch._C._does_cpp_fake_tensor_mode_exist():
             raise AssertionError(msg)
         self.arg_cnt += 1
 

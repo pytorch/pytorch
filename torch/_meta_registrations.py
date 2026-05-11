@@ -2503,14 +2503,15 @@ def _compute_reduction_shape(self, dims, keepdim):
 def device_hint(tensor) -> "str":
     if isinstance(tensor, torch._subclasses.FakeTensor):
         return tensor.fake_device.type
-    elif (
+    if torch._C._is_fake_tensor(tensor):
+        return torch._C._fake_tensor_device(tensor).type
+    if (
         hasattr(tensor, "device")
         and hasattr(tensor.device, "type")
         and tensor.device.type != "meta"
     ):
         return tensor.device.type
-    else:
-        return "cuda"  # default to cuda
+    return "cuda"  # default to cuda
 
 
 def calc_conv_nd_return_shape(

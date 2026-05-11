@@ -67,6 +67,42 @@ op_implementations_dict = {}
 op_implementations_checks = []
 
 
+class CppFakeModeShim:
+    """Lightweight stand-in for FakeTensorMode used by C++ fake tensor op_impl handlers.
+
+    The @register_op_impl handlers receive fake_mode as their first argument and
+    access .shape_env, .fake_tensor_converter, and a couple of config flags.
+    When running under C++ FakeTensorMode there is no Python FakeTensorMode
+    object, so we construct this shim from the C++ mode's stored shape_env and
+    converter.
+
+    Some handlers use ``with fake_mode:`` to ensure sub-ops dispatch through
+    fake tensor mode.  Under C++ fake mode the Fake dispatch key is already
+    active, so this is a no-op context manager.
+    """
+
+    def __init__(self, shape_env: Any, fake_tensor_converter: Any) -> None:
+        self.shape_env = shape_env
+        self.fake_tensor_converter = fake_tensor_converter
+        self.allow_fallback_kernels = True
+        self.allow_scalar_outputs = False
+
+    def __enter__(self) -> "CppFakeModeShim":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+
+def _get_fake_device(t: torch.Tensor) -> torch.device:
+    """Get the fake device of a tensor, works for both Python and C++ fake tensors."""
+    if hasattr(t, "fake_device"):
+        return t.fake_device
+    if torch._C._is_fake_tensor(t):
+        return torch._C._fake_tensor_device(t)
+    return t.device
+
+
 aten = torch._ops.ops.aten
 
 
@@ -393,7 +429,10 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    if unique_consecutive:
+        nnz = getattr(arg, "unique_consecutive_memo", None)
+    else:
+        nnz = getattr(arg, "unique_memo", None)
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -437,7 +476,9 @@ def _unique(
         # pyrefly: ignore[no-matching-overload]
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
+    return_if_dim_and_cpu = dim is not None and _get_fake_device(arg) == torch.device(
+        "cpu"
+    )
     if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(
             arg.shape if dim is None else (arg.shape[dim],), dtype=torch.int64
@@ -1055,7 +1096,8 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    nnz = getattr(arg, "nonzero_memo", None)
+    if nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,

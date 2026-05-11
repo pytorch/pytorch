@@ -244,15 +244,15 @@ struct C10_API FakeTensorMode {
   // Returns true if a handler was found and executed.
   std::function<bool(const void* op, void* stack)> op_impl_fn_;
 
-  // this is only used rn to guard re-entry for decomps
-  // idk if this is right should i rename it
-  bool in_kernel_invocation_ = false;
+  // Guards against infinite recursion when an op's decomposition is also its
+  // meta kernel (@register_decomposition). Only blocks re-entry for the
+  // specific op being decomposed; sub-ops can still use their own decomps.
+  // Stored as a type-erased pointer to the OperatorHandle to avoid depending
+  // on ATen headers from c10.
+  const void* decomposing_op_ = nullptr;
 
-  FakeTensorMode(
-      std::shared_ptr<c10::SafePyObject> shape_env,
-      std::shared_ptr<c10::SafePyObject> converter)
-      : shape_env_(std::move(shape_env)),
-        fake_tensor_converter_(std::move(converter)) {}
+  FakeTensorMode(std::shared_ptr<c10::SafePyObject> shape_env, std::shared_ptr<c10::SafePyObject> converter)
+      : shape_env_(std::move(shape_env)), fake_tensor_converter_(std::move(converter)) {}
 };
 
 struct C10_API ExtraMeta {
@@ -1433,6 +1433,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Normalizes the device index then calls set_fake_device.
   // use when the device might lack an index ("cuda" vs "cuda:0").
   void set_and_normalize_fake_device(c10::Device fake_device);
+
+  std::optional<c10::Device> fake_device() const {
+    if (!extra_meta_)
+      return std::nullopt;
+    return extra_meta_->fake_device_;
+  }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     get_extra_meta().fake_tensor_mode_ = std::move(mode);

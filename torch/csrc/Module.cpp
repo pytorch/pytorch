@@ -54,6 +54,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
@@ -72,7 +73,6 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
@@ -765,11 +765,12 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     try {
       at::IntArrayRef shape(
           prototype->shape, prototype->shape + prototype->ndim);
-      at::TensorOptions options =
-          at::TensorOptions()
-              .dtype(at::toScalarType(prototype->dtype))
-              .device(at::dlDeviceToTorchDevice(
-                  prototype->device.device_type, prototype->device.device_id));
+      at::TensorOptions options = at::TensorOptions()
+                                      .dtype(at::toScalarType(prototype->dtype))
+                                      .device(
+                                          at::dlDeviceToTorchDevice(
+                                              prototype->device.device_type,
+                                              prototype->device.device_id));
       at::Tensor tensor = at::empty(shape, options);
       *out = at::toDLPackVersioned(tensor);
       return 0;
@@ -1591,9 +1592,10 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
 
 static PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(c10::DeviceTypeName(
-      dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
-      /*lower_case=*/true));
+  return THPUtils_packString(
+      c10::DeviceTypeName(
+          dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
+          /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2769,22 +2771,23 @@ Call this whenever a new thread is created in order to propagate values from
   // Scaled Dot Product Attention utilities
   ////////////////////////////////////////////////////////////////////////////////
   py::class_<sdp::sdp_params>(py_module, "_SDPAParams")
-      .def(py::init([](at::Tensor const& query,
-                       at::Tensor const& key,
-                       at::Tensor const& value,
-                       std::optional<at::Tensor> attn_mask,
-                       double dropout,
-                       bool is_causal,
-                       bool enable_gqa) {
-        return sdp::sdp_params{
-            query,
-            key,
-            value,
-            std::move(attn_mask),
-            dropout,
-            is_causal,
-            enable_gqa};
-      }))
+      .def(
+          py::init([](at::Tensor const& query,
+                      at::Tensor const& key,
+                      at::Tensor const& value,
+                      std::optional<at::Tensor> attn_mask,
+                      double dropout,
+                      bool is_causal,
+                      bool enable_gqa) {
+            return sdp::sdp_params{
+                query,
+                key,
+                value,
+                std::move(attn_mask),
+                dropout,
+                is_causal,
+                enable_gqa};
+          }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)
       .def_readonly("value", &sdp::sdp_params::value)
@@ -2943,8 +2946,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::precision2str(at::globalContext().float32Precision(
-            at::str2backend(backend), at::str2op(op)));
+        return at::precision2str(
+            at::globalContext().float32Precision(
+                at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -3097,9 +3101,9 @@ Call this whenever a new thread is created in order to propagate values from
 
   // Callback for C++ FakeTensor fallback to call Python decompositions.
   // Type-erased to avoid pulling OperatorHandle/Stack into c10 headers.
-  static auto tryPythonDecomp = [](const void* op_ptr, void* stack_ptr) -> bool {
-    const auto& op =
-        *static_cast<const c10::OperatorHandle*>(op_ptr);
+  static auto tryPythonDecomp = [](const void* op_ptr,
+                                   void* stack_ptr) -> bool {
+    const auto& op = *static_cast<const c10::OperatorHandle*>(op_ptr);
     auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
 
     py::gil_scoped_acquire gil;
@@ -3116,29 +3120,27 @@ Call this whenever a new thread is created in order to propagate values from
     py::object decomp_fn = decomp_table[py_op];
 
     const auto& schema = op.schema();
-    auto arguments =
-        torch::jit::pop(*stack, schema.arguments().size());
+    auto arguments = torch::jit::pop(*stack, schema.arguments().size());
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-    auto result =
-        decomp_fn(*args_kwargs.first, **args_kwargs.second);
+    auto result = decomp_fn(*args_kwargs.first, **args_kwargs.second);
     pushPyOutToStack(op, stack, std::move(result), "decomposition");
     return true;
   };
 
-  static auto tryPythonOpImpl = [](const void* op_ptr, void* stack_ptr) -> bool {
-    const auto& op =
-        *static_cast<const c10::OperatorHandle*>(op_ptr);
+  static auto tryPythonOpImpl = [](const void* op_ptr,
+                                   void* stack_ptr) -> bool {
+    const auto& op = *static_cast<const c10::OperatorHandle*>(op_ptr);
     auto* stack = static_cast<torch::jit::Stack*>(stack_ptr);
 
-    // Early return for ops we haven't adapted for C++ fake tensors.
-    {
-      const auto& name = op.operator_name().name;
-      if (name != "aten::_local_scalar_dense" && name != "aten::item") {
-        return false;
-      }
-    }
-
     py::gil_scoped_acquire gil;
+
+    // A failed Meta kernel may have raised from Python, leaving the error
+    // indicator set (pybind11 translates it to C++ but doesn't clear
+    // the Python-side error). Clear it so our dict lookups don't hit
+    // "SystemError: ... returned a result with an exception set".
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
+    }
 
     py::handle py_op = torch::detail::getTorchApiFunction(op);
 
@@ -3156,71 +3158,79 @@ Call this whenever a new thread is created in order to propagate values from
       return false;
     }
 
-    // Get the Python FakeTensorMode from the tracing context.
-    // need to get shape env
-    auto mode = c10::impl::FakeTensorModeTLS::get_state();
-    auto fake_mode_obj = py::module::import("torch._guards")
-        .attr("TracingContext").attr("try_get")();
-    py::object py_fake_mode;
-    if (!fake_mode_obj.is_none()) {
-      py_fake_mode = fake_mode_obj.attr("fake_mode");
-    } else {
+    // Skip the Python handler for ops with CompositeExplicit/
+    // ImplicitAutograd decompositions — those are handled by the C++ fallback.
+    // Ops with Meta kernels are NOT skipped here: the Meta kernel may raise
+    // (e.g. _local_scalar_dense), and FakeFallbackKernel will call us as a
+    // fallback when that happens.
+    if (op.hasKernelForDispatchKey(
+            c10::DispatchKey::CompositeExplicitAutograd) ||
+        op.hasKernelForDispatchKey(
+            c10::DispatchKey::CompositeImplicitAutograd)) {
       return false;
     }
 
-    // Fast reject: only handle ops we know are in the dict.
-    {
-      const auto& name = op.operator_name().name;
-      if (name != "aten::_local_scalar_dense" && name != "aten::item") {
-        return false;
-      }
-    }
+    auto mode = c10::impl::FakeTensorModeTLS::get_state();
+    TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
+
+    // Build a lightweight shim that exposes .shape_env and
+    // .fake_tensor_converter for the @register_op_impl handlers.
+    static py::object CppFakeModeShim =
+        py::module::import("torch._subclasses.fake_impls")
+            .attr("CppFakeModeShim");
+    auto shape_env = py::reinterpret_borrow<py::object>(
+        mode->shape_env_->ptr(getPyInterpreter()));
+    auto converter = py::reinterpret_borrow<py::object>(
+        mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+    py::object py_fake_mode = CppFakeModeShim(shape_env, converter);
 
     const auto& schema = op.schema();
-    auto arguments =
-        torch::jit::pop(*stack, schema.arguments().size());
+    auto arguments = torch::jit::pop(*stack, schema.arguments().size());
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-    // Exclude Fake so sub-ops in the handler don't re-enter fakeFallback
-    // (prevents infinite recursion for handlers that call func() internally).
     py::object result;
     {
+      // Keep Fake included so sub-ops (e.g. nonzero inside index_Tensor)
+      // re-enter fakeFallback. Only exclude Python (already consumed by
+      // __torch_dispatch__) to avoid infinite re-entry on the Python side.
       c10::impl::ExcludeDispatchKeyGuard guard(
-          c10::DispatchKeySet(c10::DispatchKey::Fake) |
           c10::DispatchKeySet(c10::DispatchKey::Python) |
           c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
       result = handler(
           py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
     }
     if (result.is(py::handle(Py_NotImplemented))) {
-      // Handler returned NotImplemented, push args back and let C++ handle it
       for (auto& arg : arguments) {
         stack->push_back(std::move(arg));
       }
       return false;
     }
 
-    // Convert Python FakeTensors to C++ fake tensors.
-    // We must create NEW plain tensors because the Python FakeTensor subclass
-    // has __torch_dispatch__ which would intercept all subsequent ops.
-    static py::object FakeTensorClass =
-        py::module::import("torch._subclasses.fake_tensor").attr("FakeTensor");
-    auto convert_fake = [&](py::object obj) -> py::object {
-      if (py::isinstance(obj, FakeTensorClass)) {
-        auto fake_device = obj.attr("fake_device").cast<c10::Device>();
-        at::Tensor py_fake = py::cast<at::Tensor>(obj);
-        at::Tensor meta;
-        {
-          c10::impl::ExcludeDispatchKeyGuard guard(
-              c10::DispatchKeySet(c10::DispatchKey::Fake));
-          meta = at::empty_strided(
-              py_fake.sizes(),
-              py_fake.strides(),
-              py_fake.options().device(c10::DeviceType::Meta));
+    // Convert output tensors to C++ fake tensors.
+    // The handler runs with Fake excluded, so sub-ops like new_empty produce
+    // plain meta tensors. We need to stamp them as C++ fake tensors with the
+    // correct fake device. Python FakeTensors (if any) are also handled.
+    auto common_device = c10::Device(c10::DeviceType::CPU);
+    // Get fake device from one of the input tensors.
+    for (const auto& arg : arguments) {
+      if (arg.isTensor() && arg.toTensor().defined()) {
+        auto fd = arg.toTensor().unsafeGetTensorImpl()->fake_device();
+        if (fd.has_value()) {
+          common_device = *fd;
+          break;
         }
-        meta.unsafeGetTensorImpl()->set_and_normalize_fake_device(fake_device);
-        meta.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
-        return py::cast(meta);
       }
+    }
+
+    auto convert_to_cpp_fake = [&](py::object obj) -> py::object {
+      if (!THPVariable_Check(obj.ptr())) {
+        return obj;
+      }
+      at::Tensor t = THPVariable_Unpack(obj.ptr());
+      if (!t.defined() || t.is_fake()) {
+        return obj;
+      }
+      t.unsafeGetTensorImpl()->set_and_normalize_fake_device(common_device);
+      t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
       return obj;
     };
 
@@ -3228,11 +3238,11 @@ Call this whenever a new thread is created in order to propagate values from
       py::tuple tup = result.cast<py::tuple>();
       py::tuple converted(tup.size());
       for (size_t i = 0; i < tup.size(); i++) {
-        converted[i] = convert_fake(py::reinterpret_borrow<py::object>(tup[i]));
+        converted[i] = convert_to_cpp_fake(py::reinterpret_borrow<py::object>(tup[i]));
       }
       result = std::move(converted);
     } else {
-      result = convert_fake(std::move(result));
+      result = convert_to_cpp_fake(std::move(result));
     }
 
     pushPyOutToStack(op, stack, std::move(result), "op_impl");
@@ -3241,6 +3251,12 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
+  });
+
+  py_module.def("_fake_tensor_device", [](const at::Tensor& t) -> c10::Device {
+    auto fd = t.unsafeGetTensorImpl()->fake_device();
+    TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
+    return *fd;
   });
 
   py_module.def(
@@ -3272,7 +3288,8 @@ Call this whenever a new thread is created in order to propagate values from
         }
 
         auto device = real.device();
-        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(device);
+        meta_tensor.unsafeGetTensorImpl()->set_and_normalize_fake_device(
+            device);
         meta_tensor.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
 
         return meta_tensor;
@@ -3335,14 +3352,13 @@ Call this whenever a new thread is created in order to propagate values from
     if (!mode || !mode->shape_env_) {
       return py::none();
     }
-    py::object obj =
-        py::reinterpret_borrow<py::object>(mode->shape_env_->ptr(getPyInterpreter()));
+    py::object obj = py::reinterpret_borrow<py::object>(
+        mode->shape_env_->ptr(getPyInterpreter()));
     return obj;
   });
 
   py_module.def(
-      "_fake_tensor_belongs_to_active_mode",
-      [](const at::Tensor& t) -> bool {
+      "_fake_tensor_belongs_to_active_mode", [](const at::Tensor& t) -> bool {
         if (!t.is_fake())
           return false;
         auto active_mode = c10::impl::FakeTensorModeTLS::get_state();

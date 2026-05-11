@@ -2544,7 +2544,6 @@ class FakeTensorMode(TorchDispatchMode):
             and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
         ):
-            # print("HEREEEE ")
             if not all(t.constant is not None for t in flat_arg_fake_tensors):
                 raise AssertionError(
                     f"{func} should not have fake inputs without constants"

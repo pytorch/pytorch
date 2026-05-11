@@ -158,54 +158,54 @@ class TestGenericProxyTensor(TestCase):
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
 
-#     def test_pre_dispatch_mode_stack(self):
-#         def f(a):
-#             b = torch.ones(4, 4)
-#             return torch.matmul(a, b)
-#         # We expect to see matmul in the trace - it should NOT be decomposed into mm.
-#         # Also, torch.ones() doesn't show up in the trace.
-#         # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
-#         # so our mode never sees it - it goes directly to the BackendSelect key.
-#         inp = torch.ones(4, 4)
-#         # Test that make_fx(pre_dispatch=True) clears caches properly.
-#         from torch._dispatch.python import enable_python_dispatcher
-#         with enable_python_dispatcher():
-#             out1 = f(inp)
-#         fx_g = make_fx(f, pre_dispatch=True)(inp)
-#         self.assertExpectedInline(fx_g.code.strip(), """\
-# def forward(self, a_1):
-#     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
-#     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
-#     return matmul""")
+    def test_pre_dispatch_mode_stack(self):
+        def f(a):
+            b = torch.ones(4, 4)
+            return torch.matmul(a, b)
+        # We expect to see matmul in the trace - it should NOT be decomposed into mm.
+        # Also, torch.ones() doesn't show up in the trace.
+        # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
+        # so our mode never sees it - it goes directly to the BackendSelect key.
+        inp = torch.ones(4, 4)
+        # Test that make_fx(pre_dispatch=True) clears caches properly.
+        from torch._dispatch.python import enable_python_dispatcher
+        with enable_python_dispatcher():
+            out1 = f(inp)
+        fx_g = make_fx(f, pre_dispatch=True)(inp)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, a_1):
+    ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
+    matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
+    return matmul""")
 
-#     def test_pre_dispatch_linear(self):
-#         def f(a, b, c):
-#             return torch.nn.functional.linear(a, b, c)
-#         a = torch.ones(4, 4)
-#         b = torch.ones(4, 4)
-#         c = torch.ones(4)
-#         fx_g = make_fx(f, pre_dispatch=True)(a, b, c)
-#         out1 = f(a, b, c)
-#         out2 = fx_g(a, b, c)
-#         self.assertEqual(out1, out2)
+    def test_pre_dispatch_linear(self):
+        def f(a, b, c):
+            return torch.nn.functional.linear(a, b, c)
+        a = torch.ones(4, 4)
+        b = torch.ones(4, 4)
+        c = torch.ones(4)
+        fx_g = make_fx(f, pre_dispatch=True)(a, b, c)
+        out1 = f(a, b, c)
+        out2 = fx_g(a, b, c)
+        self.assertEqual(out1, out2)
 
-#     def test_pre_dispatch_no_grad(self):
-#         def f(a):
-#             b = a.sin()
-#             torch.set_grad_enabled(False)
-#             c = b.cos()
-#             torch.set_grad_enabled(True)
-#             return b + c.sin()
-#         a1 = torch.randn(4, requires_grad=True)
-#         a2 = a1.detach().clone().requires_grad_(True)
-#         a_tmp = a1.detach().clone().requires_grad_(True)
-#         fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
-#         out1 = f(a1)
-#         out2 = fx_g(a2)
-#         self.assertEqual(out1, out2)
-#         out1.sum().backward()
-#         out2.sum().backward()
-#         self.assertEqual(a1.grad, a2.grad)
+    def test_pre_dispatch_no_grad(self):
+        def f(a):
+            b = a.sin()
+            torch.set_grad_enabled(False)
+            c = b.cos()
+            torch.set_grad_enabled(True)
+            return b + c.sin()
+        a1 = torch.randn(4, requires_grad=True)
+        a2 = a1.detach().clone().requires_grad_(True)
+        a_tmp = a1.detach().clone().requires_grad_(True)
+        fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
+        out1 = f(a1)
+        out2 = fx_g(a2)
+        self.assertEqual(out1, out2)
+        out1.sum().backward()
+        out2.sum().backward()
+        self.assertEqual(a1.grad, a2.grad)
 
     def test_make_fx_simple(self):
         def f(x):
@@ -217,121 +217,121 @@ class TestGenericProxyTensor(TestCase):
             return a + b
         self._test(f, [torch.randn(3, device=device), torch.tensor(5)])
 
-#     def test_isolated_graphmodule(self):
-#         def is_any_sum(gm):
-#             return any(node.target == torch.ops.aten.sum.default for node in gm.graph.nodes)
+    def test_isolated_graphmodule(self):
+        def is_any_sum(gm):
+            return any(node.target == torch.ops.aten.sum.default for node in gm.graph.nodes)
 
-#         def is_any_digamma(gm):
-#             return any(node.target == torch.ops.aten.digamma.default for node in gm.graph.nodes)
+        def is_any_digamma(gm):
+            return any(node.target == torch.ops.aten.digamma.default for node in gm.graph.nodes)
 
-#         def is_any_sigmoid(gm):
-#             return any(node.target == torch.ops.aten.sigmoid.default for node in gm.graph.nodes)
+        def is_any_sigmoid(gm):
+            return any(node.target == torch.ops.aten.sigmoid.default for node in gm.graph.nodes)
 
-#         def inner(x):
-#             return torch.sum(x)
+        def inner(x):
+            return torch.sum(x)
 
-#         def f(x):
-#             gm = get_isolated_graphmodule(inner, (x,), {})
-#             self.assertTrue(is_any_sum(gm))
-#             return x + torch.randn(x.shape)
+        def f(x):
+            gm = get_isolated_graphmodule(inner, (x,), {})
+            self.assertTrue(is_any_sum(gm))
+            return x + torch.randn(x.shape)
 
-#         # get_isolated_graphmodule uses make_fx internally that shouldn't be traced
-#         # by the outer make_fx call
-#         traced = make_fx(f)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
+        # get_isolated_graphmodule uses make_fx internally that shouldn't be traced
+        # by the outer make_fx call
+        traced = make_fx(f)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
 
-#         # When factory functions are used, they should not be traced
-#         # by the outer make_fx call
-#         def inner_with_factory():
-#             val = torch.tensor(float(1))
-#             val.add_(2)
-#             return torch.full((10, 10), val).sum()
+        # When factory functions are used, they should not be traced
+        # by the outer make_fx call
+        def inner_with_factory():
+            val = torch.tensor(float(1))
+            val.add_(2)
+            return torch.full((10, 10), val).sum()
 
-#         def f1(x):
-#             gm = get_isolated_graphmodule(inner_with_factory, (), {})
-#             self.assertTrue(is_any_sum(gm))
-#             return torch.sigmoid(x)
+        def f1(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
 
-#         def f2(x):
-#             gm = get_isolated_graphmodule(f1, (x,), {})
-#             self.assertFalse(is_any_sum(gm))
-#             self.assertTrue(is_any_sigmoid(gm))
-#             return torch.digamma(x)
+        def f2(x):
+            gm = get_isolated_graphmodule(f1, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
 
-#         traced = make_fx(f2)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
-#         self.assertFalse(is_any_sigmoid(traced))
-#         self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
 
-#         # Verify nested make_fx calls don't make factory functions to be leaked
-#         # into the outer graph. Verify that `make_fx`` itself does not leak its execution.
-#         def f2(x):
-#             gm = make_fx(f1)(x)
-#             self.assertFalse(is_any_sum(gm))
-#             self.assertTrue(is_any_sigmoid(gm))
-#             return torch.digamma(x)
+        # Verify nested make_fx calls don't make factory functions to be leaked
+        # into the outer graph. Verify that `make_fx`` itself does not leak its execution.
+        def f2(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
 
-#         traced = make_fx(f2)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
-#         self.assertFalse(is_any_sigmoid(traced))
-#         self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
 
-#         # Verify that the `forward`` function of a graph module produced as a
-#         # side effect of an interior `make_fx` is still traced
-#         def f3(x):
-#             gm = make_fx(f1)(x)
-#             self.assertFalse(is_any_sum(gm))
-#             self.assertTrue(is_any_sigmoid(gm))
-#             # `gm.forward`` is still traced
-#             return torch.digamma(gm(x))
+        # Verify that the `forward`` function of a graph module produced as a
+        # side effect of an interior `make_fx` is still traced
+        def f3(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            # `gm.forward`` is still traced
+            return torch.digamma(gm(x))
 
-#         traced = make_fx(f3)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
-#         self.assertTrue(is_any_sigmoid(traced))
-#         self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f3)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertTrue(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
 
-#         # Verify interaction with non-ProxyTensor modes
-#         from torch.testing._internal.logging_tensor import LoggingTensorMode
+        # Verify interaction with non-ProxyTensor modes
+        from torch.testing._internal.logging_tensor import LoggingTensorMode
 
-#         def f1_logging(x):
-#             with LoggingTensorMode():
-#                 gm = get_isolated_graphmodule(inner_with_factory, (), {})
-#             self.assertTrue(is_any_sum(gm))
-#             return torch.sigmoid(x)
+        def f1_logging(x):
+            with LoggingTensorMode():
+                gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
 
-#         def f2_logging(x):
-#             with LoggingTensorMode(), LoggingTensorMode():
-#                 gm = get_isolated_graphmodule(f1_logging, (x,), {})
-#             self.assertFalse(is_any_sum(gm))
-#             self.assertTrue(is_any_sigmoid(gm))
-#             return torch.digamma(x)
+        def f2_logging(x):
+            with LoggingTensorMode(), LoggingTensorMode():
+                gm = get_isolated_graphmodule(f1_logging, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
 
-#         traced = make_fx(f2_logging)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
-#         self.assertFalse(is_any_sigmoid(traced))
-#         self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f2_logging)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
 
-#         # Verify interaction with another tensor subclass
-#         # This case currently doesn't work and should raise an error
-#         # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
-#         from torch.testing._internal.logging_tensor import LoggingTensor
+        # Verify interaction with another tensor subclass
+        # This case currently doesn't work and should raise an error
+        # See: https://github.com/pytorch/pytorch/pull/81764#issuecomment-1200472068
+        from torch.testing._internal.logging_tensor import LoggingTensor
 
-#         def f1_logging_tensor(x):
-#             gm = get_isolated_graphmodule(inner_with_factory, (), {})
-#             self.assertTrue(is_any_sum(gm))
-#             return torch.sigmoid(x)
+        def f1_logging_tensor(x):
+            gm = get_isolated_graphmodule(inner_with_factory, (), {})
+            self.assertTrue(is_any_sum(gm))
+            return torch.sigmoid(x)
 
-#         def f2_logging_tensor(x):
-#             x = LoggingTensor(x)
-#             gm = get_isolated_graphmodule(f1_logging_tensor, (x,), {})
-#             self.assertFalse(is_any_sum(gm))
-#             self.assertTrue(is_any_sigmoid(gm))
-#             return torch.digamma(x)
+        def f2_logging_tensor(x):
+            x = LoggingTensor(x)
+            gm = get_isolated_graphmodule(f1_logging_tensor, (x,), {})
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            return torch.digamma(x)
 
-#         traced = make_fx(f2_logging_tensor)(torch.randn(3))
-#         self.assertFalse(is_any_sum(traced))
-#         self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
-#         self.assertTrue(is_any_digamma(traced))
+        traced = make_fx(f2_logging_tensor)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))  # this fails, sigmoid is traced with LoggingTensor
+        self.assertTrue(is_any_digamma(traced))
 
     # See https://github.com/pytorch/pytorch/issues/97541
     def test_empty_like_doesnt_burn_in_defaults(self):
@@ -404,27 +404,27 @@ def forward(self, x_1):
             self.assertTrue("square" not in str(n.target))
             self.assertTrue("norm" not in str(n.target))
 
-#     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-#     def test_resnet18_backward_trace(self):
-#         mod = torchvision.models.resnet18()
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_resnet18_backward_trace(self):
+        mod = torchvision.models.resnet18()
 
-#         # An old version of this test called the module directly.  This works
-#         # for tracing_mode == "real", but for fake tensors, we also have to
-#         # ensure that the parameters and buffers get wrapped in fake tensors
-#         # because free fake tensors are not supported.  Fortunately functional_call
-#         # does precisely this for us.
-#         def f(x, params, buffers):
-#             for p in params.values():
-#                 p.grad = None
-#             loss = torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
-#             # I could have done this with the functional API, but there is
-#             # plenty of exercising this; I want to show mutating API still
-#             # works
-#             loss.backward()
-#             return [p.grad for p in params.values()]
+        # An old version of this test called the module directly.  This works
+        # for tracing_mode == "real", but for fake tensors, we also have to
+        # ensure that the parameters and buffers get wrapped in fake tensors
+        # because free fake tensors are not supported.  Fortunately functional_call
+        # does precisely this for us.
+        def f(x, params, buffers):
+            for p in params.values():
+                p.grad = None
+            loss = torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
+            # I could have done this with the functional API, but there is
+            # plenty of exercising this; I want to show mutating API still
+            # works
+            loss.backward()
+            return [p.grad for p in params.values()]
 
-#         inp = torch.randn(3, 3, 250, 250)
-#         self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
+        inp = torch.randn(3, 3, 250, 250)
+        self._test(f, [inp, dict(mod.named_parameters()), dict(mod.named_buffers())])
 
     def test_varargs(self):
         def f(*args):
@@ -445,11 +445,11 @@ def forward(self, x_1):
         for f in [f_grad, f_backward]:
             self._test(f, [torch.randn(3, requires_grad=True)])
 
-#     def test_pickle_issue89626(self):
-#         import pickle
-#         x = torch.randn(2)
-#         make_fx(lambda x: x * 2, tracing_mode=self.tracing_mode)(x)
-#         pickle.dumps(x)
+    def test_pickle_issue89626(self):
+        import pickle
+        x = torch.randn(2)
+        make_fx(lambda x: x * 2, tracing_mode=self.tracing_mode)(x)
+        pickle.dumps(x)
 
     def test_inplace_metadata(self):
         def f(x):
@@ -474,57 +474,57 @@ def forward(self, x_1):
             )
         )
 
-#     def test_pre_dispatch_functionalization(self):
-#         def f(x):
-#             a = FunctionalTensorMode(pre_dispatch=True, export=True)
-#             with a:
-#                 x_unwrapped = FunctionalTensor.to_functional(x)
-#                 y = torch.matmul(x_unwrapped, x_unwrapped)
-#                 y = y + x_unwrapped
-#                 y.mul_(5)
-#                 y_unwrapped = torch._from_functional_tensor(y.elem)
-#                 return y_unwrapped
+    def test_pre_dispatch_functionalization(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                y = y + x_unwrapped
+                y.mul_(5)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
 
-#         from torch._dispatch.python import enable_python_dispatcher
+        from torch._dispatch.python import enable_python_dispatcher
 
-#         with enable_python_dispatcher():
-#             inp = torch.randn(4, 4)
-#             gm = make_fx(f, pre_dispatch=True)(inp)
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
 
-#         # TODO actually not decompose
-#         self.assertExpectedInline(gm.code.strip(), """\
-# def forward(self, x_1):
-#     matmul = torch.ops.aten.matmul.default(x_1, x_1)
-#     add = torch.ops.aten.add.Tensor(matmul, x_1);  matmul = x_1 = None
-#     mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
-#     return mul""")
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(matmul, x_1);  matmul = x_1 = None
+    mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
+    return mul""")
 
-#     def test_pre_dispatch_functionalization_view_op(self):
-#         def f(x):
-#             a = FunctionalTensorMode(pre_dispatch=True, export=True)
-#             with a:
-#                 x_unwrapped = FunctionalTensor.to_functional(x)
-#                 y = torch.matmul(x_unwrapped, x_unwrapped)
-#                 x_unwrapped = x_unwrapped.transpose(1, 0)
-#                 y = y + x_unwrapped
-#                 y = y.view(2, 8)
-#                 y_unwrapped = torch._from_functional_tensor(y.elem)
-#                 return y_unwrapped
+    def test_pre_dispatch_functionalization_view_op(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                x_unwrapped = x_unwrapped.transpose(1, 0)
+                y = y + x_unwrapped
+                y = y.view(2, 8)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
 
-#         from torch._dispatch.python import enable_python_dispatcher
+        from torch._dispatch.python import enable_python_dispatcher
 
-#         with enable_python_dispatcher():
-#             inp = torch.randn(4, 4)
-#             gm = make_fx(f, pre_dispatch=True)(inp)
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
 
-#         # TODO actually not decompose
-#         self.assertExpectedInline(gm.code.strip(), """\
-# def forward(self, x_1):
-#     matmul = torch.ops.aten.matmul.default(x_1, x_1)
-#     transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
-#     add = torch.ops.aten.add.Tensor(matmul, transpose);  matmul = transpose = None
-#     view = torch.ops.aten.view.default(add, [2, 8]);  add = None
-#     return view""")
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
+    add = torch.ops.aten.add.Tensor(matmul, transpose);  matmul = transpose = None
+    view = torch.ops.aten.view.default(add, [2, 8]);  add = None
+    return view""")
 
     def test_val_metadata_mutation(self):
         def f(x):
@@ -555,19 +555,19 @@ def forward(self, x_1):
 
         self._test(f, [])
 
-#     def test_allclose(self):
-#         def f(a, b):
-#             return torch.allclose(a, b)
+    def test_allclose(self):
+        def f(a, b):
+            return torch.allclose(a, b)
 
-#         def test_f():
-#             make_fx(f, tracing_mode=self.tracing_mode)(
-#                 torch.zeros(3), torch.zeros(3)
-#             )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
 
-#         if self.tracing_mode != "real":
-#             self.assertRaises(DataDependentOutputException, test_f)
-#         else:
-#             self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        if self.tracing_mode != "real":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -589,27 +589,27 @@ def forward(self, x_1):
         g = make_fx(f, tracing_mode=self.tracing_mode)()
         self.assertEqual(g(), f())
 
-#     def test_constant_blowup(self):
-#         def f():
-#             val = torch.tensor([2])
-#             blowup = val.repeat(1000)
-#             return bool(blowup.sum().item() == 2)
+    def test_constant_blowup(self):
+        def f():
+            val = torch.tensor([2])
+            blowup = val.repeat(1000)
+            return bool(blowup.sum().item() == 2)
 
-#         def test_f():
-#             make_fx(f, tracing_mode=self.tracing_mode)()
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
 
-#         self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
-#     def test_constant_random(self):
-#         def f():
-#             val = torch.tensor([2.0])
-#             val.normal_()
-#             return bool(val.item() == 2.1)
+    def test_constant_random(self):
+        def f():
+            val = torch.tensor([2.0])
+            val.normal_()
+            return bool(val.item() == 2.1)
 
-#         def test_f():
-#             make_fx(f, tracing_mode=self.tracing_mode)()
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
 
-#         self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -732,20 +732,20 @@ def forward(self, x_1):
             torch.allclose(fx_f(input, params, buffers)[1], f(input, params, buffers)[1], atol=1e-03)
         )
 
-#     def test_trace_subclasses(self):
-#         def f1(x):
-#             x = UnwrapTensor(x)
-#             y = x * 2
-#             return y
+    def test_trace_subclasses(self):
+        def f1(x):
+            x = UnwrapTensor(x)
+            y = x * 2
+            return y
 
-#         def f2(x):
-#             wrapped = UnwrapTensor(x)
-#             y = x * wrapped
-#             return y
+        def f2(x):
+            wrapped = UnwrapTensor(x)
+            y = x * wrapped
+            return y
 
-#         inp = [torch.randn(5)]
-#         self._test(f1, inp)
-#         self._test(f2, inp)
+        inp = [torch.randn(5)]
+        self._test(f1, inp)
+        self._test(f2, inp)
 
     def test_partial_decomp(self):
         def f(a, b, c):
@@ -829,187 +829,187 @@ def forward(self, x_1):
             def forward(self, x):
                 return x + (x.shape[0] * 2)
 
-#         mod = TestModule()
-#         sample = torch.randn((5, 5)).to("cuda")
-#         dim0 = torch.export.Dim.DYNAMIC(max=100)
-#         dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
-#         ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
-#         gm = ep.module()
-#         symint = list(gm.graph.nodes)[3].meta["val"]
-#         list(gm.graph.nodes)[3].replace_all_uses_with(symint)
-#         gm.graph.eliminate_dead_code()
+        mod = TestModule()
+        sample = torch.randn((5, 5)).to("cuda")
+        dim0 = torch.export.Dim.DYNAMIC(max=100)
+        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
+        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
+        gm = ep.module()
+        symint = list(gm.graph.nodes)[3].meta["val"]
+        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
+        gm.graph.eliminate_dead_code()
 
-#         inductor_fx = torch._inductor.aot_compile(
-#             gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
-#         )
-
-
-# class TestGenericProxyTensorReal(TestGenericProxyTensor):
-#     tracing_mode = "real"
+        inductor_fx = torch._inductor.aot_compile(
+            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
+        )
 
 
-# class TestGenericProxyTensorFake(TestGenericProxyTensor):
-#     tracing_mode = "fake"
+class TestGenericProxyTensorReal(TestGenericProxyTensor):
+    tracing_mode = "real"
 
 
-# class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
-#     tracing_mode = "symbolic"
+class TestGenericProxyTensorFake(TestGenericProxyTensor):
+    tracing_mode = "fake"
+
+
+class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
+    tracing_mode = "symbolic"
 
 
 del TestGenericProxyTensor
 
 
-# class TestRealProxyTensor(TestCase):
-#     def test_error_on_data_dependent_ops(self):
-#         def f():
-#             x = torch.randn([])
-#             y = torch.randn([])
-#             if not torch.allclose(x * y, y * x):
-#                 raise AssertionError("x * y should equal y * x")
-#             z = float(x)
-#             z2 = float(y)
+class TestRealProxyTensor(TestCase):
+    def test_error_on_data_dependent_ops(self):
+        def f():
+            x = torch.randn([])
+            y = torch.randn([])
+            if not torch.allclose(x * y, y * x):
+                raise AssertionError("x * y should equal y * x")
+            z = float(x)
+            z2 = float(y)
 
-#         # Smoke tests
-#         make_fx(f, _error_on_data_dependent_ops=False)()
-#         make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
+        # Smoke tests
+        make_fx(f, _error_on_data_dependent_ops=False)()
+        make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
 
-#     def test_disable_torch_fn_metadata_mode(self):
-#         class MyModule(nn.Module):
-#             def forward(self, x):
-#                 return torch.sin(x) + torch.cos(x)
+    def test_disable_torch_fn_metadata_mode(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return torch.sin(x) + torch.cos(x)
 
-#         mod = MyModule()
+        mod = MyModule()
 
-#         def fn(x):
-#             return mod(x)
-#         fn._orig_mod = mod
+        def fn(x):
+            return mod(x)
+        fn._orig_mod = mod
 
-#         # With TorchFunctionMetadataMode enabled (default), torch_fn should be present
-#         gm_with = make_fx(fn, record_module_stack=True)(torch.randn(3))
-#         torch_fn_present = any(
-#             "torch_fn" in n.meta for n in gm_with.graph.nodes if n.op == "call_function"
-#         )
-#         self.assertTrue(torch_fn_present, "torch_fn metadata should be present by default")
+        # With TorchFunctionMetadataMode enabled (default), torch_fn should be present
+        gm_with = make_fx(fn, record_module_stack=True)(torch.randn(3))
+        torch_fn_present = any(
+            "torch_fn" in n.meta for n in gm_with.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_present, "torch_fn metadata should be present by default")
 
-#         # With TorchFunctionMetadataMode disabled, torch_fn should be absent
-#         gm_without = make_fx(fn, record_module_stack=True, _disable_torch_fn_metadata_mode=True)(torch.randn(3))
-#         torch_fn_absent = all(
-#             "torch_fn" not in n.meta for n in gm_without.graph.nodes if n.op == "call_function"
-#         )
-#         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
+        # With TorchFunctionMetadataMode disabled, torch_fn should be absent
+        gm_without = make_fx(fn, record_module_stack=True, _disable_torch_fn_metadata_mode=True)(torch.randn(3))
+        torch_fn_absent = all(
+            "torch_fn" not in n.meta for n in gm_without.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
-# class TestFakeProxyTensor(TestCase):
-#     def test_issue82547(self):
-#         x = nn.Parameter(torch.randn(3, 3))
+class TestFakeProxyTensor(TestCase):
+    def test_issue82547(self):
+        x = nn.Parameter(torch.randn(3, 3))
 
-#         def f():
-#             return torch.ops.aten.t.default(x)
-#         self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
+        def f():
+            return torch.ops.aten.t.default(x)
+        self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
 
-#         class A(torch.Tensor):
-#             pass
+        class A(torch.Tensor):
+            pass
 
-#         x = A(torch.randn(3, 3))
-#         self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
+        x = A(torch.randn(3, 3))
+        self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
 
-#     def test_use_fake_and_tensor(self):
-#         def f(x, y):
-#             z = torch.tensor([2.0, 3.0])
-#             return x + y + z
+    def test_use_fake_and_tensor(self):
+        def f(x, y):
+            z = torch.tensor([2.0, 3.0])
+            return x + y + z
 
-#         g = make_fx(f, tracing_mode="fake")(torch.randn(2), torch.randn(2))
-#         x, y = torch.randn(2), torch.randn(2)
-#         self.assertEqual(g(x, y), f(x, y))
+        g = make_fx(f, tracing_mode="fake")(torch.randn(2), torch.randn(2))
+        x, y = torch.randn(2), torch.randn(2)
+        self.assertEqual(g(x, y), f(x, y))
 
-#     def test_free_fake(self):
-#         def f(x):
-#             return torch.add(x, y)
+    def test_free_fake(self):
+        def f(x):
+            return torch.add(x, y)
 
-#         with FakeTensorMode() as fake_mode:
-#             y = torch.randn(2)
-#             make_fx(f, tracing_mode="real")(torch.randn(2))
+        with FakeTensorMode() as fake_mode:
+            y = torch.randn(2)
+            make_fx(f, tracing_mode="real")(torch.randn(2))
 
-#     def test_fused_adam(self):
-#         # See https://github.com/pytorch/pytorch/issues/99356
-#         params = [torch.randn(10, 10) for _ in range(10)]
-#         grads = [torch.randn(10, 10) for _ in range(10)]
-#         exp_avgs = [torch.randn(10, 10) for _ in range(10)]
-#         exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
-#         max_exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
-#         state_steps = [torch.tensor(0) for _ in range(10)]
+    def test_fused_adam(self):
+        # See https://github.com/pytorch/pytorch/issues/99356
+        params = [torch.randn(10, 10) for _ in range(10)]
+        grads = [torch.randn(10, 10) for _ in range(10)]
+        exp_avgs = [torch.randn(10, 10) for _ in range(10)]
+        exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
+        max_exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
+        state_steps = [torch.tensor(0) for _ in range(10)]
 
-#         def fused_adam(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
-#             (new_params, _, _, _, _) = aten._fused_adam.default(
-#                 params,
-#                 grads,
-#                 exp_avgs,
-#                 exp_avg_sqs,
-#                 max_exp_avg_sqs,
-#                 state_steps,
-#                 lr=0.1,
-#                 beta1=0.9,
-#                 beta2=0.999,
-#                 weight_decay=0.01,
-#                 eps=1e-8,
-#                 amsgrad=False,
-#                 maximize=False,
-#             )
+        def fused_adam(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+            (new_params, _, _, _, _) = aten._fused_adam.default(
+                params,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                lr=0.1,
+                beta1=0.9,
+                beta2=0.999,
+                weight_decay=0.01,
+                eps=1e-8,
+                amsgrad=False,
+                maximize=False,
+            )
 
-#             for p, new_p in zip(params, new_params):
-#                 p.copy_(new_p)
+            for p, new_p in zip(params, new_params):
+                p.copy_(new_p)
 
-#             return params
+            return params
 
-#         gm = make_fx(fused_adam, tracing_mode='fake')(
-#             params,
-#             grads,
-#             exp_avgs,
-#             exp_avg_sqs,
-#             max_exp_avg_sqs,
-#             state_steps,
-#         )
-#         ensure_ops_have_val = [aten._fused_adam.default, operator.getitem]
-#         for n in gm.graph.nodes:
-#             if n.op == "call_function" and n.target in ensure_ops_have_val:
-#                 self.assertIn('val', n.meta)
+        gm = make_fx(fused_adam, tracing_mode='fake')(
+            params,
+            grads,
+            exp_avgs,
+            exp_avg_sqs,
+            max_exp_avg_sqs,
+            state_steps,
+        )
+        ensure_ops_have_val = [aten._fused_adam.default, operator.getitem]
+        for n in gm.graph.nodes:
+            if n.op == "call_function" and n.target in ensure_ops_have_val:
+                self.assertIn('val', n.meta)
 
-#     def test_alias(self):
-#         def f(x):
-#             return torch.ops.aten.alias(x)
+    def test_alias(self):
+        def f(x):
+            return torch.ops.aten.alias(x)
 
-#         r = str(make_fx(f, tracing_mode="fake")(torch.randn(2)).code).strip()
-#         # NB: this should not have a detach call
-#         self.assertExpectedInline(r, """\
-# def forward(self, x_1):
-#     alias = torch.ops.aten.alias.default(x_1);  x_1 = None
-#     return alias""")
+        r = str(make_fx(f, tracing_mode="fake")(torch.randn(2)).code).strip()
+        # NB: this should not have a detach call
+        self.assertExpectedInline(r, """\
+def forward(self, x_1):
+    alias = torch.ops.aten.alias.default(x_1);  x_1 = None
+    return alias""")
 
-#     def test_meta(self):
-#         def f(x):
-#             a = x.cos()
-#             b = torch.var_mean(a, dim=0)
-#             c = b * 2
-#             return c
+    def test_meta(self):
+        def f(x):
+            a = x.cos()
+            b = torch.var_mean(a, dim=0)
+            c = b * 2
+            return c
 
-#         out = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
-#         for n in out.graph.nodes:
-#             if n.op == 'output':
-#                 continue
-#             self.assertTrue('val' in n.meta)
+        out = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
+        for n in out.graph.nodes:
+            if n.op == 'output':
+                continue
+            self.assertTrue('val' in n.meta)
 
-#     def test_fake_tensor_mode(self):
-#         def f(a):
-#             d = a.cos()
-#             return d
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
 
-#         from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode
 
-#         existing_fake_mode = FakeTensorMode()
-#         with existing_fake_mode:
-#             out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
 
-#         fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
-#         self.assertEqual(fake_mode, existing_fake_mode)
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
@@ -1026,7 +1026,6 @@ def _trace(f, *args):
     return make_fx(f, tracing_mode="symbolic")(*inps)
 
 # TODO: Need to test the guards themselves specifically as well
-
 class TestSymbolicTracing(TestCase):
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
@@ -2031,14 +2030,6 @@ L['a'].size()[1] <= 18""")
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
-=======
-# class TestSymbolicTracing(TestCase):
-#     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
-#         """
-#         Tests fn traced with trace_inputs against test_inputs
-#         Also returns shape env
-#         """
-#         trace_inputs = [torch.randn(shape) for shape in trace_inputs]
     skip('empty_like'),
     skip('empty'),
     skip('empty_permuted'),
@@ -2184,11 +2175,7 @@ def skipIfNameMatches(pattern):
     return decorator
 
 # Auto functionalize shouldn't work with make_fx directly
-_HOP_SKIP_USER_FACING = {
-    "cond", "map", "scan", "while_loop", "while_loop_stack_output",
-    "auto_functionalize",
-}
-filtered_hop_db = [op for op in hop_db if op.name not in _HOP_SKIP_USER_FACING]
+filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
@@ -2209,21 +2196,21 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
-#     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-#     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
-#              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
-#     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
-#         if not op.get_inplace():
-#             self.skipTest("No inplace variable for this op")
-#         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
+    def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
+        if not op.get_inplace():
+            self.skipTest("No inplace variable for this op")
+        _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
 
-#     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-#     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
-#              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
-#     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
-#         if not op.supports_out:
-#             self.skipTest("Op doesn't support out")
-#         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
+        if not op.supports_out:
+            self.skipTest("Op doesn't support out")
+        _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
 only_for = ("cpu")

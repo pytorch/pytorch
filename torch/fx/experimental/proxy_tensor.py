@@ -2911,8 +2911,7 @@ class _MakefxTracer:
         )
         with ExitStack() as stack:
             if self.fake_tensor_mode and not (
-                _has_cpp_fake_tensor
-                and torch._C._does_cpp_fake_tensor_mode_exist()
+                _has_cpp_fake_tensor and torch._C._does_cpp_fake_tensor_mode_exist()
             ):
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
