@@ -685,17 +685,18 @@ class RangeVariable(BaseListVariable):
         return super().call_obj_hasattr(tx, name)
 
     def range_equals(self, other: "RangeVariable") -> bool:
+        # ref: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/rangeobject.c#L514-L553  (range_equals)
         r0, r1 = self, other
-        if (
-            self.range_length() != r1.range_length()
-            or self.range_length() == 0
-            or r0.start() != r1.start()
-        ):
-            return False
-
-        if self.range_length() == 1:
+        if r0 is r1:
             return True
-
+        if r0.range_length() != r1.range_length():
+            return False
+        if r0.range_length() == 0:
+            return True
+        if r0.start() != r1.start():
+            return False
+        if r0.range_length() == 1:
+            return True
         return r0.step() == r1.step()
 
     def range_count(self, x: VariableTracker) -> int:
@@ -1802,14 +1803,19 @@ class SliceVariable(VariableTracker):
         if sys.version_info < (3, 12):
             raise_type_error(tx, "unhashable type: 'slice'")
         # CPython slicehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667
-        return hash(self.as_python_constant()), False
+        s = self.as_python_constant()
+        try:
+            h = hash(s)
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=[str(e)])
+        return h, False
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
+        if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(slice, name))
             )
@@ -1823,6 +1829,40 @@ class SliceVariable(VariableTracker):
                 hints=[*graph_break_hints.USER_ERROR],
             )
         return self.items[fields.index(name)]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "indices":
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            length_var = args[0].nb_index_impl(tx)
+            length = length_var.as_python_constant()
+            items: list[int | None] = []
+            for item in self.items:
+                if item.is_constant_none():
+                    items.append(None)
+                else:
+                    idx_var = item.nb_index_impl(tx)
+                    items.append(idx_var.as_python_constant())
+
+            try:
+                result = slice(*items).indices(length)
+            except (ValueError, TypeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, result)
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ListIteratorVariable(IteratorVariable):
