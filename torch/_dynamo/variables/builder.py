@@ -203,13 +203,14 @@ from .ctx_manager import (
 from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
-    BuiltinMethodVariable,
+    BoundBuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    MethodWrapperVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -238,7 +239,6 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     ConstantLikeVariable,
-    ConstantMethodWrapperVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
@@ -343,6 +343,26 @@ DimList = list
 def safe_has_grad(t: object) -> bool:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
+
+
+def bound_builtin_method_descriptor(value: Any) -> Any | None:
+    if not isinstance(value, types.BuiltinMethodType):
+        return None
+
+    method_self = value.__self__
+    # BuiltinMethodType also covers module-level C functions like len and
+    # torch.add.  Keep those on the existing function/trace-rule path.
+    if method_self is None or isinstance(method_self, types.ModuleType):
+        return None
+
+    # BoundBuiltinMethodVariable needs the descriptor that created this bound
+    # method.  For class-bound methods, look on the class object itself (e.g.
+    # dict.fromkeys); for instance-bound methods, look on type(self).
+    return inspect.getattr_static(
+        method_self if isinstance(method_self, type) else type(method_self),
+        value.__name__,
+        None,
+    )
 
 
 class _missing:
@@ -1465,11 +1485,12 @@ class VariableBuilder:
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
-        elif isinstance(
-            value, types.BuiltinMethodType
-        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
+        elif (descriptor := bound_builtin_method_descriptor(value)) is not None:
             self.install_guards(GuardBuilder.ID_MATCH)
-            return BuiltinMethodVariable(value, source=self.source)
+            method_self = value.__self__
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
+            return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -1522,7 +1543,14 @@ class VariableBuilder:
             # return the same object on attribute lookup. Therefore, we cannot
             # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
-            return ConstantMethodWrapperVariable(value)
+            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+            if not isinstance(descriptor, types.WrapperDescriptorType):
+                raise AssertionError(
+                    f"expected WrapperDescriptorType, got {type(descriptor)}"
+                )
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
+            return MethodWrapperVariable(descriptor, obj_vt)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -4430,7 +4458,14 @@ class SourcelessBuilder:
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            return ConstantMethodWrapperVariable(value)
+            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+            if not isinstance(descriptor, types.WrapperDescriptorType):
+                raise AssertionError(
+                    f"expected WrapperDescriptorType, got {type(descriptor)}"
+                )
+            return MethodWrapperVariable(
+                descriptor, SourcelessBuilder.create(tx, value.__self__)
+            )
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
