@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfXpu,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -167,6 +168,7 @@ class TestScheduler(TestCase):
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
@@ -185,6 +187,7 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
+    @xfailIfNoAcceleratorTriton
     @skipIfXpu(
         msg="InvalidModule: Invalid SPIR-V module, "
         "https://github.com/intel/torch-xpu-ops/issues/2329"
@@ -204,7 +207,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
-    @torch._inductor.config.patch({"force_disable_caches": True})
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
@@ -307,6 +312,7 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
         """
@@ -347,6 +353,7 @@ class TestScheduler(TestCase):
             f"compiled={compiled_result.mean().item():.6f}",
         )
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_atomic_add_no_fusion_correctness(self):
         """
