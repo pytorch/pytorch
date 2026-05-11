@@ -321,6 +321,102 @@ class TestCuda(TestCase):
 
         expected = empty_stats()
 
+    @serialTest()
+    def test_host_memory_stats_active_after_free_no_events(self):
+        """Regression test for free()'s no-events fast path.
+
+        When a pinned tensor is freed without any CUDA stream having been
+        recorded against its block (i.e. it was never used as the source of
+        an async H2D copy), the allocator pushes the block back onto the
+        free list directly. That path must decrement active_requests.current
+        and active_bytes.current; otherwise the counters grow monotonically
+        on every plain pin-and-drop cycle even though the underlying memory
+        is correctly recycled.
+
+        Two cycles exercise both alloc paths: the first triggers a new slab
+        via add_allocated_block, the second reuses the cached block via
+        get_free_block.
+        """
+        # host_memory_stats() returns an empty dict until the host caching
+        # allocator has been initialized; force init so the stat keys exist
+        # regardless of test ordering.
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            self.assertTrue(t.is_pinned())
+            del t
+            gc.collect()
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after a pin-and-drop cycle "
+                "with no async copy: the block is returned to the cache, so "
+                "the active counter must drop back to zero.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after a pin-and-drop cycle.",
+            )
+
+    @serialTest()
+    def test_host_memory_stats_active_after_event_drain(self):
+        """Regression test for the event-drain path through empty_cache.
+
+        When a pinned block is used as the source of a non_blocking H2D copy
+        and then freed, the block sits on the events queue until
+        process_events_for_specific_size drains it. That function takes a
+        size parameter that is -1 when invoked from process_events (the
+        all-sizes case, reached via _host_emptyCache). The decrement of
+        active_bytes_bucket_stats must use the block's actual size, not the
+        -1 parameter, otherwise active_bytes.current is incremented by 1
+        byte per drained event and active_bytes.freed goes negative.
+        """
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            t.cuda(non_blocking=True)
+            torch.cuda.synchronize()
+            del t
+            gc.collect()
+            # Drain via process_events_for_specific_size(-1, ...).
+            torch._C._host_emptyCache()
+
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after empty_cache drains "
+                "the events queue.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after drain.",
+            )
+            self.assertGreaterEqual(
+                stats["active_bytes.freed"],
+                0,
+                "active_bytes.freed must be non-negative; a negative value "
+                "means the drain decremented by the wrong size.",
+            )
+            self.assertGreaterEqual(
+                stats["active_requests.freed"],
+                0,
+                "active_requests.freed must be non-negative.",
+            )
+
     def test_pinned_memory_empty_cache(self):
         try:
             for alloc_settings in (True, False):
