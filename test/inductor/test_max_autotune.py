@@ -1580,39 +1580,6 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    def test_broadcast_batch_bmm(self):
-        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
-        # guard that skips the Triton bmm template for stride-0 inputs.
-        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
-        y = rand_strided(
-            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
-        )
-
-        @torch.compile(mode="max-autotune")
-        def f(x, y):
-            return torch.bmm(x, y)
-
-        ref = torch.bmm(x, y)
-        act = f(x, y)
-        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
-
-    def test_broadcast_batch_baddbmm(self):
-        # Batch size > 1 with stride[0]=0 to exercise the broadcast batch
-        # guard that skips the Triton bmm template for stride-0 inputs.
-        x = rand_strided((4, 32, 64), (0, 64, 1), dtype=torch.bfloat16, device=GPU_TYPE)
-        y = rand_strided(
-            (4, 64, 16), (1024, 16, 1), dtype=torch.bfloat16, device=GPU_TYPE
-        )
-        inp = torch.randn(4, 32, 16, dtype=torch.bfloat16, device=GPU_TYPE)
-
-        @torch.compile(mode="max-autotune")
-        def f(inp, x, y):
-            return torch.baddbmm(inp, x, y)
-
-        ref = torch.baddbmm(inp, x, y)
-        act = f(inp, x, y)
-        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
-
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
@@ -2311,7 +2278,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 20)
+        self.assertEqual(generate_and_load_args, 21)
 
     @fresh_cache()
     @config.patch(
@@ -2400,7 +2367,7 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                        'transpose_discontiguous_tensor_descriptors_override':None,
+                        'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},
                         'hint_override':None,'triton_meta':None}"""
@@ -2442,7 +2409,7 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
-                    'transpose_discontiguous_tensor_descriptors_override':None,
+                    'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
                     'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None,'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -3078,6 +3045,35 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check("triton_tem_fused").run(code[0])
 
+    @config.patch(
+        {
+            "max_autotune": True,
+        }
+    )
+    def test_deffered_layout_constraint_mm_cat_mm(self):
+        def mm_cat_mm(t1, t2, t3, t4):
+            add = t2 + 1
+            matmul1 = torch.matmul(t1, add)
+            cat = torch.cat((t3, add), dim=1)
+            matmul2 = torch.matmul(t4, add)
+            return matmul1, cat, matmul2
+
+        B = 3072
+        M = 128
+        K = 144
+        N = 160
+        P = 96
+        t1 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+        t2 = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float16)
+        t3 = torch.randn(B, P, N, device=GPU_TYPE, dtype=torch.float16)
+        t4 = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+
+        args = (t1, t2, t3, t4)
+
+        compiled_fn = torch.compile(mm_cat_mm)
+
+        run_and_get_code(compiled_fn, *args)
+
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
@@ -3385,7 +3381,10 @@ class TestMaxAutotune(TestCase):
                 out_unfused, code_unfused = run_and_get_code(torch.compile(fn), x)
 
         FileCheck().check_not(kernel_name).run(code_unfused[0])
-        self.assertEqual(out, out_unfused)
+        if GPU_TYPE == "xpu" and dtype == torch.float16:
+            torch.testing.assert_close(out, out_unfused, atol=5e-4, rtol=5e-4)
+        else:
+            self.assertEqual(out, out_unfused)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))

@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     xfailIfNoAcceleratorTriton,
+    setSdpaBackendsToDefaultFinally,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -4036,6 +4037,7 @@ class TestSDPACudaOnly(NNTestCase):
         "Does not support SDPA or pre-SM80 hardware",
     )
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
+    @setSdpaBackendsToDefaultFinally
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 143, 2048])
     @parametrize("seq_len_k", [4, 127, 579, 2048])

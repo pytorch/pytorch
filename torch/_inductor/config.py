@@ -449,6 +449,9 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
+# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
+dedup_reduce_scatters: bool = False
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
@@ -468,13 +471,13 @@ estimate_op_runtime = "default"
 
 runtime_estimations_mms_benchmark: bool = False
 
-# unit: GB/s, uni-directional P2P bandwidth per card
-# default value is NVLink
-intra_node_bw = 300
+# unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
+# None = auto-detect from GPU generation; set to override.
+intra_node_bw: int | None = None
 
-# unit: GB/s, uni-directional P2P bandwidth per node
-# default value is InfiniBand
-inter_node_bw = 25
+# unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
+# None = auto-detect from GPU generation; set to override.
+inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
 # default value is PCIe; modify for your hardware or measured bandwidth
@@ -511,6 +514,14 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# When True, autotuning is spread across real kernel invocations instead of
+# blocking on the first call. Each run() call executes one config and records
+# timing via CUDA events, progressively eliminating underperforming configs.
+# An additional JK gate inside the plugin can still block the feature on True.
+incremental_autotune: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
@@ -951,7 +962,14 @@ max_fusion_buffer_group_pairwise_attempts = 64
 # The check is disabled if set to None.
 max_fusion_unique_io_buffers: int | None = None
 
-# max number of inputs to generate cat as a pointwise op with masked loads
+# max number of inputs to always fuse cat as a pointwise op regardless of
+# per-input op complexity. Beyond this limit (up to max_pointwise_cat_inputs),
+# fusion is only applied when every input has a low op count.
+max_complex_pointwise_cat_inputs = 8
+
+# max number of inputs to generate cat as a pointwise op with masked loads.
+# Inputs beyond max_complex_pointwise_cat_inputs but within this limit are
+# only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -1028,9 +1046,22 @@ combo_kernel_max_num_nodes = 8
 combo_kernel_per_subkernel_blocks = False
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
-combo_kernel_autotune_grouping = False
+combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# Memory-aware combo kernel gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The accepted delta is measured against the original graph peak before combo
+# kernels. When both thresholds are set, the tighter limit wins.
+combo_kernel_peak_memory_increase_gb: float | None = None  # Absolute cap in GB
+combo_kernel_peak_memory_pct_threshold: float | None = 0.05
+# Maximum baseline-index span of a single combo candidate. Groups whose
+# first-to-last baseline-index distance exceeds this are split into
+# sub-windows. Set to -1 (or any negative value) to disable splitting
+# and treat each parallel group as one window.
+combo_kernel_max_distance: int = -1
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1227,7 +1258,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
@@ -1523,8 +1556,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles. Incompatible with cpp_wrapper.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
-# When True, complex_memory_overlap always reports True
-always_complex_memory_overlap_TESTING_ONLY: bool = False
+# When True, all compiled graphs report a cudagraph fail reason. Used by tests
+# that need to exercise the cudagraph-skip path.
+force_disable_cudagraph_TESTING_ONLY: bool = False
 
 # enable linear binary folding
 enable_linear_binary_folding = (
@@ -1997,6 +2031,10 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Controls TMA load enablement in template epilogues
+    enable_tma_load_for_template_epilogue = (
+        os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
+    )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -2698,7 +2736,7 @@ _cache_config_ignore_prefix: list[str] = [
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
-    "always_complex_memory_overlap_TESTING_ONLY",
+    "force_disable_cudagraph_TESTING_ONLY",
     # timing affects cache structure, not cache content
     "pre_grad_pass_timing",
     # cache related options are not relevant to cache results

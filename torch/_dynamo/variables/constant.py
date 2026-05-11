@@ -109,15 +109,16 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(value), f"""
-Cannot construct `ConstantVariable` for value of type {type(value)}.
-
-This failure likely due to PyTorch-internal use of `ConstantVariable` on
-non-literal python values, please try using `VariableTracker.build` instead. If
-you believe it's a necessary and legitimate use case (the value is immutable and
-can't easily be represented with another `VariableTracker` class), please add
-its type to `common_constant_types`.
-"""
+        if not ConstantVariable.is_base_literal(value):
+            raise AssertionError(
+                f"Cannot construct `ConstantVariable` for value of type {type(value)}.\n"
+                "\n"
+                "This failure likely due to PyTorch-internal use of `ConstantVariable` on\n"
+                "non-literal python values, please try using `VariableTracker.build` instead. If\n"
+                "you believe it's a necessary and legitimate use case (the value is immutable and\n"
+                "can't easily be represented with another `VariableTracker` class), please add\n"
+                "its type to `common_constant_types`."
+            )
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -201,6 +202,10 @@ its type to `common_constant_types`.
         except TypeError as e:
             raise NotImplementedError from e
 
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+        """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        return hash(self.value), False
+
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
@@ -223,6 +228,21 @@ its type to `common_constant_types`.
         if callable(member):
             raise NotImplementedError
         return member
+
+    def sq_contains(self, tx: InstructionTranslator, item: VariableTracker):
+        """Sequence contains for constants."""
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        return super().sq_contains(tx, item)
 
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
@@ -329,14 +349,6 @@ its type to `common_constant_types`.
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            assert not kwargs
-            search = args[0].as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -391,6 +403,9 @@ its type to `common_constant_types`.
             tree_map_kwargs,
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
+
     @override
     def call_obj_hasattr(
         self, tx: InstructionTranslator, name: str
@@ -398,21 +413,19 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
     def is_python_equal(self, other: object) -> bool:
         from .tensor import SymNodeVariable
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        if isinstance(other, ConstantVariable):
+            return self.as_python_constant() == other.as_python_constant()
+        # Delegate to other's is_python_equal - this handles cases like
+        # StringFormatVariable which can compare against constants and
+        # install guards for any lazy constants it contains.
+        if isinstance(other, VariableTracker):
+            return other.is_python_equal(self)
+        return False
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
@@ -487,6 +500,16 @@ its type to `common_constant_types`.
         # bool inherits nb_negative from int via slot inheritance.
         return ConstantVariable.create(-self.value)
 
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
+        # bool inherits nb_positive from int via slot inheritance.
+        return ConstantVariable.create(+self.value)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
@@ -521,11 +544,8 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), True
 
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
