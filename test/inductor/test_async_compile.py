@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor import config
@@ -7,6 +7,7 @@ from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
+    CachingAutotuner,
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -152,6 +153,135 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].kwargs, autotune_config.kwargs)
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
+
+    @requires_gpu()
+    @requires_triton()
+    def test_non_combo_parallel_precompile(self):
+        # Worker subprocess compiles configs via _precompile_configs_parallel
+        # (threads inside subprocess). The parent's _precompile_worker should
+        # see compile_results already populated and take the early-return.
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        parent_compiled: list[bool] = []
+        orig_worker = CachingAutotuner._precompile_worker
+
+        def wrap_worker(self):
+            had_results = bool(self.compile_results)
+            orig_worker(self)
+            parent_compiled.append(not had_results and bool(self.compile_results))
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=4),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=4,
+            ),
+            patch.object(CachingAutotuner, "_precompile_worker", wrap_worker),
+        ):
+            # Restart pool so workers pick up the latest source code.
+            shutdown_compile_workers()
+            AsyncCompile.wait_pool_ready()
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        # Worker should have compiled; parent's _precompile_worker
+        # early-returns. Any True entry means parent compiled (regression).
+        parent_did_compile = [x for x in parent_compiled if x]
+        self.assertEqual(
+            parent_did_compile,
+            [],
+            f"Parent-side _precompile_worker compiled configs instead of "
+            f"early-returning (worker should have compiled). "
+            f"parent_compiled={parent_compiled}",
+        )
+
+    @requires_gpu()
+    @requires_triton()
+    def test_compile_threads_one_serial_fallback(self):
+        # With compile_threads=1, _precompile_configs_parallel must not
+        # touch AsyncCompile.pool() if invoked. The non-combo compile path
+        # is fully synchronous in this case, so this primarily guards the
+        # helper's serial-fallback branch.
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        pool_mock = MagicMock(name="AsyncCompile.pool")
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=1),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=1,
+            ),
+            patch("torch._inductor.async_compile.AsyncCompile.pool", pool_mock),
+        ):
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        # Pool must never be invoked on the serial fallback branch.
+        self.assertEqual(
+            pool_mock.call_count,
+            0,
+            "AsyncCompile.pool() was invoked under compile_threads=1; the "
+            "serial fallback branch should not touch the pool.",
+        )
+
+    @requires_gpu()
+    @requires_triton()
+    def test_no_duplicate_bundler_puts(self):
+        # Per-config compile runs in the worker subprocess. The parent's
+        # _precompile_worker mirrors one TritonBundler.put per result on
+        # its early-return path (so the parent's bundler observes the
+        # entries). The parent must not see a key more than once.
+        def fn(x):
+            return x.softmax(dim=-1).sum(dim=-1)
+
+        x = torch.rand(64, 4096, device=GPU_TYPE)
+        out_eager = fn(x)
+
+        from torch._inductor.runtime import triton_heuristics as th
+
+        put_calls: list[tuple] = []
+        orig_put = th.TritonBundler.put
+
+        def counting_put(key, device):
+            put_calls.append((key, device))
+            return orig_put(key, device)
+
+        with (
+            fresh_cache(),
+            config.patch(max_autotune=True, combo_kernels=False, compile_threads=4),
+            patch(
+                "torch._inductor.async_compile.get_compile_threads",
+                return_value=4,
+            ),
+            patch.object(th.TritonBundler, "put", staticmethod(counting_put)),
+        ):
+            out_compiled = torch.compile(fn)(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        seen_keys: set = set()
+        duplicates: list = []
+        for key, device in put_calls:
+            ident = (key, device)
+            if ident in seen_keys:
+                duplicates.append(ident)
+            seen_keys.add(ident)
+        self.assertEqual(
+            duplicates,
+            [],
+            f"TritonBundler.put was called with duplicate (key, device) "
+            f"entries on the parent. Duplicates: {duplicates}",
+        )
 
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within
