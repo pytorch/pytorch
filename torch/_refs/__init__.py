@@ -5266,10 +5266,11 @@ def new_full(
 
 @aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 def empty_out(
-    size: TensorLikeType,
+    size: ShapeType,
     out: TensorLikeType,
     memory_format: torch.memory_format | None = None,
 ) -> TensorLikeType:
+    _maybe_resize_out(out, size, memory_format)
     return out
 
 
