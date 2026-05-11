@@ -1445,7 +1445,7 @@ class LazyConstantVariableTests(TestCase):
         def get_or_create(k1, k2):
             key = (k1, k2)
             if key not in cache:
-                cache[key] = torch.library.Library("aten", "IMPL", k2)
+                cache[key] = torch.library.Library("aten", "IMPL", k2)  # noqa: SCOPED_LIBRARY
             return cache[key]
 
         def fn():
@@ -1795,11 +1795,10 @@ class LazyConstantVariableTests(TestCase):
         self.assertGreater(counter.frame_count, 1)  # Recompilation happened
 
     def test_dict_aliasing_keys_getitem_no_recompile(self):
-        """Verify that writing and reading the same key doesn't over-guard.
+        """Writing and reading the same key doesn't over-guard.
 
-        When d[key] = val is followed by d[key], the key is used symmetrically
-        for both write and read.  Only a TYPE_MATCH guard is needed — the
-        behavior is correct regardless of the key value.
+        The key is used symmetrically for both write and read, so only
+        a TYPE_MATCH guard is needed.
         """
         tensor_input = torch.tensor([1.0, 2.0, 3.0])
 
@@ -1810,12 +1809,10 @@ class LazyConstantVariableTests(TestCase):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
 
-        # First call
         opt_fn(tensor_input, {}, "a")
         self.assertEqual(counter.frame_count, 1)
 
-        # Different key value - should NOT recompile since key is used
-        # symmetrically (write then read with same source)
+        # Different key value - should NOT recompile
         opt_fn(tensor_input, {}, "b")
         self.assertEqual(counter.frame_count, 1)
 

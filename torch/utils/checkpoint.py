@@ -1319,6 +1319,23 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+def _sac_storage_key(func, args):
+    """Compute the SAC storage key for a given op.
+
+    For inductor_compiled_code, each compiled region gets its own FIFO queue
+    keyed by the callable's unique idx.  Without this, all compiled regions
+    share one queue and a cache-hit that skips a region during recompute
+    causes the queue to return the wrong entry (see gh-175258).
+    """
+    from torch._higher_order_ops.wrap import (
+        _resolve_inductor_callable,
+        inductor_compiled_code as _inductor_compiled_code,
+    )
+    if func is _inductor_compiled_code and args:
+        return (func, _resolve_inductor_callable(args[0]).idx)
+    return func
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1352,8 +1369,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        key = _sac_storage_key(func, args)
+        idx = self.func_counter[key]
+        self.func_counter[key] += 1
 
         policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False, op_output=out),
                                 func, *args, **kwargs)
@@ -1368,9 +1386,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                     node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
+            self.storage[key][idx] = tree_map(lambda x: _VersionWrapper(_detach_helper(x)), out)
         else:
-            self.storage[func][idx] = _RECOMPUTE
+            self.storage[key][idx] = _RECOMPUTE
         return out
 
 _RECOMPUTE = object()
@@ -1404,10 +1422,11 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
-        idx = self.func_counter[func]
-        self.func_counter[func] += 1
+        key = _sac_storage_key(func, args)
+        idx = self.func_counter[key]
+        self.func_counter[key] += 1
 
-        func_storage = self.storage.get(func)
+        func_storage = self.storage.get(key)
         if func_storage is None:
             raise RuntimeError(
                 f"{func} encountered during backward but not found in "

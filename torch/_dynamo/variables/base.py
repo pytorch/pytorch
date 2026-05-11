@@ -500,6 +500,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
+    def get_python_hash(self) -> int:
+        """Return the Python hash of this variable's value.
+
+        Subclasses with known constant values (ConstantVariable,
+        LazyConstantVariable, StringFormatVariable) override this for
+        efficiency.  The default delegates to hash_impl via the current tx.
+        """
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        h, _ = self.hash_impl(tx)
+        return h
+
     def try_peek_constant(self) -> tuple[bool, bool, Any]:
         """Try to peek at the constant value without triggering realization.
 
@@ -616,6 +629,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
+
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        raise NotImplementedError(f"reconstruct_pycode not implemented for {self}")
 
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
@@ -744,6 +760,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[],
         )
 
+    def sq_contains(self, tx: Any, item: VariableTracker) -> VariableTracker:
+        """Called when sq_contains is not implemented."""
+        unimplemented(
+            gb_type="missing sq_contains",
+            context=f"sq_contains not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: Any,
@@ -772,6 +797,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
             return self.tp_iternext_impl(tx)
+        elif name == "__contains__" and not kwargs:
+            if len(args) != 1:
+                msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            return self.sq_contains(tx, args[0])
         elif (
             name == "__getattr__"
             and len(args) == 1

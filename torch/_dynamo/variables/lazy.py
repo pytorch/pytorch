@@ -590,6 +590,10 @@ class LazyConstantVariable(LazyVariableTracker):
         # Primitive types (int, float, bool, str) are always hashable
         return True
 
+    def is_hashable_lazy(self) -> bool:
+        # Primitive types are always hashable — no need to realize.
+        return True
+
     def get_python_hash(self) -> int:
         """Get hash without triggering realization.
 
