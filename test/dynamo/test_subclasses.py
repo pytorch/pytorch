@@ -1229,6 +1229,110 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    def test_redispatch_function_with_dynamo(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+    def test_redispatch_function_graph_break(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            torch._dynamo.graph_break()
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+    def test_redispatch_function_graph_break_before_has_torch_function(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            # Graph break BEFORE has_torch_function — this tests the case
+            # where skip_next is set by _skip_one_hop_torch_function but
+            # not yet consumed when the graph break fires.
+            torch._dynamo.graph_break()
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435

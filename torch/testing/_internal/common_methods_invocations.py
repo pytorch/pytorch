@@ -17705,6 +17705,7 @@ op_db: list[OpInfo] = [
         if not SM80OrLater
         else custom_types(torch.float16, torch.bfloat16),
         supports_out=False,
+        has_nondeterministic_output=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
@@ -17727,6 +17728,7 @@ op_db: list[OpInfo] = [
         if not SM80OrLater
         else custom_types(torch.float16, torch.float32, torch.bfloat16),
         supports_out=False,
+        has_nondeterministic_output=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
@@ -20299,6 +20301,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_like_fns,
            reference_inputs_func=reference_inputs_like_fns,
            supports_autograd=False,
+           has_nondeterministic_output=True,
            skips=(
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"),
@@ -20540,6 +20543,7 @@ op_db: list[OpInfo] = [
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
+           has_nondeterministic_output=True,
            sample_inputs_func=sample_inputs_new_fns,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -20572,6 +20576,7 @@ op_db: list[OpInfo] = [
            op=lambda x, *args, **kwargs: x.new_empty_strided(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=False,
+           has_nondeterministic_output=True,
            sample_inputs_func=partial(sample_inputs_new_fns, is_strided=True),
            supports_autograd=False,
            skips=(
@@ -20617,6 +20622,7 @@ op_db: list[OpInfo] = [
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.empty_strided, inp, *args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.half),
            supports_out=False,
+           has_nondeterministic_output=True,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_empty_strided,
            skips=(
@@ -20644,6 +20650,7 @@ op_db: list[OpInfo] = [
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_empty,
+           has_nondeterministic_output=True,
            supports_autograd=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -20713,6 +20720,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_empty_permuted,
            error_inputs_func=error_inputs_empty_permuted,
            supports_out=False,
+           has_nondeterministic_output=True,
            supports_autograd=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
