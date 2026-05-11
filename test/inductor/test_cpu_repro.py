@@ -41,10 +41,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    requires_mkl,
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_MKL,
     xfailIf,
     xfailIfS390X,
 )
@@ -356,7 +356,7 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
     @config.patch(freezing=True)
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
     def test_mkl_linear(self):
         dtypes = [torch.float32]
@@ -1087,6 +1087,52 @@ class CPUReproTests(TestCase):
             fn,
             (a,),
         )
+
+    def test_codegen_int_array_var_cache(self):
+        """
+        Test for the bug in codegen_int_array_var where bound method ids could collide,
+        leading to undefined 'int_array_XXX' identifiers in generated C++ code.
+        """
+        from unittest.mock import MagicMock
+
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch._inductor.virtualized import V
+
+        class MockBuffer:
+            def __init__(self):
+                self.lines = []
+
+            def writeline(self, line):
+                self.lines.append(line)
+
+        # Mock V.graph to avoid needing to compile a real model
+        mock_graph = MagicMock()
+        mock_graph.cpp_wrapper = True
+        mock_graph.aot_mode = False
+        mock_graph.is_const_graph = False
+        mock_graph.device_types = []
+
+        with V.set_graph_handler(mock_graph):
+            wrapper = CppWrapperCpu()
+            buffer = MockBuffer()
+
+            # Bound methods in Python are instantiated on access.
+            # Storing them ensures they have different ids.
+            w1 = buffer.writeline
+            w2 = buffer.writeline
+
+            # The bug: without the fix, codegen_int_array_var uses id(writeline)
+            # as the cache key, which leads to cache misses for bound methods.
+            var1 = wrapper.codegen_int_array_var("{1, 2, 3}", w1)
+            var2 = wrapper.codegen_int_array_var("{1, 2, 3}", w2)
+
+            # They should return the same variable name because it's the same buffer
+            self.assertEqual(
+                var1,
+                var2,
+                "codegen_int_array_var should cache based on the bound method's __self__, "
+                "not the transient bound method id itself.",
+            )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(

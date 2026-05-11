@@ -106,7 +106,7 @@ from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
     GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
+    enable_profiling_mode_for_profiling_tests, requires_mkl, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
@@ -9121,7 +9121,7 @@ dedent """
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_close(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    @requires_mkl
     @unittest.skipIf(True, "Skipping while landing PR stack")
     def test_torch_functional(self):
         def stft(input, n_fft):
