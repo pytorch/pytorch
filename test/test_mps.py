@@ -8882,6 +8882,11 @@ struct simple_ge_functor {
 };
 REGISTER_BINARY_OP(simple_ge, float, bool);
 REGISTER_BINARY_CASTOUT_OP(simple_ge, float, bool);
+
+// `probe` deliberately has no REGISTER_BINARY_* entries. Every dispatch
+// through it must fail at getPipelineStateForFunc; the missing kernel name
+// in the resulting error message tells us which flavor the dispatcher
+// selected, which is what the routing tests assert on.
 """
 
 _CONFORMANCE_CPP_SOURCE = r"""
@@ -8928,6 +8933,37 @@ at::Tensor simple_ge(const at::Tensor& a, const at::Tensor& b, std::optional<at:
     return iter.output(0);
 }
 
+// `probe` has no metal kernel registered, so exec_binary_kernel will always
+// raise from getPipelineStateForFunc. We capture the exception and return
+// the message so Python tests can grep for the kernel name to verify which
+// dispatch flavor was selected. The arguments mirror exec_binary_kernel.
+std::string probe(
+    const at::Tensor& a,
+    const at::Tensor& b,
+    std::optional<at::Tensor> out,
+    std::optional<at::ScalarType> natural_dtype,
+    std::optional<double> alpha,
+    std::optional<int64_t> ilp_threshold) {
+    TORCH_CHECK(g_lib != nullptr, "kernel source not set");
+    at::Tensor out_t = out.has_value() ? *out : at::Tensor();
+    at::TensorIteratorConfig cfg;
+    cfg.add_output(out_t).add_input(a).add_input(b).promote_inputs_to_common_dtype(true);
+    if (out_t.defined()) {
+        cfg.cast_common_dtype_to_outputs(true);
+    }
+    auto iter = cfg.build();
+    std::optional<c10::Scalar> alpha_s;
+    if (alpha.has_value()) alpha_s = c10::Scalar(*alpha);
+    std::optional<uint32_t> ilp_t;
+    if (ilp_threshold.has_value()) ilp_t = static_cast<uint32_t>(*ilp_threshold);
+    try {
+        g_lib->exec_binary_kernel(iter, "probe", alpha_s, std::nullopt, natural_dtype, ilp_t);
+    } catch (const std::exception& e) {
+        return std::string(e.what());
+    }
+    return std::string();
+}
+
 }  // namespace
 """
 
@@ -8967,7 +9003,7 @@ def _conformance_ext_handle():
         _conformance_ext = torch.utils.cpp_extension.load_inline(
             name="mps_iter_conformance",
             cpp_sources=_CONFORMANCE_CPP_SOURCE,
-            functions=["set_kernel_source", "simple_add", "simple_ge"],
+            functions=["set_kernel_source", "simple_add", "simple_ge", "probe"],
             extra_include_paths=[os.path.join(_CONFORMANCE_REPO_ROOT, "aten", "src")],
             verbose=False,
         )
@@ -9050,6 +9086,153 @@ class TestBinaryIteratorConformance(TestCaseMPS):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result.cpu(), expected)
+
+
+# Verifies exec_binary_kernel's dispatch routing by calling a `probe` op that
+# has no kernel registered. The missing-kernel error names the exact variant
+# the dispatcher tried to load, so we can assert routing without needing any
+# real kernels for every flavor. Each test names the *complete* expected
+# kernel string to keep the relationship between routing condition and kernel
+# name visible in one place.
+class TestBinaryDispatchRouting(TestCaseMPS):
+    def _probe(self, a, b, *, out=None, natural=None, alpha=None,
+               ilp_threshold=None):
+        ext = _conformance_ext_handle()
+        msg = ext.probe(a, b, out, natural, alpha, ilp_threshold)
+        self.assertNotEqual(
+            msg, "",
+            "probe op unexpectedly found a kernel -- dispatcher should always fail")
+        return msg
+
+    def _assert_kernel(self, msg, expected):
+        self.assertIn(
+            f"Failed to create function state object for: {expected}", msg,
+            f"expected dispatcher to select '{expected}', got: {msg}")
+
+    def test_dense_contiguous(self):
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_dense_float_float")
+
+    def test_strided(self):
+        a = torch.empty(16, dtype=torch.float32, device="mps")[::2]
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_strided_float_float")
+
+    def test_dense_cast(self):
+        a = torch.empty(8, dtype=torch.int32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_dense_cast_float_float")
+
+    def test_strided_cast(self):
+        a = torch.empty(16, dtype=torch.int32, device="mps")[::2]
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_strided_cast_float_float")
+
+    def test_dense_scalar_rhs(self):
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty((), dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_dense_scalar_float_float")
+
+    def test_dense_scalar_lhs(self):
+        a = torch.empty((), dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(self._probe(a, b), "probe_dense_scalar_lhs_float_float")
+
+    def test_dense_scalar_cast(self):
+        # Tensor int + scalar float -> tensor dtype != common, so the
+        # host-promote shortcut for scalar kernels does NOT trigger and we
+        # actually take the runtime cast path.
+        a = torch.empty(8, dtype=torch.int32, device="mps")
+        b = torch.empty((), dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a, b), "probe_dense_scalar_cast_float_float")
+
+    def test_scalar_host_promote_float(self):
+        # float tensor + int scalar: tensor matches common, scalar is
+        # integral, common is float32 -- host-promote shortcut elides the
+        # runtime cast and routes to the plain scalar kernel.
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty((), dtype=torch.int64, device="mps")
+        self._assert_kernel(
+            self._probe(a, b), "probe_dense_scalar_float_float")
+
+    def test_scalar_host_promote_complex(self):
+        # cfloat tensor + int scalar: complex backed by float32, so host
+        # promotion is bit-exact and the shortcut fires.
+        a = torch.empty(8, dtype=torch.complex64, device="mps")
+        b = torch.empty((), dtype=torch.int64, device="mps")
+        self._assert_kernel(
+            self._probe(a, b), "probe_dense_scalar_float2_float2")
+
+    def test_dense_broadcast(self):
+        # other broadcasts -> kernel name has no _rhs/_lhs suffix. The smaller
+        # tensor must stay contiguous (no `expand`) for is_dense_broadcastable
+        # to accept it; TI handles the actual broadcast.
+        a = torch.empty(4, 4, dtype=torch.float32, device="mps")
+        b = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
+        self._assert_kernel(self._probe(a, b), "probe_dense_broadcast_float_float")
+
+    def test_dense_broadcast_lhs(self):
+        # input broadcasts -> dispatcher emits "_rhs" suffix (mirrors the
+        # other-broadcast kernel signature with operands swapped).
+        a = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
+        b = torch.empty(4, 4, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a, b), "probe_dense_broadcast_rhs_float_float")
+
+    def test_dense_ilp(self):
+        # Force ILP path with a threshold of 1: any contiguous, no-cast,
+        # no-alpha, no-scalar/broadcast input qualifies.
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a, b, ilp_threshold=1),
+            "probe_dense_ilp4_float_float")
+
+    def test_ilp_threshold_boundary(self):
+        # With threshold=128, numel below the threshold stays on the plain
+        # dense kernel; at/above it routes to the ILP variant. This proves
+        # the caller-tunable threshold actually gates the switch.
+        a_small = torch.empty(64, dtype=torch.float32, device="mps")
+        b_small = torch.empty(64, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a_small, b_small, ilp_threshold=128),
+            "probe_dense_float_float")
+        a_large = torch.empty(256, dtype=torch.float32, device="mps")
+        b_large = torch.empty(256, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a_large, b_large, ilp_threshold=128),
+            "probe_dense_ilp4_float_float")
+
+    def test_alpha_suffix(self):
+        # Alpha appends "_<alpha_dtype>" to the kernel name; for float
+        # operands the alpha type is also float.
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a, b, alpha=2.0),
+            "probe_dense_float_float_float")
+
+    def test_castout_routes_to_strided_castout(self):
+        # natural=kBool with float `out=` forces the strided_castout path
+        # regardless of contiguity.
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        out = torch.empty(8, dtype=torch.float32, device="mps")
+        self._assert_kernel(
+            self._probe(a, b, out=out, natural=torch.bool),
+            "probe_strided_castout_bool_float")
+
+    def test_natural_matches_out_no_castout(self):
+        # natural=kBool with bool `out=` -> no castout; falls through to
+        # the regular dense path with (bool, float) suffix.
+        a = torch.empty(8, dtype=torch.float32, device="mps")
+        b = torch.empty(8, dtype=torch.float32, device="mps")
+        out = torch.empty(8, dtype=torch.bool, device="mps")
+        self._assert_kernel(
+            self._probe(a, b, out=out, natural=torch.bool),
+            "probe_dense_bool_float")
 
 
 class TestLargeTensors(TestCaseMPS):
