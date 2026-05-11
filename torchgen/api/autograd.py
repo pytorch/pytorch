@@ -321,6 +321,9 @@ def is_foreach_func(f: NativeFunction) -> bool:
 # is functional for their backward derivatives (and forward derivatives in the future), i.e.,
 # they would find such one in `functional_info_by_signature`. There however are some exceptions:
 _foreach_with_inplace_ref = {"_foreach_zero_"}
+# Foreach ops whose scalar-reference derivative is too complex to auto-map
+# (e.g., mm derivatives use strides_or_error which can't be lifted to lists).
+_foreach_skip_derivative_gen = {"_foreach_mm"}
 _foreach_with_tensor_overload = {
     "_foreach_add.Tensor",
     "_foreach_mul.Tensor",
@@ -346,7 +349,9 @@ def is_reference_for_foreach(
     function_schema: FunctionSchema,
 ) -> bool:
     return (
-        f.func.name.name.base.split("_foreach_")[-1] == function_schema.name.name.base
+        str(f.func.name) not in _foreach_skip_derivative_gen
+        and f.func.name.name.base.split("_foreach_")[-1]
+        == function_schema.name.name.base
         and (
             not function_schema.name.name.inplace
             or str(f.func.name) in _foreach_with_inplace_ref
