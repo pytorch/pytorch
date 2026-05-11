@@ -250,7 +250,7 @@ class TestUtils(TestCase):
 
     def test_flops_fx_higher_order_op(self):
         """count_flops_fx must use the registered formula for HOP targets
-        rather than invoking the HOP — flex_attention.__call__ requires a
+        rather than invoking the HOP. flex_attention.__call__ requires a
         Dynamo/proxy tracing context (TransformGetItemToIndex) and raises
         TypeError when invoked on bare (fake) tensors.
         """

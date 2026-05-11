@@ -625,17 +625,15 @@ def count_flops_fx(node: torch.fx.Node) -> int | None:
         success, args, kwargs = get_fake_args_kwargs(node)
 
         if success:
-            # HigherOrderOperator targets cannot be invoked directly on
-            # (fake) tensors — their __call__ requires a Dynamo/proxy
-            # tracing context (e.g. flex_attention needs
-            # TransformGetItemToIndex), so dispatching through
-            # FlopCounterMode raises. Look up the registered formula
-            # directly instead.
-            if not hasattr(node.target, "overloadpacket"):
+            # flex_attention HOPs have registered formulas, but invoking them
+            # here can require tracing-only context, e.g. TransformGetItemToIndex.
+            if node.target in (
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.flex_attention_backward,
+            ):
                 flop_formula = flop_registry.get(node.target)
-                if flop_formula is None:
-                    return None
-                return flop_formula(*args, **kwargs, out_val=node.meta.get("val"))
+                if flop_formula is not None:
+                    return flop_formula(*args, **kwargs, out_val=node.meta.get("val"))
 
             with torch.utils.flop_counter.FlopCounterMode(
                 display=False
