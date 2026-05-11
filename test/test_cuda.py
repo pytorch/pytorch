@@ -4507,36 +4507,14 @@ g = torch.cuda.CUDAGraph()
 with torch.cuda.graph(g):
     output = my_func(a, b, perm)
 """
-        capture_violation_re = (
-            r"(?is)(?:torch\.)?AcceleratorError|CUDA error|HIP error|stream is capturing|"
-            r"hipErrorStreamCaptureUnsupported|hipErrorStreamCaptureInvalidated|"
-            r"previous error during capture"
-        )
         with self.assertRaisesRegex(
             subprocess.CalledProcessError,
             "calls a synchronize which is not allowed in a cudagraph",
         ):
-            proc = subprocess.run(
-                [sys.executable, "-c", test_script],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            # First assertRegex above checks the subprocess output for the expected graph-capture
-            # error during execution. We then re-raise as CalledProcessError so assertRaisesRegex
-            # matches repr(cmd). ROCm/HIP may use returncode 0 while still printing that error.
-            combined = proc.stdout + proc.stderr
-            self.assertRegex(
-                combined,
-                capture_violation_re,
-                msg=(
-                    "expected graph-capture violation in subprocess output "
-                    f"(returncode={proc.returncode}):\n{combined}"
-                ),
-            )
-            raise subprocess.CalledProcessError(
-                proc.returncode, [sys.executable, "-c", test_script]
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script])
+                .decode("ascii")
+                .strip()
             )
 
     def test_batch_norm_gather_stats(self):
