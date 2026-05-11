@@ -91,7 +91,7 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  * avoids lookups for None, tuple, and List objects,
  * and doesn't create a PyErr since this code ignores it.
  *
- * This can be much faster then PyObject_GetAttrString where
+ * This can be much faster than PyObject_GetAttrString where
  * exceptions are not used by caller.
  *
  * 'obj' is the object to search for attribute.
