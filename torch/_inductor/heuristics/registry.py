@@ -14,7 +14,7 @@ import contextlib
 import logging
 from typing import Any, TYPE_CHECKING
 
-from .triton_template.base import TemplateConfigHeuristics
+from .template.base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
