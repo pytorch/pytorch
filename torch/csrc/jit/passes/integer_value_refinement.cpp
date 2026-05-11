@@ -60,7 +60,7 @@ struct IntegerValueRefiner {
     // same value, which opens up further optimization opportunities. The pass
     // will already handle if both outputs are refined to the same constant.
     // Here, we look for cases where one block output has been refined in the
-    // other block to be equal to the same constant value as the other other
+    // other block to be equal to the same constant value as the other
     // block output:
     //  graph(%y.1 : int):
     //   %one_constant : int = prim::Constant[value=1]()

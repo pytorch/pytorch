@@ -2,7 +2,7 @@
 import hashlib
 import logging
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, TypeGuard
 
 from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
@@ -40,7 +40,7 @@ class CUTLASSScheduling(BaseScheduling):
     """
     Partial Scheduling implementation for cutlass C++ Kernels.
     This class is intended to be used in combination with TritonScheduling,
-    and delegated to by CUDACombinedScheduling.
+    and delegated to by CUDACombinedScheduling/XPUCombinedScheduling.
 
     It handles fusion decisions and cutlass C++ specific template code generation.
     """
@@ -53,7 +53,7 @@ class CUTLASSScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
-    def is_cutlass_template(node: BaseSchedulerNode) -> bool:
+    def is_cutlass_template(node: BaseSchedulerNode) -> TypeGuard[SchedulerNode]:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUTLASSTemplateBuffer
         )
@@ -109,7 +109,7 @@ class CUTLASSScheduling(BaseScheduling):
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.cuda(r'''")
+            compile_wrapper.writeline(f"async_compile.{V.graph.device_type}(r'''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline(
                 f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
@@ -136,7 +136,6 @@ class CUTLASSScheduling(BaseScheduling):
         assert self.is_cutlass_template(template_node), (
             "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
         )
-        template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
@@ -283,13 +282,13 @@ size: {cutlass_template_buffer.get_size()}"
                 not_implemented_op = not_implemented_op[4:]
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}, \
-likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+likely due to unsupported operation: {not_implemented_op}"
                 )
                 return False
             else:  # Likely due to unsupported dtype.
                 why(
                     f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
-Reason: {not_implemented_op}"  # noqa: G004, B950
+Reason: {not_implemented_op}"
                 )
                 return False
 

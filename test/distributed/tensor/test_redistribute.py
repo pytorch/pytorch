@@ -430,9 +430,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
         comm_mode = CommDebugMode()
 
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
         # test it successfully zero out the contents on other ranks
@@ -451,9 +460,18 @@ class RedistributeTest(DTensorContinuousTestBase):
         replica_tensor = distribute_tensor(
             local_tensor, device_mesh, [replica_spec, replica_spec]
         )
+        dt = replica_tensor.dtype
         with comm_mode:
             partial_tensor = Redistribute.apply(
-                replica_tensor, device_mesh, [partial_spec, partial_spec]
+                replica_tensor,
+                device_mesh,
+                [partial_spec, partial_spec],
+                False,
+                {
+                    "op_dtype": dt,
+                    "out_dtype": dt,
+                    "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                },
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
@@ -835,9 +853,18 @@ class RedistributeTest(DTensorContinuousTestBase):
 
             # Apply R->P transition with the specified reduce_op
             partial_spec = Partial(reduce_op)
+            dt = replica_tensor.dtype
             with comm_mode:
                 partial_tensor = Redistribute.apply(
-                    replica_tensor, device_mesh, [partial_spec]
+                    replica_tensor,
+                    device_mesh,
+                    [partial_spec],
+                    False,
+                    {
+                        "op_dtype": dt,
+                        "out_dtype": dt,
+                        "backward_options": {"op_dtype": dt, "out_dtype": dt},
+                    },
                 )
 
             self.assertEqual(partial_tensor.size(), local_tensor.size())
@@ -988,6 +1015,67 @@ class RedistributeTest(DTensorContinuousTestBase):
         # With mesh=4 and dim 1 size=8, each rank has local shape (2, 2)
         self.assertEqual(dt_shard1._local_tensor.shape, (2, 2))
         self.assertEqual(dt_shard1.full_tensor(), dt.full_tensor())
+
+    @parametrize("dtype", [torch.float32])
+    def test_shard_to_replicate_forward_backward_backward(self, dtype):
+        # 1) test shard -> replicate forward
+        device_mesh = self.build_device_mesh()
+        replica_spec = [Replicate()]
+
+        input_sizes_and_shard_dim = [
+            ((self.world_size * 3, 3), 0),
+            ((self.world_size * 3 + 1, 3), 0),
+            ((self.world_size * 3 + 2, 3), 0),
+            ((3, self.world_size * 3), 1),
+            ((3, self.world_size * 3 + 1), 1),
+            ((3, self.world_size * 3 + 2), 1),
+        ]
+
+        activation = torch.nn.ReLU()
+
+        comm_mode = CommDebugMode()
+        for input_size, shard_dim in input_sizes_and_shard_dim:
+            shard_spec = [Shard(shard_dim)]
+            weight_ref = torch.nn.Parameter(torch.randn([]))
+            weight = distribute_tensor(weight_ref, device_mesh, replica_spec)
+            expected_tensor = torch.randn(
+                input_size, device=self.device_type, requires_grad=True, dtype=dtype
+            )
+            dtensor = distribute_tensor(expected_tensor, device_mesh, shard_spec)
+            dtensor_act = activation(dtensor * weight)
+            expected_tensor_act = torch.square(activation(expected_tensor * weight_ref))
+            with comm_mode:
+                reshard_dtensor_act = torch.square(dtensor_act.full_tensor())
+            self.assertEqual(reshard_dtensor_act.size(), torch.Size(input_size))
+            self.assertEqual(expected_tensor_act, reshard_dtensor_act)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+
+            # 2) test shard -> replicate backward:
+            output_dist = reshard_dtensor_act.mean()
+            output_ref = expected_tensor_act.mean()
+            self.assertEqual(output_ref, output_dist)
+            grad_input_ref = torch.autograd.grad(
+                outputs=output_ref, inputs=expected_tensor, create_graph=True
+            )[0]
+            with comm_mode:
+                grad_input = torch.autograd.grad(
+                    outputs=output_dist, inputs=dtensor, create_graph=True
+                )[0].full_tensor()
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+            self.assertEqual(grad_input, grad_input_ref)
+
+            # 3) test grad weight for shard -> replicate double-backward:
+            grad_input_ref.mean().backward()
+            with comm_mode:
+                grad_input.mean().backward()
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+            self.assertEqual(weight_ref.grad, weight.grad.full_tensor())
 
 
 instantiate_parametrized_tests(RedistributeTest)
@@ -1642,8 +1730,29 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
 
     def test_strided_shard_redistribution(self):
         torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        # 1D mesh: _StridedShard -> Replicate uses the greedy path's 1D shortcut
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        input_1d = torch.randn((16, 13), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_1d, mesh_1d, [_StridedShard(0, split_factor=2)]
+        )
+        # _StridedShard -> Replicate via redistribute
+        result_dt = src_dt.redistribute(mesh_1d, [Replicate()])
+        self.assertEqual(result_dt.to_local(), input_1d)
+        # Same code path as above, but exercises the user-facing API
+        self.assertEqual(src_dt.full_tensor(), input_1d)
+
+        # 2D mesh: _StridedShard with undecodable split_factor falls back to greedy
+        mesh_2d = init_device_mesh(self.device_type, (4, 2))
+        input_2d = torch.randn((24, 8), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_2d, mesh_2d, [_StridedShard(0, split_factor=3), Replicate()]
+        )
+        result_dt = src_dt.redistribute(mesh_2d, [Replicate(), Replicate()])
+        self.assertEqual(result_dt.to_local(), input_2d)
+
+        # 3D mesh cases
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((31, 13, 11), device=self.device_type)
         sharding_src_dst_pairs_with_expected_trace = [
             (
@@ -1708,7 +1817,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",  # noqa: B950
+                    """S(0)[0]S(0)[1]_S(0, 3)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
@@ -1723,7 +1832,7 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)[0]S(0)[1]_S(1, 5)->S(0)R_S(1, 5)->S(0)RR->S(0)_S(1, 5)R->S(0)_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)[0]_S(1, 5)[1]->R_S(1, 5)R->R_S(1, 5)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(),
@@ -1733,6 +1842,137 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
                 src_data_rank=None,
             )
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+    def test_strided_shard_to_shard_redistribution(self):
+        torch.manual_seed(42)
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_2d = init_device_mesh(self.device_type, (4, 2))
+        mesh_3d = init_device_mesh(self.device_type, (2, 2, 2))
+        input_1d = torch.randn((16, 13), device=self.device_type)
+        input_2d = torch.randn((24, 8), device=self.device_type)
+        input_3d = torch.randn((31, 13, 11), device=self.device_type)
+
+        # _StridedShard <-> Shard on 1D, 2D, and 3D meshes
+        redistribute_pairs = [
+            # (mesh, input, src_placements, dst_placements)
+            # 1D: _StridedShard(0) -> Shard(0)
+            (mesh_1d, input_1d, [_StridedShard(0, split_factor=2)], [Shard(0)]),
+            # 1D: _StridedShard(0) -> Shard(1) (cross-dim)
+            (mesh_1d, input_1d, [_StridedShard(0, split_factor=2)], [Shard(1)]),
+            # 1D: Shard(0) -> _StridedShard(0)
+            (mesh_1d, input_1d, [Shard(0)], [_StridedShard(0, split_factor=2)]),
+            # 2D: [_StridedShard(0), Replicate()] -> [Shard(0), Replicate()]
+            (
+                mesh_2d,
+                input_2d,
+                [_StridedShard(0, split_factor=3), Replicate()],
+                [Shard(0), Replicate()],
+            ),
+            # 2D: [_StridedShard(0), Shard(1)] -> [Shard(0), Shard(1)]
+            (
+                mesh_2d,
+                input_2d,
+                [_StridedShard(0, split_factor=2), Shard(1)],
+                [Shard(0), Shard(1)],
+            ),
+            # 2D: [Shard(0), Replicate()] -> [_StridedShard(0), Replicate()]
+            (
+                mesh_2d,
+                input_2d,
+                [Shard(0), Replicate()],
+                [_StridedShard(0, split_factor=3), Replicate()],
+            ),
+            # 2D: [Shard(0), Shard(1)] -> [_StridedShard(0), Shard(1)]
+            (
+                mesh_2d,
+                input_2d,
+                [Shard(0), Shard(1)],
+                [_StridedShard(0, split_factor=2), Shard(1)],
+            ),
+        ]
+        for mesh, inp, src, dst in redistribute_pairs:
+            src_dt = distribute_tensor(inp, mesh, src)
+            result_dt = src_dt.redistribute(mesh, dst)
+            expected_dt = distribute_tensor(inp, mesh, dst)
+            self.assertEqual(result_dt.to_local(), expected_dt.to_local())
+            self.assertEqual(result_dt.full_tensor(), inp)
+
+        # 3D: _StridedShard on one dim -> Shard, others unchanged
+        src_dt = _distribute_tensor(
+            input_3d.clone(),
+            mesh_3d,
+            [Shard(0), Shard(0), _StridedShard(0, split_factor=3)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+            src_data_rank=None,
+        )
+        result_dt = redistribute(
+            src_dt,
+            mesh_3d,
+            [Shard(0), Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+        )
+        expected_dt = _distribute_tensor(
+            input_3d.clone(),
+            mesh_3d,
+            [Shard(0), Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+            src_data_rank=None,
+        )
+        self.assertEqual(result_dt.to_local(), expected_dt.to_local())
+
+    def test_partial_to_strided_shard_redistribution(self):
+        torch.manual_seed(42)
+
+        # 1D mesh, Partial -> _StridedShard(0)
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        input_1d = torch.randn((16, 13), device=self.device_type)
+        src_dt = DTensor.from_local(
+            input_1d.clone(), mesh_1d, [Partial("sum")], run_check=False
+        )
+        result_dt = src_dt.redistribute(mesh_1d, [_StridedShard(0, split_factor=2)])
+        reduced = input_1d * self.world_size
+        expected_dt = distribute_tensor(
+            reduced, mesh_1d, [_StridedShard(0, split_factor=2)]
+        )
+        self.assertEqual(result_dt.to_local(), expected_dt.to_local())
+        self.assertEqual(result_dt.full_tensor(), reduced)
+
+        # 2D mesh (4x2), [Partial, Replicate()] -> [_StridedShard(0), Replicate()]
+        mesh_2d = init_device_mesh(self.device_type, (4, 2))
+        input_2d = torch.randn((24, 8), device=self.device_type)
+        src_dt = DTensor.from_local(
+            input_2d.clone(), mesh_2d, [Partial("sum"), Replicate()], run_check=False
+        )
+        result_dt = src_dt.redistribute(
+            mesh_2d, [_StridedShard(0, split_factor=3), Replicate()]
+        )
+        reduced_2d = input_2d * 4
+        expected_dt = distribute_tensor(
+            reduced_2d, mesh_2d, [_StridedShard(0, split_factor=3), Replicate()]
+        )
+        self.assertEqual(result_dt.to_local(), expected_dt.to_local())
+        self.assertEqual(result_dt.full_tensor(), reduced_2d)
+
+    def test_strided_shard_to_partial_raises(self):
+        torch.manual_seed(42)
+
+        # 1D mesh
+        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        input_1d = torch.randn((16, 13), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_1d, mesh_1d, [_StridedShard(0, split_factor=2)]
+        )
+        with self.assertRaises(RuntimeError):
+            src_dt.redistribute(mesh_1d, [Partial("sum")])
+
+        # 2D mesh
+        mesh_2d = init_device_mesh(self.device_type, (4, 2))
+        input_2d = torch.randn((24, 8), device=self.device_type)
+        src_dt = distribute_tensor(
+            input_2d, mesh_2d, [_StridedShard(0, split_factor=3), Replicate()]
+        )
+        with self.assertRaises(RuntimeError):
+            src_dt.redistribute(mesh_2d, [Partial("sum"), Replicate()])
 
 
 class TransformInfoTest(TestCase):
@@ -1762,6 +2002,23 @@ class TransformInfoTest(TestCase):
         for placements in local_cases:
             info = _TransformInfo(0, placements, [8, 8])
             self.assertIsNone(info._comm_type_key())
+
+    def test_comm_type_key_strided_shard(self):
+        """_StridedShard must produce the same comm type keys as Shard."""
+        ss = _StridedShard(0, split_factor=2)
+        test_cases = [
+            ((Partial("sum"), ss), "reduce_scatter"),
+            ((ss, Replicate()), "all_gather"),
+            ((ss, Shard(1)), "all_to_all"),
+            ((ss, _StridedShard(1, split_factor=2)), "all_to_all"),
+        ]
+        for placements, expected_key in test_cases:
+            info = _TransformInfo(0, placements, [8, 8])
+            self.assertEqual(
+                info._comm_type_key(),
+                expected_key,
+                f"_StridedShard transform {placements} should map to '{expected_key}'",
+            )
 
 
 class OptimizeFlattenedReductionsTest(TestCase):
@@ -2836,6 +3093,88 @@ DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
     base_class=LocalDTensorContinuousTestBase,
 )
+
+
+class _CollectiveDtypeTracer(torch.utils._python_dispatch.TorchDispatchMode):
+    """Records the dtype of the first tensor argument for each _c10d_functional op."""
+
+    def __init__(self):
+        super().__init__()
+        self.events: list[tuple[str, torch.dtype]] = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        name = str(func)
+        if "_c10d_functional" in name and args and isinstance(args[0], torch.Tensor):
+            self.events.append((name, args[0].dtype))
+        return func(*args, **kwargs)
+
+    def dtypes_for(self, op_substr: str) -> list[torch.dtype]:
+        return [dt for name, dt in self.events if op_substr in name]
+
+
+class RedistributeBackwardDtypeTest(TestCase):
+    """Verify ``DTensor.redistribute(..., backward_dtype=...)`` actually runs the
+    backward collective at the requested dtype.
+
+    A fake process group lets us run this single-process; a TorchDispatchMode
+    tracer captures the dtype of each ``_c10d_functional`` collective.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        dist.destroy_process_group()
+        super().tearDownClass()
+
+    def test_backward_dtype_runs_backward_collective_at_that_dtype(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.bfloat16,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.bfloat16])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
+    def test_forward_and_backward_dtype_differ(self):
+        mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("dp",))
+        local = torch.randn(16, 8, dtype=torch.float32, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Shard(0)])
+
+        tracer = _CollectiveDtypeTracer()
+        with tracer:
+            out = dt.redistribute(
+                mesh,
+                [Replicate()],
+                forward_dtype=torch.bfloat16,
+                backward_dtype=torch.float32,
+            )
+            grad_d = DTensor.from_local(
+                torch.ones(64, 8, dtype=out.dtype), mesh, [Partial()]
+            )
+            out.backward(grad_d)
+
+        self.assertEqual(tracer.dtypes_for("all_gather_into_tensor"), [torch.bfloat16])
+        self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
+        self.assertEqual(local.grad.dtype, torch.float32)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -14,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import dis
     from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
@@ -36,7 +38,9 @@ if TYPE_CHECKING:
 
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.guards import GuardCheckSpec
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+    from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -228,6 +232,8 @@ class SLoc:
         floc = (
             self.framework_loc
             if isinstance(self.framework_loc, str)
+            else ""
+            if self.framework_loc is None
             else format_frame(self.framework_loc)
         )
         if self.maybe_user_loc is not None:
@@ -512,7 +518,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -635,7 +641,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
+    def __init__(self, inner: OrderedSet[Guard] | None = None) -> None:
         if inner is None:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
@@ -739,10 +745,12 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None: ...
+    def add_dynamo_installed_submodule(
+        self, fn_code: CodeType, identifier: str
+    ) -> None: ...
 
     @abstractmethod
-    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
+    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None: ...
@@ -770,23 +778,89 @@ class HopSubgraphCache:
     ) -> tuple[torch.fx.GraphModule | None, int | None]: ...
 
 
+@dataclass
+class InvokeSubgraphReuseEntry:
+    body_name: str
+    body_gmod: torch.fx.GraphModule
+    config: NestedCompileRegionOptions | None
+    subgraph_input_mapping: list[
+        Any
+    ]  # list[LiftedArgOrigin] - defined in invoke_subgraph.py
+    single_tensor_output: bool
+    # Per-output tensor metadata (shape, stride, dtype, device, requires_grad)
+    # cached from the first trace so we can construct fresh FakeTensors on
+    # cache hit without re-running body_gmod.
+    output_metadata: list[
+        tuple[torch.Size, tuple[int, ...], torch.dtype, torch.device, bool]
+    ]
+    # 1-1 mapping to flat_vts: source for each flattened arg/kwarg, or None if
+    # the VT has no source. On cache hit, we build a source replacement mapping
+    # (old arg sources → new arg sources) to rewrite captured variable sources
+    # for the current invocation.
+    arg_sources: list[Source | None]
+    # Number of user-visible outputs (from the function return value).
+    # The graph may have additional outputs from side-effect intermediates;
+    # stamp_out_subgraph uses this to return only the user-visible slice.
+    num_user_outputs: int = 0
+
+
+@dataclass
+class InvokeSubgraphReuseCondition:
+    # Per flattened input VT: (InputTag, metadata).
+    #   (InputTag.TENSOR, TensorMetadata)
+    #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
+    #   (InputTag.CONSTANT, value)
+    #   (InputTag.MODULE, None)
+    # Tensor metadata is checked here because TENSOR_MATCH guards for
+    # subgraph inputs may already exist before tracing and thus won't
+    # appear in the guard delta.
+    input_checks: list[tuple[Any, object]]  # list[tuple[InputTag, object]]
+
+    # Guards captured during the trace (delta + source-mapped).
+    # Each entry: (source, handler, expected_value, guard)
+    # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
+    guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
+
+    # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
+    # On cache hit, we verify the new call has the same treespec.
+    treespec: pytree.TreeSpec | None = None
+
+    # All sources accessed via VariableBuilder during the subgraph trace.
+    # On cache hit, we check if any modified VT's source is a base of one
+    # of these to detect mutations on captured variables.
+    traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
+
+
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
-        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
         ] = defaultdict(dict)
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
+        # fn.__code__ → list of (condition, cache_entry) pairs. Walked linearly
+        # on lookup; first matching condition wins.
+        self.subgraph_reuse_cache: dict[
+            CodeType,
+            list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
+        ] = defaultdict(list)
+        # fn_code → {hash_key → cache_entry}. Used by user-provided
+        # reuse_hash_fn for O(1) subgraph reuse lookup.
+        self.subgraph_reuse_key_cache: dict[
+            CodeType, dict[int, InvokeSubgraphReuseEntry]
+        ] = defaultdict(dict)
 
-    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
-        self.dynamo_installed_submodules[fn_id].append(identifier)
+    def add_dynamo_installed_submodule(
+        self, fn_code: CodeType, identifier: str
+    ) -> None:
+        self.dynamo_installed_submodules[fn_code].append(identifier)
 
-    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
-        return self.dynamo_installed_submodules.get(fn_id, [])
+    def get_dynamo_installed_submodules(self, fn_code: CodeType) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_code, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None:
         self.autograd_cache[identifier] = key
@@ -834,6 +908,65 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_effects(self, identifier: str) -> set | None:
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
+
+    def add_reuse_entry(
+        self,
+        fn_code: CodeType,
+        condition: InvokeSubgraphReuseCondition,
+        entry: InvokeSubgraphReuseEntry,
+        max_reuse_entries: int = 8,
+    ) -> None:
+        entries = self.subgraph_reuse_cache[fn_code]
+        if len(entries) >= max_reuse_entries:
+            raise RuntimeError(
+                f"invoke_subgraph: exceeded maximum reuse entries "
+                f"({max_reuse_entries}) for function code {fn_code}. "
+                f"This most likely means a guard keeps failing on every "
+                f"invocation, preventing subgraph reuse. "
+                f"Set TORCH_LOGS='+hierarchical_compile' to identify which "
+                f"guard is failing. If reuse is genuinely not possible and "
+                f"you need more cache entries, increase the limit via the "
+                f"max_reuse_entries argument to nested_compile_region()."
+            )
+        entries.append((condition, entry))
+
+    def find_reuse_entry(
+        self,
+        fn_code: CodeType,
+        evaluator: Callable[
+            [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
+        ],
+    ) -> InvokeSubgraphReuseEntry | None:
+        entries = self.subgraph_reuse_cache.get(fn_code, [])
+        for i, (condition, entry) in enumerate(entries):
+            if evaluator(condition, entry):
+                # MRU: move the hit entry to the front for faster future lookups
+                if i > 0:
+                    entries.insert(0, entries.pop(i))
+                return entry
+        return None
+
+    def find_reuse_entry_by_key(
+        self, fn_code: CodeType, hash_key: int
+    ) -> InvokeSubgraphReuseEntry | None:
+        return self.subgraph_reuse_key_cache.get(fn_code, {}).get(hash_key)
+
+    def add_reuse_entry_by_key(
+        self,
+        fn_code: CodeType,
+        hash_key: int,
+        entry: InvokeSubgraphReuseEntry,
+        max_reuse_entries: int = 8,
+    ) -> None:
+        key_cache = self.subgraph_reuse_key_cache[fn_code]
+        if len(key_cache) >= max_reuse_entries and hash_key not in key_cache:
+            raise RuntimeError(
+                f"invoke_subgraph: exceeded maximum reuse entries "
+                f"({max_reuse_entries}) for function code {fn_code} (hash-key path). "
+                f"Increase the limit via the max_reuse_entries argument to "
+                f"nested_compile_region()."
+            )
+        key_cache[hash_key] = entry
 
 
 class HopDispatchSetCache:
@@ -954,6 +1087,7 @@ class TracingContext:
         # to frame_summary_stack (prepping this variable for the inner frame's
         # progress)
         self.loc_in_frame: tuple[str, int, str] | None = None
+        self.loc_in_frame_positions: dis.Positions | None = None
         # this is only set after aot_autograd
         self.fw_metadata: ViewAndMutationMeta | None = None
         # this is only set when the DDPOptimizer is used
@@ -1030,7 +1164,18 @@ class TracingContext:
         if self.loc_in_frame is None:
             raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
-        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["colno"] = self.loc_in_frame_positions.col_offset
+            kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
+        return traceback.FrameSummary(
+            filename,
+            lineno,
+            frame_name,
+            lookup_line=False,
+            **kwargs,
+        )
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -1041,6 +1186,7 @@ class TracingContext:
         with (
             unittest.mock.patch.object(tc, "frame_summary_stack", []),
             unittest.mock.patch.object(tc, "loc_in_frame", None),
+            unittest.mock.patch.object(tc, "loc_in_frame_positions", None),
         ):
             try:
                 yield
@@ -1077,7 +1223,9 @@ class TracingContext:
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
+        old_positions = tc.loc_in_frame_positions
         tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
         try:
             yield
         except Exception as e:
@@ -1088,6 +1236,7 @@ class TracingContext:
             if frame_summary is not None:
                 tc.frame_summary_stack.pop()
             tc.loc_in_frame = old
+            tc.loc_in_frame_positions = old_positions
 
     @staticmethod
     @contextlib.contextmanager
@@ -1106,10 +1255,17 @@ class TracingContext:
             tc.output_strides = old_output_strides
 
     @staticmethod
-    def set_current_loc(filename: str, lineno: int, frame_name: str) -> None:
+    def set_current_loc(
+        filename: str,
+        lineno: int,
+        frame_name: str,
+        positions: dis.Positions | None = None,
+    ) -> None:
         # Save the current location in the frame. Lazily generate the
         # framesummary.
-        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
+        tc = TracingContext.get()
+        tc.loc_in_frame = (filename, lineno, frame_name)
+        tc.loc_in_frame_positions = positions
 
     @staticmethod
     def get_traced_code() -> list[CodeType] | None:
@@ -1188,7 +1344,7 @@ def dataclass_with_cached_hash(
             # The _hash is a cached value that can be nondeterministically computed
             # (e.g., based on id() of objects), so it should not affect pickling.
             fields = dataclasses.fields(self)
-            field_values = tuple(getattr(self, f.name) for f in fields)
+            field_values = tuple(getattr(self, f.name) for f in fields if f.init)
             return (self.__class__, field_values)
 
         new_cls.__hash__ = __hash__
@@ -1212,6 +1368,14 @@ class Source:
         return False
 
     def reconstruct(self, codegen: PyCodegen) -> None:
+        raise NotImplementedError
+
+    def reconstruct_pycode(self, codegen: PyCodegen) -> str:
+        """
+        Reconstructs the source into a string of Python code. This method should
+        be eventually implemented for all subclasses of Source to achieve full
+        coverage of python wrapper code generation.
+        """
         raise NotImplementedError
 
     @functools.cached_property
@@ -1240,7 +1404,7 @@ class Source:
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1298,7 +1462,7 @@ class ChainedSource(Source):
         self,
         globals: dict[str, Any],
         locals: dict[str, Any],
-        cache: weakref.WeakKeyDictionary[Source, Any],
+        cache: dict[Source, Any],
     ) -> Any:
         if self in cache:
             return cache[self]
