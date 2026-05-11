@@ -2,392 +2,140 @@
 
 Status: current gate is G0.
 
-This plan is for improving `PYTORCH_TEST_WITH_DYNAMO=1` coverage for the
-CPython tests under `test/dynamo/cpython`. The current reported passrate is
-about 45%. The first campaign focuses on common Python data structures, where
-small semantic fixes should pay off across many tests.
-
-The plan is designed for an agent-driven loop. The loop should make small,
-coherent changes, keep the active gate fixed until its exit criteria are met,
-and update this file with measured evidence after each cycle.
-
-## Scope
-
-Initial test directory:
+Goal: improve `PYTORCH_TEST_WITH_DYNAMO=1` coverage for CPython tests under
+`test/dynamo/cpython/3_13`, starting with five common data-structure files:
 
 ```
-test/dynamo/cpython/3_13
+test_list.py
+test_tuple.py
+test_dict.py
+test_set.py
+test_deque.py
 ```
 
-Primary command for the full CPython Dynamo suite:
+The current reported overall passrate is about 45%. This plan keeps the first
+campaign small and makes gates per-file so the agent loop can land measurable
+progress without repeatedly running the full CPython suite.
+
+Operational loop instructions live in `test/dynamo/cpython/agent_manager.md`.
+This file is the source of truth for active gate, file scope, exit criteria,
+test commands, and measured progress.
+
+## Ground Rules
+
+- Do not relax gate exit criteria during an implementation cycle.
+- Do not mark a gate complete without measured evidence from the current tree.
+- Do not edit vendored CPython tests under `test/dynamo/cpython/3_13` unless the
+  human explicitly asks for a CPython import/update.
+- Do not add new expected-failure or skip sentinels without human approval.
+- Use `agent_space/` for scratch files, temporary reports, JUnit XML, and
+  sentinel backups.
+- For real Dynamo behavior fixes, add focused regression tests in the normal
+  Dynamo test suite and remove only the CPython sentinels proven fixed.
+
+Sentinel directories:
 
 ```
-cd test/dynamo/cpython/3_13
-PYTORCH_TEST_WITH_DYNAMO=1 pytest -vs .
+test/dynamo_expected_failures/
+test/dynamo_skips/
 ```
 
-Targeted command shape for one file:
+Example key:
 
 ```
-PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short test/dynamo/cpython/3_13/test_dict.py
+CPython313-test_dict-DictTest.test_update
 ```
 
-Targeted command shape for one test:
+Expected-failure sentinels still execute the test. If the test now passes, the
+harness reports an unexpected success and asks for the sentinel to be removed.
+
+## Initial Five-File Slice
+
+Collection command:
+
+```
+PYTORCH_TEST_WITH_DYNAMO=1 pytest --collect-only -q \
+  test/dynamo/cpython/3_13/test_list.py \
+  test/dynamo/cpython/3_13/test_tuple.py \
+  test/dynamo/cpython/3_13/test_dict.py \
+  test/dynamo/cpython/3_13/test_set.py \
+  test/dynamo/cpython/3_13/test_deque.py
+```
+
+Measured collection: 914 tests.
+
+| File | Collected | Xfail sentinels | Skip sentinels | Main source areas |
+| --- | ---: | ---: | ---: | --- |
+| `test_list.py` | 65 | 25 | 0 | `variables/lists.py`, `variables/builtin.py`, `variables/object_protocol.py` |
+| `test_tuple.py` | 36 | 16 | 0 | `variables/lists.py`, `variables/builtin.py`, `variables/object_protocol.py` |
+| `test_dict.py` | 112 | 45 | 7 | `variables/dicts.py`, `variables/user_defined.py`, `variables/object_protocol.py` |
+| `test_set.py` | 623 | 220 | 0 | `variables/sets.py`, `variables/user_defined.py`, `variables/object_protocol.py` |
+| `test_deque.py` | 78 | 58 | 0 | `variables/lists.py`, `variables/user_defined.py`, `variables/object_protocol.py` |
+
+Initial five-file totals: 914 collected tests, 364 expected-failure sentinels,
+and 7 skip sentinels.
+
+## Measurement Commands
+
+Run one file:
+
+```
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  test/dynamo/cpython/3_13/test_dict.py
+```
+
+Run one test:
 
 ```
 PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
   test/dynamo/cpython/3_13/test_dict.py::DictTest::test_update
 ```
 
-Use `agent_space/` for scratch files, temporary reports, and sentinel backups.
-Do not commit files from `agent_space/`.
-
-## How These Tests Work
-
-`torch._dynamo.test_case.CPythonTestCase` wraps CPython unittest methods with
-Dynamo when `PYTORCH_TEST_WITH_DYNAMO=1` is set. CPython tests use keys like:
+Run the five-file slice:
 
 ```
-CPython313-test_dict-DictTest.test_update
-```
-
-Known failures are represented by empty sentinel files in:
-
-```
-test/dynamo_expected_failures/
-```
-
-Known skips are represented by empty sentinel files in:
-
-```
-test/dynamo_skips/
-```
-
-Expected failures still execute. If the test fails, the wrapper reports it as a
-skip. If the test unexpectedly passes, the wrapper raises:
-
-```
-Unexpected success, please remove `test/dynamo_expected_failures/<key>`
-```
-
-For diagnosis, temporarily move the relevant sentinel into
-`agent_space/cpython_sentinel_backups/` and restore it before ending the cycle
-unless the fix really makes the test pass. For an actual fix, remove the
-sentinel with `git rm`.
-
-Do not add new expected-failure sentinels as part of this campaign unless the
-human explicitly approves. New failures should be treated as regressions or
-scope findings.
-
-## Maintenance Rules
-
-Gate exit criteria are fixed once written. Do not relax or rewrite them during
-an implementation cycle. If a gate appears unreachable, run a deep replan and
-record a proposal under "Proposed Gate Changes Awaiting Human Approval"; do not
-change the active criteria without human approval.
-
-Do not mark a gate complete unless the recorded exit criteria are met by
-measured evidence from the current tree.
-
-Most source fixes should be in `torch/_dynamo`, usually under:
-
-```
-torch/_dynamo/variables/
-torch/_dynamo/polyfills/
-torch/_dynamo/symbolic_convert.py
-torch/_dynamo/bytecode_transformation.py
-```
-
-Avoid editing vendored CPython tests under `test/dynamo/cpython/3_13` unless the
-task is explicitly to update the CPython import. For behavior fixes, add focused
-Dynamo tests in the normal Dynamo test files and remove the relevant CPython
-expected-failure sentinels.
-
-When adding focused tests, follow the local test style:
-
-```
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-class TestFeature(TestCase):
-    ...
-
-if __name__ == "__main__":
-    run_tests()
-```
-
-Use `assertEqual` for equality checks. Use `torch._dynamo.config.patch` for
-temporary Dynamo config changes.
-
-Only use `spin` commands for linting. If asked to commit or amend, run
-`lintrunner -a` before creating the commit.
-
-## Initial Ten-File Slice
-
-These ten files cover the highest-value common data structures and protocols:
-lists, tuples, dicts, sets, ordered/default/user mappings, deques, and
-collections ABC wrappers.
-
-Collection was checked with:
-
-```
-PYTORCH_TEST_WITH_DYNAMO=1 pytest --collect-only -q \
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
   test/dynamo/cpython/3_13/test_list.py \
   test/dynamo/cpython/3_13/test_tuple.py \
   test/dynamo/cpython/3_13/test_dict.py \
   test/dynamo/cpython/3_13/test_set.py \
-  test/dynamo/cpython/3_13/test_defaultdict.py \
-  test/dynamo/cpython/3_13/test_ordered_dict.py \
-  test/dynamo/cpython/3_13/test_deque.py \
-  test/dynamo/cpython/3_13/test_userlist.py \
-  test/dynamo/cpython/3_13/test_userdict.py \
-  test/dynamo/cpython/3_13/test_collections.py
+  test/dynamo/cpython/3_13/test_deque.py
 ```
 
-That command collected 1396 tests. It emitted one collection warning for
-`test_collections.py::TestNT`, matching normal pytest behavior for a class with
-`__new__`.
-
-| File | Collected tests | Expected-failure sentinels | Skip sentinels | Why this file is in the first slice |
-| --- | ---: | ---: | ---: | --- |
-| `test_list.py` | 65 | 25 | 0 | Core mutable sequence operations and iterator semantics |
-| `test_tuple.py` | 36 | 16 | 0 | Core immutable sequence, hashing, repeat, repr, tuple subclass behavior |
-| `test_dict.py` | 112 | 45 | 7 | Core mapping operations, views, mutation during lookup, split dict behavior |
-| `test_set.py` | 623 | 220 | 0 | Core set/frozenset operations and many repeated protocol clusters |
-| `test_defaultdict.py` | 11 | 6 | 0 | Default factory, copy, repr, union behavior |
-| `test_ordered_dict.py` | 295 | 223 | 0 | Ordered mapping behavior, pure Python and C implementation parity |
-| `test_deque.py` | 78 | 58 | 0 | Common queue/list hybrid with sequence protocol behavior |
-| `test_userlist.py` | 51 | 27 | 0 | UserList wrapper behavior, sequence protocol delegation |
-| `test_userdict.py` | 25 | 15 | 0 | UserDict wrapper behavior, mapping protocol delegation |
-| `test_collections.py` | 100 | 46 | 0 | ChainMap, Counter, namedtuple, collections ABCs |
-
-Total for first slice: 1396 collected tests, 681 expected-failure sentinels,
-and 7 skip sentinels.
-
-## First-Slice Failure Clusters
-
-These clusters should be used to pick coherent work, not to justify broad
-refactors.
-
-### Sequence Protocol
-
-Files:
+Write five-file JUnit XML:
 
 ```
-test_list.py
-test_tuple.py
-test_deque.py
-test_userlist.py
+PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
+  --junitxml=agent_space/cpython_dynamo/five_file_slice.xml \
+  test/dynamo/cpython/3_13/test_list.py \
+  test/dynamo/cpython/3_13/test_tuple.py \
+  test/dynamo/cpython/3_13/test_dict.py \
+  test/dynamo/cpython/3_13/test_set.py \
+  test/dynamo/cpython/3_13/test_deque.py
 ```
 
-Likely source areas:
+Count expected failures for the five files:
 
 ```
-torch/_dynamo/variables/lists.py
-torch/_dynamo/variables/user_defined.py
-torch/_dynamo/variables/object_protocol.py
-torch/_dynamo/variables/builtin.py
-```
-
-Representative expected failures:
-
-```
-ListTest.test_constructors
-ListTest.test_contains_order
-ListTest.test_extend
-ListTest.test_imul
-ListTest.test_index
-ListTest.test_repeat
-ListTest.test_repr
-TupleTest.test_constructors
-TupleTest.test_repeat
-TestBasic.test_getitem
-TestBasic.test_iadd
-UserListTest.test_getitem
-UserListTest.test_setitem
-```
-
-Common themes:
-
-- `list`, `tuple`, `deque`, and `UserList` constructor and subclass handling.
-- `__contains__`, count, index, and remove semantics with side effects.
-- Repeat, inplace repeat, add, and reverse/reversed behavior.
-- Iterator exhaustion, mutation while iterating, and reconstruction.
-- Repr and recursive repr behavior.
-
-### Mapping Protocol
-
-Files:
-
-```
-test_dict.py
-test_defaultdict.py
-test_ordered_dict.py
-test_userdict.py
-test_collections.py
-```
-
-Likely source areas:
-
-```
-torch/_dynamo/variables/dicts.py
-torch/_dynamo/variables/user_defined.py
-torch/_dynamo/variables/object_protocol.py
-torch/_dynamo/variables/builtin.py
-```
-
-Representative expected failures:
-
-```
-DictTest.test_update
-DictTest.test_getitem
-DictTest.test_merge_operator
-DictTest.test_views_mapping
-DictTest.test_items_symmetric_difference
-DictTest.test_setdefault_atomic
-TestDefaultDict.test_union
-UserDictTest.test_update
-CPythonOrderedDictTests.test_update
-TestChainMap.test_union_operators
-TestCounter.test_update
-```
-
-Common themes:
-
-- `dict.update`, `setdefault`, `pop`, `popitem`, `fromkeys`, and merge operators.
-- Dict views as live objects with set-like operations.
-- OrderedDict behavior across C and pure-Python implementations.
-- DefaultDict factory, copy/deepcopy, repr, and union.
-- UserDict and ChainMap mapping protocol delegation.
-- Counter as dict-like multiset with arithmetic operations.
-
-### Set Protocol
-
-Files:
-
-```
-test_set.py
-test_collections.py
-```
-
-Likely source areas:
-
-```
-torch/_dynamo/variables/sets.py
-torch/_dynamo/variables/user_defined.py
-torch/_dynamo/variables/object_protocol.py
-torch/_dynamo/variables/builtin.py
-```
-
-Representative expected failures:
-
-```
-TestSet.test_badcmp
-TestSet.test_container_iterator
-TestSet.test_copy
-TestSet.test_pickling
-TestSetSubclass.test_keywords_in_subclass
-TestFrozenSet.test_hash_caching
-TestBinaryOpsMutating_Set_Set.test_or_with_mutation
-TestMethodsMutating_Set_Set.test_update_with_mutation
-TestCollectionABCs.test_Set
-TestCollectionABCs.test_Set_interoperability_with_real_sets
-```
-
-Common themes:
-
-- Binary and inplace set operations.
-- Subclass priority and mutation during comparison or iteration.
-- Frozenset hash and copy identity behavior.
-- Set ABC interoperability with real sets.
-- Pickling and iterator behavior, which may often be a hard CPython boundary.
-
-### Iterator, Pickle, Repr, and Implementation-Detail Edges
-
-These recur across the slice and should be triaged separately from normal
-container semantics.
-
-Representative themes:
-
-- `_pickle.dumps` on iterators and containers.
-- `gc.collect`, `gc.is_tracked`, `sys.getsizeof`, and CPython refcount or GC
-  tracking assertions.
-- Repr on recursive containers.
-- `free_after_iterating`, use-after-free, and mutation during equality tests.
-- `importlib.import_module` and other stdlib functions Dynamo currently skips.
-
-Preferred handling:
-
-- Fix normal Python semantics when the test models ordinary user-visible
-  behavior.
-- Keep or convert to skip only for CPython implementation details that are not
-  meaningful Dynamo coverage targets.
-- Record hard-boundary decisions in this plan with exact test names and reasons.
-
-## Agent Manager
-
-Operational loop instructions live in `test/dynamo/cpython/agent_manager.md`.
-This file is the project plan and the source of truth for scope, active gate,
-exit criteria, test targets, and measured progress.
-
-The manager must update this file after each cycle with exact commands, results,
-sentinels removed, focused tests added, remaining risks, and the next best
-cluster inside the active gate.
-
-## Measurement Commands
-
-Count CPython expected failures by file:
-
-```
-find test/dynamo_expected_failures -maxdepth 1 -type f -name 'CPython313-*' \
-  | sed 's|.*/CPython313-||; s|-.*||' \
-  | sort | uniq -c | sort -nr
-```
-
-Count first-slice expected failures:
-
-```
-for f in test_list test_tuple test_dict test_set test_defaultdict \
-  test_ordered_dict test_deque test_userlist test_userdict test_collections; do
+for f in test_list test_tuple test_dict test_set test_deque; do
   printf '%s ' "$f"
   find test/dynamo_expected_failures -maxdepth 1 -type f \
     -name "CPython313-$f-*" | wc -l
 done
 ```
 
-Collect first-slice tests:
+Count skips for the five files:
 
 ```
-PYTORCH_TEST_WITH_DYNAMO=1 pytest --collect-only -q \
-  test/dynamo/cpython/3_13/test_list.py \
-  test/dynamo/cpython/3_13/test_tuple.py \
-  test/dynamo/cpython/3_13/test_dict.py \
-  test/dynamo/cpython/3_13/test_set.py \
-  test/dynamo/cpython/3_13/test_defaultdict.py \
-  test/dynamo/cpython/3_13/test_ordered_dict.py \
-  test/dynamo/cpython/3_13/test_deque.py \
-  test/dynamo/cpython/3_13/test_userlist.py \
-  test/dynamo/cpython/3_13/test_userdict.py \
-  test/dynamo/cpython/3_13/test_collections.py
+find test/dynamo_skips -maxdepth 1 -type f \
+  \( -name 'CPython313-test_list-*' \
+  -o -name 'CPython313-test_tuple-*' \
+  -o -name 'CPython313-test_dict-*' \
+  -o -name 'CPython313-test_set-*' \
+  -o -name 'CPython313-test_deque-*' \) | wc -l
 ```
 
-Run first-slice tests and write JUnit XML for later histogramming:
-
-```
-PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
-  --junitxml=agent_space/cpython_dynamo/first_slice.xml \
-  test/dynamo/cpython/3_13/test_list.py \
-  test/dynamo/cpython/3_13/test_tuple.py \
-  test/dynamo/cpython/3_13/test_dict.py \
-  test/dynamo/cpython/3_13/test_set.py \
-  test/dynamo/cpython/3_13/test_defaultdict.py \
-  test/dynamo/cpython/3_13/test_ordered_dict.py \
-  test/dynamo/cpython/3_13/test_deque.py \
-  test/dynamo/cpython/3_13/test_userlist.py \
-  test/dynamo/cpython/3_13/test_userdict.py \
-  test/dynamo/cpython/3_13/test_collections.py
-```
-
-Run one active file with Dynamo logs when the error is opaque:
+Use Dynamo logs only for opaque single-test repros:
 
 ```
 TORCH_LOGS="+dynamo,graph_breaks" TORCHDYNAMO_VERBOSE=1 \
@@ -397,276 +145,203 @@ PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short \
 
 ## Gates
 
-### G0: Baseline and Triage Harness
+### G0: Baseline Five Files
 
 Status: current.
 
-Purpose: make the agent loop reliable before changing behavior.
+Purpose: capture reliable starting data before source changes.
 
 Exit criteria:
 
-- A baseline first-slice run has been captured under `agent_space/cpython_dynamo/`
-  with the exact git SHA, command, Python version, and JUnit XML.
-- The first-slice expected-failure and skip counts in this file have been
-  checked against the current tree and updated if needed.
-- The first 20 actionable clusters have been recorded under "Work Queue" with
-  exact test names, normalized failure reason, and likely source files.
-- At least one single-test repro has been run with its sentinel temporarily
-  bypassed and restored.
-- No source files or sentinels are changed by this gate.
+- Record git SHA, Python version, exact five-file command, and JUnit XML under
+  `agent_space/cpython_dynamo/`.
+- Verify the current five-file counts: 914 collected tests, 364 expected-failure
+  sentinels, and 7 skip sentinels.
+- Build a normalized failure histogram from the five-file run.
+- Record the first 10 actionable single-test repros in "Work Queue" with exact
+  test names, normalized failure reason, and likely source file.
+- Run at least one single-test repro with its sentinel temporarily bypassed and
+  restored.
+- Leave source files and sentinels unchanged.
 
-Recommended first action:
-
-Run the first-slice XML command and build a normalized failure histogram from
-the skipped expected failures. Use `agent_space/` for any parser or report.
-
-### G1: Sequence Core
+### G1: `test_list.py`
 
 Status: pending.
 
-Purpose: improve list, tuple, deque, and UserList semantics before moving to
-larger mapping and set surfaces.
-
-Files in scope:
-
-```
-test_list.py
-test_tuple.py
-test_deque.py
-test_userlist.py
-```
-
-Initial expected-failure count: 126.
+Initial scope: 65 collected tests, 25 expected-failure sentinels, 0 skip
+sentinels.
 
 Exit criteria:
 
-- Remove at least 35 expected-failure sentinels across the sequence files.
-- Remove no skip sentinels unless the tests are now both passing and cheap.
-- Add focused Dynamo regression tests for every non-trivial semantic fix.
-- The four sequence files pass under `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q
-  --tb=short` with no unexpected successes or new real failures.
-- Any remaining sequence expected failures are categorized as one of:
-  unsupported stdlib/C boundary, CPython implementation detail, side-effect
-  semantic gap, iterator/reconstruction gap, or untriaged.
+- Remove at least 10 `test_list.py` expected-failure sentinels.
+- Add focused Dynamo regression tests for each non-trivial semantic fix.
+- `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short
+  test/dynamo/cpython/3_13/test_list.py` has no unexpected successes or new
+  real failures.
+- Remaining `test_list.py` sentinels are categorized in this file.
 
-High-priority clusters:
+Seed clusters:
 
-- `list` and `tuple` repeat, inplace repeat, repr, and contains behavior.
-- `deque` getitem, iadd, imul, rotate, reverse, copy, and maxlen behavior.
-- `UserList` delegation for getitem, setitem, contains, repeat, append, extend,
-  remove, and sort.
-- Iterator reconstruction and mutation during iteration where the behavior is
-  user-visible.
+- Constructors and subclass keyword behavior.
+- `contains`, `count`, `index`, and `remove` with side effects.
+- Repeat and inplace repeat.
+- Repr and recursive repr.
+- Iterator pickle/reconstruction and `reversed`.
 
-### G2: Mapping Core
+### G2: `test_tuple.py`
 
 Status: pending.
 
-Purpose: improve dict, defaultdict, and UserDict behavior before tackling the
-larger OrderedDict surface.
-
-Files in scope:
-
-```
-test_dict.py
-test_defaultdict.py
-test_userdict.py
-```
-
-Initial expected-failure count: 66. Initial skip count: 7, all in `test_dict.py`.
+Initial scope: 36 collected tests, 16 expected-failure sentinels, 0 skip
+sentinels.
 
 Exit criteria:
 
-- Remove at least 25 expected-failure sentinels across the mapping-core files.
-- Do not add new expected-failure or skip sentinels.
-- Add focused Dynamo regression tests for every non-trivial semantic fix.
-- The three mapping-core files pass under `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q
-  --tb=short` with no unexpected successes or new real failures.
-- Each remaining `test_dict.py` skip has a recorded reason: slow, CPython
-  implementation detail, or real remaining crash/hang risk.
+- Remove at least 7 `test_tuple.py` expected-failure sentinels.
+- Add focused Dynamo regression tests for each non-trivial semantic fix.
+- `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short
+  test/dynamo/cpython/3_13/test_tuple.py` has no unexpected successes or new
+  real failures.
+- Remaining `test_tuple.py` sentinels are categorized in this file.
 
-High-priority clusters:
+Seed clusters:
 
-- `ConstDictVariable.update` and mapping protocol update behavior.
-- `dict` merge operators and `fromkeys`.
-- Dict view operations on keys/items/values.
-- `setdefault`, `pop`, `popitem`, reconstruction, and split-dict behavior.
-- `defaultdict` repr, copy/deepcopy, recursive repr, pickling, and union.
-- `UserDict` read/write/update delegation.
+- Constructors and subclass keyword behavior.
+- Repeat and `repr(FakeIdVariable)`-adjacent failures.
+- Contains order and index behavior.
+- Iterator pickle/reconstruction and `reversed`.
+- CPython GC tracking tests that may be implementation-detail boundaries.
 
-### G3: Set and Frozenset Core
+### G3: `test_dict.py`
 
 Status: pending.
 
-Purpose: attack the largest repeated cluster in the first slice.
-
-Files in scope:
-
-```
-test_set.py
-test_collections.py
-```
-
-Initial expected-failure count in `test_set.py`: 220.
+Initial scope: 112 collected tests, 45 expected-failure sentinels, 7 skip
+sentinels.
 
 Exit criteria:
 
-- Remove at least 60 `test_set.py` expected-failure sentinels.
-- Add focused Dynamo regression tests for every non-trivial semantic fix.
-- `test_set.py` passes under `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short`
-  with no unexpected successes or new real failures.
-- Remaining `test_set.py` expected failures are grouped by exact protocol gap:
-  binary op, inplace op, mutation during comparison, iterator/pickle,
-  subclassing, frozenset hash/copy, or CPython implementation detail.
+- Remove at least 15 `test_dict.py` expected-failure sentinels.
+- Do not remove skip sentinels unless the tests are now passing and cheap.
+- Add focused Dynamo regression tests for each non-trivial semantic fix.
+- `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short
+  test/dynamo/cpython/3_13/test_dict.py` has no unexpected successes or new
+  real failures.
+- Remaining `test_dict.py` xfails and skips are categorized in this file.
 
-High-priority clusters:
+Seed clusters:
+
+- `ConstDictVariable.update` and mapping update protocol.
+- `getitem`, `setdefault`, `pop`, `popitem`, and reconstruction.
+- Merge operators and `fromkeys`.
+- Dict view operations and symmetric difference.
+- Split-dict behavior and non-string key edge cases.
+- Mutation during lookup, equality, and iteration.
+
+### G4: `test_set.py`
+
+Status: pending.
+
+Initial scope: 623 collected tests, 220 expected-failure sentinels, 0 skip
+sentinels.
+
+Exit criteria:
+
+- Remove at least 40 `test_set.py` expected-failure sentinels.
+- Add focused Dynamo regression tests for each non-trivial semantic fix.
+- `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short
+  test/dynamo/cpython/3_13/test_set.py` has no unexpected successes or new real
+  failures.
+- Remaining `test_set.py` sentinels are categorized in this file.
+
+Seed clusters:
 
 - Binary operations across set/set, set/subclass, subclass/set, and
   subclass/subclass.
 - Inplace operations and mutation during operation.
-- Frozenset hash and copy identity.
+- Frozenset hash, copy, and constructor identity.
 - Set subclass constructor and keyword behavior.
-- Set iterator behavior that is not purely CPython implementation detail.
+- Iterator, pickle, repr, and CPython implementation-detail boundaries.
 
-### G4: OrderedDict and Collections Wrappers
-
-Status: pending.
-
-Purpose: cover heavily used collection wrappers after core dict/set behavior has
-improved.
-
-Files in scope:
-
-```
-test_ordered_dict.py
-test_collections.py
-```
-
-Initial expected-failure count: 269.
-
-Exit criteria:
-
-- Remove at least 75 expected-failure sentinels across the two files.
-- Add focused Dynamo regression tests for every non-trivial semantic fix.
-- Both files pass under `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short` with
-  no unexpected successes or new real failures.
-- Remaining failures are separated between OrderedDict-specific behavior and
-  generic mapping/set/sequence behavior that belongs to earlier gates.
-
-High-priority clusters:
-
-- OrderedDict `update`, `clear`, `delitem`, `pop`, `popitem`, `move_to_end`,
-  equality, merge, repr, and iterator behavior.
-- Pure-Python versus C OrderedDict parity.
-- ChainMap union behavior.
-- Counter init, update, subtract, multiset operations, and inplace operations.
-- NamedTuple factory, readonly, pickle, defaults, and descriptor behavior.
-- Collections ABC `Set`, `Mapping`, `Sequence`, `MutableSequence`, and
-  one-trick pony ABCs.
-
-### G5: Cross-Cutting Hard Edges
+### G5: `test_deque.py`
 
 Status: pending.
 
-Purpose: revisit the recurring failures that may have been deferred during
-semantic gates.
-
-Files in scope: all ten first-slice files.
+Initial scope: 78 collected tests, 58 expected-failure sentinels, 0 skip
+sentinels.
 
 Exit criteria:
 
-- Every remaining expected failure in the first-slice files is categorized with
-  an exact reason and a decision: fix now, keep expected failure, convert to
-  skip, or ask for human decision.
-- At least 20 additional expected-failure sentinels are removed, unless fewer
-  than 20 fixable sentinels remain after G1 through G4.
-- No test remains in the "untriaged" category.
-- The first-slice run completes and its result summary is recorded in this file.
+- Remove at least 18 `test_deque.py` expected-failure sentinels.
+- Add focused Dynamo regression tests for each non-trivial semantic fix.
+- `PYTORCH_TEST_WITH_DYNAMO=1 pytest -q --tb=short
+  test/dynamo/cpython/3_13/test_deque.py` has no unexpected successes or new
+  real failures.
+- Remaining `test_deque.py` sentinels are categorized in this file.
 
-High-priority clusters:
+Seed clusters:
 
-- Pickle and copy behavior that is ordinary Python semantics.
-- Recursive repr behavior.
-- Iterator reconstruction after graph breaks.
-- `gc`, `sys.getsizeof`, refcount, and tracking tests, which may be legitimate
-  CPython implementation-detail skips rather than Dynamo coverage targets.
-- Stdlib C functions that Dynamo skips but that are common enough to support.
+- `getitem`, `index`, `count`, `contains`, and sequence protocol behavior.
+- `add`, `iadd`, `mul`, `imul`, `extend`, and `extendleft`.
+- `rotate`, `reverse`, `reversed`, and iterator behavior.
+- Copy, deepcopy, pickle, recursive pickle, and repr.
+- Subclass and maxlen behavior.
 
-### G6: Full CPython Dynamo Suite Rebaseline
+### G6: Five-File Rebaseline
 
 Status: pending.
 
-Purpose: measure the global impact and choose the next domain after the
-data-structure campaign.
-
-Files in scope:
-
-```
-test/dynamo/cpython/3_13
-test/dynamo_expected_failures
-test/dynamo_skips
-```
+Purpose: measure the campaign result and choose the next five files.
 
 Exit criteria:
 
-- Run the full CPython Dynamo suite with:
-
-  ```
-  cd test/dynamo/cpython/3_13
-  PYTORCH_TEST_WITH_DYNAMO=1 pytest -vs .
-  ```
-
-- Record total collected tests, passes, skips, xfails/unexpected successes, and
-  true passrate.
-- Record expected-failure counts by CPython file after the first-slice campaign.
-- Identify the next 10-file slice by expected-failure count and user value.
-- Propose the next active gate, leaving it under "Proposed Gate Changes Awaiting
-  Human Approval" until approved.
+- Run the five-file slice command and record total pass/skip/fail/unexpected
+  success counts.
+- Record expected-failure and skip counts for all five files after G1-G5.
+- Compute sentinel removals by file and total.
+- Identify the next five files by expected-failure count and user value.
+- Add proposed per-file gates for the next slice under "Proposed Gate Changes
+  Awaiting Human Approval".
 
 ## Work Queue
 
 G0 owns this section until its exit criteria are met. Replace these seed items
 with measured clusters from the current tree.
 
-1. Build first-slice XML and normalized histogram.
-2. Reproduce `DictTest.test_update` with its expected-failure sentinel
-   temporarily bypassed; likely source is `ConstDictVariable.call_method`.
-3. Reproduce `ListTest.test_repeat` and `TupleTest.test_repeat`; likely source
-   is sequence repeat and `repr(FakeIdVariable)` behavior in list/tuple VTs.
-4. Reproduce one `TestBinaryOpsMutating_*` set failure; likely source is
-   set binary dispatch, subclass priority, or side-effect handling.
-5. Reproduce `TestDefaultDict.test_union`; likely source is
-   `DefaultDictVariable` and mapping merge handling.
-6. Reproduce `TestBasic.test_getitem` from `test_deque.py`; likely source is
-   `DequeVariable` and object protocol indexing.
-7. Reproduce `UserListTest.test_getitem` and `UserDictTest.test_update`; likely
-   source is user-defined wrapper delegation.
-8. Reproduce `TestChainMap.test_union_operators`; likely source is mapping
-   protocol and collections wrapper handling.
+1. Build five-file JUnit XML and normalized histogram.
+2. Reproduce `ListTest.test_repeat`; likely source is sequence repeat or repr
+   behavior in `variables/lists.py`.
+3. Reproduce `TupleTest.test_repeat`; likely source is tuple repeat or repr
+   behavior in `variables/lists.py`.
+4. Reproduce `DictTest.test_update`; likely source is
+   `ConstDictVariable.call_method`.
+5. Reproduce `DictTest.test_items_symmetric_difference`; likely source is dict
+   view set operation handling.
+6. Reproduce one `TestBinaryOpsMutating_*` set failure; likely source is set
+   binary dispatch, subclass priority, or side-effect handling.
+7. Reproduce one `TestMethodsMutating_*` set failure; likely source is inplace
+   set operation handling.
+8. Reproduce `TestBasic.test_getitem` from `test_deque.py`; likely source is
+   `DequeVariable` indexing or object protocol indexing.
+9. Reproduce `TestBasic.test_rotate` from `test_deque.py`; likely source is
+   `DequeVariable.call_method`.
+10. Reproduce one pickle/repr failure and decide whether it is normal Python
+    behavior or a CPython implementation-detail boundary.
 
-## Deep Replan Triggers
+## Remaining Failure Categories
 
-Run a deep replan instead of continuing the same loop when any of these happens:
+Use these categories when closing each per-file gate:
 
-- Three consecutive cycles remove no sentinels from the active gate.
-- The same failure reason appears in many tests but the source abstraction is
-  unclear after targeted repros.
-- A proposed fix requires broad changes to bytecode interpretation, exception
-  handling, or side-effect modeling.
-- A gate's quantitative exit criteria appear unreachable because most remaining
-  tests are CPython implementation details.
-- A change fixes CPython tests but risks changing normal Dynamo behavior without
-  focused regression tests.
-
-Deep replan output should include:
-
-- Active gate and blocker.
-- Exact commands run.
-- Failure histogram table.
-- Top three hypotheses with supporting evidence.
-- Recommended next coherent cluster.
-- Proposed plan changes, if any, under "Proposed Gate Changes Awaiting Human
-  Approval".
+- fixed: sentinel removed with focused regression coverage.
+- stdlib/C boundary: Dynamo does not trace an external C or stdlib function.
+- CPython implementation detail: GC tracking, refcount, object layout, or
+  pickle details that do not represent useful Dynamo coverage.
+- side-effect semantic gap: mutation during comparison, lookup, iteration, or
+  containment.
+- reconstruction gap: value cannot be reconstructed after a graph break.
+- unsupported protocol: missing method, slot, descriptor, or object-protocol
+  dispatch.
+- untriaged: still needs a single-test repro and normalized failure reason.
 
 ## Proposed Gate Changes Awaiting Human Approval
 
