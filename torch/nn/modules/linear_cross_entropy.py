@@ -967,12 +967,17 @@ class _ChunkContext:
         """Returns ``num / den`` written into ``self.tmp`` rather than
         a fresh tensor.
 
-        When ``num``/``den`` are in a wider dtype than ``self.tmp``,
-        ``torch.div(out=)`` runs the division at the operand dtype
-        and casts on store — no temporary tensor.
+        CUDA/CPU lower ``torch.div(out=)`` to a fused compute-then-cast
+        kernel even when ``num``/``den`` are wider than ``self.tmp``
+        (e.g. ``acc_dtype="ultralow"``). MPS lacks the cross-dtype
+        ``div_true_dense_<src>_<dst>`` variant, so on MPS we materialize
+        the quotient then ``copy_`` it (cross-dtype copy is supported).
         """
         factor = self.tmp.narrow(0, 0, num.shape[0])
-        torch.div(num, den, out=factor)
+        if self.input.device.type == "mps" and num.dtype != factor.dtype:
+            factor.copy_(num / den)
+        else:
+            torch.div(num, den, out=factor)
         return factor
 
     def mul(self, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
