@@ -6,6 +6,13 @@
 #include <ATen/cpu/vec/vec256/vec256_16bit_float.h>
 #include <c10/util/irange.h>
 
+#if defined(__riscv) && defined(__riscv_v_intrinsic) &&              \
+    (defined(__riscv_zvfh) || defined(__riscv_zvfhmin)) &&           \
+    defined(__riscv_zve32f) && defined(__FLT16_MANT_DIG__)
+#define ATEN_RISCV_VECTOR_F16 1
+#include <riscv_vector.h>
+#endif
+
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
@@ -221,10 +228,55 @@ LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
+#if defined(ATEN_RISCV_VECTOR_F16)
+template <>
+inline void convert(const float* src, Half* dst, int64_t n) {
+  auto* rvv_dst = reinterpret_cast<_Float16*>(dst);
+  int64_t i = 0;
+  while (i < n) {
+    const auto vl = __riscv_vsetvl_e32m2(static_cast<size_t>(n - i));
+    auto values = __riscv_vle32_v_f32m2(src + i, vl);
+    auto half_values = __riscv_vfncvt_f_f_w_f16m1(values, vl);
+    __riscv_vse16_v_f16m1(rvv_dst + i, half_values, vl);
+    i += static_cast<int64_t>(vl);
+  }
+}
+
+template <>
+inline void convert(const Half* src, float* dst, int64_t n) {
+  auto* rvv_src = reinterpret_cast<const _Float16*>(src);
+  int64_t i = 0;
+  while (i < n) {
+    const auto vl = __riscv_vsetvl_e16m1(static_cast<size_t>(n - i));
+    auto half_values = __riscv_vle16_v_f16m1(rvv_src + i, vl);
+    auto values = __riscv_vfwcvt_f_f_v_f32m2(half_values, vl);
+    __riscv_vse32_v_f32m2(dst + i, values, vl);
+    i += static_cast<int64_t>(vl);
+  }
+}
+#endif
+
 #if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
 CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
+#if defined(ATEN_RISCV_VECTOR_F16)
+inline void load_fp32_from_fp16(const Half* data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  convert(data, values, Vectorized<float>::size());
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_fp16(
+    const Half* data,
+    Vectorized<float>& out1,
+    Vectorized<float>& out2) {
+  load_fp32_from_fp16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_fp16(data, out2);
+}
+#else
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
+#endif
 #endif // defined(CPU_CAPABILITY_AVX2)
 }} // namsepace at::vec::CPU_CAPABILITY

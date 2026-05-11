@@ -62,6 +62,15 @@
 #endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
 #endif // __GNUC__ || __clang__
 
+#if defined(__riscv) &&                                      \
+    (defined(__riscv_zfh) || defined(__riscv_zfhmin)) &&     \
+    defined(__FLT16_MANT_DIG__) &&                           \
+    !(defined(__CUDA_ARCH__) || defined(__CUDACC__) ||       \
+      defined(__HIP_DEVICE_COMPILE__) ||                     \
+      defined(__SYCL_DEVICE_ONLY__))
+#define C10_RISCV_F16 1
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -375,6 +384,22 @@ inline float native_fp16_to_fp32_value(uint16_t h) {
 
 inline uint16_t native_fp16_from_fp32_value(float f) {
   return fp16_to_bits(static_cast<float16_t>(f));
+}
+#elif defined(C10_RISCV_F16)
+inline _Float16 fp16_from_bits(uint16_t h) {
+  return c10::bit_cast<_Float16>(h);
+}
+
+inline uint16_t fp16_to_bits(_Float16 f) {
+  return c10::bit_cast<uint16_t>(f);
+}
+
+inline float native_fp16_to_fp32_value(uint16_t h) {
+  return static_cast<float>(fp16_from_bits(h));
+}
+
+inline uint16_t native_fp16_from_fp32_value(float f) {
+  return fp16_to_bits(static_cast<_Float16>(f));
 }
 #endif
 
