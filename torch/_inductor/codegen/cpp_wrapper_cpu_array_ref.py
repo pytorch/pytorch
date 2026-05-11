@@ -84,11 +84,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         return DTYPE_TO_CPP[input.get_dtype()]
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
+    def get_device_include_path_jit(device: str) -> str:
         assert device == "cpu", "ArrayRef only supported on CPU!"
-        if V.graph.aot_mode:
-            return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
         return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
+
+    @staticmethod
+    def get_device_include_path_aot(device: str) -> str:
+        assert device == "cpu", "ArrayRef only supported on CPU!"
+        return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
 
     def codegen_input_numel_asserts(self, indented_buffer=None):
         writer = indented_buffer or self.prefix
@@ -806,7 +809,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized: see comment in CppWrapperCpu.make_buffer_allocation
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -826,6 +830,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride,
         buffer_if_can_stack_allocate=None,
         is_pinned=False,
+        is_uninitialized=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
@@ -1112,6 +1117,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         super().generate_fallback_kernel_with_runtime_lookup(
             buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
+
+    def codegen_runtime_lookup_tensor_call_args(
+        self, tensor_call_args: Sequence[str]
+    ) -> Sequence[str]:
+        self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+        return [f"borrow_arrayref_tensor_as_tensor({arg})" for arg in tensor_call_args]
 
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
