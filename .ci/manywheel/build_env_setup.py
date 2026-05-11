@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """GPU/toolchain environment setup (runs once before any wheel is built).
 
-When running on a standard manylinux container (no pre-installed GPU
-toolkits), installs CUDA, cuDNN, NCCL, MAGMA, cuSPARSELt, etc. via the
-.ci/docker/common/install_*.sh scripts.
+The manywheel builder image (.ci/docker/manywheel/Dockerfile_2_28) is
+expected to ship the heavy build dependencies (CUDA, cuDNN, NCCL, MAGMA,
+cuSPARSELt, MKL, plus the standard OS package set). This script:
+
+  * Installs the two packages historically added at wheel-build time
+    (zip, openssl) to match the legacy build_common.sh contract.
+  * Falls back to running install_cuda.sh / install_magma.sh /
+    install_mkl.sh if CUDA, MAGMA, or MKL is missing, so the script
+    remains usable on a lean manylinux base.
+  * Wires the symlinks/env to target the requested CUDA version.
 
 Build-flag exports (USE_CUDA, TH_BINARY_BUILD, ...) are written to the file
 given by --env-out; the caller (build.sh) sources it so the values reach
@@ -147,53 +154,19 @@ def os_name() -> str:
 
 
 def install_os_packages() -> None:
+    # Everything else the build needs is baked into the manywheel image
+    # (.ci/docker/manywheel/Dockerfile_2_28). Only zip + openssl are not,
+    # matching the legacy build_common.sh contract.
     name = os_name()
     if any(distro in name for distro in ("AlmaLinux", "CentOS", "Red Hat")):
         subprocess.run(
-            [
-                "yum",
-                "install",
-                "-q",
-                "-y",
-                "zip",
-                "openssl",
-                "openssl-devel",
-                "sudo",
-                "wget",
-                "curl",
-                "perl",
-                "util-linux",
-                "xz",
-                "bzip2",
-                "git",
-                "patch",
-                "which",
-                "zlib-devel",
-            ],
+            ["yum", "install", "-q", "-y", "zip", "openssl"],
             check=True,
         )
     elif "Ubuntu" in name:
-        # Disable nvidia apt repos that may 404 on plain Ubuntu images
-        for entry in Path("/etc/apt").rglob("*.list"):
-            text = entry.read_text()
-            new = "\n".join(
-                f"# {line}" if "nvidia" in line else line for line in text.splitlines()
-            )
-            if new != text:
-                entry.write_text(new + ("\n" if text.endswith("\n") else ""))
         subprocess.run(["apt-get", "update", "-qq"], check=True)
         subprocess.run(
-            [
-                "apt-get",
-                "-y",
-                "-qq",
-                "install",
-                "zip",
-                "openssl",
-                "wget",
-                "curl",
-                "git",
-            ],
+            ["apt-get", "-y", "-qq", "install", "zip", "openssl"],
             check=True,
         )
 
