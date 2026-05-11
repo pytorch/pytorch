@@ -3279,6 +3279,33 @@ class GraphModule(torch.nn.Module):
         out = f(x, y)
         self.assertEqual(out, (x.sin().sum(), y.sin().sum()))
 
+    def test_generator_iteration_over_subclass(self):
+        class YieldTensor(torch.Tensor):
+            @staticmethod
+            def wrap(t):
+                return torch.Tensor._make_subclass(
+                    YieldTensor, t, require_grad=t.requires_grad
+                )
+
+            def iter_vals(self):
+                flat = torch.Tensor.reshape(self, -1)
+                for chunk in flat.split(1):
+                    yield from chunk
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = YieldTensor.wrap(x * 2)
+                total = torch.zeros((), dtype=y.dtype, device=y.device)
+                for value in y.iter_vals():
+                    total = total + value
+                return total
+
+        m = Module()
+        x = torch.arange(8.0, requires_grad=True)
+        output1 = m(x)
+        output2 = torch.compile(m)(x)
+        self.assertEqual(output1, output2)
+
     def test_njt_subclass_simple(self):
         def f(nt):
             y = nt.clone()
@@ -3527,32 +3554,20 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(shell._data, data)
         self.assertEqual(shell._scale, 2.0)
 
-    def test_generator_iteration_over_subclass(self):
-        class YieldTensor(torch.Tensor):
-            @staticmethod
-            def wrap(t):
-                return torch.Tensor._make_subclass(
-                    YieldTensor, t, require_grad=t.requires_grad
-                )
+    def test_tensor_subclass_super_new(self):
+        # super().__new__(cls, tensor) should be traceable in Tensor subclasses
+        class MyTensor(torch.Tensor):
+            def __new__(cls, x):
+                return super().__new__(cls, x)
 
-            def iter_vals(self):
-                flat = torch.Tensor.reshape(self, -1)
-                for chunk in flat.split(1):
-                    yield from chunk
+        @torch.compile(backend="eager", fullgraph=True)
+        def forward(x):
+            return MyTensor(x)
 
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                y = YieldTensor.wrap(x * 2)
-                total = torch.zeros((), dtype=y.dtype, device=y.device)
-                for value in y.iter_vals():
-                    total = total + value
-                return total
-
-        m = Module()
-        x = torch.arange(8.0, requires_grad=True)
-        output1 = m(x)
-        output2 = torch.compile(m)(x)
-        self.assertEqual(output1, output2)
+        x = torch.randn(4, 10)
+        result = forward(x)
+        self.assertIsInstance(result, MyTensor)
+        self.assertEqual(result, x)
 
 
 instantiate_parametrized_tests(SubclassTests)
