@@ -329,8 +329,8 @@ def _remove_participant_epilogue(
     else:
         if len(state.participants) < settings.min_nodes:
             msg = (
-                f"Number of participants {len(state.participants)}) less than"
-                f"min_nodes {settings.min_nodes}, clearning deadline in state"
+                f"Number of participants {len(state.participants)} less than "
+                f"min_nodes {settings.min_nodes}, clearing deadline in state"
             )
             logger.debug(msg)
             state.deadline = None
