@@ -9,13 +9,13 @@ import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
-from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.fx_utils import (
     count_flops_fx,
     countable_fx,
     FakeTensorUpdater,
     get_fake,
 )
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -272,9 +272,7 @@ class TestUtils(TestCase):
         shape_env.guard_or_defer_runtime_assert(Eq(Mod(s1, 16), 0), "test")
 
         # If s1 is divisible by 16, then s0 * s1 should also be divisible by 16
-        self.assertTrue(
-            allocator.statically_known_multiple_of(s0 * s1, 16)
-        )
+        self.assertTrue(allocator.statically_known_multiple_of(s0 * s1, 16))
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
