@@ -43,7 +43,7 @@ jobs:
   docker-build:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
-    timeout-minutes: 240
+    timeout-minutes: ${{ matrix.timeout-minutes || 240 }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +77,6 @@ jobs:
           # TODO: Re-enable me when docker pin update happens
           # pytorch-linux-jammy-py3-clang18-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
-          pytorch-linux-noble-riscv64-py3.12-gcc14,
           pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build,
         ]
         include:
@@ -85,6 +84,8 @@ jobs:
             runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
+            timeout-minutes: 600
+          - docker-image-name: pytorch-linux-noble-riscv64-py3.12-gcc14
             timeout-minutes: 600
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
@@ -114,6 +115,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ci-image:${{ matrix.docker-image-name }}
+          docker-build-timeout-minutes: ${{ matrix.timeout-minutes }}
           always-rebuild: true
           push: true
 
