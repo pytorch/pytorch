@@ -147,6 +147,17 @@ def is_bound_tensor_method(value: object) -> bool:
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
+def _is_sym_arith_operand(vt: VariableTracker) -> bool:
+    """True if vt can be the other operand of a SymNode arithmetic op
+    (add/sub). Accepts SymNode-like values plus float ConstantVariable —
+    arithmetic with float promotes to SymFloat, unlike bitwise ops."""
+    if vt.is_symnode_like():
+        return True
+
+    # mirror sym_node.py::binary_magic_impl
+    return isinstance(vt, ConstantVariable) and isinstance(vt.value, (float, int, bool))
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -2392,7 +2403,7 @@ class SymNodeVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
-        if not other.is_symnode_like():
+        if not _is_sym_arith_operand(other):
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
         return SymNodeVariable.create(
@@ -2426,7 +2437,7 @@ class SymNodeVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
-        if not other.is_symnode_like():
+        if not _is_sym_arith_operand(other):
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
         return SymNodeVariable.create(
