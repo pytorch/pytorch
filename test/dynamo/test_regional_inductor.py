@@ -1646,7 +1646,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             32,
             device=device_type,
             dtype=torch.bfloat16,
-            requires_grad=True
+            requires_grad=True,
         )
 
         x_ref = x.detach().clone().requires_grad_()
