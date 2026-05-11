@@ -52,7 +52,7 @@ from .flex_flash_attention import (
 
 
 if TYPE_CHECKING:
-    from ...heuristics.triton_template.triton import FlexBwDConfig, FlexConfig
+    from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)

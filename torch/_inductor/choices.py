@@ -13,9 +13,15 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .heuristics import get_config_heuristic_for_device
-from .heuristics.triton_template import get_template_heuristic
-from .heuristics.triton_template.triton import BaseConfigHeuristic  # noqa: TC001
+from .heuristics.template import get_template_heuristic
+from .heuristics.template.triton import (
+    BaseConfigHeuristic,
+    CPUConfigHeuristic,
+    CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
+    ROCmConfigHeuristic,
+    XPUConfigHeuristic,
+)
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
@@ -106,7 +112,19 @@ class InductorChoices:
     def get_config_heuristics(
         self, device_type: str | None = "cuda"
     ) -> BaseConfigHeuristic:
-        return get_config_heuristic_for_device(device_type)
+        if device_type == "cuda":
+            if torch.version.hip is None:
+                return CUDAConfigHeuristic()
+            else:
+                return ROCmConfigHeuristic()
+        elif device_type == "xpu":
+            return XPUConfigHeuristic()
+        elif device_type == "cpu":
+            return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
+        else:
+            return BaseConfigHeuristic()
 
     # Conv configs
     def get_conv_configs(

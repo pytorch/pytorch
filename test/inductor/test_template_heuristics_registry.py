@@ -5,8 +5,8 @@ from torch._inductor.heuristics.registry import (
     get_template_heuristic,
     register_template_heuristic,
 )
-from torch._inductor.heuristics.triton_template.base import TemplateConfigHeuristics
-from torch._inductor.heuristics.triton_template.triton import BlackwellGPUGemmConfig
+from torch._inductor.heuristics.template.base import TemplateConfigHeuristics
+from torch._inductor.heuristics.template.triton import BlackwellGPUGemmConfig
 from torch._inductor.test_case import run_tests, TestCase
 
 
