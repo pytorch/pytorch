@@ -140,15 +140,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
 
-        # Temporarily redirect self.prefix so the base class
-        # codegen_input_symbol_assignment writes into our buffer.
-        orig_prefix = self.prefix
-        self.prefix = code
-        try:
+        # Redirect self.prefix so the base class codegen_input_symbol_assignment
+        # writes into our buffer.
+        with self._target_buf("prefix", code):
             for name, value in inputs:
                 self.codegen_input_symbol_assignment(name, value, bound_vars)
-        finally:
-            self.prefix = orig_prefix
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
