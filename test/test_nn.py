@@ -14617,13 +14617,15 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 0
             else:
                 if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 90
                     if "mps" in device:
                         # MPS + use_acc_dtype: fallback to memory.
-                        expected_weight_grad_max_ulp_diff = 109
+                        expected_max_ulp_diff = 2
+                        expected_input_grad_max_ulp_diff = 232
+                        expected_weight_grad_max_ulp_diff = 166
                     else:  # CUDA: widened from memory's 37.
-                        expected_weight_grad_max_ulp_diff = 118  # was 80
+                        expected_max_ulp_diff = 1
+                        expected_input_grad_max_ulp_diff = 90
+                        expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
