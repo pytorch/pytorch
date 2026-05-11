@@ -2271,7 +2271,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslator", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L10387-L10389
-        method = self._maybe_get_baseclass_method("__add__")
+        method = self._maybe_get_baseclass_method("__iadd__")
         if (
             self._base_vt is not None
             and self._base_methods is not None
