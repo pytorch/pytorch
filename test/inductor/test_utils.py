@@ -6,10 +6,7 @@ import unittest
 from sympy import Eq, I, Max, Min, Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import (
-    count_flops_fx,
-    countable_fx,
-)
+from torch._inductor.fx_utils import count_flops_fx, countable_fx
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
