@@ -236,6 +236,21 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError
         return member
 
+    def sq_contains(self, tx: InstructionTranslator, item: VariableTracker):
+        """Sequence contains for constants."""
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        return super().sq_contains(tx, item)
+
     def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
 
@@ -341,17 +356,6 @@ class ConstantVariable(VariableTracker):
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            if kwargs:
-                raise AssertionError(
-                    f"__contains__ does not accept keyword arguments, got {kwargs}"
-                )
-            search = args[0].as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -406,6 +410,9 @@ class ConstantVariable(VariableTracker):
             tree_map_kwargs,
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
+
     @override
     def call_obj_hasattr(
         self, tx: InstructionTranslator, name: str
@@ -418,10 +425,14 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        if isinstance(other, ConstantVariable):
+            return self.as_python_constant() == other.as_python_constant()
+        # Delegate to other's is_python_equal - this handles cases like
+        # StringFormatVariable which can compare against constants and
+        # install guards for any lazy constants it contains.
+        if isinstance(other, VariableTracker):
+            return other.is_python_equal(self)
+        return False
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.

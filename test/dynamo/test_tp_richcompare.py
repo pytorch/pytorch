@@ -1126,6 +1126,23 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0), a)
         self.assertEqual(result, (False, True, True))
 
+    # =====================================================================
+    # GetAttrVariable resolution
+    # =====================================================================
+
+    def test_getattr_bound_method_cmp(self):
+        """tensor.data_ptr == captured_data_ptr after graph break."""
+        t = torch.randn(5, 5)
+        data_ptr = t.data_ptr
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(copy, dp):
+            return copy.data_ptr == dp
+
+        self.assertTrue(fn(t, data_ptr))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

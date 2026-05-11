@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -32,7 +33,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -40,10 +41,17 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
+from ..bytecode_transformation import (
+    create_binary_op,
+    create_call_method,
+    create_compare_op,
+    create_load_method,
+)
 from ..exc import (
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_type_error,
     unimplemented,
     Unsupported,
     UserError,
@@ -226,6 +234,55 @@ _SET_LIKE_OP_SUPPORT: tuple[type[VariableTracker], ...] = (
     SetVariable,
     UserDefinedObjectVariable,
 )
+
+
+def _make_binary_op_reconstruct_fn(
+    op: Callable[..., Any],
+) -> Callable[[Any, list[VariableTracker]], None] | None:
+    """Create a reconstruct_fn for a binary, comparison, or method operation.
+
+    Returns a function that generates bytecode to recompute the result
+    by loading the operands and applying the operation.
+    Returns None if the operation is not supported.
+    """
+    # Check if this operator is supported by create_binary_op or create_compare_op
+    binary_op_inst = create_binary_op(op)
+    compare_op_inst = create_compare_op(op)
+
+    if binary_op_inst is not None:
+
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            codegen(args[0])
+            codegen(args[1])
+            codegen.append_output(create_binary_op(op))
+
+        return reconstruct_fn
+    elif compare_op_inst is not None:
+
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            codegen(args[0])
+            codegen(args[1])
+            codegen.append_output(create_compare_op(op))
+
+        return reconstruct_fn
+    elif op is str.format:
+        # str.format(format_str, *args) -> format_str.format(*args)
+        # Bytecode: LOAD format_str, LOAD_METHOD 'format', LOAD args..., CALL_METHOD
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            # First arg is the format string
+            codegen(args[0])
+            # Load the 'format' method
+            codegen.append_output(create_load_method("format"))
+            # Load remaining args
+            for arg in args[1:]:
+                codegen(arg)
+            # Call the method
+            codegen.extend_output(create_call_method(len(args) - 1))
+
+        return reconstruct_fn
+    else:
+        return None
+
 
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
@@ -1104,39 +1161,153 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyConstantVariable, LazyVariableTracker
+        from .lazy import (
+            ComputedLazyConstantVariable,
+            LazyConstantVariable,
+            LazyVariableTracker,
+        )
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
         lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
         if lazy_types:
-            if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
+            if not all(
+                issubclass(t, (LazyConstantVariable, ComputedLazyConstantVariable))
+                for t in lazy_types
+            ):
                 # Realize non-constant lazy args and re-dispatch.  Any
-                # LazyConstantVariable args are kept and handled on the
-                # second dispatch through the branch below.
+                # LazyConstantVariable/ComputedLazyConstantVariable args are
+                # kept and handled on the second dispatch through the branches
+                # below.
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
                     [
                         a.realize()
                         if isinstance(a, LazyVariableTracker)
-                        and not isinstance(a, LazyConstantVariable)
+                        and not isinstance(
+                            a, (LazyConstantVariable, ComputedLazyConstantVariable)
+                        )
                         else a
                         for a in args
                     ],
                     kwargs,
                 )
 
-            # Only LazyConstantVariable lazy types.  Install type guards
-            # and resolve the dispatch type.  If the resolved type is
-            # ConstantVariable (the common case), delegate to a handler
-            # built for ConstantVariable.  Otherwise (e.g. specialize_int=
-            # False turned the int into a SymNodeVariable), realize and
-            # re-dispatch so the correct handler is used.
+            # All lazy types are LazyConstantVariable (or ComputedLazy).
+            # Special handling for isinstance and type: these only need the
+            # TYPE of the value, not the specific value.
+            first_arg_is_lazy = arg_types and issubclass(
+                arg_types[0], (LazyConstantVariable, ComputedLazyConstantVariable)
+            )
+            if first_arg_is_lazy and not has_kwargs:
+                if fn is isinstance and len(arg_types) == 2:
+
+                    def handle_isinstance(
+                        tx: Any, args: Any, kwargs: Any
+                    ) -> VariableTracker | None:
+                        return obj.call_isinstance(tx, args[0], args[1])
+
+                    return handle_isinstance
+
+                if fn is type and len(arg_types) == 1:
+
+                    def handle_type(
+                        tx: Any, args: Any, kwargs: Any
+                    ) -> VariableTracker | None:
+                        return obj.call_type(tx, args[0])
+
+                    return handle_type
+
+            # Check if we can handle this lazily (all args are lazy/computed
+            # lazy constants or regular constants, and the op can be
+            # constant-folded)
+            all_constant_like = all(
+                issubclass(
+                    t,
+                    (
+                        LazyConstantVariable,
+                        ComputedLazyConstantVariable,
+                        ConstantVariable,
+                    ),
+                )
+                for t in arg_types
+            )
+            reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
+            if (
+                all_constant_like
+                and obj.can_constant_fold_through()
+                and not has_kwargs
+                and reconstruct_fn is not None
+            ):
+
+                def handle_lazy_constant(
+                    tx: Any, args: Any, kwargs: Any
+                ) -> VariableTracker | None:
+                    from .. import config
+
+                    if fn is not str.format:
+                        for arg in args:
+                            if (
+                                isinstance(arg, LazyConstantVariable)
+                                and not arg.is_realized()
+                            ):
+                                val_type = arg.peek_type()
+                                if val_type is int and not config.specialize_int:
+                                    return obj.call_function(
+                                        tx,
+                                        [
+                                            v.realize()
+                                            if isinstance(v, LazyVariableTracker)
+                                            else v
+                                            for v in args
+                                        ],
+                                        kwargs,
+                                    )
+                                if val_type is float and not config.specialize_float:
+                                    return obj.call_function(
+                                        tx,
+                                        [
+                                            v.realize()
+                                            if isinstance(v, LazyVariableTracker)
+                                            else v
+                                            for v in args
+                                        ],
+                                        kwargs,
+                                    )
+
+                    try:
+                        return ComputedLazyConstantVariable.create(
+                            fn, list(args), reconstruct_fn
+                        )
+                    except (
+                        TypeError,
+                        ValueError,
+                        AsPythonConstantNotImplementedError,
+                    ):
+                        return obj.call_function(
+                            tx,
+                            [
+                                v.realize() if isinstance(v, LazyVariableTracker) else v
+                                for v in args
+                            ],
+                            kwargs,
+                        )
+
+                return handle_lazy_constant
+
+            # Fallback: install type guards and resolve dispatch type.  If
+            # ConstantVariable (common case), delegate to a handler built for
+            # ConstantVariable.  Otherwise (e.g. specialize_int=False turned
+            # the int into SymNodeVariable), realize and re-dispatch.
             inner_handler = BuiltinVariable._make_handler(
                 fn,
                 [
-                    ConstantVariable if issubclass(t, LazyConstantVariable) else t
+                    ConstantVariable
+                    if issubclass(
+                        t, (LazyConstantVariable, ComputedLazyConstantVariable)
+                    )
+                    else t
                     for t in arg_types
                 ],
                 has_kwargs,
@@ -1308,7 +1479,67 @@ class BuiltinVariable(BaseBuiltinVariable):
                     args: Sequence[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
-                    # path with a runtime check
+                    # First try to peek at all args as constants without realizing
+                    # This allows us to constant-fold through lazy constants
+                    peeked_args = []
+                    any_unrealized = False
+                    all_can_peek = True
+
+                    for arg in args:
+                        can_peek, is_unrealized, value = arg.try_peek_constant()
+                        if not can_peek or (
+                            not is_unrealized and not arg.is_python_constant()
+                        ):
+                            all_can_peek = False
+                            break
+                        peeked_args.append(value)
+                        if is_unrealized:
+                            any_unrealized = True
+
+                    peeked_kwargs = {}
+                    if all_can_peek:
+                        for k, v in kwargs.items():
+                            can_peek, is_unrealized, value = v.try_peek_constant()
+                            if not can_peek:
+                                all_can_peek = False
+                                break
+                            peeked_kwargs[k] = value
+                            if is_unrealized:
+                                any_unrealized = True
+
+                    if all_can_peek:
+                        try:
+                            res = fn(*peeked_args, **peeked_kwargs)
+                        except TypeError as exc:
+                            # Check if this is an "unsupported operand type" error
+                            # that should be propagated as an observed exception.
+                            # Errors like "unsupported operand type(s) for -: 'tuple' and 'set'"
+                            # are definitive and no other handler can help.
+                            exc_str = str(exc)
+                            if "unsupported operand type" in exc_str:
+                                raise_observed_exception(
+                                    TypeError,
+                                    tx,
+                                    args=list(map(ConstantVariable.create, exc.args)),
+                                )
+                            # For other TypeErrors (e.g., operator.le(torch.device, str)),
+                            # fall through to let polyfill handlers try.
+                            all_can_peek = False
+                        except Exception:
+                            # Other exceptions - fall through to let other handlers try.
+                            all_can_peek = False
+
+                    if all_can_peek:
+                        if any_unrealized:
+                            # Realize all lazy constants to install guards
+                            from .lazy import LazyVariableTracker
+
+                            LazyVariableTracker.realize_all((args, kwargs))
+
+                        # pyrefly: ignore [unbound-name]
+                        return VariableTracker.build(tx, res)
+
+                    # Fall back to the original check for UnspecializedPythonVariable
                     if check_unspec_or_constant_args(args, kwargs):
                         try:
                             res = fn(
@@ -1331,7 +1562,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 tx,
                                 args=list(exc.args),
                             )
-                        return VariableTracker.build(tx, res)
+                        return VariableTracker.build(
+                            tx,
+                            res,  # pyrefly: ignore [unbound-name]
+                        )
                     return None
 
             handlers.append(constant_fold_handler)
@@ -1695,7 +1929,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name)
+            resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
                 # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
@@ -1882,6 +2116,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # Inline the user function
                 return user_func_variable.call_function(tx, [arg], {})
         return None
+
+    def call___build_class__(self, tx, *args, **kwargs):
+        def fail(args, kwargs) -> NoReturn:
+            unimplemented(
+                gb_type="Invalid call to __build_class__",
+                context=f"Non-constant args to __build_class__: {args} {kwargs}",
+                explanation="Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not torch._dynamo.config.enable_trace_load_build_class:
+            fail(args, kwargs)
+
+        try:
+            fn = args[0].get_function()
+        except NotImplementedError:
+            fail(args, kwargs)
+
+        if check_constant_args(args[1:], kwargs):
+            r = builtins.__build_class__(
+                fn,  # type: ignore[possibly-undefined]
+                *[a.as_python_constant() for a in args[1:]],
+            )
+            return VariableTracker.build(tx, r)
+        else:
+            fail(args, kwargs)
 
     def _call_min_max(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -2077,6 +2337,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_slice(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
+        if not 1 <= len(args) < 4:
+            raise_type_error(tx, f"slice expected at least 1 argument, got {len(args)}")
         return variables.SliceVariable(args, tx)
 
     def _dyn_proxy(
@@ -2440,7 +2702,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
             isinstance_type_tuple = (isinstance_type,)
         elif isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = isinstance_type.__args__
+            isinstance_type_tuple = typing.get_args(isinstance_type)
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
             for tp in isinstance_type
@@ -3068,7 +3330,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_contains(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return a.call_method(tx, "__contains__", [b], {})
+        from .object_protocol import generic_contains
+
+        return generic_contains(tx, a, b)
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn

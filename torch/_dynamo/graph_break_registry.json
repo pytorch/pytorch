@@ -1043,7 +1043,7 @@
       "Context": "",
       "Explanation": "Dynamo does not support tracing classes that are defined in the compiled region.",
       "Hints": [
-        "Move the class definition out of the compiled region.",
+        "Move the class definition out of the compiled region or set `torch._dynamo.config.enable_trace_load_build_class=True`.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2064,6 +2064,16 @@
       "Hints": []
     }
   ],
+  "GB4411": [
+    {
+      "Gb_type": "missing sq_contains",
+      "Context": "sq_contains not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0154": [
     {
       "Gb_type": "Unsupported kwargs for itertools.accumulate",
@@ -2498,6 +2508,16 @@
       ]
     }
   ],
+  "GB7489": [
+    {
+      "Gb_type": "Unsupported argument type in tensor method call",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo could not create a proxy for an argument in the call to Tensor.{name}(). This usually means an unsupported type was passed as an argument to a tensor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3840": [
     {
       "Gb_type": "leaf_function without fake_fn",
@@ -2720,6 +2740,16 @@
       "Context": "",
       "Explanation": "Missing BUILD_SET bytecode handler (for testing purposes).",
       "Hints": []
+    }
+  ],
+  "GB6215": [
+    {
+      "Gb_type": "Unresolved GetAttrVariable comparison",
+      "Context": "richcompare_impl {self} {op}",
+      "Explanation": "Cannot compare {self} because the attribute could not be resolved to a concrete value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB8843": [
@@ -4593,6 +4623,16 @@
       "Gb_type": "missing_mp_subscript_impl",
       "Context": "mp_subscript_impl not defined for {type(self).__name__}",
       "Explanation": "'{self.python_type_name()}' subscript is not yet supported by Dynamo.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8977": [
+    {
+      "Gb_type": "Invalid call to __build_class__",
+      "Context": "Non-constant args to __build_class__: {args} {kwargs}",
+      "Explanation": "Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
