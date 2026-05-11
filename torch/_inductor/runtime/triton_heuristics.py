@@ -471,8 +471,8 @@ class CachingAutotuner(KernelInterface):
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
-        # Last tolerable error from _precompile_configs_parallel; surfaced
-        # by _precompile_worker when no configs compiled successfully.
+        # Last tolerable error from _precompile_configs_parallel when
+        # invoked with tolerate_failures=True.
         self._last_precompile_failure: BaseException | None = None
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
@@ -634,9 +634,6 @@ class CachingAutotuner(KernelInterface):
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
-        # Per-config compile runs in the parent; reload fn.fn if it was
-        # stripped during the worker pickle round-trip.
-        self._ensure_kernel_loaded()
         compile_results = self._precompile_configs_parallel(
             list(self.configs), tolerate_failures=True
         )
@@ -647,8 +644,6 @@ class CachingAutotuner(KernelInterface):
                     f"No valid triton configs. {type(exc).__name__}: {exc}"
                 )
             raise NoTritonConfigsError("No valid triton configs.")
-        # _precompile_config already did the per-config TritonBundler.put;
-        # the pool is in-process (ThreadPoolExecutor), so no mirror needed.
         self.compile_results = compile_results
         self.configs = None
 
@@ -853,11 +848,8 @@ class CachingAutotuner(KernelInterface):
 
     def prepare_for_pickle(self) -> tuple[Any, ...]:
         """Drop stuff from triton.JITFunction that does not pickle.
-
-        Safe before or after precompile; if before, parent must call
-        ``_ensure_kernel_loaded`` before driving compile.
-
-        Returns a tuple of old values.
+        This must be called after precompile so that these things are no longer needed.
+        Returns a tuple of old values
         """
         old_values = (
             self.fn.fn,
@@ -1611,10 +1603,10 @@ class CachingAutotuner(KernelInterface):
     ) -> list[CompileResult[_KernelType]]:
         """Compile a batch of configs in parallel via AsyncCompile.pool.
 
-        Falls back to serial when compile_threads <= 1 or len(configs) == 1.
-        With tolerate_failures=True, skips OutOfResources/PTXASError/
-        IntelGPUError and records the last on self._last_precompile_failure.
-        Caller must hold self.lock if shared-state atomicity matters.
+        Used by both ``_precompile_worker`` (inside worker subprocess,
+        preserving cross-kernel parallelism) and ``_precompile_combo_trials``
+        (inside parent process for combo autotune). Falls back to serial
+        when ``compile_threads <= 1`` or single config.
         """
         if not configs:
             return []
