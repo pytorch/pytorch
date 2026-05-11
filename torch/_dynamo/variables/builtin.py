@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -32,7 +33,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -106,6 +107,7 @@ from .object_protocol import (
     generic_int,
     generic_len,
     generic_neg,
+    generic_pos,
     vt_getitem,
     vt_identity_compare,
 )
@@ -1691,7 +1693,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name)
+            resolved_fn = getattr(self.fn, name, None)
             if resolved_fn in str_methods:
                 # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
@@ -1718,8 +1720,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         if name == "__neg__" and len(args) == 1 and not kwargs:
             # type.__neg__(instance) → neg(instance)
             # e.g., int.__neg__(4) → neg(4)
-            # For builtin types called on user-defined subclasses, use the base iterator
             return generic_neg(tx, args[0])
+
+        if name == "__pos__" and len(args) == 1 and not kwargs:
+            # type.__pos__(instance) → pos(instance)
+            # e.g., int.__pos__(4) → pos(4)
+            return generic_pos(tx, args[0])
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1875,6 +1881,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return user_func_variable.call_function(tx, [arg], {})
         return None
 
+    def call___build_class__(self, tx, *args, **kwargs):
+        def fail(args, kwargs) -> NoReturn:
+            unimplemented(
+                gb_type="Invalid call to __build_class__",
+                context=f"Non-constant args to __build_class__: {args} {kwargs}",
+                explanation="Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not torch._dynamo.config.enable_trace_load_build_class:
+            fail(args, kwargs)
+
+        try:
+            fn = args[0].get_function()
+        except NotImplementedError:
+            fail(args, kwargs)
+
+        if check_constant_args(args[1:], kwargs):
+            r = builtins.__build_class__(
+                fn,  # type: ignore[possibly-undefined]
+                *[a.as_python_constant() for a in args[1:]],
+            )
+            return VariableTracker.build(tx, r)
+        else:
+            fail(args, kwargs)
+
     def _call_min_max(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker | None:
@@ -2025,13 +2057,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        # Call arg.__pos__()
-        pos_method = SourcelessBuilder.create(tx, getattr).call_function(
-            tx, [arg, VariableTracker.build(tx, "__pos__")], {}
-        )
-        return pos_method.call_function(tx, [], {})
+        return generic_pos(tx, arg)
 
     def call_index(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -3066,7 +3092,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_contains(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return a.call_method(tx, "__contains__", [b], {})
+        from .object_protocol import generic_contains
+
+        return generic_contains(tx, a, b)
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
