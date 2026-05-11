@@ -712,9 +712,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   int query_head_dim = q_.size(3);
   int value_head_dim = v_.size(3);
 
-  // For a vector fast implementation support {64, 96, 128} and for full support {64, 80, 128} head_dims
-  bool sdpa_vector_supported_head_dim =
-      (query_head_dim == value_head_dim) && (query_head_dim == 64 || query_head_dim == 96 || query_head_dim == 128);
+  // For a vector fast implementation support {64, 96, 128, 256} and for full support {64, 80, 128} head_dims
+  bool sdpa_vector_supported_head_dim = (query_head_dim == value_head_dim) &&
+      (query_head_dim == 64 || query_head_dim == 96 || query_head_dim == 128 || query_head_dim == 256);
 
   int query_seq_len = q_.size(2);
   // Fast vector attention: when the sequence length is very short,
