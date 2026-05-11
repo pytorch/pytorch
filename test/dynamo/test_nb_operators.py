@@ -4,7 +4,6 @@
 
 import collections
 import functools
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -1628,13 +1627,12 @@ class TestNbAdd(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
-    @unittest.expectedFailure
     def test_add_bool_and_symnode(self):
         def fn(x):
             s = x.shape[0]
             a = True + s
             b = s + False
-            return a, b
+            return x + a + b
 
         x = torch.randn(4)
         torch._dynamo.mark_dynamic(x, 0)
