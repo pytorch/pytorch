@@ -140,7 +140,11 @@ def _expanded_1d_inner_size(
     for i in range(1, index.ndim):
         if index.stride(i) != 0:
             return None
-    if src.shape[0] == 0:
+    if src.shape[0] == 0 or self.shape[0] == 0:
+        # src.shape[0] == 0 is a no-op; self.shape[0] == 0 means every
+        # index is out of range. Either way, decline and let aten
+        # handle (and for self.shape[0] == 0, raise the proper index
+        # error -- our kernel would silently write OOB).
         return None
     N = math.prod(src.shape[1:])
     if N == 0:
