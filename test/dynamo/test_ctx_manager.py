@@ -3005,7 +3005,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.dtype, torch.bfloat16)
 
     @skipIfXpu(
-        msg="autocast with float64 may not support on XPU, https://github.com/intel/torch-xpu-ops/issues/3598"
+        msg="autocast with float64 may not support on XPU, https://github.com/intel/torch-xpu-ops/issues/2714"
     )
     @onlyOn(("cuda", "xpu"))
     def test_amp_autocast(self, device):
