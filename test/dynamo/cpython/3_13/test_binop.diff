@@ -1,0 +1,62 @@
+diff --git a/test/dynamo/cpython/3_13/test_binop.py b/test/dynamo/cpython/3_13/test_binop.py
+index 299af09c498..cbc4f9f4d1d 100644
+--- a/test/dynamo/cpython/3_13/test_binop.py
++++ b/test/dynamo/cpython/3_13/test_binop.py
+@@ -1,3 +1,24 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_iter.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    skipIfTorchDynamo,
++    run_tests,
++)
++
++# ======= END DYNAMO PATCH =======
++
+ """Tests for binary operators on subtypes of built-in types."""
+ 
+ import unittest
+@@ -194,7 +215,7 @@ class Rat(object):
+             return float(self) == other
+         return NotImplemented
+ 
+-class RatTestCase(unittest.TestCase):
++class RatTestCase(CPythonTestCase):
+     """Unit tests for Rat class and its support utilities."""
+ 
+     def test_gcd(self):
+@@ -368,7 +389,7 @@ class V(OperationLogger):
+ B.register(V)
+ 
+ 
+-class OperationOrderTests(unittest.TestCase):
++class OperationOrderTests(CPythonTestCase):
+     def test_comparison_orders(self):
+         self.assertEqual(op_sequence(eq, A, A), ['A.__eq__', 'A.__eq__'])
+         self.assertEqual(op_sequence(eq, A, B), ['A.__eq__', 'B.__eq__'])
+@@ -413,7 +434,7 @@ class XN:
+         return True
+     __ne__ = None
+ 
+-class FallbackBlockingTests(unittest.TestCase):
++class FallbackBlockingTests(CPythonTestCase):
+     """Unit tests for None method blocking"""
+ 
+     def test_fallback_rmethod_blocking(self):
+@@ -437,4 +458,4 @@ class FallbackBlockingTests(unittest.TestCase):
+         self.assertRaises(TypeError, ne, xn, e)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
