@@ -55,6 +55,10 @@ RUN bash ./install_libgomp.sh && rm install_libgomp.sh
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
+# Build CPython 3.15.0 / 3.15.0t from source; quay.io/pypa does not ship them yet
+COPY ./common/install_cpython.sh install_cpython.sh
+RUN CPYTHON_VERSIONS="3.15.0 3.15.0t" bash ./install_cpython.sh && rm install_cpython.sh
+
 FROM base as openblas
 # Install openblas
 ARG OPENBLAS_VERSION
