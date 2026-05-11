@@ -200,6 +200,33 @@ class TestCuda(TestCase):
     def tearDown(self):
         super().tearDown()
 
+    def test_mem_get_info_does_not_initialize_cuda(self):
+        script = """
+import torch
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+assert torch.cuda.mem_get_info() == (0, 0)
+assert not torch.cuda.is_initialized()
+assert torch.cuda.mem_get_info(torch.device("cuda")) == (0, 0)
+assert not torch.cuda.is_initialized()
+assert torch.cuda.mem_get_info(0) == (0, 0)
+assert not torch.cuda.is_initialized()
+
+torch.empty(1, device="cuda:0")
+free, total = torch.cuda.mem_get_info(0)
+assert 0 <= free <= total
+assert total > 0
+assert torch.cuda.is_initialized()
+"""
+        subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+        )
+
     @property
     def expandable_segments(self):
         return EXPANDABLE_SEGMENTS

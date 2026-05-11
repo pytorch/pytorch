@@ -837,10 +837,27 @@ def mem_get_info(device: "Device" = None) -> tuple[int, int]:
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default) or if the device index is not specified.
 
+    Returns:
+        tuple[int, int]: a tuple of two integers (free_memory, total_memory) in bytes.
+            Returns ``(0, 0)`` if CUDA has not been initialized.
+
     .. note::
         See :ref:`cuda-memory-management` for more
         details about GPU memory management.
     """
+    if not is_initialized():
+        if isinstance(device, str):
+            device = torch.device(device)
+        if (
+            isinstance(device, torch.device)
+            and device.type == "cuda"
+            and device.index is None
+        ):
+            return (0, 0)
+        if device is not None:
+            _get_device_index(device, optional=False)
+        return (0, 0)
+
     if device is None:
         device = torch.cuda.current_device()
     # optional=True allows `device = torch.device('cuda')` for which device.index is None
