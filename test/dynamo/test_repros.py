@@ -982,24 +982,22 @@ class LRUCacheWarningTests(LoggingTestCase):
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
         prev_default = torch._C._get_default_device()
+        try:
+            torch.set_default_device("cuda")
 
-        def _restore_default_device():
+            @torch.compile(backend="eager")
+            def f(x):
+                torch.get_device_module()
+                x = x.cos().sin()
+                return x
+
+            result = f(torch.randn(1024))
+            self.assertIsInstance(result, torch.Tensor)
+        finally:
             if prev_default == "cpu":
                 torch.set_default_device(None)
             else:
                 torch.set_default_device(prev_default)
-
-        self.addCleanup(_restore_default_device)
-        torch.set_default_device("cuda")
-
-        @torch.compile(backend="eager")
-        def f(x):
-            torch.get_device_module()
-            x = x.cos().sin()
-            return x
-
-        result = f(torch.randn(1024))
-        self.assertIsInstance(result, torch.Tensor)
 
         for record in records:
             if "call to a lru_cache wrapped function at:" in record.getMessage():
@@ -8122,6 +8120,33 @@ SavedForBackwardsAOTOutput(idx=5)""",
             torch.randn(3, dtype=torch.float32),
         )
         self.assertEqual(result.dtype, torch.float32)
+
+    def test_empty_out_shape_mismatch_dynamic(self):
+        def f(size, out):
+            return torch.empty(size, out=out, dtype=torch.float32)
+
+        size = [2, 3]
+
+        # Mismatched out shape should be resized to match requested size
+        out_wrong = torch.empty([1])
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            eager_result = f(size, out_wrong.clone())
+
+        cf = torch.compile(f, dynamic=True)
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            compiled_result = cf(size, out_wrong.clone())
+
+        self.assertEqual(compiled_result.shape, eager_result.shape)
+
+        # Compatible out should pass through unchanged
+        compiled_ok = cf(size, torch.empty([2, 3]))
+        self.assertEqual(compiled_ok.shape, torch.Size([2, 3]))
+
+        # Zero-element out should be resized
+        compiled_zero = cf(size, torch.empty([0]))
+        self.assertEqual(compiled_zero.shape, torch.Size([2, 3]))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

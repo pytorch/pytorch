@@ -455,6 +455,29 @@ def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.E
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
+def flatten_index(
+    indices: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
+) -> sympy.Expr:
+    """Row-major flatten: per-dimension indices -> flat index."""
+    assert len(indices) == len(sizes)
+    flat = sympy.S.Zero
+    for index, size in zip(indices, sizes):
+        flat = flat * size + index
+    return flat
+
+
+def decompose_index(
+    index: sympy.Expr,
+    sizes: Sequence[sympy.Expr],
+) -> list[sympy.Expr]:
+    """Row-major decomposition: flat index -> per-dimension indices."""
+    return [
+        ModularIndexing(index, sympy_product(sizes[i + 1 :]), size)
+        for i, size in enumerate(sizes)
+    ]
+
+
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
@@ -1150,6 +1173,10 @@ def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
 
+def prefix_is_pointwise(prefix: str) -> bool:
+    return prefix[0] in ("x", "y", "z")
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -1557,6 +1584,20 @@ class IndentedBuffer:
         else:
             self._lines.append("")
 
+    def writeline_jit(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to JIT buffer only. On a plain IndentedBuffer, same as writeline."""
+        self.writeline(line)
+
+    def writeline_aot(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
+    def splice_jit(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to JIT buffer only. On a plain IndentedBuffer, same as splice."""
+        self.splice(other_code, strip=strip)
+
+    def splice_aot(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
     def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
         for line in lines:
             self.writeline(line)
@@ -1620,6 +1661,41 @@ class IndentedBuffer:
 
     def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
         return new_line in self._lines
+
+
+class AotOnlyBuffer(IndentedBuffer):
+    """IndentedBuffer for pure-AOTI codegen.
+
+    Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
+    write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
+    sites use writeline_jit/writeline_aot uniformly across pure-JIT and
+    pure-AOTI modes.
+    """
+
+    def writeline_jit(self, line) -> None:
+        pass
+
+    def writeline_aot(self, line) -> None:
+        self.writeline(line)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        pass
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        self.splice(other_code, strip=strip)
+
+
+def make_codegen_buffer() -> IndentedBuffer:
+    """Construct the IndentedBuffer subclass matching the current codegen mode.
+
+    Pure AOTI → AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  → IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    """
+    from .virtualized import V
+
+    if V.graph.aot_mode:
+        return AotOnlyBuffer()
+    return IndentedBuffer()
 
 
 class FakeIndentedBuffer(IndentedBuffer):
@@ -3784,6 +3860,13 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.tpu_backend
     else:
         return config.cuda_backend
+
+
+def device_supports_fp64(device: torch.device | None) -> bool:
+    """Check if the given device supports float64."""
+    if device is not None and device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
