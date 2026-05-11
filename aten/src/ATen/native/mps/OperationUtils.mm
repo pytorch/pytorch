@@ -1079,6 +1079,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha,
                                             std::optional<c10::ScalarType> scalar_arg_type,
+                                            std::optional<c10::ScalarType> natural_output_dtype,
                                             std::optional<uint32_t> ilp_threshold) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
@@ -1093,8 +1094,27 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
+      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, natural_output_dtype, ilp_threshold);
     }
+    return;
+  }
+
+  // Output-cast fallback: the kernel naturally produces `natural` dtype (=
+  // common for arithmetic, kBool for comparison). If the user-facing output
+  // dtype differs, none of the registered kernels store-cast for us, so we
+  // run the kernel into a natural-dtype temp and copy_ (which casts) into the
+  // user output.
+  const auto natural = natural_output_dtype.value_or(iter.common_dtype());
+  if (iter.output().scalar_type() != natural) {
+    auto tmp = at::empty_like(iter.output(), natural);
+    auto sub_iter = at::TensorIteratorConfig()
+                        .add_output(tmp)
+                        .add_input(iter.input(0))
+                        .add_input(iter.input(1))
+                        .promote_inputs_to_common_dtype(true)
+                        .build();
+    exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, natural_output_dtype, ilp_threshold);
+    iter.output().copy_(tmp);
     return;
   }
 
