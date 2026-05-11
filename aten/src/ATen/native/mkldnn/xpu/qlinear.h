@@ -24,13 +24,13 @@ class QLinearOnednnXPU final {
       std::string_view post_op_algorithm);
 
   C10_API static Tensor q_linear_pointwise_tensor(
-      Tensor act,
-      Tensor act_scale,
-      Tensor act_zero_point,
-      Tensor weight,
-      Tensor weight_scales,
-      Tensor weight_zero_points,
-      std::optional<Tensor> bias,
+      const Tensor& act,
+      const Tensor& act_scale,
+      const Tensor& act_zero_point,
+      const Tensor& weight,
+      const Tensor& weight_scales,
+      const Tensor& weight_zero_points,
+      const std::optional<Tensor>& bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
@@ -59,14 +59,14 @@ class QLinearOnednnXPU final {
       std::string_view unary_post_op_algorithm);
 
   C10_API static Tensor q_linear_pointwise_binary_tensor(
-      Tensor act,
-      Tensor act_scale,
-      Tensor act_zero_point,
-      Tensor weight,
-      Tensor weight_scales,
-      Tensor weight_zero_points,
-      std::optional<at::Tensor> other,
-      std::optional<Tensor> bias,
+      const Tensor& act,
+      const Tensor& act_scale,
+      const Tensor& act_zero_point,
+      const Tensor& weight,
+      const Tensor& weight_scales,
+      const Tensor& weight_zero_points,
+      const std::optional<at::Tensor>& other,
+      const std::optional<Tensor>& bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
