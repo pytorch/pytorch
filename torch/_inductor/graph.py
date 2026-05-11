@@ -427,6 +427,10 @@ class GraphLowering(torch.fx.Interpreter):
             OrderedSet
         )
         self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
+        # Maps control_deps FX node to operation names created when lowering it,
+        # for void ops (e.g. record_event) that return None and therefore cannot
+        # be referenced by name in subsequent control_deps ordering constraints.
+        self._void_ctrl_dep_op_names: dict[torch.fx.Node, list[str]] = {}
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.

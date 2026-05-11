@@ -257,6 +257,78 @@ class TestControlDeps(InductorTestCase):
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
 
+    @requires_gpu()
+    def test_control_deps_orders_void_op_across_nested_calls(self):
+        """record_event's void op must be named as an additional_buffer_dep
+        of the subsequent wait_event's operations after Inductor lowering.
+
+        record_event lowers to a NoneLayout (void) op and the overall
+        control_deps call around it returns a tuple/None.  When a later
+        control_deps call (around wait_event) lists the record's control_deps
+        node as an additional dep, the lowered value fails the
+        ``isinstance(dep, IRNode)`` check.  Before the fix, the void op was
+        silently dropped and never referenced in the wait's
+        additional_buffer_deps, so Inductor's cudagraph partitioning and
+        other consumers of additional_buffer_deps could reorder the wait
+        before the record.
+        """
+        from unittest.mock import patch
+
+        from torch._inductor import ir, scheduler
+        from torch._inductor.virtualized import V
+
+        def fn(x):
+            s1 = torch.Stream(device=GPU_TYPE)
+            s2 = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s1:
+                y = x + 1
+                e.record()
+            with s2:
+                a = x * 3
+                e.wait()
+                z = y * a
+            return z
+
+        captured: list[dict] = []
+        orig_init = scheduler.Scheduler._init
+
+        def capture_init(self, nodes):
+            void_names = {
+                op.get_name()
+                for op in V.graph.operations
+                if hasattr(op, "layout") and isinstance(op.layout, ir.NoneLayout)
+            }
+            referenced: set[str] = set()
+            for deps in V.graph.additional_buffer_deps.values():
+                referenced.update(deps)
+            captured.append({"void_names": void_names, "referenced": referenced})
+            return orig_init(self, nodes)
+
+        torch._dynamo.reset()
+        with patch.object(scheduler.Scheduler, "_init", capture_init):
+            x = torch.ones(2, 2, device=GPU_TYPE)
+            torch.compile(fn)(x)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+
+        void_names: set[str] = set()
+        referenced: set[str] = set()
+        for state in captured:
+            void_names |= state["void_names"]
+            referenced |= state["referenced"]
+
+        self.assertGreater(
+            len(void_names),
+            0,
+            "expected record_event/wait_event to lower to NoneLayout ops",
+        )
+        self.assertTrue(
+            void_names & referenced,
+            "no record_event void op appears as an additional_buffer_dep; "
+            f"void_names={void_names}, referenced={referenced}",
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
