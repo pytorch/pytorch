@@ -9,7 +9,6 @@ from torch._export.db.case import ExportCase
 from torch._export.db.examples import all_examples
 from torch.export import export
 
-
 PWD = Path(__file__).absolute().parent
 ROOT = Path(__file__).absolute().parents[3]
 SOURCE = ROOT / "source"

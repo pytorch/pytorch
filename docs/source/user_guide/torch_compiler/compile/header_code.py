@@ -3,7 +3,6 @@ import os
 
 import torch
 
-
 # to lower notebook execution time while hiding backend="eager"
 torch.compile = functools.partial(torch.compile, backend="eager")
 

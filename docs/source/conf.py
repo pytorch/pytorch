@@ -24,7 +24,6 @@ from os import path
 # sys.path.insert(0, os.path.abspath('../..'))
 import torch
 
-
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
@@ -41,14 +40,12 @@ RELEASE = os.environ.get("RELEASE", False)
 
 import pytorch_sphinx_theme2
 
-
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # Add the source directory to sys.path so that redirects.py can be imported
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from redirects import redirects  # noqa: F401
-
 
 # -- General configuration ------------------------------------------------
 
@@ -2308,7 +2305,6 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
-
 # NB: Due to some duplications of the following modules/functions, we keep
 # them as expected failures for the time being instead of return 1
 ignore_duplicated_modules = {
@@ -2688,7 +2684,6 @@ import sphinx.ext.doctest
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.util.docfields import TypedField
-
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ""

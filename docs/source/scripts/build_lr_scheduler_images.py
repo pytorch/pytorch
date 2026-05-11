@@ -23,7 +23,6 @@ from torch.optim.lr_scheduler import (
     StepLR,
 )
 
-
 matplotlib.use("Agg")
 
 LR_SCHEDULER_IMAGE_PATH = Path(__file__).parent / "lr_scheduler_images"
