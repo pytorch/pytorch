@@ -909,9 +909,8 @@ DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
 void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
-    bool save_mobile_debug_info,
+    [[maybe_unused]] bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func) {
-  (void)save_mobile_debug_info;
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   writer_func(buffer->data(), buffer->size());
 }

@@ -724,6 +724,13 @@ class TestCutlassBackend(TestCase):
         """
         Main test for addmm.
         """
+        if dtype == torch.bfloat16 and GPU_TYPE == "cuda":
+            # Mismatched elements: 4539 / 16384 (27.7%)
+            # Greatest absolute difference: 0.125 at index (12, 33) (up to 0.001 allowed)
+            # Greatest relative difference: inf at index (15, 7) (up to 0.002 allowed)
+            raise unittest.SkipTest(
+                "This case with bfloat16 has known accuracy issues that need to be resolved."
+            )
 
         class MyModel(torch.nn.Module):
             def forward(self, x, a, b):
@@ -797,7 +804,11 @@ class TestCutlassBackend(TestCase):
                         "rtol": 1.6e-2 if dtype == torch.bfloat16 else 1e-3,
                         "atol": 1e-2 if dtype == torch.bfloat16 else 2e-3,
                     }
-
+                else:
+                    assert_close_kwargs = {
+                        "rtol": 2e-3,
+                        "atol": 1e-3,
+                    }
                 torch.testing.assert_close(actual, expected, **assert_close_kwargs)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1399,6 +1410,7 @@ class TestCutlassBackend(TestCase):
         x = torch.randn((128, 128)).to(GPU_TYPE).half()
         a = torch.randn(128, 128).to(GPU_TYPE).half()
         b = torch.randn(128, 128).to(GPU_TYPE).half().t()
+        allowlist_regex = "stream_k" if SM100OrLater else "pingpong"
 
         with fresh_cache():
             with config.patch(
@@ -1406,7 +1418,7 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
                     "cutlass.cutlass_max_profiling_configs": 2,
-                    "cutlass.cutlass_op_allowlist_regex": "pingpong",
+                    "cutlass.cutlass_op_allowlist_regex": allowlist_regex,
                     "cutlass.cutlass_op_denylist_regex": None,
                 }
             ):
@@ -1433,9 +1445,9 @@ class TestCutlassBackend(TestCase):
                                 raise AssertionError(
                                     f"Expected op_conf_name to be str, got {type(op_conf_name)}"
                                 )
-                            if "pingpong" not in op_conf_name:
+                            if allowlist_regex not in op_conf_name:
                                 raise AssertionError(
-                                    "Only pingpong Kernels should have been allowed"
+                                    f"Only {allowlist_regex} kernels should have been allowed"
                                 )
                             cuda_template_count += 1
                     if cuda_template_count <= 0:

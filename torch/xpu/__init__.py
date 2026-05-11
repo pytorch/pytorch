@@ -299,7 +299,7 @@ def _lazy_init() -> None:
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:
-        # This test was was protected via GIL. Double-check whether XPU has
+        # This test was protected via GIL. Double-check whether XPU has
         # already been initialized.
         if is_initialized():
             return

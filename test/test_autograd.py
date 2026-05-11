@@ -13557,6 +13557,62 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    @skipIfTorchDynamo("tests C++ autograd engine layout policy, not dynamo")
+    def test_enforce_grad_layout_policy(self, device):
+        # A custom function that returns a fresh contiguous gradient,
+        # which has different strides from a channels_last parameter.
+        class ContiguousGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.ones(2, 3, 4, 5, device=grad_output.device)
+
+        # Parameter is channels_last -- its strides differ from contiguous.
+        a = (
+            torch.rand(2, 3, 4, 5, device=device)
+            .to(memory_format=torch.channels_last)
+            .requires_grad_()
+        )
+
+        # --- enforcement ON (default): grad strides match param ---
+        ContiguousGrad.apply(a).backward()
+        self.assertEqual(a.grad.stride(), a.stride())
+        a.grad = None
+
+        # --- enforcement OFF: grad is stolen as-is (contiguous strides) ---
+        with torch.autograd.enforce_grad_layout_policy(False):
+            ContiguousGrad.apply(a).backward()
+            self.assertTrue(a.grad.is_contiguous())
+            self.assertNotEqual(a.grad.stride(), a.stride())
+        a.grad = None
+
+        # --- context manager restores state ---
+        ContiguousGrad.apply(a).backward()
+        self.assertEqual(a.grad.stride(), a.stride())
+        a.grad = None
+
+        # --- used as a bare function (not context manager) ---
+        try:
+            torch.autograd.enforce_grad_layout_policy(False)
+            ContiguousGrad.apply(a).backward()
+            self.assertTrue(a.grad.is_contiguous())
+            self.assertNotEqual(a.grad.stride(), a.stride())
+        finally:
+            torch.autograd.enforce_grad_layout_policy(True)
+        a.grad = None
+
+        # --- as a decorator ---
+        @torch.autograd.enforce_grad_layout_policy(False)
+        def do_backward():
+            ContiguousGrad.apply(a).backward()
+
+        do_backward()
+        self.assertTrue(a.grad.is_contiguous())
+        self.assertNotEqual(a.grad.stride(), a.stride())
+
     @skipIfMPS
     def test_copy_r_to_c(self, device):
         out_c = torch.empty(3, 2, dtype=torch.cdouble, device=device)
@@ -15838,21 +15894,16 @@ class TestSelectiveActivationCheckpoint(TestCase):
     # - dynamo is trying to trace into saved variable hooks unpack hook for some reason
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_policy_with_state(self):
-        # If I have a stateful callable, state is shared between the original
-        # forward and the recompute.
+        # Policy is only called during forward, not during backward/recompute.
         counters = []
 
         class Policy:
             def __init__(self) -> None:
                 self.counter = [0]
-                self.recompute_counter = [0]
 
             def __call__(self, ctx, func, *args, **kwargs):
-                counter = self.recompute_counter if ctx.is_recompute else self.counter
-                counter[0] += 1
-                counters.append(counter[0])
-                if counter == 1 and func is torch.ops.aten.mm.default:
-                    return CheckpointPolicy.MUST_SAVE
+                self.counter[0] += 1
+                counters.append(self.counter[0])
                 return CheckpointPolicy.PREFER_RECOMPUTE
 
         def fn(x):
@@ -15866,9 +15917,8 @@ class TestSelectiveActivationCheckpoint(TestCase):
         )
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
-        # 1. counter properly reset to 0 for the recompute
-        # 2. due to early-stop we do not recompute the final op
-        self.assertEqual(counters, [1, 2, 3, 1, 2])
+        # Policy is only called during forward (3 ops), not during recompute
+        self.assertEqual(counters, [1, 2, 3])
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_storage_lifetime(self):
@@ -15984,7 +16034,8 @@ class TestSelectiveActivationCheckpoint(TestCase):
         x_grad = torch.autograd.grad(out.sum(), (x,))
         x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
         self.assertEqual(x_grad, x_grad_ref)
-        self.assertEqual(counter[0], 2)
+        # Policy is only called during forward, not backward
+        self.assertEqual(counter[0], 1)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_non_tensor_output(self):
@@ -16027,10 +16078,57 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(x_grad, x_grad_ref)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_mismatch_new_op_during_recompute(self):
+        call_count = [0]
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            call_count[0] += 1
+            x = x.sin()
+            if call_count[0] > 1:
+                x = x.exp()
+            return x
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(
+            fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
+        )
+        with self.assertRaisesRegex(RuntimeError, "not found in storage"):
+            out.sum().backward()
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_mismatch_extra_invocation_during_recompute(self):
+        call_count = [0]
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            call_count[0] += 1
+            x = x.sin()
+            if call_count[0] > 1:
+                x = x.sin()
+            return x.cos()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(
+            fn, x, use_reentrant=False, context_fn=context_fn, early_stop=False
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "invocation index .* not found in storage"
+        ):
+            out.sum().backward()
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_can_only_trigger_recompute_once(self):
         # We don't support this to avoid adding extra complexity for now.
         # If there's a need, we could probably do some kind of use_count tracking.
-        # TODO: have a nice error message here.
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.sin.default:
                 return CheckpointPolicy.MUST_SAVE
@@ -16082,22 +16180,13 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 "Model.layers.1_my_op.default_2",
             }
 
-            fwd_decisions: list = []
-            fwd_idx = [0]
-
             def policy_fn(ctx, op, *args, **kwargs):
-                if ctx.is_recompute:
-                    decision = fwd_decisions[fwd_idx[0]]
-                    fwd_idx[0] += 1
-                    return decision
                 out = ctx.op_output
-                decision = CheckpointPolicy.PREFER_RECOMPUTE
                 if isinstance(out, torch.Tensor):
                     name = naming.names.get(out)
                     if name in save_names:
-                        decision = CheckpointPolicy.MUST_SAVE
-                fwd_decisions.append(decision)
-                return decision
+                        return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
 
             x = torch.randn(4, requires_grad=True)
             context_fn = functools.partial(

@@ -1485,6 +1485,31 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_max_pool3d(self, device):
+        test_cases = [
+            # size, kernel_size, stride, padding, dilation, ceil_mode
+            [(2, 3, 8, 8, 8), 3, 1, 1, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, False],
+            [(2, 3, 8, 8, 8), 2, 2, 0, 1, False],
+            [(2, 3, 8, 8, 8), 3, 2, 1, 1, True],
+            [(3, 8, 8, 8), 3, 1, 1, 1, False],  # unbatched
+        ]
+
+        for size, ks, st, pa, di, cm in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                for _ in range(5):
+                    res, _ = torch.nn.functional.max_pool3d(
+                        input, ks, st, pa, di, cm, return_indices=True)
+                    res.backward(torch.ones_like(res))
+                    if grad is None:
+                        grad = input.grad
+                    else:
+                        self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                    input.grad = None
+
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding

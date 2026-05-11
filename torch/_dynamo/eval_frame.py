@@ -1039,51 +1039,58 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
+                saved_include_set = torch._C._dispatch_tls_local_include_set()
+                saved_exclude_set = torch._C._dispatch_tls_local_exclude_set()
 
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
-                call_succeeded = False
-                try:
-                    result = fn(*args, **kwargs)
-                    call_succeeded = True
-                except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
-                    if config.verbose:
-                        raise
-                    # strip internal tracebacks from causes
-                    cur_exn: BaseException = e
-                    while cur_exn.__cause__ is not None:
-                        cur_exn.__cause__.with_traceback(None)
-                        cur_exn = cur_exn.__cause__
+                with torch._C._ForceDispatchKeyGuard(
+                    saved_include_set, saved_exclude_set
+                ):
+                    call_succeeded = False
+                    try:
+                        result = fn(*args, **kwargs)
+                        call_succeeded = True
+                    except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
+                        if config.verbose:
+                            raise
+                        # strip internal tracebacks from causes
+                        cur_exn: BaseException = e
+                        while cur_exn.__cause__ is not None:
+                            cur_exn.__cause__.with_traceback(None)
+                            cur_exn = cur_exn.__cause__
 
-                    raise e.with_traceback(None) from e.__cause__  # User compiler error
-                except ShortenTraceback as e:
-                    # Failures in the backend likely don't have useful
-                    # data in the TorchDynamo frames, so we strip them out.
-                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
-                finally:
-                    # Restore the dynamic layer stack depth if necessary.
-                    set_eval_frame(None)
-                    if fullgraph_count_enabled and call_succeeded:
-                        count = set_fullgraph_compiled_frame_count(-1)
-                        if count == 0:
-                            raise RuntimeError(
-                                "torch.compile with fullgraph=True found no compiled frames. "
-                                "The frame was likely skipped (e.g., a non-infra torch dispatch "
-                                "mode was active, dynamo was disabled, or the frame was skipped."
+                        raise e.with_traceback(
+                            None
+                        ) from e.__cause__  # User compiler error
+                    except ShortenTraceback as e:
+                        # Failures in the backend likely don't have useful
+                        # data in the TorchDynamo frames, so we strip them out.
+                        raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                    finally:
+                        # Restore the dynamic layer stack depth if necessary.
+                        set_eval_frame(None)
+                        if fullgraph_count_enabled and call_succeeded:
+                            count = set_fullgraph_compiled_frame_count(-1)
+                            if count == 0:
+                                raise RuntimeError(
+                                    "torch.compile with fullgraph=True found no compiled frames. "
+                                    "The frame was likely skipped (e.g., a non-infra torch dispatch "
+                                    "mode was active, dynamo was disabled, or the frame was skipped."
+                                )
+                        if prior_error_on_graph_break is not None:
+                            _set_error_on_graph_break(prior_error_on_graph_break)
+                        if prior_error_on_nested_compile is not None:
+                            set_fullgraph_error_on_nested_compile(
+                                prior_error_on_nested_compile
                             )
-                    if prior_error_on_graph_break is not None:
-                        _set_error_on_graph_break(prior_error_on_graph_break)
-                    if prior_error_on_nested_compile is not None:
-                        set_fullgraph_error_on_nested_compile(
-                            prior_error_on_nested_compile
+                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                            saved_dynamic_layer_stack_depth
                         )
-                    torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                        saved_dynamic_layer_stack_depth
-                    )
 
-                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                    for cleanup in cleanups:
-                        cleanup()
+                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                        for cleanup in cleanups:
+                            cleanup()
                 return result
             finally:
                 if fullgraph_count_enabled:

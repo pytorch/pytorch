@@ -422,7 +422,7 @@ AOT_COUNTER = itertools.count()
 
 # Note [Side-Effectful Tokens in AOTAutograd]
 #
-# We allow some some side-effectful operators in
+# We allow some side-effectful operators in
 # the post-AOTAutograd (functional) graph, such as prints and torchbind operations.
 # To ensure that these side-effects are compatible to future graph passes that
 # assume that the graph is functional, we will thread "effect tokens" to show

@@ -4354,7 +4354,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         cnt = CompileCounterWithBackend("inductor")
 
         # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
-        # hints to to compute strides.
+        # hints to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
             result2 = x.view(u0, u1) * 10
@@ -5561,6 +5561,56 @@ class TestMaybeFastEvalComparison(TestCase):
         expr = sympy.GreaterThan(u0.node.expr, 0)
         result = shape_env._maybe_fast_eval_comparison(expr)
         self.assertIsNone(result)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_slice_assignment_same_bounds(self):
+        # Repro from sequential_experts_gemm (MoE pattern in HuggingFace Aria).
+        # output[start:end] = out should not fail with a data-dependent guard
+        # because `out` was produced from token_states[start:end], so both
+        # slices share the same (start, end) and thus the same size.
+        def sequential_experts_gemm(token_states, expert_weights, tokens_per_expert):
+            num_tokens = token_states.shape[0]
+            out_features = expert_weights.shape[-1]
+            output = torch.zeros(
+                num_tokens,
+                out_features,
+                dtype=token_states.dtype,
+                device=token_states.device,
+            )
+
+            cumsum_num_tokens = torch.cumsum(tokens_per_expert, dim=0)
+            zero_tensor = torch.zeros(
+                1, dtype=torch.long, device=cumsum_num_tokens.device
+            )
+            cumsum_num_tokens = torch.cat((zero_tensor, cumsum_num_tokens))
+
+            for expert_num in range(expert_weights.shape[0]):
+                start = cumsum_num_tokens[expert_num]
+                end = cumsum_num_tokens[expert_num + 1]
+                tokens = token_states[start:end]
+                out = torch.matmul(tokens, expert_weights[expert_num])
+                output[start:end] = out
+            return output
+
+        num_tokens = 10
+        in_features = 16
+        out_features = 32
+        num_experts = 3
+
+        token_states = torch.randn(num_tokens, in_features)
+        expert_weights = torch.randn(num_experts, in_features, out_features)
+        tokens_per_expert = torch.tensor([3, 2, 5])
+
+        eager_result = sequential_experts_gemm(
+            token_states, expert_weights, tokens_per_expert
+        )
+
+        compiled_fn = torch.compile(
+            sequential_experts_gemm, fullgraph=True, backend="eager"
+        )
+        compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
+
+        self.assertEqual(eager_result, compiled_result)
 
 
 if __name__ == "__main__":

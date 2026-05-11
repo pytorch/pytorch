@@ -119,7 +119,9 @@ _thread_local = threading.local()
 def _should_save_cache(*compiled_fns: Callable[..., Any]) -> bool:
     if should_bundle_autograd_cache():
         return True
-    return all(hasattr(fn, "_fx_graph_cache_key") for fn in compiled_fns)
+    return all(
+        getattr(fn, "_fx_graph_cache_key", None) is not None for fn in compiled_fns
+    )
 
 
 @contextmanager
@@ -521,6 +523,7 @@ def _cache_inference_info(
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
             serialized_bw_module=None,
+            min_cut_info_str=None,
         )
         AOTAutogradCache.save(
             cache_info.cache_key,
@@ -1913,7 +1916,7 @@ def _categorize_saved_tensors_for_backward(
 # We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
 #
 # Note that this solution is not bulletproof.
-# It's possible to construct a case where eager may or may not have have tried to autograd through y,
+# It's possible to construct a case where eager may or may not have tried to autograd through y,
 # depending on the actual grad_outputs that were passed in during the backward.
 # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
 # allowing autograd to reuse the graph.
@@ -2279,6 +2282,8 @@ def aot_stage2_autograd(
         aot_config,
     )
 
+    min_cut_info_str = getattr(fx_g.graph, "_min_cut_info_str", None)
+
     fw_module_str, bw_module_str = _log_fw_bw_graphs(
         fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
     )
@@ -2316,6 +2321,7 @@ def aot_stage2_autograd(
         _indices_of_inps_to_detach,
         num_symints_saved_for_bw,
         bw_module,
+        min_cut_info_str,
     )
 
     return _aot_stage2c_make_autograd_function(
@@ -2407,6 +2413,7 @@ def _cache_autograd_info(
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
     bw_module: torch.fx.GraphModule | None,
+    min_cut_info_str: str | None,
 ) -> tuple[
     GenericAOTAutogradResult[Any, Any] | None,
     Callable[..., Any],
@@ -2474,6 +2481,7 @@ def _cache_autograd_info(
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),
+                    min_cut_info_str=min_cut_info_str,
                 )
                 AOTAutogradCache.save(
                     cache_info.cache_key,

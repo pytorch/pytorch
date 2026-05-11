@@ -678,6 +678,7 @@ class GraphModule(torch.nn.Module):
         res.sum().backward()
 
     @inductor_config.patch("fx_graph_cache", False)
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_dropout_checks_joint_graph(self):
         # `dropout` tests that joint graph passes (not just partitioner) is ran
         # on the hop graphs. Inductor rng functionalization happens in the joint
@@ -747,6 +748,7 @@ class GraphModule(torch.nn.Module):
                 ignore_empty_lines=True,
             )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @inductor_config.patch("fx_graph_cache", False)
     def test_dropout_checks_joint_graph_inference(self):
         # Checks that joint graph results in inductor seeds for just the inference graph
@@ -996,6 +998,7 @@ class GraphModule(torch.nn.Module):
             ):
                 opt_fn(x)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_dce(self):
         @nested_compile_region
         def gn(x):
@@ -1030,6 +1033,7 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_dce_recursive(self):
         def fn1(x):
             a = torch.sin(x)
@@ -1084,6 +1088,7 @@ class GraphModule(torch.nn.Module):
 """,
                 )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nonlocal_update(self):
         counter = 2
 
@@ -1179,6 +1184,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @inductor_config.patch("fx_graph_cache", False)
     def test_view_to_reshape(self):
         @nested_compile_region
@@ -1375,6 +1381,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_input_mutation_inference_mode(self):
         @nested_compile_region
         def gn(x, y):
@@ -1732,6 +1739,7 @@ class GraphModule(torch.nn.Module):
         r1.sum().backward()
         weight.grad.clone()
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_return_none_from_fwd(self):
         @nested_compile_region
         def gn(x):
@@ -1848,6 +1856,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_grad_accumulation(self):
         mod1 = torch.nn.Linear(8, 8)
         mod2 = torch.nn.Linear(8, 8)
@@ -1955,6 +1964,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_bwd_partitioning(self):
         @nested_compile_region
         def gn(x, y):
@@ -2050,6 +2060,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_ac(self):
         def fn1(x):
             return torch.cos(x)
@@ -2165,6 +2176,7 @@ class GraphModule(torch.nn.Module):
         )(q, k, v)
         res.sum().backward()
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_fake_tensor_checking(self):
         @nested_compile_region
         def gn(x):
@@ -2246,6 +2258,7 @@ class GraphModule(torch.nn.Module):
         run(dynamic=True)
         run(dynamic=False)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_different_symint(self):
         """
         Tests check that the same subgraph called with different symints use different graphs
@@ -3022,6 +3035,7 @@ class GraphModule(torch.nn.Module):
         res = gm(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_remove_unused_output(self):
         # Test that the ggn's graph's output is pruned.
 
@@ -3917,6 +3931,7 @@ class GraphModule(torch.nn.Module):
     params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_simple_func(self):
         @nested_compile_region
         def gn(x, y):
@@ -3956,6 +3971,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_unbacked(self):
         @nested_compile_region
         def gn(x, y):
@@ -3979,6 +3995,7 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_pending_unbacked(self):
         class M(torch.nn.Module):
             @nested_compile_region
@@ -4011,6 +4028,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_simple_method(self):
         class M(torch.nn.Module):
             @nested_compile_region
@@ -4029,6 +4047,7 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_multiple_module(self):
         b = torch.randn(8)
 
@@ -4148,6 +4167,157 @@ class TestInlineInvokeSubgraph(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x2.grad)
         self.assertEqual(y.grad, y2.grad)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInlineSingleUseInvokeSubgraph(TestCase):
+    def _assert_no_invoke_subgraph(self, fn, args):
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        self.assertTrue(len(backend.graphs) > 0)
+        for gm in backend.graphs:
+            for node in gm.graph.nodes:
+                self.assertFalse(
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.invoke_subgraph,
+                )
+        return res
+
+    def _count_invoke_subgraph(self, fn, args):
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        count = 0
+        for gm in backend.graphs:
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.invoke_subgraph
+                ):
+                    count += 1
+        return res, count
+
+    def test_single_use_inlined(self):
+        @nested_compile_region
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        ref = fn(x, y)
+        res = self._assert_no_invoke_subgraph(fn, (x, y))
+        self.assertEqual(ref, res)
+
+    def test_multi_use_preserved(self):
+        @nested_compile_region
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            return gn(x, y) + gn(x, y)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        ref = fn(x, y)
+        res, count = self._count_invoke_subgraph(fn, (x, y))
+        self.assertEqual(ref, res)
+        self.assertEqual(count, 2)
+
+    def test_mixed_single_and_multi_use(self):
+        @nested_compile_region
+        def shared(x):
+            return x.sin()
+
+        @nested_compile_region
+        def unique(x):
+            return x.cos()
+
+        def fn(x):
+            a = shared(x) + shared(x)
+            b = unique(a)
+            return b
+
+        x = torch.randn(8)
+        ref = fn(x)
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        # shared is called twice -> kept as invoke_subgraph
+        # unique is called once -> inlined
+        invoke_count = 0
+        for gm in backend.graphs:
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.invoke_subgraph
+                ):
+                    invoke_count += 1
+        self.assertEqual(invoke_count, 2)
+
+    def test_ac_shared_subgraph_not_inlined(self):
+        @nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            a = torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+            b = torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+            return a + b
+
+        x1 = torch.randn(8, requires_grad=True)
+        x2 = x1.clone().detach().requires_grad_(True)
+        ref = fn(x1)
+        ref.sum().backward()
+
+        # Two checkpoint bodies share the same gn subgraph module.
+        # Global counting should see 2 uses and preserve invoke_subgraph.
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x2)
+        self.assertEqual(ref, res)
+
+        invoke_count = sum(
+            1
+            for mod in backend.graphs[0].modules()
+            if isinstance(mod, torch.fx.GraphModule)
+            for node in mod.graph.nodes
+            if node.op == "call_function"
+            and node.target is torch.ops.higher_order.invoke_subgraph
+        )
+        self.assertEqual(invoke_count, 2)
+
+    def test_inline_single_use_with_autograd_function(self):
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region
+        def gn(x):
+            return MyOp.apply(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x_clone)
+
+        self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -4407,6 +4577,128 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
             RuntimeError, "reuse_hash_fn was provided but the subgraph is not eligible"
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+@unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
+class TestInvokeSubgraphTrainStepCapture(TestCase):
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_mark_non_differentiable_propagation(self):
+        """invoke_subgraph wrapping an autograd.Function that calls
+        mark_non_differentiable should propagate the non-differentiable
+        status to the outer InvokeSubgraphAutogradOp.  Without this,
+        the outer autograd engine sets requires_grad=True on all outputs,
+        causing AOT autograd to take the joint tracing path and hit
+        'backward through graph a second time'.
+        """
+
+        class MyOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.sin()
+                aux = x.max()
+                ctx.mark_non_differentiable(aux)
+                ctx.save_for_backward(x)
+                return out, aux
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_aux):
+                (x,) = ctx.saved_tensors
+                return grad_out * x.cos()
+
+        @nested_compile_region()
+        def nested_fn(x):
+            return MyOp.apply(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z, aux = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach(), aux
+
+        model = Model()
+        x = torch.randn(4, 4)
+        compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+        loss, aux = compiled(x)
+        self.assertFalse(aux.requires_grad)
+
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        enable_invoke_subgraph_regional_compile=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_nested_region_config_propagated_to_backward(self):
+        """When joint tracing creates backward invoke_subgraph nodes,
+        the nested_region_config should be propagated so the regional
+        compiler can compile them.
+        """
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+            invoke_subgraph,
+        )
+
+        config = get_invoke_subgraph_compile_options(
+            decompositions=torch._decomp.core_aten_decompositions()
+        )
+
+        @nested_compile_region(options=config)
+        def nested_fn(x):
+            return x.sin()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+                self.head = torch.nn.Linear(4, 1, bias=False)
+
+            def forward(self, x):
+                y = self.linear(x)
+                z = nested_fn(y)
+                z_det = z.detach().requires_grad_()
+                loss = self.head(z_det).sum()
+                loss.backward()
+                z.backward(z_det.grad)
+                return loss.detach()
+
+        fw_graphs = []
+
+        def recording_compiler(gm, example_inputs, **kwargs):
+            fw_graphs.append(gm)
+            return gm
+
+        backend = aot_autograd(fw_compiler=recording_compiler)
+        model = Model()
+        x = torch.randn(4, 4)
+        opt_model = torch.compile(model, backend=backend, fullgraph=True)
+        opt_model(x)
+
+        # The inference graph should have both fw and bw invoke_subgraph nodes,
+        # each with nested_region_config so regional inductor can compile them.
+        self.assertEqual(len(fw_graphs), 1)
+        gm = fw_graphs[0]
+        invoke_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is invoke_subgraph
+        ]
+        # 2 invoke_subgraph nodes: fw and bw
+        self.assertEqual(len(invoke_nodes), 2)
+        for node in invoke_nodes:
+            self.assertIn("custom", node.meta)
+            self.assertIn("nested_region_config", node.meta["custom"])
 
 
 if __name__ == "__main__":

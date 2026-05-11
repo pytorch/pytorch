@@ -1394,7 +1394,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
-        # the fake_device of the tensor so that code such as as `if x.is_cuda`
+        # the fake_device of the tensor so that code such as `if x.is_cuda`
         # or torch.zeros([10, 10], device=x.device) continues to execute as if
         # the FakeTensor were real. However, within kernel execution, we return
         # the `Meta` device because all computation within the kernels should
@@ -2935,11 +2935,14 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_run_unsafe_fallback(
             error: RuntimeError | None = None,
         ) -> FakeTensor | None:
-            # We infer the meta of a custom ops that return None to just
-            # return None. custom ops are not allowed to mutate metadata
-            # of their inputs, so this is safe.
+            # We infer the meta of custom ops that return None to just
+            # return None, and Tag.out ops to return their out= args.
+            # Custom ops are not allowed to mutate metadata of their
+            # inputs, so this is safe.
             if torch._library.utils.can_generate_trivial_fake_impl(func):
-                return None
+                return torch._library.utils.generate_trivial_fake_impl(
+                    func, *args, **kwargs
+                )
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)

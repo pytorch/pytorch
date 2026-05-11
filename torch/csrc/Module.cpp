@@ -1634,7 +1634,7 @@ static PyObject* THPModule_willEngineExecuteNode(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
   torch::autograd::Node* node = nullptr;
-  c10::intrusive_ptr<torch::autograd::Node> node_sp;
+  std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
     node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
     node = node_sp.get();
@@ -2390,6 +2390,7 @@ PyObject* initModule() {
 #endif
 #if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
+  ASSERT_TRUE(FastCudaLauncher_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));

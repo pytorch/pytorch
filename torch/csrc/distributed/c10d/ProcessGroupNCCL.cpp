@@ -880,7 +880,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
-      // If throwing timed out excepiton without aborting nccl communicators
+      // If throwing timed out exception without aborting nccl communicators
       // here, it was observed that CUDA GPU will have 100% utilization and
       // can not run new events successfully.
       if (timedOut) {
