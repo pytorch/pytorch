@@ -16,11 +16,12 @@ from torch.types import _device, _dtype
 
 
 def throw_on_unsupported_rng_device(device):
-    raise RuntimeError(
-        f"You are trying to functionalize a {device.type} RNG operator, but only cuda and xpu "
-        f"Philox/counter-based RNG functionalization is currently supported. We are discussing the "
-        f"possibility of a Philox-based RNG implementation for CPU."
-    )
+    if device.type not in ("cuda", "xpu"):
+        raise RuntimeError(
+            f"You are trying to functionalize a {device.type} RNG operator, but only cuda and xpu "
+            f"Philox/counter-based RNG functionalization is currently supported. We are discussing the "
+            f"possibility of a Philox-based RNG implementation for CPU."
+        )
 
 
 def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
@@ -56,6 +57,7 @@ def philox_rand_offset(
     shape: torch.Size,
     device: _device,
 ):
+    throw_on_unsupported_rng_device(device)
     # For impl, look at the function calc_execution_policy in the file
     # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
     # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
@@ -78,7 +80,7 @@ def philox_rand_offset(
         max_threads_per_processor = device_property.max_work_group_size
         processor_count = device_property.max_compute_units
     else:
-        raise throw_on_unsupported_rng_device(device)
+        raise RuntimeError("Unexpected device type for philox_rand_offset: " + device.type)
     blocks_per_sm = max_threads_per_processor // block_size
     num = numel_scalar
     grid_size = (num + block_size - 1) // block_size
@@ -125,8 +127,7 @@ def register_philox_rand():
         else:
             devices = [device]
 
-        if device.type not in ("cuda", "xpu"):
-            raise throw_on_unsupported_rng_device(device)
+        throw_on_unsupported_rng_device(device)
 
         with torch.random.fork_rng(devices, device_type=device.type):
             AcceleratorRngStateHelper.set_torch_state_tensor(
