@@ -4626,6 +4626,7 @@ class CUTLASSCodeCache:
 
     _SOURCE_CODE_SUFFIX: str = ""
     _BACKEND: str = ""
+    _COMPILE_ERROR: type[exc.CppCompileError] = exc.CUDACompileError
 
     @classmethod
     def cache_clear(cls) -> None:
@@ -4758,7 +4759,7 @@ class CUTLASSCodeCache:
                     cls.cache[key_with_ext] = cls.CacheEntry(
                         input_path, output_path, error_json
                     )
-                    raise exc.CUDACompileError(cmd_parts, error_output)
+                    raise cls._COMPILE_ERROR(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cls._compile_command(
                         src_files, output_path, dst_file_ext, extra_args
@@ -4791,7 +4792,7 @@ class CUTLASSCodeCache:
                             output_path,
                             binary_remote_cache,
                         )
-                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                        raise cls._COMPILE_ERROR(cmd_parts, error.output) from error
                     except Exception as error:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_compile_error(
@@ -4802,7 +4803,7 @@ class CUTLASSCodeCache:
                                 output_path,
                                 binary_remote_cache,
                             )
-                            raise exc.CUDACompileError(cmd_parts, str(error)) from error
+                            raise cls._COMPILE_ERROR(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
                     log_duration_msg = f"{cls._BACKEND} {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
@@ -4830,7 +4831,7 @@ class CUTLASSCodeCache:
         if cache_entry.error_json is not None:
             # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
-            raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
+            raise cls._COMPILE_ERROR(cmd_parts, error_output.encode("utf-8"))
         return (cls.cache[key_with_ext].output_path, key, input_path)
 
     @classmethod
@@ -4924,7 +4925,13 @@ from torch._inductor.codegen.xpu import compile_utils as xpu_compile_utils
 class XPUCodeCache(CUTLASSCodeCache):
     _SOURCE_CODE_SUFFIX = "cpp"
     _BACKEND = "XPU"
+    _COMPILE_ERROR: type[exc.CppCompileError] = exc.XPUCompileError
     dll_cache: dict[str, DLLWrapper] = {}
+
+    @classmethod
+    def cache_clear(cls) -> None:
+        super().cache_clear()
+        cls.dll_cache.clear()
 
     @classmethod
     def _use_re_build(cls) -> bool:

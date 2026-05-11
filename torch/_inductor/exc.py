@@ -125,6 +125,10 @@ class CUDACompileError(CppCompileError):
     pass
 
 
+class XPUCompileError(CppCompileError):
+    pass
+
+
 class TritonMissing(ShortenTraceback):
     def __init__(self, first_useful_frame: types.FrameType | None) -> None:
         super().__init__(
