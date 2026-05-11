@@ -611,6 +611,17 @@ class TestScatterAddOverrideConds(TestCase):
             self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
             self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
 
+    def test_rejects_empty_self(self):
+        # self.shape[0] == 0 with a non-empty src would have every index
+        # out of range. Cond must reject so aten raises the index error
+        # instead of our kernel silently writing OOB.
+        self_t = torch.zeros(0, 128, device="cuda", dtype=torch.float32)
+        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
 @skipIfNoCuteDSL
@@ -684,6 +695,18 @@ class TestScatterAddOverrideCorrectness(TestCase):
         got = torch.scatter_add(self_t, 0, idx, src)
         self.assertEqual(got[0], src.sum(0), atol=1e-3, rtol=1e-3)
         self.assertEqual(got[1:].abs().sum().item(), 0)
+
+    def test_deterministic_mode_uses_aten(self):
+        # Under use_deterministic_algorithms(True), the cond rejects and
+        # scatter_add falls through to aten's deterministic path. Verify
+        # end-to-end numerics match a naive reference.
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        with DeterministicGuard(True):
+            got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(got, ref)
+
 
 
 instantiate_parametrized_tests(TestScatterAddOverrideConds)
