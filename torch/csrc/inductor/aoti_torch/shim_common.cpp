@@ -7,6 +7,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
@@ -253,7 +254,7 @@ AOTITorchError aoti_torch_strlist_to_ivalue(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::string> vec;
     vec.reserve(len);
-    for (int64_t i = 0; i < len; i++) {
+    for (const auto i : c10::irange(len)) {
       vec.emplace_back(val[i]);
     }
     c10::IValue* t = new c10::IValue(std::move(vec));
@@ -1124,7 +1125,7 @@ AOTITorchError aoti_record_function_start(
     }
 
     std::vector<c10::IValue> recordInputs(n_inputs);
-    for (size_t i = 0; i < n_inputs; i++) {
+    for (const auto i : c10::irange(n_inputs)) {
       recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
@@ -1191,7 +1192,7 @@ AOTITorchError aoti_torch_index_put_out(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
-    for (size_t i = 0; i < num_indices; i++) {
+    for (const auto i : c10::irange(num_indices)) {
       indices_.emplace_back(
           pointer_to_optional(tensor_handle_to_tensor_pointer(indices[i])));
     }

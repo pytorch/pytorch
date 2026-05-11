@@ -360,6 +360,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     aot_joint_graph_str: str | None
     aot_forward_graph_str: str | None
     aot_backward_graph_str: str | None
+    min_cut_info_str: str | None
 
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
@@ -447,6 +448,16 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             aot_graphs_log.info(
                 "Backward graph (from cache)\n\n%s",
                 self.aot_backward_graph_str,
+            )
+
+        if self.min_cut_info_str is not None:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "min_cut_information",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: self.min_cut_info_str,
             )
 
     def _load_and_post_compile(

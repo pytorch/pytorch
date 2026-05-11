@@ -1887,6 +1887,117 @@ class DictTests(torch._dynamo.test_case.TestCase):
             "not CustomBoolDict(False) should evaluate to True in boolean context",
         )
 
+    def _get_fw_graphs_for_dict_orders(self):
+        """Compile a model with two different dict key orders, return both
+        forward graphs from AOTAutograd (the level where has_same_nodes operates).
+
+        Uses asymmetric paths (deep vs shallow) so that different dict iteration
+        orders produce different op orderings in the graph.
+        """
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.deep(val))
+                    else:
+                        results.append(self.shallow(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        torch.compile(model, backend=backend1)(d1).backward()
+        torch._dynamo.reset()
+        model.zero_grad()
+        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        torch.compile(model, backend=backend2)(d2).backward()
+
+        return backend1.fw_graphs[0].graph, backend2.fw_graphs[0].graph
+
+    def test_name_based_hash_diverges_on_dict_order(self):
+        # Demonstrates the original bug: the name-based hash used in
+        # has_same_nodes diverges when different ranks trace with different
+        # dict iteration orders, producing different node orderings.
+        import hashlib
+
+        graph1, graph2 = self._get_fw_graphs_for_dict_orders()
+
+        def name_based_hash(graph):
+            node_str = "/".join(x.name for x in graph.nodes)
+            return hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self.assertNotEqual(name_based_hash(graph1), name_based_hash(graph2))
+
+    def test_canonical_names_invariant_to_dict_order(self):
+        # The canonical naming produces identical mappings for structurally
+        # equivalent graphs traced with different dict iteration orders.
+        from torch._functorch.partitioners import _canonical_node_names
+
+        graph1, graph2 = self._get_fw_graphs_for_dict_orders()
+
+        canonical1 = _canonical_node_names(graph1)
+        canonical2 = _canonical_node_names(graph2)
+
+        # Build {canonical_name: (op, target)} for each graph.
+        # For placeholders, exclude target (it's the rank-local name like
+        # primals_N which differs across ranks).
+        def structure(graph, canonical):
+            return {
+                canonical[n]: (n.op, str(n.target) if n.op != "placeholder" else "")
+                for n in graph.nodes
+            }
+
+        self.assertEqual(structure(graph1, canonical1), structure(graph2, canonical2))
+
+    def test_canonical_names_different_models(self):
+        from torch._functorch.partitioners import _canonical_node_names
+
+        class ModelA(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ModelB(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        inp = torch.randn(4, 8)
+        backend1 = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(ModelA(), backend=backend1)(inp)
+        torch._dynamo.reset()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(ModelB(), backend=backend2)(inp)
+
+        c1 = _canonical_node_names(backend1.graphs[0].graph)
+        c2 = _canonical_node_names(backend2.graphs[0].graph)
+        structure1 = {
+            c1[n]: (n.op, str(n.target)) for n in backend1.graphs[0].graph.nodes
+        }
+        structure2 = {
+            c2[n]: (n.op, str(n.target)) for n in backend2.graphs[0].graph.nodes
+        }
+        self.assertNotEqual(structure1, structure2)
+
 
 instantiate_parametrized_tests(DictTests)
 

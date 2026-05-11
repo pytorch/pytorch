@@ -980,23 +980,43 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
-        @wraps(compiled_fn)
-        def wrapper(runtime_args: list[Any]) -> Any:
-            if runtime_metadata.is_rng_op_functionalized:
-                # Add the seed and offset to args
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                runtime_args.extend([seed, offset])
-                out = compiled_fn(runtime_args)
-                out = self._functionalized_rng_runtime_epilogue(
-                    runtime_metadata,
-                    out,
-                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
-                    runtime_metadata.num_forward_returns,
-                )
-                return out
-            return compiled_fn(runtime_args)
+        if not runtime_metadata.is_rng_op_functionalized:
+            return compiled_fn
 
-        return wrapper
+        if runtime_metadata.num_outputs_rng_offset != 1:
+            raise AssertionError(
+                f"expected num_outputs_rng_offset == 1, got {runtime_metadata.num_outputs_rng_offset}"
+            )
+
+        from .subclass_codegen import _compile_and_exec_source
+
+        offset_index = runtime_metadata.num_forward_returns
+        lines = ["def _functionalized_rng_wrapper(runtime_args):"]
+        lines.append("    seed, offset = _get_rng_state_()")
+        lines.append("    runtime_args.extend([seed, offset])")
+        lines.append("    outs = _compiled_fn_(runtime_args)")
+        lines.append(f"    _set_offset_(outs[{offset_index}])")
+        if self.return_new_outs:
+            lines.append(
+                f"    return outs[:{offset_index}] + outs[{offset_index + 1}:]"
+            )
+        else:
+            lines.append("    return outs")
+        source = "\n".join(lines)
+
+        inner_fn = _compile_and_exec_source(
+            source,
+            {
+                "_compiled_fn_": compiled_fn,
+                "_get_rng_state_": CUDARngStateHelper.get_torch_state_as_tuple,
+                "_set_offset_": CUDARngStateHelper.set_new_offset,
+            },
+            "_functionalized_rng_wrapper",
+            "functionalized_rng_wrapper",
+            wrapped_fn=compiled_fn,
+        )
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
     # Calling convention: If we are running functionalized RNG, then outs consists
     # of (user_outs, rng_offset)
@@ -1190,24 +1210,27 @@ class EffectTokensWrapper(CompilerWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
         num_tokens = len(runtime_metadata.tokens)
+        if num_tokens == 0:
+            return compiled_fn
 
-        @wraps(compiled_fn)
-        def inner_fn(args: list[Any]) -> Any:
-            if num_tokens > 0:
-                # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-                old_args = args
-                args = [*([None] * num_tokens), *args]
-                old_args.clear()
+        from .subclass_codegen import _compile_and_exec_source
 
-            outs = compiled_fn(args)
+        lines = ["def _effect_tokens_wrapper(args):"]
+        lines.append(f"    new_args = [{', '.join(['None'] * num_tokens)}, *args]")
+        lines.append("    args.clear()")
+        lines.append("    outs = _compiled_fn_(new_args)")
+        lines.append("    if outs is None:")
+        lines.append("        return None")
+        lines.append(f"    return outs[{num_tokens}:]")
+        source = "\n".join(lines)
 
-            # Inductor cache DummyModule can return None
-            if outs is None:
-                return None
-            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            return outs[num_tokens:] if num_tokens != 0 else outs
-
-        # box it
+        inner_fn = _compile_and_exec_source(
+            source,
+            {"_compiled_fn_": compiled_fn},
+            "_effect_tokens_wrapper",
+            "effect_tokens_wrapper",
+            wrapped_fn=compiled_fn,
+        )
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
 

@@ -326,34 +326,35 @@ inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
-  // disable NHWC for float64 input.
-  if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
-      input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
+// Shared logic for memory-format suggestions
+// enabled: backend gate (compiled-with-X && not-float64). If false, return Contiguous.
+// Dispatches by weight.ndim: 4 -> CL, 5 -> CL3d, else Contiguous.
+inline at::MemoryFormat _conv_suggest_memory_format_impl(
+    const at::Tensor& input, const at::Tensor& weight, bool enabled) {
+  if (!enabled) {
     return at::MemoryFormat::Contiguous;
   }
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
+  auto input_mf = input.suggest_memory_format();
+  auto weight_mf = weight.suggest_memory_format();
   auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = weight_ndim == 4 && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
-  if (can_use_cudnn_channels_last_2d) {
+  if (weight_ndim == 4 &&
+      (input_mf == at::MemoryFormat::ChannelsLast ||
+       weight_mf == at::MemoryFormat::ChannelsLast)) {
     return at::MemoryFormat::ChannelsLast;
   }
-
-  bool can_use_cudnn_channels_last_3d = weight_ndim == 5 && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
-  if (can_use_cudnn_channels_last_3d) {
+  if (weight_ndim == 5 &&
+      (input_mf == at::MemoryFormat::ChannelsLast3d ||
+       weight_mf == at::MemoryFormat::ChannelsLast3d)) {
     return at::MemoryFormat::ChannelsLast3d;
   }
-
   return at::MemoryFormat::Contiguous;
+}
+
+inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
+  bool enabled = at::detail::getCUDAHooks().compiledWithCuDNN() &&
+      input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
+  return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
 // controls whether emptyCache will be called following cudnn conv benchmarking
@@ -362,39 +363,13 @@ TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
 inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
-  // disable NHWC for float64 input.
-  if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
-      input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
-    return at::MemoryFormat::Contiguous;
-  }
-
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+  bool enabled = at::detail::getCUDAHooks().compiledWithMIOpen() &&
+      input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen.
   // See https://github.com/pytorch/pytorch/issues/64427.
-  // non static variable is used to be able to change environment variable in runtime for testing
-  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
-
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-  auto weight_ndim = weight.ndimension();
-
-  bool can_use_miopen_channels_last_2d = suggest_nhwc && (weight_ndim == 4) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
-  if (can_use_miopen_channels_last_2d) {
-    return at::MemoryFormat::ChannelsLast;
-  }
-
-  bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
-  if (can_use_miopen_channels_last_3d) {
-    return at::MemoryFormat::ChannelsLast3d;
-  }
-
-  return at::MemoryFormat::Contiguous;
+  // Non-static read so tests can toggle the env var at runtime.
+  enabled &= c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
+  return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
 // deprecated, but to remove would be BC-breaking
@@ -402,31 +377,32 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
   return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
 }
 
+// Shared "is either tensor channels-last (2d or 3d)?" check.
+// enabled: backend gate (e.g. dtype/device checks) -- if false, return false.
+// exact_match=true requires exact-stride classification (needed by MPS;
+// see https://github.com/pytorch/pytorch/issues/180984 -- MPS reads raw
+// buffers assuming packed NHWC, so misclassifying a channel slice or
+// degenerate 1x1 weight would corrupt the read).
+inline bool _conv_use_channels_last_impl(
+    const at::Tensor& input, const at::Tensor& weight, bool enabled, bool exact_match) {
+  if (!enabled) {
+    return false;
+  }
+  if (!input.defined() || input.is_sparse()) {
+    return false;
+  }
+  auto is_channel_last = [exact_match](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format(exact_match);
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
+}
+
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // disable NHWC for float64 input.
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
-    return false;
-  }
-
-  // disable NHWC for MkldnnCPU tensor.
-  if (input.is_mkldnn() || weight.is_mkldnn()) {
-    return false;
-  }
-
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-
-  bool can_use_mkldnn_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
-
-  bool can_use_mkldnn_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
-
-  return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
+  // Disable NHWC for float64 input and for MkldnnCPU tensors.
+  bool enabled = input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble &&
+      !input.is_mkldnn() && !weight.is_mkldnn();
+  return _conv_use_channels_last_impl(input, weight, enabled, /*exact_match=*/false);
 }
 
 inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
@@ -442,45 +418,13 @@ inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tenso
 }
 
 inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // check layout only for xpu tensor.
-  if (!input.is_xpu() || !weight.is_xpu()) {
-    return false;
-  }
-  if (!input.defined() || input.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format();
-    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
-  };
-  return is_channel_last(input) || is_channel_last(weight);
+  return _conv_use_channels_last_impl(
+      input, weight, input.is_xpu() && weight.is_xpu(), /*exact_match=*/false);
 }
 
 inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // check layout only for mps tensor.
-  if (!input.is_mps() || !weight.is_mps()) {
-    return false;
-  }
-  if (!input.defined() || input.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  // Use exact-match so a tensor whose strides merely *look* like channels-last
-  // (e.g. a channel-slice of a channels-last tensor) is not misclassified --
-  // MPS reads raw buffers assuming packed NHWC, which would be incorrect for
-  // such views. exact_match also correctly excludes degenerate 1x1 weights
-  // whose NCHW-contiguous strides happen to also satisfy is_contiguous(CL).
-  // See https://github.com/pytorch/pytorch/issues/180984
-  auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
-  };
-  return is_channel_last(input) || is_channel_last(weight);
+  return _conv_use_channels_last_impl(
+      input, weight, input.is_mps() && weight.is_mps(), /*exact_match=*/true);
 }
 
 } // namespace at::native

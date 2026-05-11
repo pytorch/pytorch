@@ -357,7 +357,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         self.proxy = tx.output.create_node(
             "call_function",
-            torch._C._functorch._jvp_increment_nesting,
+            torch._functorch.predispatch._jvp_increment_nesting,
             (),
             {},
         )
@@ -368,7 +368,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
-            "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
+            "call_function", torch._functorch.predispatch._jvp_decrement_nesting, (), {}
         )
         return variables.ConstantVariable.create(None)
 
@@ -439,7 +439,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         )
         self.proxy = tx.output.create_node(
             "call_function",
-            torch._C._enter_dual_level,
+            torch._functorch.predispatch._enter_dual_level,
             (),
             {},
         )
@@ -451,9 +451,9 @@ class DualLevelContextManager(ContextWrappingVariable):
         self.cleanup()
         tx.output.create_node(
             "call_function",
-            torch._C._exit_dual_level,
-            (self.new_level,),
-            {},
+            torch._functorch.predispatch._exit_dual_level,
+            (),
+            {"level": self.new_level},
         )
         return variables.ConstantVariable.create(None)
 

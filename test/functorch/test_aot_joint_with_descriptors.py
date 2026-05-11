@@ -1143,6 +1143,7 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_9', {'test': 1})""",
         )
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_annotate_invoke_subgraph_simple(self):
         class Bar(nn.Module):
             @torch.compiler.nested_compile_region

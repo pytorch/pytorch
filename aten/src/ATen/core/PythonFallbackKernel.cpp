@@ -50,7 +50,7 @@ private:
 };
 
 void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
+  at::impl::MaybeSetTLSOnEntryGuard tls_guard;
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
   c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);

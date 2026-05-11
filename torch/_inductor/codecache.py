@@ -26,6 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
+from collections.abc import Set as AbstractSet
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -569,7 +570,7 @@ class FxGraphCachePickler(pickle.Pickler):
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
-            raise BypassFxGraphCache("mkldnn tensors unpickleable")
+            CacheabilityValidator.check_tensor(t)
 
         metadata = extract_tensor_metadata_for_cache_key(t)
         if self._device_id_agnostic:
@@ -616,7 +617,7 @@ class FxGraphCachePickler(pickle.Pickler):
         Custom reducer to handle any objects that we don't support and therefore
         raise to bypass caching.
         """
-        raise BypassFxGraphCache("Reduce unsupported")
+        CacheabilityValidator.bypass("Reduce unsupported")
 
     def _reduce_graph_module(
         self, gm: torch.fx.GraphModule
@@ -662,14 +663,12 @@ class FxGraphCachePickler(pickle.Pickler):
             return self._stream.getvalue()
         except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
             # Some configs options may not pickle.
-            log.warning("Failed to pickle cache key", exc_info=True)
-            raise BypassFxGraphCache("Failed to pickle cache key") from e
+            CacheabilityValidator.bypass_for_pickle_error(e)
         except RuntimeError as e:
             # pybind11 raises RuntimeError with message like:
             # "<pybind11_builtins... object at 0x...> is not pickleable."
             if "pybind11" in str(e) and "is not pickleable" in str(e):
-                log.warning("Failed to pickle cache key", exc_info=True)
-                raise BypassFxGraphCache("Failed to pickle cache key") from e
+                CacheabilityValidator.bypass_for_pickle_error(e)
             raise
         finally:
             # Reset our stream for the next dump.
@@ -818,6 +817,165 @@ class BypassFxGraphCache(Exception):
     """
     Exception to indicate that the FxGraphCache should be bypassed.
     """
+
+
+@dataclasses.dataclass(frozen=True)
+class CacheabilityValidator:
+    """
+    Centralized validation for deciding whether an FX graph can use the cache.
+
+    The cache key pickler still defends itself when serializing arbitrary objects,
+    but non-cacheable inputs should be rejected here before hashing starts.
+    """
+
+    gm: torch.fx.GraphModule
+    example_inputs: Sequence[InputType] = ()
+    fx_kwargs: _CompileFxKwargs | None = None
+    require_shape_env: bool = True
+    shape_env: ShapeEnv | None = None
+
+    def validate(self) -> None:
+        self._check_custom_passes()
+        self._check_frozen_params()
+        self._check_runtime_constant_folding()
+        self._check_compiler_bisector()
+        self._check_shape_env()
+        self.validate_graph(include_constants=True)
+        self._check_cache_key_object(self.example_inputs)
+        if self.fx_kwargs is not None:
+            self._check_cache_key_object(self.fx_kwargs)
+
+    def validate_graph(self, include_constants: bool) -> None:
+        for module in self.gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    self.bypass(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                # TODO: this check is broken in two ways:
+                # 1. FX uses "get_attr" (with underscore), not "getattr"
+                # 2. It only checks for ScriptObject, not FakeScriptObject
+                # Fixing it would also bypass AOTAutogradCache (which calls
+                # _check_can_cache), so we'd need to decouple the two first.
+                if node.op == "getattr" and isinstance(
+                    getattr(self.gm, node.target), torch._C.ScriptObject
+                ):
+                    self.bypass("Can't cache torchbind objects")
+                if include_constants and node.op == "get_attr":
+                    try:
+                        attr = self._get_attr(module, node.target)
+                    except AttributeError:
+                        continue
+                    self._check_cache_key_object(attr)
+
+    @staticmethod
+    def check_tensor(t: Tensor) -> None:
+        if t.is_mkldnn:
+            CacheabilityValidator.bypass("mkldnn tensors unpickleable")
+
+    @staticmethod
+    def bypass(reason: str) -> NoReturn:
+        raise BypassFxGraphCache(reason)
+
+    @staticmethod
+    def bypass_for_pickle_error(e: Exception) -> NoReturn:
+        log.warning(
+            "Failed to pickle cache key",
+            exc_info=(type(e), e, e.__traceback__),
+        )
+        raise BypassFxGraphCache("Failed to pickle cache key") from e
+
+    @staticmethod
+    def _get_attr(module: torch.fx.GraphModule, target: str) -> Any:
+        from torch.fx.graph_module import _get_attr
+
+        return _get_attr(module, target)
+
+    def _check_custom_passes(self) -> None:
+        # Custom passes must implement the CustomGraphPass or we don't
+        # know how to include them in the cache key calculation.
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if resolve_pre_grad_pass_timing() != "early":
+            if config.pre_grad_custom_pass and (
+                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                or not config.pre_grad_custom_pass.uuid()
+            ):
+                self.bypass("Unsupported pre grad custom pass")
+        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                self.bypass("Unsupported post grad custom pass")
+        # Same with the joint custom passes
+        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                self.bypass("Unsupported joint custom pass")
+        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
+        # and ensure they are not passing us raw callables
+        if config._pre_fusion_custom_pass is not None:
+            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+                self.bypass("Unsupported _pre_fusion_custom_pass")
+        for p in config._fuse_ddp_communication_passes:
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                self.bypass("Unsupported _fuse_ddp_communication_pass")
+
+    def _check_frozen_params(self) -> None:
+        # Freezing can embed constants that wouldn't be static across runs.
+        if has_frozen_params(self.gm) and not torch._utils_internal.justknobs_check(
+            "pytorch/inductor:allow_freezing_with_caching"
+        ):
+            self.bypass("Skipping graph with frozen constants")
+
+    def _check_runtime_constant_folding(self) -> None:
+        if config.aot_inductor.use_runtime_constant_folding:
+            self.bypass(
+                "Runtime constant folding can introduce constants that aren't "
+                "static across runs"
+            )
+
+    def _check_compiler_bisector(self) -> None:
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        if CompilerBisector.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            self.bypass("compiler bisector enabled")
+
+    def _check_shape_env(self) -> None:
+        # The treatment of guards in the caching implementation requires that
+        # we have a shape env.
+        if self.require_shape_env and self.shape_env is None:
+            log.debug("fx graph cache no shape env")
+            self.bypass("No shape env")
+
+    def _check_cache_key_object(
+        self,
+        obj: Any,
+        seen: set[int] | None = None,  # noqa: set_linter
+    ) -> None:
+        if seen is None:
+            seen = set()  # noqa: set_linter
+
+        obj_id = id(obj)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+
+        if isinstance(obj, torch.Tensor):
+            self.check_tensor(obj)
+            return
+        elif isinstance(obj, torch.fx.experimental._backward_state.BackwardState):
+            self.bypass("Reduce unsupported")
+        elif isinstance(obj, dict):
+            for key, value in obj.items():
+                self._check_cache_key_object(key, seen)
+                self._check_cache_key_object(value, seen)
+        elif isinstance(obj, (list, tuple, AbstractSet)):
+            for item in obj:
+                self._check_cache_key_object(item, seen)
 
 
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
@@ -1678,84 +1836,29 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
     @staticmethod
     def _check_for_hop(gm: torch.fx.GraphModule) -> None:
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                # TODO: this check is broken in two ways:
-                # 1. FX uses "get_attr" (with underscore), not "getattr"
-                # 2. It only checks for ScriptObject, not FakeScriptObject
-                # Fixing it would also bypass AOTAutogradCache (which calls
-                # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        CacheabilityValidator(gm, require_shape_env=False).validate_graph(
+            include_constants=False
+        )
 
     @staticmethod
-    def _check_can_cache(gm: torch.fx.GraphModule) -> None:
+    def _check_can_cache(
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType] = (),
+        fx_kwargs: _CompileFxKwargs | None = None,
+        require_shape_env: bool = True,
+    ) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Custom passes must implement the CustomGraphPass or we don't
-        # know how to include them in the cache key calculation.
-        # When timing is EARLY, pre-grad passes already ran before the cache
-        # lookup so there's nothing to validate here.
-        if resolve_pre_grad_pass_timing() != "early":
-            assert not config.pre_grad_custom_pass or (
-                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                and config.pre_grad_custom_pass.uuid()
-            ), "Unsupported pre grad custom pass"
-        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported post grad custom pass")
-        # Same with the joint custom passes
-        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
-            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
-                raise BypassFxGraphCache("Unsupported joint custom pass")
-        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
-        # and ensure they are not passing us raw callables
-        if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
-        for p in config._fuse_ddp_communication_passes:
-            if callable(p) and not isinstance(p, CustomGraphPass):
-                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
-
-        # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
-            "pytorch/inductor:allow_freezing_with_caching"
-        ):
-            raise BypassFxGraphCache("Skipping graph with frozen constants")
-
-        if config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache(
-                "Runtime constant folding can introduce constants that aren't "
-                "static across runs"
-            )
-
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        if CompilerBisector.bisection_enabled:
-            log.debug("dont cache graph when bisect enabled")
-            raise BypassFxGraphCache
-
-        # The treatment of guards in the caching implementation requires that
-        # we have a shape env.
-        if FxGraphCache._get_shape_env() is None:
-            log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env")
-
-        # We skip caching if there are any HOPs or torchbind objects.
-        FxGraphCache._check_for_hop(gm)
+        shape_env = FxGraphCache._get_shape_env() if require_shape_env else None
+        CacheabilityValidator(
+            gm,
+            example_inputs=example_inputs,
+            fx_kwargs=fx_kwargs,
+            require_shape_env=require_shape_env,
+            shape_env=shape_env,
+        ).validate()
 
     @staticmethod
     def prepare_key(
@@ -1776,7 +1879,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         I personally believe it is more annoying/difficult to read in that format.
         """
         try:
-            FxGraphCache._check_can_cache(gm)
+            FxGraphCache._check_can_cache(gm, example_inputs, fx_kwargs)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
@@ -2149,7 +2252,7 @@ class AotCodeCompiler:
             specified_sub_dir.mkdir(exist_ok=True)
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
-        def _compile_consts(consts: bytes, platform: str) -> str:
+        def _compile_consts(consts: bytes | bytearray, platform: str) -> str:
             # Load from aot_inductor, and update the value on demand.
             use_asm_build: bool = config.aot_inductor.use_consts_asm_build
 
@@ -2185,7 +2288,7 @@ class AotCodeCompiler:
             is_zero_size_consts = len(consts) == 0
 
             def format_consts_to_gnu_asm(
-                consts: bytes,
+                consts: bytes | bytearray,
                 align_bytes: int,
                 symbol_prefix: str,
                 is_large_consts: bool,
@@ -2210,7 +2313,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -2400,46 +2503,78 @@ end
                 if name not in graph.folded_constants
             )
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
+            import ctypes
 
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
+            def _constant_nbytes(t: torch.Tensor) -> int:
                 if t.numel() == 0:
-                    return b""
-
+                    return 0
                 if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                # pyrefly: ignore [missing-attribute]
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+                    return torch.ops.mkldnn._nbytes(t)
+                return t.untyped_storage().nbytes()
 
             if (
                 config.aot_inductor.package_constants_in_so
                 or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
             ):
-                serialized_weights = b"".join(
-                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants
-                    if name not in graph.folded_constants
-                )
+                with dynamo_timed(
+                    "aoti_serialize_constants", log_pt2_compile_event=True
+                ):
+                    constant_names = [
+                        name
+                        for name in graph.constants
+                        if name not in graph.folded_constants
+                    ]
+                    if constant_names:
+                        from concurrent.futures import ThreadPoolExecutor
+
+                        # Compute offsets up front so each worker can write into a
+                        # disjoint slice of a single pre-allocated buffer independently
+                        offsets: list[int] = []
+                        sizes: list[int] = []
+                        total_size = 0
+                        for name in constant_names:
+                            t = graph.get_original_value_of_constant(name)
+                            n = _constant_nbytes(t)
+                            offsets.append(total_size)
+                            sizes.append(n)
+                            total_size += (
+                                n
+                                if all_cuda
+                                else (n + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES
+                            )
+
+                        serialized_weights = bytearray(total_size)
+                        # Hold one persistent view so the bytearray can't be resized,
+                        # and cache the base address for pointer arithmetic.
+                        buf_view = (ctypes.c_ubyte * total_size).from_buffer(
+                            serialized_weights
+                        )
+                        base_addr = ctypes.addressof(buf_view)
+
+                        def _worker(i: int) -> None:
+                            n = sizes[i]
+                            if n == 0:
+                                return
+                            t = graph.get_original_value_of_constant(constant_names[i])
+                            if t.is_mkldnn:
+                                data_ptr = torch.ops.mkldnn.data_ptr(t)
+                                ctypes.memmove(base_addr + offsets[i], data_ptr, n)
+                            else:
+                                # Hold the CPU storage until memmove finishes —
+                                # otherwise it may be freed and data_ptr dangles.
+                                t_cpu = t.untyped_storage().cpu()
+                                ctypes.memmove(
+                                    base_addr + offsets[i], t_cpu.data_ptr(), n
+                                )
+
+                        with ThreadPoolExecutor() as pool:
+                            # Consume iterator to surface any worker exceptions.
+                            for _ in pool.map(_worker, range(len(constant_names))):
+                                pass
+
+                        del buf_view
+                    else:
+                        serialized_weights = b""
             else:
                 serialized_weights = b""
 
@@ -2496,21 +2631,22 @@ end
 
             # potentially, precompile the AOT header for this device
             if config.aot_inductor.precompile_headers and not _IS_WINDOWS:
-                header_file = _get_cpp_wrapper_header(
-                    device_type, aot_mode=graph.aot_mode
-                )
-                wrapper_build_options.precompiled_header = _precompile_header(
-                    header_file,
-                    cpp_command,
-                    min_optimize=not config.aot_inductor.package_cpp_only,
-                    **compile_command,
-                )
-                if cpp_prefix := _get_cpp_prefix_header(device_type):
-                    kernel_build_options.precompiled_header = _precompile_header(
-                        cpp_prefix,
+                with dynamo_timed("aoti_precompile_header", log_pt2_compile_event=True):
+                    header_file = _get_cpp_wrapper_header(
+                        device_type, aot_mode=graph.aot_mode
+                    )
+                    wrapper_build_options.precompiled_header = _precompile_header(
+                        header_file,
                         cpp_command,
+                        min_optimize=not config.aot_inductor.package_cpp_only,
                         **compile_command,
                     )
+                    if cpp_prefix := _get_cpp_prefix_header(device_type):
+                        kernel_build_options.precompiled_header = _precompile_header(
+                            cpp_prefix,
+                            cpp_command,
+                            **compile_command,
+                        )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
@@ -2709,7 +2845,10 @@ end
                             )
                             raise
 
-                    with ThreadPoolExecutor() as pool:
+                    with (
+                        dynamo_timed("aoti_compile_fatbin", log_pt2_compile_event=True),
+                        ThreadPoolExecutor() as pool,
+                    ):
                         list(pool.map(_compile_fatbin, fatbin_cmds))
 
                 if cubins_to_embed:
