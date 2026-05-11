@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
+#include <ATen/core/CachingHostAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -60,18 +61,40 @@ void initCudartBindings(PyObject* module) {
       "cuda"
       "HostRegister",
       [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
-        py::gil_scoped_release no_gil;
-        return C10_CUDA_ERROR_HANDLED(
+        cudaError_t err;
+        {
+          py::gil_scoped_release no_gil;
+          err = C10_CUDA_ERROR_HANDLED(
+              // NOLINTNEXTLINE(performance-no-int-to-ptr)
+              cudaHostRegister((void*)ptr, size, flags));
+        }
+        // Record after re-acquiring the GIL so that Python traceback
+        // capture in maybeGatherContext() succeeds.
+        if (err == cudaSuccess) {
+          if (auto* host_alloc = at::getHostAllocator(at::kCUDA)) {
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            cudaHostRegister((void*)ptr, size, flags));
+            host_alloc->record_external_register((void*)ptr, size);
+          }
+        }
+        return err;
       });
   cudart.def(
       "cuda"
       "HostUnregister",
       [](uintptr_t ptr) -> cudaError_t {
-        py::gil_scoped_release no_gil;
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        return C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
+        cudaError_t err;
+        {
+          py::gil_scoped_release no_gil;
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          err = C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
+        }
+        if (err == cudaSuccess) {
+          if (auto* host_alloc = at::getHostAllocator(at::kCUDA)) {
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            host_alloc->record_external_unregister((void*)ptr);
+          }
+        }
+        return err;
       });
   cudart.def(
       "cuda"
