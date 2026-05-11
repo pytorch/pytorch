@@ -4858,11 +4858,11 @@ def interpolate(  # noqa: F811
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            interpolate,
+            interpolate,  # pyrefly: ignore [bad-argument-type]
             (input,),
             input,
             size=size,
-            scale_factor=scale_factor,
+            scale_factor=scale_factor,  # pyrefly: ignore [bad-argument-type]
             mode=mode,
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
