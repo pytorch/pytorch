@@ -575,54 +575,52 @@ def forward(self, x):
         multi-return ops. The getitem node for the unused list output is
         removed by DCE, so the serializer must synthesize names.
         """
-        lib = torch.library.Library("mylib", "DEF")
-        lib.define(
-            "tensor_and_list(Tensor x) -> (Tensor, Tensor[])",
-        )
-
-        @torch.library.impl(lib, "tensor_and_list", "CPU")
-        def tensor_and_list_impl(x):
-            return x * 2, [x, x + 1]
-
-        @torch.library.impl(lib, "tensor_and_list", "Meta")
-        def tensor_and_list_meta(x):
-            return x * 2, [x, x + 1]
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                # Only use the first (Tensor) output; the List[Tensor] is unused
-                return torch.ops.mylib.tensor_and_list(x)[0]
-
-        exported_module = export(MyModule(), (torch.ones(3),), strict=True)
-        # Simulate the scenario where DCE removes the getitem for the
-        # unused List[Tensor] output (as happens in real serialization
-        # pipelines like package_sigmoid_model).
-        exported_module.graph.eliminate_dead_code()
-        exported_module.graph_module.recompile()
-
-        serialized = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.exported_program.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch.ops.mylib.tensor_and_list.default")
-        self.assertEqual(len(node.outputs), 2)
-
-        # First output is a single tensor
-        self.assertTrue(node.outputs[0].as_tensor.name != "")
-        # Second output is the unused list -- should still have tensor entries
-        self.assertTrue(len(node.outputs[1].as_tensors) > 0)
-        for t in node.outputs[1].as_tensors:
-            self.assertIn("_unused_", t.name)
-
-        # Roundtrip: deserialize and verify functional correctness
-        deserialized_ep = deserialize(serialize(exported_module))
-        inp = torch.randn(3)
-        self.assertTrue(
-            torch.allclose(
-                exported_module.module()(inp),
-                deserialized_ep.module()(inp),
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            lib.define(
+                "tensor_and_list(Tensor x) -> (Tensor, Tensor[])",
             )
-        )
 
-        del lib
+            @torch.library.impl(lib, "tensor_and_list", "CPU")
+            def tensor_and_list_impl(x):
+                return x * 2, [x, x + 1]
+
+            @torch.library.impl(lib, "tensor_and_list", "Meta")
+            def tensor_and_list_meta(x):
+                return x * 2, [x, x + 1]
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    # Only use the first (Tensor) output; the List[Tensor] is unused
+                    return torch.ops.mylib.tensor_and_list(x)[0]
+
+            exported_module = export(MyModule(), (torch.ones(3),), strict=True)
+            # Simulate the scenario where DCE removes the getitem for the
+            # unused List[Tensor] output (as happens in real serialization
+            # pipelines like package_sigmoid_model).
+            exported_module.graph.eliminate_dead_code()
+            exported_module.graph_module.recompile()
+
+            serialized = ExportedProgramSerializer().serialize(exported_module)
+            node = serialized.exported_program.graph_module.graph.nodes[-1]
+            self.assertEqual(node.target, "torch.ops.mylib.tensor_and_list.default")
+            self.assertEqual(len(node.outputs), 2)
+
+            # First output is a single tensor
+            self.assertTrue(node.outputs[0].as_tensor.name != "")
+            # Second output is the unused list -- should still have tensor entries
+            self.assertTrue(len(node.outputs[1].as_tensors) > 0)
+            for t in node.outputs[1].as_tensors:
+                self.assertIn("_unused_", t.name)
+
+            # Roundtrip: deserialize and verify functional correctness
+            deserialized_ep = deserialize(serialize(exported_module))
+            inp = torch.randn(3)
+            self.assertTrue(
+                torch.allclose(
+                    exported_module.module()(inp),
+                    deserialized_ep.module()(inp),
+                )
+            )
 
     def test_rational_ranges(self) -> None:
         class M(torch.nn.Module):
@@ -734,18 +732,31 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
+            arg_names = []
             kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
+                    arg_names.append(arg.name)
                 elif arg.kind == ArgumentKind.KEYWORD:
                     kwargs[arg.name] = arg.arg
 
             self.assertEqual(len(args), 6)
-            # Always: name, grid, output_indices and num_warps are
+            # Positional args carry kernel parameter names
+            expected_param_names = [
+                "in_ptr0",
+                "in_ptr1",
+                "out_ptr",
+                "n_elements",
+                "fval",
+                "ival",
+            ]
+            self.assertEqual(arg_names, expected_param_names)
+            # Always: name, grid, output_indices, num_warps,
+            # kernel_param_names, kernel_param_types
             # Triton version dependent: num_cpu_threads, shared_memory_bytes
-            self.assertTrue(len(kwargs) >= 4)
+            self.assertTrue(len(kwargs) >= 6)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
@@ -766,6 +777,16 @@ def forward(self, x):
                 self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
             if "shared_memory_bytes" in kwargs:
                 self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
+
+            self.assertIn("kernel_param_names", kwargs)
+            self.assertEqual(
+                kwargs["kernel_param_names"].as_strings, expected_param_names
+            )
+            self.assertIn("kernel_param_types", kwargs)
+            self.assertEqual(
+                len(kwargs["kernel_param_types"].as_strings),
+                len(expected_param_names),
+            )
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
