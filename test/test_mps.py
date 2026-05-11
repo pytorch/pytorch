@@ -10,6 +10,7 @@ import warnings
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import os
 import copy
 import gc
@@ -13421,6 +13422,26 @@ class TestNoRegression(TestCase):
 
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "mps")
+
+    def test_dense_scalar_kernels_pass_metal_validation(self):
+        script = textwrap.dedent("""
+            import torch
+            a = torch.randn(1024, dtype=torch.float32, device='mps')
+            ai = torch.arange(1024, dtype=torch.long, device='mps')
+            (a + 1.5).cpu()
+        """)
+        env = {
+            **os.environ,
+            "MTL_DEBUG_LAYER": "1",
+            "MTL_SHADER_VALIDATION": "1",
+            "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+            "MTL_SHADER_VALIDATION_REPORT_TO_STDERR": "1",
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", script], env=env,
+            capture_output=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
 
 
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]

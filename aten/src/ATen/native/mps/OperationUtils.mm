@@ -1172,14 +1172,22 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   std::string kernel_name;
   if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
+    const auto& scalar_operand = scalar_on_lhs ? input : other;
     const auto lhs_suffix = scalar_on_lhs ? "_lhs" : "";
+    // MPS scalar views can land on non-4-byte aligned offsets.
+    // if we bind these to constant memory, it will land at non-4-byte aligned offsets
+    // e.g. t[1:2]. These will be routed to the _device kernel variant.
+    // regular CPU scalars will be routed to constant so metal in validation mode
+    // doesn't complain. See issue https://github.com/pytorch/pytorch/issues/181650
+    const auto device_suffix = scalar_operand.device().type() == kMPS ? "_device" : "";
     if (cast_needed) {
-      kernel_name =
-          fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, scalarToMetalTypeString(out), alpha_suffix);
+      kernel_name = fmt::format(
+          "{}_dense_scalar{}_cast{}_{}{}", name, lhs_suffix, device_suffix, scalarToMetalTypeString(out), alpha_suffix);
     } else {
-      kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
+      kernel_name = fmt::format("{}_dense_scalar{}{}_{}_{}{}",
                                 name,
                                 lhs_suffix,
+                                device_suffix,
                                 scalarToMetalTypeString(out),
                                 scalarToMetalTypeString(tensor_operand),
                                 alpha_suffix);
