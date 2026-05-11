@@ -658,9 +658,9 @@ def _view_has_unbacked_input(
 
 def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     """
-    Smarter heuristic: collect candidate (x, y) pairs whose runtime hints
-    match (so they *could* be equal), then test whether substituting them
-    into the view's numel equation makes the equation symbolically zero.
+    Collect candidate (x, y) pairs whose runtime hints match (so they
+    *could* be equal), then test whether substituting them into the
+    view's numel equation makes the equation symbolically zero.
     Only commit the equalities (adds the real Eq guards via bool(x == y)
     which triggers set_replacement) if the substitution actually solves
     the view validity check.
@@ -817,7 +817,7 @@ def _view_unbacked_meta(
         # size-oblivious view path succeed without specialization on x==1.
         # But with potential duck specializations which are more general.
         if (
-            torch.fx.experimental._config.unify_view_symbols_unbacked_meta
+            torch.fx.experimental._config.unify_view_symbols_bso_meta
             and not tried_duck_specialize
             and try_duck_specialization_first(a, shape)
         ):

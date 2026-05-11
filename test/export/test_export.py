@@ -446,9 +446,9 @@ graph():
         on the non-contiguous slice from `cat → split`, and the recursive
         non-size-oblivious branch uses `eval_eager` to specialize.
 
-        - With `unify_view_symbols_unbacked_meta=False` (default): export
+        - With `unify_view_symbols_bso_meta=False` (default): export
           fails with ConstraintViolationError ("specialized value of 1").
-        - With `unify_view_symbols_unbacked_meta=True`: `_view_unbacked_meta`
+        - With `unify_view_symbols_bso_meta=True`: `_view_unbacked_meta`
           discovers the cross-symbol equality automatically, unifies the
           symbols, and export succeeds without specialization.
         """
@@ -466,16 +466,14 @@ graph():
         ds = {"getattr_1": {0: B}, "values_1": {0: B}}
 
         # Without the flag → must FAIL with ConstraintViolationError.
-        with torch.fx.experimental._config.patch(
-            unify_view_symbols_unbacked_meta=False
-        ):
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=False):
             with self.assertRaises(
                 torch._dynamo.exc.UserError,
             ):
                 export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
 
         # With the flag → must SUCCEED.
-        with torch.fx.experimental._config.patch(unify_view_symbols_unbacked_meta=True):
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
             ep = export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
             self.assertIsNotNone(ep)
 
