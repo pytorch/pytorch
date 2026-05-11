@@ -604,6 +604,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
         import torch
 
+        tensor_var = tensor_var.unwrap()
+
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
