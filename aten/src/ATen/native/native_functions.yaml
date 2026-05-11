@@ -8647,8 +8647,7 @@
   structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
-    CPU, CUDA, MTIA: bitwise_and_out
-    MPS: bitwise_and_out_mps
+    CPU, CUDA, MPS, MTIA: bitwise_and_out
   tags: pointwise
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8714,8 +8713,7 @@
   structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
-    CPU, CUDA, MTIA: bitwise_or_out
-    MPS: bitwise_or_out_mps
+    CPU, CUDA, MPS, MTIA: bitwise_or_out
   tags: pointwise
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8781,8 +8779,7 @@
   structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_xor_out
-    MPS: bitwise_xor_out_mps
+    CPU, CUDA, MPS: bitwise_xor_out
   tags: pointwise
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -9050,9 +9047,8 @@
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: random_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
-    MPS: random_mps_
   autogen: random.from, random.from_out
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
@@ -9060,9 +9056,8 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: random_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
-    MPS: random_mps_
   autogen: random.to, random.to_out
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
@@ -9070,8 +9065,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: random_
-    MPS: random_mps_
+    CPU, CUDA, MPS: random_
     Meta: random_meta_
   autogen: random, random.out
 
@@ -9080,8 +9074,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: uniform_
-    MPS: uniform_mps_
+    CPU, CUDA, MPS: uniform_
     Meta: uniform_meta_
   autogen: uniform, uniform.out
 
@@ -9090,8 +9083,7 @@
   variants: method
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: cauchy_
-    MPS: cauchy_mps_
+    CPU, CUDA, MPS: cauchy_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -9099,8 +9091,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: log_normal_
-    MPS: log_normal_mps_
+    CPU, CUDA, MPS: log_normal_
   autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -9108,8 +9099,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: exponential_
-    MPS: exponential_mps_
+    CPU, CUDA, MPS: exponential_
   autogen: exponential, exponential.out
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -9117,8 +9107,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: geometric_
-    MPS: geometric_mps_
+    CPU, CUDA, MPS: geometric_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out
@@ -9189,8 +9178,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ne_Scalar_out
-    MPS: ne_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: ne_Scalar_out
     QuantizedCPU: ne_out_quantized_cpu
   tags: pointwise
 
@@ -9207,8 +9195,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ne_Tensor_out
-    MPS: ne_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: ne_Tensor_out
     QuantizedCPU: ne_out_quantized_cpu
   tags: pointwise
 
@@ -9252,8 +9239,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: eq_Scalar_out
-    MPS: eq_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: eq_Scalar_out
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
 
@@ -9271,8 +9257,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: eq_Tensor_out
-    MPS: eq_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: eq_Tensor_out
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
 
@@ -9290,8 +9275,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ge_Scalar_out
-    MPS: ge_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: ge_Scalar_out
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
 
@@ -9309,8 +9293,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: ge_Tensor_out
-    MPS: ge_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: ge_Tensor_out
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
 
@@ -9354,8 +9337,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: le_Scalar_out
-    MPS: le_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: le_Scalar_out
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
 
@@ -9372,8 +9354,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: le_Tensor_out
-    MPS: le_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: le_Tensor_out
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
 
@@ -9417,8 +9398,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA,MTIA: gt_Scalar_out
-    MPS: gt_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: gt_Scalar_out
     QuantizedCPU: gt_out_quantized_cpu
   tags: pointwise
 
@@ -9436,8 +9416,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: gt_Tensor_out
-    MPS: gt_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: gt_Tensor_out
     QuantizedCPU: gt_out_quantized_cpu
   tags: pointwise
 
@@ -9481,8 +9460,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: lt_Scalar_out
-    MPS: lt_scalar_out_mps
+    CPU, CUDA, MPS, MTIA: lt_Scalar_out
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
 
@@ -9499,8 +9477,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: lt_Tensor_out
-    MPS: lt_tensor_out_mps
+    CPU, CUDA, MPS, MTIA: lt_Tensor_out
     QuantizedCPU: lt_out_quantized_cpu
   tags: pointwise
 
@@ -10647,8 +10624,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: normal_
-    MPS: normal_mps_
+    CPU, CUDA, MPS: normal_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: normal_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: normal_nested_
@@ -10666,42 +10642,36 @@
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
-    CPU, CUDA: normal_out
-    MPS: normal_mps_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: normal_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
-    MPS: normal_mps_out
   tags: nondeterministic_seeded
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: normal_out
+    CPU, CUDA, MPS: normal_out
     Meta: normal_out_meta
-    MPS: normal_mps_out
   tags: nondeterministic_seeded
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU, CUDA: normal
-    MPS: normal_mps
+    CPU, CUDA, MPS: normal
     Meta: normal_meta
   tags: nondeterministic_seeded
 
