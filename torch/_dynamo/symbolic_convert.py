@@ -3646,6 +3646,7 @@ class InstructionTranslatorBase(
             and (self.is_child_tracer_active or not self.error_on_graph_break)
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
+            and not self.skip_one_hop_torch_function_depth
             # Do not allow nested graph breaks in HOPs
             and self.output.current_tracer.parent is None
         )
@@ -5059,6 +5060,7 @@ class InstructionTranslatorBase(
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
+        self.skip_one_hop_torch_function_depth: int = 0
         self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -5320,7 +5322,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
-                torch_function_mode_stack
+                torch_function_mode_stack,
+                skip_next=False,
             )
 
             self.symbolic_stream_state = SymbolicStreamState()

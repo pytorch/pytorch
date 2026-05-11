@@ -1876,13 +1876,18 @@ PythonArgs PythonArgParser::raw_parse(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
+  const bool skip_torch_function = torch::consume_should_skip_torch_function();
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     std::vector<PyObject*> overloaded_args;
     signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
     check_deprecated(signature);
     return PythonArgs(
-        traceable, signature, parsed_args, std::move(overloaded_args));
+        traceable,
+        skip_torch_function,
+        signature,
+        parsed_args,
+        std::move(overloaded_args));
   }
 
   for (auto& signature : signatures_) {
@@ -1891,7 +1896,11 @@ PythonArgs PythonArgParser::raw_parse(
             self, args, kwargs, parsed_args, overloaded_args, false)) {
       check_deprecated(signature);
       return PythonArgs(
-          traceable, signature, parsed_args, std::move(overloaded_args));
+          traceable,
+          skip_torch_function,
+          signature,
+          parsed_args,
+          std::move(overloaded_args));
     }
   }
 

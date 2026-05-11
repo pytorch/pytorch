@@ -165,6 +165,7 @@ manual_torch_name_rule_map: dict[
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
+    "torch._C._skip_one_hop_torch_function": TorchInGraphFunctionVariable,
     "torch.jit.is_scripting": TorchInGraphFunctionVariable,
     "torch.jit.is_tracing": TorchInGraphFunctionVariable,
     "torch.jit.annotate": TorchInGraphFunctionVariable,

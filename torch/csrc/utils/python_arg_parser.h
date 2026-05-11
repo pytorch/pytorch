@@ -259,17 +259,20 @@ struct PYBIND11_EXPORT PythonArgParser {
 struct TORCH_PYTHON_API PythonArgs {
   PythonArgs(
       bool traceable,
+      bool skip_torch_function,
       const FunctionSignature& signature,
       PyObject** args,
       std::vector<PyObject*> overloaded_args)
       : idx(signature.index),
         traceable(traceable),
+        skip_torch_function(skip_torch_function),
         signature(signature),
         args(args),
         overloaded_args(std::move(overloaded_args)) {}
 
   int idx;
   bool traceable;
+  bool skip_torch_function;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FunctionSignature& signature;
   PyObject** args;
@@ -386,7 +389,9 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function() {
-  return !overloaded_args.empty() || at::impl::torch_function_mode_enabled();
+  return (
+      !this->skip_torch_function &&
+      (!overloaded_args.empty() || at::impl::torch_function_mode_enabled()));
 }
 
 inline std::string PythonArgs::get_func_name() {
