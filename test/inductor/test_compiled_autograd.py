@@ -5239,6 +5239,9 @@ copy_.default""",
 
 
 def load_test_module(name):
+    if name in sys.modules:
+        return sys.modules[name]
+
     testdir = Path(__file__).absolute().parent.parent
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
         return SourceFileLoader(
@@ -5271,10 +5274,17 @@ def lookup_backend(test_name):
         return "inductor"
 
 
-def wrap_test_class(orig_cls):
+def wrap_test_class(orig_cls, only_tests=None):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
+        if (
+            only_tests is not None
+            and name.startswith("test_")
+            and name not in only_tests
+        ):
+            dct[name] = None
+            continue
         if not callable(fn) or name in skipped_tests:
             continue
         elif (
@@ -5574,7 +5584,10 @@ xfail_by_backend = {
         "test_grad",  # AOT backward higher order gradients
         "test_grad_materialize_grads",  # AOT backward higher order gradients
     },
-    "inductor": {},  # will be run with torch.compile(backend="aot_eager")
+    "inductor": {
+        # This DTensor regression test uses CPU and should run without GPU/Triton.
+        "test_dtensor_input_mutations_repeated_compile",
+    },  # will be run with torch.compile(backend="aot_eager")
     # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
@@ -5647,10 +5660,14 @@ ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.ActivationCheckpointingTests
 )
 
-if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
+if torch.distributed.is_available():
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
+    dtensor_only_tests = None
+    if not HAS_GPU_AND_TRITON:
+        dtensor_only_tests = {"test_dtensor_input_mutations_repeated_compile"}
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
-        test_dtensor.TestDTensorCompile
+        test_dtensor.TestDTensorCompile,
+        only_tests=dtensor_only_tests,
     )
 
 xfail_hops = {"local_map_hop"}

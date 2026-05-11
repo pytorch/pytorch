@@ -2259,6 +2259,37 @@ static bool contains_any_symint(const py::tuple& tup) {
   return false;
 }
 
+static bool ivalue_has_symbolic_symint(const c10::IValue& value) {
+  if (value.isSymInt()) {
+    return value.toSymInt().is_symbolic();
+  }
+  if (value.isSymIntList()) {
+    const auto symints = value.toSymIntList();
+    for (const auto idx : c10::irange(symints.size())) {
+      if (symints.get(idx).is_symbolic()) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (value.isTuple()) {
+    for (const auto& item : value.toTupleRef().elements()) {
+      if (ivalue_has_symbolic_symint(item)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (value.isList()) {
+    for (const auto& item : value.toList()) {
+      if (ivalue_has_symbolic_symint(item)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static bool dtensor_spec_has_symints(py::handle spec) {
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
   if (tensor_meta.is_none()) {
@@ -2403,6 +2434,11 @@ create_native_op_schema(
         break;
       }
       case TensorFlavor::NON_TENSOR: {
+        if (ivalue_has_symbolic_symint(arg)) {
+          // Symbolic SymInts are scoped to a single tracing/capture context,
+          // so cached sharding results containing them cannot be reused.
+          return std::nullopt;
+        }
         // Check if this is a list/tuple that might contain DTensors (e.g.,
         // torch.cat)
         if (arg.isList()) {
@@ -2521,6 +2557,11 @@ create_native_op_schema(
           break;
         }
         case TensorFlavor::NON_TENSOR: {
+          if (ivalue_has_symbolic_symint(*argument_it)) {
+            // Symbolic SymInts are scoped to a single tracing/capture context,
+            // so cached sharding results containing them cannot be reused.
+            return std::nullopt;
+          }
           if (argument_it->isList()) {
             const auto list = argument_it->toList();
             comparison_key_hash =
