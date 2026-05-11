@@ -283,7 +283,7 @@ In the next section, we give a full example of training a neural network.
 For more information, check out:
 
 - Library of PyTorch-provided modules: [torch.nn](https://pytorch.org/docs/stable/nn.html)
-- Defining neural net modules: <https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html>
+- Defining neural net modules: [https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html](https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html)
 
 (Neural Network Training with Modules)=
 ## Neural Network Training with Modules
@@ -372,9 +372,9 @@ print('evaluation mode output: {}'.format(m(x)))
 ```
 Training neural networks can often be tricky. For more information, check out:
 
-- Using Optimizers: <https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html>.
-- Neural network training: <https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html>
-- Introduction to autograd: <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>
+- Using Optimizers: [https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)
+- Neural network training: [https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html](https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html)
+- Introduction to autograd: [https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html](https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html)
 
 ## Module State
 
@@ -527,9 +527,9 @@ print(m_loaded.state_dict())
 
 For more information, check out:
 
-- Saving and loading: <https://pytorch.org/tutorials/beginner/saving_loading_models.html>
-- Serialization semantics: <https://pytorch.org/docs/main/notes/serialization.html>
-- What is a state dict? <https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html>
+- Saving and loading: [https://pytorch.org/tutorials/beginner/saving_loading_models.html](https://pytorch.org/tutorials/beginner/saving_loading_models.html)
+- Serialization semantics: [https://pytorch.org/docs/main/notes/serialization.html](https://pytorch.org/docs/main/notes/serialization.html)
+- What is a state dict? [https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html](https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html)
 
 ## Module Initialization
 
@@ -575,7 +575,7 @@ in these areas for your custom module by conforming to the convention demonstrat
 
 For more information, check out:
 
-- Skipping module parameter initialization: <https://pytorch.org/tutorials/prototype/skip_param_init.html>
+- Skipping module parameter initialization: [https://pytorch.org/tutorials/prototype/skip_param_init.html](https://pytorch.org/tutorials/prototype/skip_param_init.html)
 
 ## Module Hooks
 
