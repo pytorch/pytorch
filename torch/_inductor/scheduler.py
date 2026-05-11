@@ -102,6 +102,7 @@ from .utils import (
     is_output_of_multi_outputs_template,
     is_wait,
     sympy_product,
+    sympy_subs,
 )
 from .virtualized import V
 
@@ -508,6 +509,16 @@ class NestedReduction:
             and bool(outer_node.get_operation_names() & grouped_node.ancestors)
         )
 
+    @staticmethod
+    def _is_enabled_for(
+        outer_node: BaseSchedulerNode, grouped_node: BaseSchedulerNode
+    ) -> bool:
+        return (
+            config.triton.nested_reduction
+            and not V.graph.cpp_wrapper
+            and _is_gpu_triton_backend(outer_node, grouped_node)
+        )
+
     class PointwiseDomain(enum.Enum):
         """
         Where a pointwise node runs in the nested pipeline.
@@ -715,7 +726,7 @@ class NestedReduction:
         return V.graph.sizevars.statically_known_equals(
             sn_numel, expected_numel
         ) and SIMDKernel.is_compatible(
-            expected_groups, typing.cast(Any, sn).get_ranges()
+            expected_groups, typing.cast(SchedulerNode, sn).get_ranges()
         )
 
     @classmethod
@@ -758,11 +769,7 @@ class NestedReduction:
         """Check whether a dependent cross-axis reduction pair can be fused."""
         # TODO: enable nested reduction with cpp wrapper after validating the
         # additional autotuning meta (min_xblock / min_rblock).
-        if (
-            not config.triton.nested_reduction
-            or V.graph.cpp_wrapper
-            or not _is_gpu_triton_backend(node1, node2)
-        ):
+        if not cls._is_enabled_for(node1, node2):
             return False
 
         assert cls._is_dependent_reduction_pair(node1, node2)
@@ -7363,6 +7370,69 @@ class Scheduler:
                 return True
         return False
 
+    @staticmethod
+    def _fusable_read_after_broadcast_split(
+        read: MemoryDep, write: MemoryDep
+    ) -> bool:
+        """Match a broadcast read by splitting larger read dims.
+
+        The normal ``read.normalize() == write.normalize()`` path handles
+        rank-changing broadcasts such as a flat read of a 2D write. This handles
+        same-rank broadcasts where one read dimension is an exact multiple of
+        the corresponding write dimension.
+
+        Example:
+
+            read:  32*d0 + FloorDiv(d1, 128), {d0: 128, d1: 4096}
+            write: 32*d0 + d1,                {d0: 128, d1: 32}
+
+        For each read dim that is an exact multiple of the write dim, rewrite
+        the read var as ``write_var * factor + tail_var`` and rely on range
+        simplification to prove the refactored read index equals the write.
+        """
+        if read.num_vars != write.num_vars:
+            return False
+
+        sizevars = V.graph.sizevars
+        write_vars = tuple(
+            sympy.Symbol(f"_fusable_broadcast_{i}", integer=True, nonnegative=True)
+            for i in range(read.num_vars)
+        )
+        replacements: dict[sympy.Expr, sympy.Expr] = {}
+        tail_ranges: dict[sympy.Symbol, sympy.Expr] = {}
+        for read_var, read_size, write_var, write_size in zip(
+            read.var_names, read.size, write_vars, write.size
+        ):
+            if sizevars.statically_known_equals(read_size, write_size):
+                replacements[read_var] = write_var
+                continue
+
+            if not sizevars.statically_known_equals(
+                sympy.Mod(read_size, write_size), 0
+            ):
+                return False
+            factor = sizevars.simplify(FloorDiv(read_size, write_size))
+            if not sizevars.statically_known_gt(factor, 1):
+                return False
+
+            tail_var = sympy.Symbol(
+                f"_fusable_broadcast_tail_{len(tail_ranges)}",
+                integer=True,
+                nonnegative=True,
+            )
+            replacements[read_var] = write_var * factor + tail_var
+            tail_ranges[tail_var] = factor
+
+        if not tail_ranges:
+            return False
+
+        read_index = sizevars.simplify_with_ranges(
+            sympy_subs(read.index, replacements),
+            {**dict(zip(write_vars, write.size)), **tail_ranges},
+        )
+        write_index = sympy_subs(write.index, dict(zip(write.var_names, write_vars)))
+        return sizevars.statically_known_equals(read_index, write_index)
+
     # on tensors that are "empty" (i.e. with undefined values),
     # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
     # This makes use of the fact that `f(UB) = UB`.
@@ -7410,9 +7480,7 @@ class Scheduler:
         # normalized-dependency scoring once that can be done without skipping
         # loop-reindex repairs for reduction->pointwise fusion.
         if not (
-            config.triton.nested_reduction
-            and not V.graph.cpp_wrapper
-            and _is_gpu_triton_backend(outer_node, grouped_node)
+            NestedReduction._is_enabled_for(outer_node, grouped_node)
             and NestedReduction._is_dependent_reduction_pair(outer_node, grouped_node)
         ):
             return 0

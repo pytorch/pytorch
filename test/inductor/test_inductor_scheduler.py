@@ -10,10 +10,12 @@ import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, ReadWrites
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -30,6 +32,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -82,6 +85,36 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_fusable_read_after_broadcast_split(self):
+        d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            self.assertTrue(
+                Scheduler._fusable_read_after_broadcast_split(
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128),
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                )
+            )
+            self.assertFalse(
+                Scheduler._fusable_read_after_broadcast_split(
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                )
+            )
+
     def test_nested_reduction_axis_from_loop_body(self):
         outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
         grouped_x0, grouped_x1, grouped_r = sympy.symbols(
