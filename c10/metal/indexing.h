@@ -146,6 +146,14 @@ kernel void unary_strided(
     }                                                                           \
   }
 
+#define DEFINE_BINARY_COMPARISON_FUNCTOR(NAME, OP) \
+  struct NAME##_functor {                          \
+    template <typename T>                          \
+    inline bool operator()(const T a, const T b) { \
+      return a OP b;                               \
+    }                                              \
+  }
+
 template <typename T, typename T2, typename F>
 kernel void unary_alpha_dense(
     device result_of<F, T, T2>* output [[buffer(0)]],
