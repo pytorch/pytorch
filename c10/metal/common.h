@@ -9,10 +9,15 @@
 #define C10_METAL_CONSTEXPR constexpr
 #endif
 
-// Per-type X-macro: (EnumName, EnumValue, MetalType). Drives the ScalarType
-// enum (host + device) and the runtime-typed read/store helpers in indexing.h
-// (device only). MetalType is the in-shader spelling and is only meaningful
-// in Metal shader compilation contexts.
+// `if IF_CONSTEXPR (...)` reduces to `if constexpr` on Metal 4 (which supports
+// C++17) and to a plain runtime `if` on Metal 3 (where the compiler will
+// usually still constant-fold the branch, but it's not guaranteed).
+#if __METAL_VERSION__ >= 400
+#define IF_CONSTEXPR constexpr
+#else
+#define IF_CONSTEXPR
+#endif
+
 #define C10_METAL_ALL_TYPES_FUNCTOR(_) \
   _(Byte, 0, uchar)                    \
   _(Char, 1, char)                     \
