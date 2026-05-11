@@ -1100,15 +1100,14 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   }
 
   // Output-cast routing: when the user-facing output dtype diverges from the
-  // kernel's natural output (`natural` = common for arithmetic, kBool for
-  // comparison), force the strided `_castout_` kernel variant. That kernel
-  // computes at compile-time precision and runtime-casts on store using the
-  // output dtype already bound in `ndim_and_types.w` on the strided path.
-  // The flag flips off `use_scalar_kernel` / `use_broadcast_kernel` /
-  // `dense_ilp` / `is_contiguous` choices below; the strided buffer-binding
-  // branch handles every layout (just at slightly higher cost than the dense
-  // specializations).
-  const auto natural = natural_output_dtype.value_or(iter.common_dtype());
+  // kernel's natural output, force the strided `_castout_` kernel variant.
+  // The default `natural` is `iter.dtype(0)` -- arithmetic kernels are
+  // template-instantiated for whatever dtype the user requested, so there's
+  // no divergence to handle. Comparison stubs declare `kBool` and
+  // `polar`/`make_complex` declare `toComplexType(common)`, which lets the
+  // dispatcher route through the new castout path when the user's `out=`
+  // dtype diverges from that fixed natural output.
+  const auto natural = natural_output_dtype.value_or(iter.output().scalar_type());
   const bool output_cast_needed = iter.output().scalar_type() != natural;
 
   auto convert_double_scalar = [](Tensor& t) {

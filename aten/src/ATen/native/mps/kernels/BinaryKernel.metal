@@ -480,16 +480,29 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
-#define REGISTER_COMPARISON_OP(NAME)      \
-  REGISTER_BINARY_OP(NAME, float, bool);  \
-  REGISTER_BINARY_OP(NAME, half, bool);   \
-  REGISTER_BINARY_OP(NAME, bfloat, bool); \
-  REGISTER_BINARY_OP(NAME, long, bool);   \
-  REGISTER_BINARY_OP(NAME, int, bool);    \
-  REGISTER_BINARY_OP(NAME, short, bool);  \
-  REGISTER_BINARY_OP(NAME, uchar, bool);  \
-  REGISTER_BINARY_OP(NAME, char, bool);   \
-  REGISTER_BINARY_OP(NAME, bool, bool)
+// Comparison ops produce bool but may be invoked with a non-bool `out=`
+// (e.g. `linalg_vector_norm(p=0)` -> `ne_outf(float, 0, float_out)`); each
+// DTYPEI gets the castout variant so the dispatcher can route the non-bool
+// case through `_strided_castout_<bool>_<DTYPEI>`.
+#define REGISTER_COMPARISON_OP(NAME)              \
+  REGISTER_BINARY_OP(NAME, float, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float, bool);  \
+  REGISTER_BINARY_OP(NAME, half, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, half, bool);   \
+  REGISTER_BINARY_OP(NAME, bfloat, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, bfloat, bool); \
+  REGISTER_BINARY_OP(NAME, long, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, long, bool);   \
+  REGISTER_BINARY_OP(NAME, int, bool);            \
+  REGISTER_BINARY_CASTOUT_OP(NAME, int, bool);    \
+  REGISTER_BINARY_OP(NAME, short, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, short, bool);  \
+  REGISTER_BINARY_OP(NAME, uchar, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
+  REGISTER_BINARY_OP(NAME, char, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, bool, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);

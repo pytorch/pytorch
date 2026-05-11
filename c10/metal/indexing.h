@@ -768,18 +768,6 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               constant long* other_strides,                                    \
               constant uint4& ndim_types,                                      \
               uint tid);                                                       \
-  template [[host_name(#NAME "_strided_castout_" #DTYPEO                       \
-                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
-      binary_strided_castout<DTYPEI, NAME##_functor, OMT>(                     \
-          device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
-          constant long* sizes,                                                \
-          constant long* output_strides,                                       \
-          constant long* input_strides,                                        \
-          constant long* other_strides,                                        \
-          constant uint4& ndim_types,                                          \
-          uint tid);                                                           \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
@@ -882,6 +870,25 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
 
 #define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO) \
   REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
+
+// Opt-in castout variant: enables `<NAME>_strided_castout_<DTYPEO>_<DTYPEI>`
+// for ops whose kernel-natural output dtype is fixed (comparison: bool) and
+// whose user-facing `out=` may differ. Arithmetic ops that produce
+// `iter.dtype(0)` directly should NOT register this -- the existing
+// `_<DTYPEO>_<DTYPEI>` cast kernel matrix covers them.
+#define REGISTER_BINARY_CASTOUT_OP(NAME, DTYPEI, DTYPEO)                \
+  template [[host_name(#NAME "_strided_castout_" #DTYPEO "_" #DTYPEI)]] \
+  kernel void ::c10::metal::                                            \
+      binary_strided_castout<DTYPEI, NAME##_functor, DTYPEI>(           \
+          device void* out,                                             \
+          constant void* input,                                         \
+          constant void* other,                                         \
+          constant long* sizes,                                         \
+          constant long* output_strides,                                \
+          constant long* input_strides,                                 \
+          constant long* other_strides,                                 \
+          constant uint4& ndim_types,                                   \
+          uint tid)
 
 #define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)                \
   static_assert(                                                              \

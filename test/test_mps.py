@@ -8881,6 +8881,7 @@ struct simple_ge_functor {
     inline bool operator()(const T a, const T b) { return a >= b; }
 };
 REGISTER_BINARY_OP(simple_ge, float, bool);
+REGISTER_BINARY_CASTOUT_OP(simple_ge, float, bool);
 """
 
 _CONFORMANCE_CPP_SOURCE = r"""
@@ -8996,11 +8997,12 @@ _CONFORMANCE_SHAPES = [(), (8,), (3, 5)]
 
 
 class TestBinaryIteratorConformance(TestCaseMPS):
-    # `out_dtype=None` exercises the functional form (TI allocates); other
-    # values exercise the `out=` path, including ones that diverge from the
-    # kernel's natural output and trigger the strided castout dispatch.
+    # simple_add only registers `(float, float)` -- it relies on the existing
+    # `<DTYPEO>_<DTYPEI>` cast kernel matrix, so `out=` must match the common
+    # dtype. Real-op divergent-out narrowing is covered by test_binary_kernels.
+    # Divergent-out via the castout path is exercised by simple_ge below.
     @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
-    @parametrize("out_dtype", [None, torch.float32, torch.float16, torch.int32])
+    @parametrize("out_dtype", [None, torch.float32])
     @parametrize("shape", _CONFORMANCE_SHAPES)
     def test_simple_add(self, a_dtype, b_dtype, out_dtype, shape):
         ext = _conformance_ext_handle()
