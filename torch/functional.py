@@ -84,7 +84,7 @@ def broadcast_shapes(*shapes):
 
     This is equivalent to
     ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
-    but avoids the need create to intermediate tensors. This is useful for
+    but avoids the need to create intermediate tensors. This is useful for
     broadcasting tensors of common batch shape but different rightmost shape,
     e.g. to broadcast mean vectors with covariance matrices.
 
