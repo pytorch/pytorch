@@ -111,6 +111,15 @@ from torch.hub import tqdm
 from torch.testing import make_tensor
 
 
+def _get_device_name() -> str:
+    """Return the current accelerator device name for use as a Triton tuning cache key."""
+    if torch.cuda.is_available():
+        return torch.cuda.get_device_name()
+    if torch.xpu.is_available():
+        return torch.xpu.get_device_name()
+    return ""
+
+
 def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=False):
     """Return triton kernel meta parameters of the specified op and its inputs key.
 
@@ -135,7 +144,7 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
       mappings that match with the given `key`.
     """
     if device_name is None:
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
 
     op_data = _operation_device_version_data.get((op, device_name, version))
     if op_data is None and not exact:
@@ -144,7 +153,10 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
         # meta parameters have been computed. In the following we'll
         # assume that there is a set of GPU models that all have
         # a similar set of optimal meta parameters.
-        if re.match(r"NVIDIA A100[^\d]", device_name) is not None:
+        if (
+            device_name is not None
+            and re.match(r"NVIDIA A100[^\d]", device_name) is not None
+        ):
             device_name = "NVIDIA A100-SXM4-80GB"
         else:
             return
@@ -241,10 +253,8 @@ def dump():
     part2 = current_content[end_data_index:]
     data_part = []
     for op_key in sorted(_operation_device_version_data, key=sort_key):
-        # pyrefly: ignore [bad-argument-type]
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        # pyrefly: ignore [bad-argument-type]
         data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
@@ -485,7 +495,7 @@ def optimize_scatter_mm(
     key = (m, k, n, bm, bk)
 
     version = (0, dtype, sparsity)
-    device_name = torch.cuda.get_device_name()
+    device_name = _get_device_name()
 
     reference_meta = dict(
         GROUP_SIZE=1,
@@ -578,7 +588,7 @@ def optimize_scatter_mm(
     print(f"{meta=} {speedup=:.1f} % {timing=:.3f} ms")
     if speedup < 0:
         return
-    device_name = torch.cuda.get_device_name()
+    device_name = _get_device_name()
 
     update(
         "scatter_mm", device_name, version, key, tuple(meta[k] for k in sorted(meta))
@@ -740,7 +750,7 @@ def tune_bsr_dense_addmm(
     if store and not (
         may_skip_update and meta == initial_meta and initial_meta is not reference_meta
     ):
-        device_name = torch.cuda.get_device_name()
+        device_name = _get_device_name()
         update(
             opname,
             device_name,
@@ -939,7 +949,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                 print(sparsity1, index, key, meta_lst, speeddiff)
 
                 if index > 0:
-                    device_name = torch.cuda.get_device_name()
+                    device_name = _get_device_name()
                     meta = get_meta(
                         op, key, version=(0, dtype, meta_lst[0][1]), exact=True
                     )

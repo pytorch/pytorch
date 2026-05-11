@@ -104,7 +104,8 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
+    if not callable(func):
+        raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
     new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
@@ -279,6 +280,9 @@ if RUN_CPU:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_codegen_int_array_var_cache", "", test_cpu_repro.CPUReproTests()
+        ),
         BaseTest("test_scalar_input"),
         BaseTest("test_scalar_output"),
         BaseTest("test_scaled_dot_product_attention"),

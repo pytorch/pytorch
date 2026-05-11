@@ -330,7 +330,7 @@ static PyObject* THPVariable_asarray(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {
-          "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool requires_grad=False)",
+          "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool? requires_grad=None)",
       },
       /*traceable=*/false);
 
@@ -347,7 +347,7 @@ static PyObject* THPVariable_asarray(
     auto dtype = r.scalartypeOptional(1);
     auto device = r.deviceOptional(2);
     auto copy = r.toBoolOptional(3);
-    auto requires_grad = r.toBool(4);
+    auto requires_grad = r.toBoolOptional(4);
     return wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
   }
 
@@ -797,10 +797,8 @@ void initTorchFunctions(PyObject* module) {
         if (inner_autograd_meta) {
           dst_.set_requires_grad(src_.requires_grad());
           if (dst_.requires_grad()) {
-            auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
-                new torch::autograd::Error(
-                    "Cannot backprop through mirrored meta, file a bug in PyTorch"),
-                torch::autograd::deleteNode);
+            auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
+                "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);
           }
         }

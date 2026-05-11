@@ -5,7 +5,6 @@ import functools
 import unittest
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -90,11 +89,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self,
         *,
         no_sync: bool,
-        setup_func: Optional[Callable] = None,
+        setup_func: Callable | None = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
         checkpoint: bool = False,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
@@ -389,6 +388,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
+        super().setUp()
         # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4

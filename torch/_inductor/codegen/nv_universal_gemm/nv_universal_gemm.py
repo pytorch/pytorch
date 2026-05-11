@@ -8,7 +8,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 
 import itertools
 from enum import auto, Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._inductor import config
@@ -65,22 +65,22 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_type_a: Optional[Any] = None,
-        scale_type_b: Optional[Any] = None,
-        swizzle_type_a: Optional[Any] = None,
-        swizzle_type_b: Optional[Any] = None,
+        scale_type_a: Any | None = None,
+        scale_type_b: Any | None = None,
+        swizzle_type_a: Any | None = None,
+        swizzle_type_b: Any | None = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self._compiled_artifact = None
-        self._workspace: Optional[torch.Tensor] = None
+        self._workspace: torch.Tensor | None = None
         self.workspace_size = workspace_size
         self.variant = variant
         self.scale_type_a = scale_type_a
@@ -91,7 +91,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     def benchmark(
         self,
         *input_tensors: torch.Tensor,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
     ) -> float:
         """Benchmark the NVIDIA Universal GEMM kernel.
 
@@ -114,6 +114,10 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
+
+        from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+        _ensure_fp4_dtype_registered()
 
         args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
 
@@ -205,10 +209,10 @@ class NVUniversalGemmCaller(ChoiceCaller):
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_type_a: Optional[Any] = None,
-        scale_type_b: Optional[Any] = None,
-        swizzle_type_a: Optional[Any] = None,
-        swizzle_type_b: Optional[Any] = None,
+        scale_type_a: Any | None = None,
+        scale_type_b: Any | None = None,
+        swizzle_type_a: Any | None = None,
+        swizzle_type_b: Any | None = None,
     ) -> None:
         super().__init__(
             name=name,
@@ -284,7 +288,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
         }
 
 
-def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
+def _create_dummy_tensor_from_layout(
+    layout: Layout, dtype_override: torch.dtype | None = None
+) -> torch.Tensor | None:
     """
     Create a FakeTensor from a Layout for kernel filtering.
 
@@ -293,7 +299,10 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
     metadata for its supports() checks.
     """
     try:
-        return layout.get_example()
+        result = layout.get_example()
+        if dtype_override is not None and result.dtype != dtype_override:
+            result = result.view(dtype_override)
+        return result
     except Exception:
         return None
 
@@ -316,11 +325,11 @@ def _add_nv_gemm_choices_impl(
     input_nodes: list[Buffer],
     variant: GemmVariant,
     accumulator_type: torch.dtype,
-    mm_inputs: Optional[MMKernelInputs] = None,
-    scale_type_a: Optional[Any] = None,
-    scale_type_b: Optional[Any] = None,
-    swizzle_type_a: Optional[Any] = None,
-    swizzle_type_b: Optional[Any] = None,
+    mm_inputs: MMKernelInputs | None = None,
+    scale_type_a: Any | None = None,
+    scale_type_b: Any | None = None,
+    swizzle_type_a: Any | None = None,
+    swizzle_type_b: Any | None = None,
 ) -> None:
     """
     Unified implementation for adding NVIDIA Universal GEMM choices.
@@ -339,13 +348,21 @@ def _add_nv_gemm_choices_impl(
     """
     import cutlass_api
 
+    from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+    _ensure_fp4_dtype_registered()
+
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_compatible_kernels,
     )
 
-    # Create dummy tensors for cutlass_api's supports() checks
+    # Create dummy tensors for cutlass_api's supports() checks.
+    # Pass node dtype to handle FP4 ReinterpretView (uint8 storage viewed as float4_e2m1fn_x2).
     dummy_tensors = [
-        _create_dummy_tensor_from_layout(node.get_layout()) for node in input_nodes
+        _create_dummy_tensor_from_layout(
+            node.get_layout(), dtype_override=node.get_dtype()
+        )
+        for node in input_nodes
     ]
     out_tensor = _create_dummy_tensor_from_layout(layout)
 
@@ -456,7 +473,7 @@ def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
     inputs: MMKernelInputs,
-    accumulator_type: Optional[torch.dtype] = None,
+    accumulator_type: torch.dtype | None = None,
 ) -> None:
     """
     Add NVIDIA Universal GEMM kernels to the autotune choices.
@@ -481,7 +498,7 @@ def add_nv_universal_grouped_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
     input_nodes: list[Buffer],
-    accumulator_type: Optional[torch.dtype] = None,
+    accumulator_type: torch.dtype | None = None,
 ) -> None:
     """
     Add NVIDIA Universal Grouped GEMM kernels to the autotune choices.
@@ -513,8 +530,8 @@ def add_nv_universal_scaled_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
     input_nodes: list[Buffer],
-    accumulator_type: Optional[torch.dtype] = None,
-    kernel_inputs: Optional[MMKernelInputs] = None,
+    accumulator_type: torch.dtype | None = None,
+    kernel_inputs: MMKernelInputs | None = None,
 ) -> None:
     """
     Add NVIDIA Universal Scaled GEMM (FP8) kernels to the autotune choices.

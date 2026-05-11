@@ -3,7 +3,10 @@
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
 #if defined(USE_ROCM)
-#include <rocm_smi/rocm_smi.h>
+#include <amd_smi/amdsmi.h>
+#include <dlfcn.h>
+#include <cstdlib>
+#include <string>
 #endif
 
 namespace c10d::intra_node_comm {
@@ -20,7 +23,7 @@ static int intraNodeCommIdx = 0;
  * Query the nvlink connection among devices.
  */
 static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
-#if !defined(USE_RCOM)
+#if !defined(USE_ROCM)
   auto connectivity = detect_dma_connectivity(c10::DeviceType::CUDA, "nvlink");
   NvlMesh nvlMesh = {};
   for (size_t srcRank = 0; srcRank < kMaxDevices; ++srcRank) {
@@ -35,23 +38,126 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   }
   return nvlMesh;
 #else
+  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
+  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
+  struct AmdsmiApi {
+    amdsmi_status_t (*init)(uint64_t);
+    amdsmi_status_t (*get_socket_handles)(uint32_t*, amdsmi_socket_handle*);
+    amdsmi_status_t (*get_processor_handles)(
+        amdsmi_socket_handle,
+        uint32_t*,
+        amdsmi_processor_handle*);
+    amdsmi_status_t (*is_P2P_accessible)(
+        amdsmi_processor_handle,
+        amdsmi_processor_handle,
+        bool*);
+  };
+  static void* amdsmi_handle = nullptr;
+  static AmdsmiApi amdsmi = {};
+  static bool amdsmi_resolved = false;
+
+  if (!amdsmi_resolved) {
+    amdsmi_resolved = true;
+    const char* rocm = std::getenv("ROCM_PATH");
+    std::string path =
+        rocm ? std::string(rocm) + "/lib/libamd_smi.so" : "libamd_smi.so";
+    amdsmi_handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!amdsmi_handle) {
+      amdsmi_handle = dlopen("libamd_smi.so", RTLD_NOW | RTLD_LOCAL);
+    }
+    if (!amdsmi_handle) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: dlopen libamd_smi.so failed: "
+                 << dlerror();
+      return {};
+    }
+    amdsmi.init = reinterpret_cast<decltype(amdsmi.init)>(
+        dlsym(amdsmi_handle, "amdsmi_init"));
+    amdsmi.get_socket_handles =
+        reinterpret_cast<decltype(amdsmi.get_socket_handles)>(
+            dlsym(amdsmi_handle, "amdsmi_get_socket_handles"));
+    amdsmi.get_processor_handles =
+        reinterpret_cast<decltype(amdsmi.get_processor_handles)>(
+            dlsym(amdsmi_handle, "amdsmi_get_processor_handles"));
+    amdsmi.is_P2P_accessible =
+        reinterpret_cast<decltype(amdsmi.is_P2P_accessible)>(
+            dlsym(amdsmi_handle, "amdsmi_is_P2P_accessible"));
+    if (!amdsmi.init || !amdsmi.get_socket_handles ||
+        !amdsmi.get_processor_handles || !amdsmi.is_P2P_accessible) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: dlsym amdsmi failed";
+      return {};
+    }
+  }
+
   NvlMesh nvlMesh = {};
   const auto worldSize = rankToDeviceIdx.size();
-  // For each device, loop over devices connected to it
+
+  uint32_t socket_count = 0;
+  amdsmi_status_t ret = amdsmi.get_socket_handles(&socket_count, nullptr);
+  if (ret == AMDSMI_STATUS_NOT_INIT) {
+    ret = amdsmi.init(AMDSMI_INIT_AMD_GPUS);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_init failed, ret="
+                 << static_cast<int>(ret);
+      return {};
+    }
+    socket_count = 0;
+    ret = amdsmi.get_socket_handles(&socket_count, nullptr);
+  }
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    LOG(ERROR)
+        << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles failed, ret="
+        << static_cast<int>(ret);
+    return {};
+  }
+
+  std::vector<amdsmi_socket_handle> socket_handles(socket_count);
+  ret = amdsmi.get_socket_handles(&socket_count, &socket_handles[0]);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    LOG(ERROR)
+        << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles (buffer) failed, ret="
+        << static_cast<int>(ret);
+    return {};
+  }
+
+  std::vector<amdsmi_processor_handle> processor_handles;
+  for (size_t i = 0; i < socket_count; ++i) {
+    uint32_t device_count = 0;
+    ret =
+        amdsmi.get_processor_handles(socket_handles[i], &device_count, nullptr);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      LOG(ERROR)
+          << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles (count) failed, ret="
+          << static_cast<int>(ret);
+      return {};
+    }
+    std::vector<amdsmi_processor_handle> _processor_handles(device_count);
+    ret = amdsmi.get_processor_handles(
+        socket_handles[i], &device_count, &_processor_handles[0]);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      LOG(ERROR)
+          << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles (buffer) failed, ret="
+          << static_cast<int>(ret);
+      return {};
+    }
+    processor_handles.insert(
+        processor_handles.end(),
+        _processor_handles.begin(),
+        _processor_handles.end());
+  }
+
   for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxDevices; ++link) {
       if (idx == link)
         continue;
-
       bool conn = false;
-      auto ret = rsmi_is_P2P_accessible(idx, link, &conn);
-      if (ret != RSMI_STATUS_SUCCESS) {
+      ret = amdsmi.is_P2P_accessible(
+          processor_handles[idx], processor_handles[link], &conn);
+      if (ret != AMDSMI_STATUS_SUCCESS) {
         LOG(ERROR)
-            << "IntraNodeComm: getNvlMesh: rsmi_is_P2P_accessible returned error ret="
-            << ret;
+            << "IntraNodeComm: getNvlMesh: amdsmi_is_P2P_accessible failed, ret="
+            << static_cast<int>(ret);
         return {};
       }
-
       if (conn) {
         nvlMesh[idx][link] += 1;
       }
@@ -88,11 +194,13 @@ IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
     size_t worldSize,
-    std::optional<size_t> bufferSize)
+    std::optional<size_t> bufferSize,
+    std::string groupName)
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
-      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {}
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize),
+      groupName_(std::move(groupName)) {}
 
 IntraNodeComm::~IntraNodeComm() {
   if (!isInitialized_) {
@@ -171,14 +279,6 @@ bool IntraNodeComm::rendezvous() {
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
 
-#if defined(USE_ROCM)
-  auto ret = rsmi_init(0);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
-    return false;
-  }
-#endif
-
   auto peerDevInfos =
       storeAllGather(store_, "handshake-0", rank_, worldSize_, devInfo);
 
@@ -214,11 +314,13 @@ bool IntraNodeComm::rendezvous() {
     return false;
   }
 
-  auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
+  const std::string name = groupName_.empty()
+      ? "IntraNodeComm" + std::to_string(intraNodeCommIdx++)
+      : groupName_;
   set_group_info(
-      groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
+      name, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
-  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, name);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;

@@ -8,7 +8,7 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
 from typing import Any, cast, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, Self
+from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
@@ -60,7 +60,6 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -134,16 +133,14 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
-                and arg[0].is_cuda
+                and arg[0].device.type in {"cuda", "xpu"}
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
-                    and kwarg[0].is_cuda
+                    and kwarg[0].device.type in {"cuda", "xpu"}
                 )
             ):
                 return disabled_func(*args, **kwargs)
@@ -377,7 +374,7 @@ class Optimizer:
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
-    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
+    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -412,14 +409,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> dict[str, Any]:  # noqa: D105
+    def __getstate__(self) -> dict[str, Any]:
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: dict[str, Any]) -> None:  # noqa: D105
+    def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -436,7 +433,7 @@ class Optimizer:
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault("differentiable", False)
 
-    def __repr__(self) -> str:  # noqa: D105
+    def __repr__(self) -> str:
         format_string = self.__class__.__name__ + " ("
         for i, group in enumerate(self.param_groups):
             format_string += "\n"
@@ -463,21 +460,16 @@ class Optimizer:
             return
 
         # Determine available accelerator device
-        accelerator = None
-        if torch.cuda.is_available():
-            accelerator = (torch.cuda, "CUDA")
-        elif torch.xpu.is_available():
-            accelerator = (torch.xpu, "XPU")
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
 
-        if accelerator:
-            device_module, device_name = accelerator
-            capturing = device_module.is_current_stream_capturing()
+        if accelerator and accelerator.type in {"cuda", "xpu"}:
+            capturing = torch.accelerator.current_stream().is_capturing()
 
             if capturing and not all(
                 group["capturable"] for group in self.param_groups
             ):
                 raise RuntimeError(
-                    f"Attempting {device_name} graph capture of step() for an instance of "
+                    f"Attempting {accelerator.type.upper()} graph capture of step() for an instance of "
                     + self.__class__.__name__
                     + " but param_groups' capturable is False."
                 )
@@ -489,11 +481,16 @@ class Optimizer:
             ):
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
-                    f"but step() is running without {device_name} graph capture. If you never intend to graph-capture this "
+                    f"but step() is running without {accelerator.type.upper()} graph capture. If you never intend to graph-capture this "
                     "instance, capturable=True can impair performance, and you should set capturable=False.",
                     stacklevel=2,
                 )
                 self._warned_capturable_if_run_uncaptured = True
+
+    # Backward compatibility alias for internal callers still using the old name.
+    _cuda_graph_capture_health_check = deprecated(
+        "Use _accelerator_graph_capture_health_check instead",
+    )(_accelerator_graph_capture_health_check)
 
     def _optimizer_step_code(self) -> None:
         """Entry point for `torch.profile.profiler`.
@@ -508,7 +505,7 @@ class Optimizer:
         """
 
     @staticmethod
-    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102
+    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self, *_ = args
@@ -616,7 +613,7 @@ class Optimizer:
 
     def register_state_dict_pre_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:  # noqa: D101
+    ) -> RemovableHandle:
         r"""Register a state dict pre-hook which will be called before :meth:`~torch.optim.Optimizer.state_dict` is called.
 
         It should have the following signature::
@@ -809,7 +806,7 @@ class Optimizer:
         self,
         hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
-    ) -> RemovableHandle:  # noqa: D205 D400
+    ) -> RemovableHandle:
         r"""Register a load_state_dict pre-hook which will be called before
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -846,7 +843,7 @@ class Optimizer:
 
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:  # noqa: D205 D400
+    ) -> RemovableHandle:
         r"""Register a load_state_dict post-hook which will be called after
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::

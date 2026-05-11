@@ -145,7 +145,6 @@ class BackwardHook:
 
                 res = out
 
-            # pyrefly: ignore [bad-assignment]
             self.grad_outputs = None
 
             return self._unpack_none(self.input_tensors_index, res)
@@ -226,7 +225,7 @@ class BackwardHook:
                 if self.input_tensors_index is None:
                     warnings.warn("Full backward hook is firing when gradients are computed "
                                   "with respect to module outputs since no inputs require gradients. See "
-                                  "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "  # noqa: B950
+                                  "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
                                   "for more details.",
                                   stacklevel=5)
                     grad_inputs = self._pack_with_none([], [], self.n_inputs)

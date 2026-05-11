@@ -2,10 +2,10 @@
 import functools
 import itertools
 from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
@@ -29,8 +29,8 @@ class CuteDSLTemplate(KernelTemplate):
         self,
         name: str,
         source: str,
-        subgraph_fn: Optional[Any] = None,
-        mask_fn: Optional[Any] = None,
+        subgraph_fn: Any | None = None,
+        mask_fn: Any | None = None,
     ) -> None:
         super().__init__(name)
         self.source = source
@@ -48,7 +48,7 @@ class CuteDSLTemplate(KernelTemplate):
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
-    ) -> Optional[NotImplementedError]:
+    ) -> NotImplementedError | None:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -57,18 +57,19 @@ class CuteDSLTemplate(KernelTemplate):
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.debug("CuteDSL template choice generation failed: %s", e)  # noqa: G200
+            log.debug("CuteDSL template choice generation failed: %s", e)
             return e
         except Exception as e:
-            log.debug("CuteDSL template choice generation error: %s", e)  # noqa: G200
+            log.debug("CuteDSL template choice generation error: %s", e)
             return NotImplementedError(f"CuteDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
-        """Generate the CuteDSL kernel caller."""
+        """Generate the CuteDSL kernel caller for template autotuning."""
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         subgraphs = kwargs.pop("subgraphs", None)
+        template_kwargs = dict(kwargs)
 
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
@@ -90,6 +91,32 @@ class CuteDSLTemplate(KernelTemplate):
 
             log.debug("Generated CuteDSL Code:\n%s", code)
 
+            input_call_args = tuple(kernel.args.input_buffers.keys())
+            expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+            if input_call_args[: len(expected_input_args)] != expected_input_args:
+                raise RuntimeError(
+                    "CuteDSL template input registration order changed while "
+                    "collecting captured subgraph buffers. Expected template "
+                    "inputs to be registered before captured buffers, got "
+                    f"{input_call_args}, expected prefix {expected_input_args}."
+                )
+            extra_capture_names = input_call_args[len(expected_input_args) :]
+
+            # Resolve captured nodes from the graph-level side table
+            # (populated by realize_captures_for_cutedsl) to get view nodes.
+            graph_captures = getattr(V.graph, "_cutedsl_capture_nodes", {})
+            capture_nodes_by_name: dict[str, Any] = {}
+            extra_capture_nodes = []
+            for name in extra_capture_names:
+                node = graph_captures.get(name)
+                if node is None:
+                    node = V.graph.get_buffer(name)
+                capture_nodes_by_name[name] = node
+                extra_capture_nodes.append(node)
+            input_nodes = list(input_nodes) + extra_capture_nodes
+
+            kernel.set_capture_input_nodes(capture_nodes_by_name)
+
             bmreq = CuteDSLBenchmarkRequest(
                 kernel_name=kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
@@ -98,7 +125,7 @@ class CuteDSLTemplate(KernelTemplate):
                 source_code=code,
             )
 
-            def make_kernel_render(out_node, hint_override: Optional[int] = None):
+            def make_kernel_render(out_node, hint_override: int | None = None):
                 """
                 Factory function that creates a kernel renderer for the final output.
 
@@ -112,6 +139,7 @@ class CuteDSLTemplate(KernelTemplate):
                     output_node=out_node,
                     subgraphs=subgraphs,
                 )
+                render_kernel.set_capture_input_nodes(capture_nodes_by_name)
 
                 def render():
                     return render_kernel.render(self.template, **kwargs)
@@ -126,6 +154,7 @@ class CuteDSLTemplate(KernelTemplate):
                 bmreq=bmreq,
                 template=self,
                 mutated_inputs=mutated_inputs,
+                template_kwargs=template_kwargs,
             )
 
 
@@ -140,18 +169,28 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         make_kernel_render: Any,
         bmreq: CuteDSLBenchmarkRequest,
         template: "CuteDSLTemplate",
-        mutated_inputs: Optional[Iterable[IRNode]] = None,
+        mutated_inputs: Iterable[IRNode] | None = None,
+        template_kwargs: dict[str, Any] | None = None,
     ):
+        description = self._build_description(name, template_kwargs)
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"CuteDSL template {name}",
+            description=description,
         )
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
+
+    def _build_description(
+        self, name: str, template_kwargs: dict[str, Any] | None
+    ) -> str:
+        if not template_kwargs:
+            return f"CuteDSL template {name}"
+        kwargs_desc = ", ".join(f"{k}={v}" for k, v in template_kwargs.items())
+        return f"CuteDSL template {name} ({kwargs_desc})"
 
     def __str__(self) -> str:
         return f"CuteDSLTemplateCaller({self.name})"
