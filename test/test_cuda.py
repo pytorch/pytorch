@@ -1197,28 +1197,34 @@ print(t.is_pinned())
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     def test_lazy_call_reentrant_set_rng_state_does_not_deadlock(self):
-        code = r"""
-import torch
-
-torch.cuda.init()
-state = torch.cuda.get_rng_state()
-
-def cb():
-    torch.cuda.set_rng_state(state)
-
-torch.cuda._lazy_call(cb)
-print("done")
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=20,
+        # Separate process: a regression deadlocks the interpreter (non-reentrant lock).
+        # Happy path is usually a few seconds; allow margin for slow CI / CUDA init.
+        timeout_sec = 15
+        script = (
+            "import torch; "
+            "torch.cuda.init(); "
+            "state = torch.cuda.get_rng_state(); "
+            "torch.cuda._lazy_call(lambda: torch.cuda.set_rng_state(state)); "
+            "print('done')"
         )
-        if proc.returncode != 0:
-            self.fail(
-                f"subprocess failed rc={proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
             )
+        except subprocess.TimeoutExpired as e:
+            self.fail(
+                f"lazy_call reentrancy subprocess did not finish within {timeout_sec}s "
+                "(likely deadlock in torch.cuda._lazy_call); "
+                f"cmd={e.cmd!r}"
+            )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
         self.assertIn("done", proc.stdout)
 
     def test_specify_improper_device_name(self):

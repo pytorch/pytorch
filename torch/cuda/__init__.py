@@ -451,6 +451,8 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
+    # Do not invoke user callbacks while holding _initialization_lock
+    # they may call back into _lazy_call.
     if is_initialized():
         callable()
         return
