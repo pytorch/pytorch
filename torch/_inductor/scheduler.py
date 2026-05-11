@@ -12,12 +12,23 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
+import time
 import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    NamedTuple,
+    overload,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+)
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -139,6 +150,41 @@ class PendingFusion:
 
     def get_fusion_nodes(self) -> tuple[BaseSchedulerNode, BaseSchedulerNode]:
         return (self.node1, self.node2)
+
+
+class _LocalEntry(NamedTuple):
+    """One row of the post-rewrite slice the gate builds.
+
+    `cur` is the step the node currently wants to run at, `baseline`
+    is its original index (used to break ties when sorting), and
+    `node` is the slice member itself.
+    """
+
+    cur: int
+    baseline: int
+    node: BaseSchedulerNode
+
+
+@dataclasses.dataclass(slots=True)
+class ComboKernelMemoryContext:
+    """Shared state used by the memory-aware combo gate.
+
+    Candidate windows are evaluated independently against the original
+    schedule. Earlier accepted combos only contribute through `running_peak`,
+    which caps the cumulative peak drift from the original graph.
+    """
+
+    graph_outputs: OrderedSet[str]
+    node_to_idx: dict[BaseSchedulerNode, int]
+    baseline_peak: int = 0
+    # Running peak after earlier accepts. Bumped on each accept; the
+    # gate's threshold check still compares against `baseline_peak`
+    # (the original) so total drift is capped.
+    running_peak: int = 0
+    # Live bytes before each step in the original schedule. Combo windows
+    # are evaluated independently, so a window's entry memory is the
+    # precomputed baseline live-in at `region_start`.
+    baseline_live_before: list[int] = dataclasses.field(default_factory=list)
 
 
 def _is_gpu_triton_backend(
@@ -2047,7 +2093,6 @@ class SchedulerNode(BaseSchedulerNode):
         node: ir.ComputedBuffer | ir.TemplateBuffer,
     ) -> None:
         super().__init__(scheduler)
-        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._init_from_node(node)
         self._compute_attrs()
 
@@ -2157,12 +2202,7 @@ class SchedulerNode(BaseSchedulerNode):
         self.pointwise_read_writes.clear_cache(self)
         SIMDScheduling.candidate_tilings.cache_clear()
 
-    def _before_loop_state_mutation(self) -> None:
-        if self._loop_mutation_listener is not None:
-            self._loop_mutation_listener(self)
-
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
-        self._before_loop_state_mutation()
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
@@ -2173,7 +2213,6 @@ class SchedulerNode(BaseSchedulerNode):
     def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
 
-        self._before_loop_state_mutation()
         self._body = self._body.reindex_iter_loops(new_iter_sizes)
         self._sizes = self._body.sizes
 
@@ -2704,6 +2743,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 
 class FusedMixOrderReductions(FusedSchedulerNode):
+    """Fused node for two reductions with different iteration orders (inner + outer)."""
+
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         if not MixOrderReduction.is_contiguous_node(node1):
             assert MixOrderReduction.is_contiguous_node(node2)
@@ -2767,6 +2808,19 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
+        # Limit tl.load() count in the fused RSPLIT loop to avoid register
+        # spills. See https://github.com/pytorch/pytorch/issues/179423
+        max_reads = config.triton.mix_order_reduction_max_reads
+        if max_reads > 0:
+            all_reads: OrderedSet[str] = OrderedSet()
+            for sn in itertools.chain(self.get_nodes(), other.get_nodes()):
+                for dep in sn.read_writes.reads:
+                    if isinstance(dep, MemoryDep):
+                        all_reads.add(dep.name)
+            if len(all_reads) > max_reads:
+                # pyrefly: ignore [bad-assignment]
+                metrics.rejected_mix_order_reduction_fusion += 1
+                return False
         if not isinstance(other, FusedMixOrderReductions):
             return self.sub_node_can_fuse(
                 self.node1, other, (self.node2,)
@@ -2919,16 +2973,18 @@ class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
         node1: ExternKernelSchedulerNode,
         node2: SchedulerNode,
     ) -> FusedSchedulerNode:
+        assert isinstance(node1.node, ir.UserDefinedTritonKernel)
         scheduler = node1.scheduler
-        # this unmet dependency is the buffer which is mutated
-        # after fusion, we don't need this buffer anymore,
-        # because the kernel directly writes to the output buffer of the epilogue
-        assert len(node1.unmet_dependencies) == 1
-        original_mutated_buffer = scheduler.name_to_buf[
-            next(iter(node1.unmet_dependencies)).name
-        ]
-        original_mutated_buffer.users.remove(NodeUser(node1))
-        return FusedExternTritonKernelSchedulerNode(scheduler, node1, node2)
+
+        assert len(node1.node.mutation_outputs) == 1
+        # pyrefly: ignore[bad-assignment]
+        mutated_name: str = node1.node.mutation_outputs[0].name
+        # Node1's mutated tensor becomes an intermediary tensor.
+        # Thus, remove node1 from the respective allocated buffer's users
+        # for `Scheduler.dead_node_elimination` to remove.
+        real_name = scheduler.mutation_real_name.get(mutated_name, mutated_name)
+        scheduler.name_to_buf[real_name].users.remove(NodeUser(node1))
+        return cls(scheduler, node1, node2)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
@@ -3631,10 +3687,6 @@ class NodeUser:
 _post_grad_graph_counter = itertools.count()
 
 
-def used_non_deterministic_runtime_estimations() -> bool:
-    return config.runtime_estimations_mms_benchmark
-
-
 def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
     """Get free symbols from a node's layout (size, stride, offset)."""
     free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
@@ -3710,122 +3762,6 @@ def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
 
 def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return node2 if is_epilogue_fusion(node1, node2) else node1
-
-
-@dataclasses.dataclass
-class _LoopStateSnapshot:
-    """Captured loop state for a set of scheduler nodes, restorable on rollback.
-
-    Stores both SchedulerNode loop state (body, sizes, deps) and
-    FusedSchedulerNode group assignments, since the latter is reassigned
-    directly after child reindexing and has no mutation listener.
-    """
-
-    scheduler_node_states: dict[SchedulerNode, tuple[Any, ...]] = dataclasses.field(
-        default_factory=dict
-    )
-    fused_node_groups: dict[FusedSchedulerNode, Any] = dataclasses.field(
-        default_factory=dict
-    )
-
-    @classmethod
-    def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopStateSnapshot:
-        """Capture scheduler-node boundaries and their mutable leaf loop state."""
-        snapshot = cls()
-        for node in nodes:
-            snapshot.snapshot_node(node)
-        return snapshot
-
-    def _snapshot_scheduler_node(self, sn: SchedulerNode) -> None:
-        """Capture one leaf scheduler node before its first loop mutation."""
-        assert sn not in self.scheduler_node_states
-        self.scheduler_node_states[sn] = sn.snapshot_loop_state()
-
-    def _snapshot_fused_node(self, node: FusedSchedulerNode) -> None:
-        """Capture fused-node group metadata changed outside leaf listeners."""
-        assert node not in self.fused_node_groups
-        self.fused_node_groups[node] = node.group
-
-    def snapshot_node(self, node: BaseSchedulerNode) -> None:
-        """Capture a scheduler node boundary and all mutable leaf loop state."""
-        if isinstance(node, FusedSchedulerNode):
-            self._snapshot_fused_node(node)
-        for sn in node.get_nodes():
-            if isinstance(sn, SchedulerNode):
-                self._snapshot_scheduler_node(sn)
-
-    def restore(self) -> None:
-        """Restore all captured loop state and fused-node group metadata."""
-        for sn, state in self.scheduler_node_states.items():
-            sn.restore_loop_state(state)
-        for node, group in self.fused_node_groups.items():
-            node.group = group
-            refresh_group_node_dependencies(node)
-
-
-@dataclasses.dataclass
-class _LoopMutationTracker:
-    """Rollback scope for speculative loop mutations during can_fuse().
-
-    can_fuse() may speculatively reorder or reindex loops while evaluating
-    whether a fusion is legal. If the final decision rejects the fusion,
-    this tracker restores the original loop structure so later fusion
-    candidates do not inherit a speculative layout chosen for a fusion
-    that did not happen.
-
-    The first active tracker for a SchedulerNode leaf owns that leaf's
-    listener. Recursive can_fuse() calls reuse the outer listener instead of
-    installing nested listeners, so the captured state is the original state at
-    the outermost decision boundary.
-
-    Usage: call finish(commit=True) to keep mutations, or finish(commit=False)
-    to restore the original state. If no mutation occurred, finish() is a no-op.
-    """
-
-    nodes: tuple[BaseSchedulerNode, ...]
-    watched_nodes: OrderedSet[SchedulerNode] = dataclasses.field(
-        default_factory=OrderedSet
-    )
-    state: _LoopStateSnapshot | None = None
-
-    @classmethod
-    def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopMutationTracker:
-        """Create a rollback scope and watch mutable leaf scheduler nodes."""
-        seen = OrderedSet(nodes)
-        tracker = cls(nodes=tuple(seen))
-        for node in seen:
-            for sn in node.get_nodes():
-                if isinstance(sn, SchedulerNode):
-                    tracker.watch(sn)
-        return tracker
-
-    def watch(self, sn: SchedulerNode) -> None:
-        """Install this scope as the mutation listener for a leaf node."""
-        if sn._loop_mutation_listener is not None:
-            # A recursive can_fuse() is already covered by an outer scope.
-            return
-        self.watched_nodes.add(sn)
-        sn._loop_mutation_listener = self.track
-
-    def track(self, sn: SchedulerNode) -> None:
-        """Lazily snapshot candidate roots when the first mutation occurs."""
-        assert sn in self.watched_nodes
-        if self.state is not None:
-            # Keep the original pre-mutation snapshot for the whole scope.
-            return
-
-        # The listener tells us a child loop mutated. Snapshot the original
-        # candidate roots here so we also capture fused-node group state,
-        # which is reassigned directly and has no listener of its own.
-        self.state = _LoopStateSnapshot.create(self.nodes)
-
-    def finish(self, *, rollback: bool) -> None:
-        """Detach listeners and restore captured state if rolling back."""
-        for sn in self.watched_nodes:
-            sn._loop_mutation_listener = None
-        if not rollback or self.state is None:
-            return
-        self.state.restore()
 
 
 class Scheduler:
@@ -3994,14 +3930,7 @@ class Scheduler:
                     self.nodes, self.name_to_buf
                 )
 
-            if (
-                used_non_deterministic_runtime_estimations()
-                and config_comms.runtime_estimations_align_across_all_distributed_ranks
-                and (
-                    config.runtime_estimations_mms_benchmark
-                    or config_comms.runtime_estimations_use_nccl_lib_estimations
-                )
-            ):
+            if config_comms.runtime_estimations_align_across_all_distributed_ranks:
                 has_collectives = False
                 for node in self.nodes:
                     if is_collective(node.node):
@@ -4903,20 +4832,18 @@ class Scheduler:
         for inp in multi_node.inputs:
             # pyrefly: ignore [missing-attribute]
             inp_name = inp.get_name()
-            # View has its own fixed layout that is not constrained
-            if (
-                not getattr(inp, "layout", None)
-                or inp_name not in constraints
-                or isinstance(inp, ir.ReinterpretView)
-            ):
+
+            if not torch._inductor.select_algorithm.should_use_layout_constraints(inp):
                 continue
 
+            # pyrefly: ignore [missing-attribute]
             layout = inp.layout
             expected_layout = constraints[inp_name]
             if isinstance(layout, ir.FlexibleLayout):
                 # Freeze to the expected layout to avoid conflicts
                 # pyrefly: ignore [missing-attribute]
                 inp.freeze_layout_with_exact_strides(expected_layout.stride)
+                # pyrefly: ignore [missing-attribute]
                 layout = inp.layout
 
             if isinstance(layout, ir.FixedLayout) and expected_layout != layout:
@@ -4946,40 +4873,27 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                if not config.test_configs.force_extern_kernel_in_multi_template:
+                if (
+                    not config.test_configs.force_extern_kernel_in_multi_template
+                    and not self._has_layout_conflict_for_template(multi_node)
+                ):
+                    # TODO (PaulZhang12): Potentially support recompilation/benchmark for new strides
                     min_node_unfused, _ = multi_node.get_min_choice()
                 else:
-                    min_node_unfused = next(
-                        (
-                            timing
-                            for timing in multi_node.choice_timings()
-                            if isinstance(
-                                timing,
-                                torch._inductor.select_algorithm.ExternKernelCaller,
-                            )
-                        ),
-                    )
-
-                if isinstance(
-                    min_node_unfused,
-                    torch._inductor.ir.TritonTemplateCallerBase,
-                ):
-                    # Check for layout conflicts before committing to Triton template
-                    if self._has_layout_conflict_for_template(multi_node):
-                        # Fall back to first ExternKernelCaller (ATen)
-                        for choice in multi_node.choice_timings():
-                            if isinstance(
-                                choice,
-                                torch._inductor.select_algorithm.ExternKernelCaller,
-                            ):
-                                min_node_unfused = choice
-                                break
-
-                        assert isinstance(
-                            choice, torch._inductor.select_algorithm.ExternKernelCaller
-                        ), (
-                            "No extern kernel detected to fallback to when layout constraints fail for Triton templates"
+                    extern_choices = [
+                        c
+                        for c in multi_node.choices
+                        if isinstance(
+                            c,
+                            torch._inductor.select_algorithm.ExternKernelCaller,
                         )
+                    ]
+                    assert extern_choices, "No extern kernel detected for fallback"
+                    if len(extern_choices) > 1:
+                        timings = multi_node.choice_timings()
+                        min_node_unfused = min(extern_choices, key=lambda c: timings[c])
+                    else:
+                        min_node_unfused = extern_choices[0]
 
                 if isinstance(
                     min_node_unfused,
@@ -5796,49 +5710,122 @@ class Scheduler:
         nodes = self.topological_sort_schedule(nodes)
         return nodes
 
-    def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
+    @staticmethod
+    def _distance_windows(
+        nodes: list[BaseSchedulerNode],
+        node_to_idx: dict[BaseSchedulerNode, int],
+        max_distance: int,
+    ) -> Iterator[list[BaseSchedulerNode]]:
+        """Sort `nodes` by baseline index, then yield groups whose span
+        is at most `max_distance`. Start a new window whenever the next
+        node would push the span past the limit. Negative `max_distance`
+        means "no limit" — yield everything as one window.
         """
-        Groups parallel nodes
+        ordered = sorted(nodes, key=lambda n: node_to_idx[n])
+        if max_distance < 0:
+            if ordered:
+                yield ordered
+            return
+        window: list[BaseSchedulerNode] = []
+        window_min = -1
+        for n in ordered:
+            idx = node_to_idx[n]
+            if window and idx - window_min > max_distance:
+                yield window
+                window = []
+            if not window:
+                window_min = idx
+            window.append(n)
+        if window:
+            yield window
+
+    def create_combo_kernel_nodes(self, num_ck_nodes: int | None = None) -> None:
+        """Group parallel nodes into combo kernels.
+
+        Each parallel group is split into windows whose baseline-index
+        span is at most `combo_kernel_max_distance` (set the config to a
+        negative value to disable splitting). If a peak-memory threshold is set,
+        each window goes through the gate, which simulates the
+        post-fusion peak and accepts the combo only if the peak stays
+        under the threshold; rejected windows are halved and retried.
+        Without a threshold, every window becomes a combo directly.
         """
         fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
         log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
+        enable_autotune = config.combo_kernels_autotune > 0
+
+        abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
+        pct_thr = config.combo_kernel_peak_memory_pct_threshold
+        memory_check = abs_thr_gb is not None or pct_thr is not None
+        max_distance = config.combo_kernel_max_distance
+        memory_sim_time = 0.0
+        mem_ctx: ComboKernelMemoryContext | None = None
+        if memory_check:
+            mem_ctx = self._init_peak_memory_context()
+            node_to_idx = mem_ctx.node_to_idx
+        else:
+            node_to_idx = {n: i for i, n in enumerate(self.nodes)}
+
+        def _register_accept(
+            combo_node: ForeachKernelSchedulerNode,
+            accepted: list[BaseSchedulerNode],
+            num: int,
+        ) -> None:
+            nonlocal count
+            count += 1
+            log.info(
+                "ComboKernels: Combining %d nodes for %d-th group",
+                len(accepted),
+                num,
+            )
+            for node in accepted:
+                fused_nodes.remove(node)
+            fused_nodes.add(combo_node)
+            self.name_to_fused_node.update(
+                {n.get_name(): combo_node for n in combo_node.get_nodes()}
+            )
+            stream = self.node_to_stream.get(accepted[0])
+            if stream is not None:
+                self.node_to_stream[combo_node] = stream
+
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
         ):
-            node_list = ForeachKernelSchedulerNode.combinable_nodes(node_list)
-            if len(node_list) < 2:
-                continue
             if num_ck_nodes is not None and count > num_ck_nodes:
                 break
-            if not self.speedup_by_combo_kernel(node_list):
-                log.debug("ComboKernels: Not speeding up %d-th group", num)
+            members = ForeachKernelSchedulerNode.combinable_nodes(node_list)
+            if len(members) < 2:
                 continue
-            count += 1
-            enable_autotune = config.combo_kernels_autotune > 0
-            group_snode = ForeachKernelSchedulerNode(
-                node_list[0].scheduler,
-                node_list,
-                use_custom_partition_algo=True,
-                enable_autotune=enable_autotune,
-            )
-            log.info(
-                "ComboKernels: Combining %d nodes for %d-th group",
-                len(node_list),
-                num,
-            )
-            for node in node_list:
-                fused_nodes.remove(node)
-            fused_nodes.add(group_snode)
-            self.name_to_fused_node.update(
-                {n.get_name(): group_snode for n in group_snode.get_nodes()}
-            )
-            # Propagate stream assignment so codegen can place the combo
-            # kernel in the correct stream context.
-            stream = self.node_to_stream.get(node_list[0])
-            if stream is not None:
-                self.node_to_stream[group_snode] = stream
+
+            for window in Scheduler._distance_windows(
+                members, node_to_idx, max_distance
+            ):
+                if num_ck_nodes is not None and count > num_ck_nodes:
+                    break
+                if len(window) < 2 or not self.speedup_by_combo_kernel(window):
+                    continue
+                if memory_check:
+                    assert mem_ctx is not None
+                    sim_start = time.perf_counter()
+                    self._try_combo_with_halving(
+                        window,
+                        num,
+                        mem_ctx,
+                        enable_autotune=enable_autotune,
+                        on_accept=_register_accept,
+                    )
+                    memory_sim_time += time.perf_counter() - sim_start
+                else:
+                    combo_node = ForeachKernelSchedulerNode(
+                        window[0].scheduler,
+                        window,
+                        use_custom_partition_algo=True,
+                        enable_autotune=enable_autotune,
+                    )
+                    _register_accept(combo_node, window, num)
+
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
@@ -5847,7 +5834,227 @@ class Scheduler:
             num_nodes_orig,
             len(self.nodes),
         )
+        if memory_check:
+            log.info(
+                "ComboKernels memory-aware: %.3fs spent in peak simulation",
+                memory_sim_time,
+            )
         self.prune_redundant_deps(self.nodes)
+
+    def _init_peak_memory_context(self) -> ComboKernelMemoryContext:
+        """Build the immutable baseline state the gate compares against:
+        original buffer lifetimes, original peak, and step indices.
+        """
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            assign_memory_planning_info_for_scheduler_nodes,
+            compute_memory_timeline,
+            get_freeable_input_buf,
+            live_memory_before_steps_from_buf_info_list,
+            peak_memory_from_buf_info_list,
+        )
+
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+
+        name_to_freeable = get_freeable_input_buf(self.nodes, graph_inputs)
+        assign_memory_planning_info_for_scheduler_buffers(self.nodes, self.name_to_buf)
+        assign_memory_planning_info_for_scheduler_nodes(
+            self.nodes,
+            self.name_to_fused_node,
+            self.name_to_buf,
+            name_to_freeable,
+        )
+        buf_info_list, _, _ = compute_memory_timeline(
+            self.nodes, name_to_freeable, graph_outputs
+        )
+        baseline_peak, _ = peak_memory_from_buf_info_list(
+            buf_info_list, len(self.nodes)
+        )
+        baseline_live_before = live_memory_before_steps_from_buf_info_list(
+            buf_info_list, len(self.nodes)
+        )
+
+        return ComboKernelMemoryContext(
+            graph_outputs=graph_outputs,
+            node_to_idx={node: idx for idx, node in enumerate(self.nodes)},
+            baseline_peak=baseline_peak,
+            running_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+        )
+
+    def _try_combo_with_memory_check(
+        self,
+        group_nodes: list[BaseSchedulerNode],
+        mem_ctx: ComboKernelMemoryContext,
+        enable_autotune: bool,
+    ) -> tuple[ForeachKernelSchedulerNode | None, int]:
+        """The gate: does fusing `group_nodes` into one combo keep peak
+        memory under the threshold?
+
+        Returns `(combo_node, combo_step)` if accepted, or `(None, 0)`
+        if rejected. The running peak lives on `mem_ctx.running_peak`.
+
+        The pretend rewrite only changes node order inside the window
+        `[region_start, region_end]` (the smallest range containing all
+        members). Inside that window:
+          - the members collapse into one combo node, all at `combo_step`,
+          - everything else is evaluated from the original schedule.
+        Outside the window, nothing moves. Earlier accepts are accounted
+        for only by `mem_ctx.running_peak`. The threshold is checked
+        against `mem_ctx.baseline_peak` (the original graph peak) so total
+        peak drift is capped.
+        """
+        from .memory import estimate_region_peak_memory
+
+        combo_node = ForeachKernelSchedulerNode(
+            group_nodes[0].scheduler,
+            group_nodes,
+            use_custom_partition_algo=True,
+            enable_autotune=enable_autotune,
+        )
+        # Wire the combo's pred_buffers from its members so the gate
+        # simulator can read `node.mpi_node.pred_buffers` uniformly.
+        combo_pred_buffers = OrderedSet()
+        for m in group_nodes:
+            combo_pred_buffers.update(m.mpi_node.pred_buffers)
+        combo_node.mpi_node = MemoryPlanningInfoForNode(
+            pred_buffers=combo_pred_buffers,
+        )
+
+        node_to_idx = mem_ctx.node_to_idx
+
+        # Single pass over group_nodes: build the set and find the
+        # min/max baseline index together.
+        group_set: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        region_start = sys.maxsize
+        region_end = -1
+        for n in group_nodes:
+            group_set.add(n)
+            idx = node_to_idx[n]
+            if idx < region_start:
+                region_start = idx
+            if idx > region_end:
+                region_end = idx
+
+        # Build the post-rewrite slice for [region_start, region_end].
+        local_entries: list[_LocalEntry] = []
+        inserted_combo = False
+
+        def add_local(node: BaseSchedulerNode, cur: int, baseline: int) -> None:
+            local_entries.append(_LocalEntry(cur, baseline, node))
+
+        for i in range(region_start, region_end + 1):
+            n = self.nodes[i]
+            if n in group_set:
+                if not inserted_combo:
+                    add_local(combo_node, region_start, i)
+                    inserted_combo = True
+                continue
+            add_local(n, i, i)
+
+        local_nodes = [
+            e.node for e in sorted(local_entries, key=lambda e: (e.cur, e.baseline))
+        ]
+        local_nodes = self.topological_sort_schedule(local_nodes)
+
+        new_step = {n: region_start + i for i, n in enumerate(local_nodes)}
+        combo_step = new_step[combo_node]
+        for n in group_nodes:
+            new_step[n] = combo_step
+
+        def step_of(node: BaseSchedulerNode) -> int:
+            if node in new_step:
+                return new_step[node]
+            return node_to_idx[node]
+
+        # Combo windows are evaluated independently. The entry live set is
+        # therefore the original-schedule live memory before this region starts.
+        cur_memory = mem_ctx.baseline_live_before[region_start]
+
+        region_peak = estimate_region_peak_memory(
+            local_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=step_of,
+            graph_outputs=mem_ctx.graph_outputs,
+            cur_memory=cur_memory,
+        )
+
+        # Compare against the *original* baseline peak (not the running
+        # peak) to cap total drift across many accepts.
+        original_peak = mem_ctx.baseline_peak
+        new_peak = max(mem_ctx.running_peak, region_peak)
+        delta = new_peak - original_peak
+        abs_thr_gb = config.combo_kernel_peak_memory_increase_gb
+        pct_thr = config.combo_kernel_peak_memory_pct_threshold
+        limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
+        if pct_thr is not None:
+            limits.append(pct_thr * original_peak)
+        assert limits
+        accept = delta <= min(limits)
+
+        pct = (100.0 * delta / original_peak) if original_peak > 0 else 0.0
+        if not accept:
+            log.debug(
+                "ComboKernels memory-aware: rejected %d nodes "
+                "(peak delta %+d bytes = %.3f%%)",
+                len(group_nodes),
+                delta,
+                pct,
+            )
+            return None, 0
+
+        log.info(
+            "ComboKernels memory-aware: accepted %d nodes "
+            "(peak delta %+d bytes = %.3f%%)",
+            len(group_nodes),
+            delta,
+            pct,
+        )
+        mem_ctx.running_peak = new_peak
+        return combo_node, combo_step
+
+    def _try_combo_with_halving(
+        self,
+        candidate: list[BaseSchedulerNode],
+        num: int,
+        mem_ctx: ComboKernelMemoryContext,
+        *,
+        enable_autotune: bool,
+        on_accept: Callable[
+            [ForeachKernelSchedulerNode, list[BaseSchedulerNode], int], None
+        ],
+    ) -> None:
+        """Try the full candidate; on reject, halve at the
+        baseline-index midpoint and try each half.
+        """
+        n2i = mem_ctx.node_to_idx
+        # Push late then early so early pops first.
+        stack: list[list[BaseSchedulerNode]] = [candidate]
+        while stack:
+            subset = stack.pop()
+            if len(subset) < 2 or not self.speedup_by_combo_kernel(subset):
+                continue
+
+            combo_node, combo_step = Scheduler._try_combo_with_memory_check(
+                self, subset, mem_ctx, enable_autotune
+            )
+            if combo_node is not None:
+                on_accept(combo_node, subset, num)
+                continue
+
+            idxs = [n2i[n] for n in subset]
+            lo, hi = min(idxs), max(idxs)
+            if lo == hi:
+                continue
+            mid = (lo + hi) // 2
+            early = [n for n in subset if n2i[n] <= mid]
+            late = [n for n in subset if n2i[n] > mid]
+            if 2 <= len(late) < len(subset):
+                stack.append(late)
+            if 2 <= len(early) < len(subset):
+                stack.append(early)
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
@@ -5927,11 +6134,11 @@ class Scheduler:
                     # All fusion outputs are in ancestors of node1 and node2, thus
                     # cannot introduce new path:
                     #
-                    # 1. if output is neither descendent of node1 or node2, the
+                    # 1. if output is neither descendant of node1 or node2, the
                     #        output cannot introduce a path
-                    # 2. due to [can_fuse]: if WLOG output is descendent of node1, it cannot be
+                    # 2. due to [can_fuse]: if WLOG output is descendant of node1, it cannot be
                     #        on path(node1->node2), hence it cannot be ancestor of node2
-                    # 3. due to [acyclic]: if WLOG output is descendent of node1, it cannot be
+                    # 3. due to [acyclic]: if WLOG output is descendant of node1, it cannot be
                     #        ancestor of node1
                     return False
                 else:
@@ -6458,11 +6665,6 @@ class Scheduler:
         """
         from .codegen.simd import SIMDKernel
 
-        # Keep this consistent with shared_data_after_reordering_loop(): CPU
-        # reindexing is not validated yet.
-        if node1.is_cpu() or node2.is_cpu():
-            return False
-
         if node1.is_reduction() and not node2.is_reduction():
             reduction_node, pw_node = node1, node2
         elif node2.is_reduction() and not node1.is_reduction():
@@ -6495,16 +6697,12 @@ class Scheduler:
         ):
             return False
 
-        # Nothing to reindex if the pointwise already uses the reduction split.
-        target_iter_sizes = (red_numel, red_rnumel)
-        if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
-            return False
-
-        # Local rollback is still needed even with _LoopMutationTracker: this
-        # helper is also used by shared_data_after_reordering_loop(), where a
-        # failed reindex attempt returns -1 and the caller may keep evaluating
-        # fusion within the same can_fuse() call.
-        rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
+        # Snapshot state before mutation so we can rollback if the
+        # reindexed deps don't actually improve the fusion score.
+        snapshots = [(sn, sn.snapshot_loop_state()) for sn in snodes]
+        old_pw_group = (
+            pw_node.group if isinstance(pw_node, FusedSchedulerNode) else None
+        )
 
         for sn in snodes:
             sn.apply_loop_reindexing([red_numel, red_rnumel])
@@ -6524,7 +6722,12 @@ class Scheduler:
             for name in common_names
         )
         if not has_benefit:
-            rollback_snapshot.restore()
+            for sn, state in snapshots:
+                sn.restore_loop_state(state)
+            if isinstance(pw_node, FusedSchedulerNode):
+                assert old_pw_group is not None
+                pw_node.group = old_pw_group
+                refresh_group_node_dependencies(pw_node)
             return False
 
         # When loop ordering is disabled, re-extract deps with
@@ -6666,7 +6869,7 @@ class Scheduler:
         # When memory access is small, reducing gpu kernel overhead is profitable over
         # slightly larger memory access.
         node1_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
-        node2_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
+        node2_write_memory = self.dep_size_hint(next(iter(node2.read_writes.writes)))
         if (
             max(node1_write_memory, node2_write_memory)
             > config.small_memory_access_threshold
@@ -6716,28 +6919,6 @@ class Scheduler:
             return None
 
     def can_fuse(
-        self,
-        node1: BaseSchedulerNode,
-        node2: BaseSchedulerNode,
-        can_reorder: bool = False,
-        allow_mix_order_reduction: bool = True,
-    ) -> bool:
-        """Determine if node1 and node2 can be combined into a single fused node.
-
-        Speculative loop mutations (reordering, reindexing) are automatically
-        rolled back if the fusion decision ultimately fails.
-        """
-        tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
-        tracker.finish(rollback=not can_fuse)
-        return can_fuse
-
-    def _can_fuse_impl(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
@@ -7991,7 +8172,7 @@ class Scheduler:
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
         candidate_symbols.update(
-            *(get_input_node_symbols(node) for _, node in input_nodes.items())
+            *(get_input_node_symbols(node) for node in input_nodes.values())
         )
 
         candidate_symbols = filter_symbols(candidate_symbols)

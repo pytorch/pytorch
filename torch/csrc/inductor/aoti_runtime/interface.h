@@ -221,6 +221,15 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     bool use_inactive,
     bool validate_full_update);
 
+// Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
+// allowed to pass CPU tensors even when the model lives on a non-CPU device.
+// CPU tensors are silently copied to the model's device.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
@@ -288,6 +297,15 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// C-ABI-safe variant of AOTInductorModelUpdateConstantsMap.
+// Uses an array of (name, handle) pairs instead of an opaque pointer to
+// std::unordered_map, so the host and DSO can use different C++ standard
+// libraries without ABI conflicts.
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
+    AOTInductorModelHandle model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    int32_t num_pairs);
+
 // Get the size of the constant blob
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
     AOTInductorModelContainerHandle container_handle,
@@ -310,6 +328,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,
     const char** in_spec,
     const char** out_spec);
+
+// Retrieves the error message from the last failed AOTI runtime call on the
+// current thread. The returned pointer is valid until the next AOTI runtime
+// call on the same thread. Returns an empty string if the last call succeeded.
+AOTI_API AOTIRuntimeError AOTInductorGetLastError(const char** error_msg);
 
 // ---------------------------------------------------------------------------
 // C-ABI-safe variant of AOTInductorModelRunMinimalArrayrefInterface.

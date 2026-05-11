@@ -15,9 +15,10 @@ def make_subclass(
         # This is a rough approximation of `THPVariable_make_subclass`. It should
         # suffice for most of Dynamo tracing purposes.
         # https://github.com/pytorch/pytorch/blob/ccfde4dadfa3c342076a1ee387017f84dd4ad2f7/torch/csrc/autograd/python_variable.cpp#L597-L650
-        assert len(kwargs) == 0, (
-            "_make_subclass only supports requires_grad as keyword arg"
-        )
+        if len(kwargs) != 0:
+            raise AssertionError(
+                "_make_subclass only supports requires_grad as keyword arg"
+            )
         data = data.detach()
 
         # Avoid unnecessary `requires_grad` mutation, which isn't supported in Dynamo.
