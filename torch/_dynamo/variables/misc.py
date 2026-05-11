@@ -8,7 +8,7 @@ Key classes include:
 - ExceptionVariable: Tracks exception objects
 - RandomVariable: Manages random number generators
 - GetAttrVariable: Tracks attribute access
-- ConstantMethodWrapperVariable: Handles method wrappers
+- MethodWrapperVariable: Handles method wrappers
 - PythonModuleVariable: Tracks Python modules
 - NumpyVariable: Handles numpy functions and types
 - StringFormatVariable: Manages string formatting
@@ -407,6 +407,9 @@ class SuperVariable(VariableTracker):
             # e.g., tensor ops like `torch.Tensor.to`.
             fn_var = VariableTracker.build(tx, inner_fn, source, realize=True)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
+        elif isinstance(inner_fn, types.BuiltinFunctionType):
+            fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
+            return fn_vt.call_function(tx, args, kwargs)
 
         unimplemented(
             gb_type="Attempted to call a super() attribute that is "
@@ -1597,31 +1600,6 @@ class ConstantMethodWrapperVariable(VariableTracker):
         )
 
 
-class GetSetDescriptorVariable(VariableTracker):
-    def __init__(self, desc: types.GetSetDescriptorType, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.desc = desc
-
-    def get_real_python_backed_value(self) -> types.GetSetDescriptorType:
-        return self.desc
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "__get__" and self.source:
-            source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.desc.__get__, source)
-        elif name in ("__objclass__", "__name__"):
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, getattr(self.desc, name), source)
-        else:
-            return super().var_getattr(tx, name)
-
-    def is_python_constant(self) -> Literal[True]:
-        return True
-
-    def as_python_constant(self) -> types.GetSetDescriptorType:
-        return self.desc
-
-
 class PythonModuleVariable(VariableTracker):
     # PyModule_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/moduleobject.c#L1203
     _cpython_type = types.ModuleType
@@ -2020,6 +1998,9 @@ class NullVariable(VariableTracker):
             )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "None"
+
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
@@ -2042,10 +2023,47 @@ class StringFormatVariable(VariableTracker):
         sym_args: Sequence[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if all(
-            x.is_python_constant()
-            for x in itertools.chain(sym_args, sym_kwargs.values())
-        ):
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        all_args = list(itertools.chain(sym_args, sym_kwargs.values()))
+
+        has_lazy_constant = any(
+            isinstance(x, (LazyConstantVariable, ComputedLazyConstantVariable))
+            for x in all_args
+        )
+
+        if has_lazy_constant and not sym_kwargs:
+            # All args must be simple constants or lazy constants (not
+            # containers like TupleVariable which may hold SymNodeVariables
+            # under dynamic shapes).
+            all_simple_constants = all(
+                isinstance(
+                    x,
+                    (
+                        variables.ConstantVariable,
+                        LazyConstantVariable,
+                        ComputedLazyConstantVariable,
+                    ),
+                )
+                for x in all_args
+            )
+            if all_simple_constants:
+                # Use str.format as the op with format_string as the first arg.
+                # _make_binary_op_reconstruct_fn already has a str.format handler.
+                from .base import AsPythonConstantNotImplementedError
+                from .builtin import _make_binary_op_reconstruct_fn
+
+                reconstruct_fn = _make_binary_op_reconstruct_fn(str.format)
+                fmt_str_var = variables.ConstantVariable.create(format_string)
+                try:
+                    return ComputedLazyConstantVariable.create(
+                        str.format,
+                        [fmt_str_var] + list(sym_args),
+                        reconstruct_fn,  # pyrefly: ignore[bad-argument-type]
+                    )
+                except (TypeError, ValueError, AsPythonConstantNotImplementedError):
+                    pass
+        elif all(x.is_python_constant() for x in all_args):
             return variables.ConstantVariable.create(
                 format_string.format(
                     *[v.as_python_constant() for v in sym_args],
@@ -2109,6 +2127,112 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
+
+    def _try_get_format_value(self) -> tuple[bool, str]:
+        """Try to get the formatted string value without realizing lazy constants.
+
+        Returns (success, value). If any argument cannot be peeked, returns (False, "").
+        """
+        arg_values = []
+        for arg in self.sym_args:
+            can_peek, _is_unrealized, value = arg.try_peek_constant()
+            if not can_peek:
+                return (False, "")
+            arg_values.append(value)
+
+        kwarg_values = {}
+        for k, v in self.sym_kwargs.items():
+            can_peek, _is_unrealized, value = v.try_peek_constant()
+            if not can_peek:
+                return (False, "")
+            kwarg_values[k] = value
+
+        return (True, self.format_string.format(*arg_values, **kwarg_values))
+
+    def is_python_constant(self) -> bool:
+        """Return True if this StringFormatVariable can be converted to a constant.
+
+        Returns False if any argument is an unrealized lazy constant, since those
+        should be reconstructed at runtime rather than loaded as a constant (to
+        avoid unnecessary guard installation and recompilation).
+        """
+        for x in itertools.chain(self.sym_args, self.sym_kwargs.values()):
+            can_peek, is_unrealized, _value = x.try_peek_constant()
+            if not can_peek or is_unrealized:
+                # Can't peek or has unrealized lazy constant - don't treat as constant
+                return False
+        return True
+
+    def as_python_constant(self) -> str:
+        """Return the formatted string value, realizing any lazy constants."""
+        self._realize_lazy_args()
+        return self.format_string.format(
+            *[v.as_python_constant() for v in self.sym_args],
+            **{k: v.as_python_constant() for k, v in self.sym_kwargs.items()},
+        )
+
+    def is_python_hashable(self) -> bool:
+        # Strings are always hashable, and we can peek at all values
+        success, _ = self._try_get_format_value()
+        return success
+
+    def get_python_hash(self) -> int:
+        success, value = self._try_get_format_value()
+        if not success:
+            raise RuntimeError(
+                "StringFormatVariable hash failed: could not peek all args"
+            )
+        return hash(value)
+
+    def _realize_lazy_args(self) -> None:
+        """Realize any lazy constant arguments to install guards."""
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        for arg in itertools.chain(self.sym_args, self.sym_kwargs.values()):
+            if isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable)):
+                arg.realize()
+
+    def is_python_equal(self, other: object) -> bool:
+        success, value = self._try_get_format_value()
+        if not success:
+            return False
+        if isinstance(other, StringFormatVariable):
+            other_success, other_value = other._try_get_format_value()
+            if not other_success:
+                return False
+            if value == other_value:
+                # Match found - realize lazy args to install guards
+                self._realize_lazy_args()
+                other._realize_lazy_args()
+                return True
+            return False
+        if not isinstance(other, VariableTracker):
+            return False
+        if other.is_python_constant():
+            if value == other.as_python_constant():
+                # Match found - realize lazy args to install guards
+                self._realize_lazy_args()
+                return True
+            return False
+        return False
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the formatted string value without triggering realization.
+
+        Returns (can_peek, is_unrealized, value).
+        """
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        success, value = self._try_get_format_value()
+        if not success:
+            return (False, False, None)
+        # Check if any arg is unrealized lazy constant
+        any_unrealized = any(
+            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not arg.is_realized()
+            for arg in itertools.chain(self.sym_args, self.sym_kwargs.values())
+        )
+        return (True, any_unrealized, value)
 
 
 class ObjectVariable(VariableTracker):

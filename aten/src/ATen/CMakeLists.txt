@@ -212,7 +212,7 @@ if(USE_FLASH_ATTENTION)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(USE_ROCM AND USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})
       list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
       if(NUM_ARCHS GREATER 1)
@@ -294,9 +294,21 @@ if(USE_FLASH_ATTENTION)
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
+
+    # Only build for MI3xx series architectures as building for all targets takes too long
+    # We will selectively add supported architectures when/if needed
+    set(_ck_sdpa_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _ck_sdpa_hip_arches ${ARCH})
+      endif()
+    endforeach()
+
     add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
     target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
-    set_target_properties(ck_sdpa PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set_target_properties(ck_sdpa PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
