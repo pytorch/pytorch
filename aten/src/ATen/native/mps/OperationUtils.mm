@@ -1099,24 +1099,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     return;
   }
 
-  // Output-cast fallback: the kernel naturally produces `natural` dtype (=
-  // common for arithmetic, kBool for comparison). If the user-facing output
-  // dtype differs, none of the registered kernels store-cast for us, so we
-  // run the kernel into a natural-dtype temp and copy_ (which casts) into the
-  // user output.
+  // Output-cast routing: when the user-facing output dtype diverges from the
+  // kernel's natural output (`natural` = common for arithmetic, kBool for
+  // comparison), force the strided `_castout_` kernel variant. That kernel
+  // computes at compile-time precision and runtime-casts on store using the
+  // output dtype already bound in `ndim_and_types.w` on the strided path.
+  // The flag flips off `use_scalar_kernel` / `use_broadcast_kernel` /
+  // `dense_ilp` / `is_contiguous` choices below; the strided buffer-binding
+  // branch handles every layout (just at slightly higher cost than the dense
+  // specializations).
   const auto natural = natural_output_dtype.value_or(iter.common_dtype());
-  if (iter.output().scalar_type() != natural) {
-    auto tmp = at::empty_like(iter.output(), natural);
-    auto sub_iter = at::TensorIteratorConfig()
-                        .add_output(tmp)
-                        .add_input(iter.input(0))
-                        .add_input(iter.input(1))
-                        .promote_inputs_to_common_dtype(true)
-                        .build();
-    exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, natural_output_dtype, ilp_threshold);
-    iter.output().copy_(tmp);
-    return;
-  }
+  const bool output_cast_needed = iter.output().scalar_type() != natural;
 
   auto convert_double_scalar = [](Tensor& t) {
     if (t.dim() != 0) {
@@ -1149,23 +1142,28 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool input_is_bc = is_dense_broadcastable(input, out) && !input_is_full;
   const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
 
-  if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
-    broadcast_numel = input.numel();
-    if (broadcast_numel == 1) {
-      use_scalar_kernel = true;
-      scalar_on_lhs = true;
-    } else {
-      use_broadcast_kernel = true;
-      broadcast_on_lhs = true;
-    }
-  } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
-    broadcast_numel = other.numel();
-    if (broadcast_numel == 1) {
-      use_scalar_kernel = true;
-      scalar_on_lhs = false;
-    } else {
-      use_broadcast_kernel = true;
-      broadcast_on_lhs = false;
+  // Scalar/broadcast specializations are skipped when the user-facing output
+  // dtype differs from the kernel's natural output: only the strided castout
+  // variant is registered for that combination.
+  if (!output_cast_needed) {
+    if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
+      broadcast_numel = input.numel();
+      if (broadcast_numel == 1) {
+        use_scalar_kernel = true;
+        scalar_on_lhs = true;
+      } else {
+        use_broadcast_kernel = true;
+        broadcast_on_lhs = true;
+      }
+    } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
+      broadcast_numel = other.numel();
+      if (broadcast_numel == 1) {
+        use_scalar_kernel = true;
+        scalar_on_lhs = false;
+      } else {
+        use_broadcast_kernel = true;
+        broadcast_on_lhs = false;
+      }
     }
   }
 
@@ -1206,8 +1204,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // UINT32_MAX (i.e. off by default), and ops with a different
   // memory-bandwidth profile can override. PYTORCH_BINARY_FORCE_FLAVOR
   // overrides whenever the kernel is applicable, regardless of dtype.
-  const bool ilp_applicable =
-      !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed && !alpha.has_value();
+  const bool ilp_applicable = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
+      !alpha.has_value() && !output_cast_needed;
   const uint32_t threshold = ilp_threshold.value_or(
       c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
   bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
@@ -1232,7 +1230,18 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                   scalarToMetalTypeString(out),
                   scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
   std::string kernel_name;
-  if (use_scalar_kernel) {
+  if (output_cast_needed) {
+    // Force the strided castout path regardless of contiguity / scalar /
+    // broadcast hints. The strided binding code below also kicks in (see the
+    // matching `output_cast_needed` short-circuit). Defensive: lookup fails
+    // loudly via getPipelineStateForFunc if the op didn't register a
+    // `_strided_castout_` variant (e.g. alpha or unusual functor combos).
+    kernel_name = fmt::format("{}_strided_castout_{}_{}{}",
+                              name,
+                              scalarToMetalTypeString(natural),
+                              scalarToMetalTypeString(iter.common_dtype()),
+                              alpha_suffix);
+  } else if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
     const auto lhs_suffix = scalar_on_lhs ? "_lhs" : "";
     if (cast_needed) {
@@ -1280,7 +1289,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
-      if (use_scalar_kernel) {
+      if (output_cast_needed) {
+        // Strided castout path: shape/strides + (ndim, in_a_type, in_b_type,
+        // out_type). The kernel reads inputs at runtime types and stores at
+        // ndim_and_types.w (out dtype). This binding matches the
+        // `binary_strided_castout` template at any contiguity/broadcast.
+        std::array<int, 4> ndim_and_types = {iter.ndim(),
+                                             static_cast<int>(input.scalar_type()),
+                                             static_cast<int>(other.scalar_type()),
+                                             static_cast<int>(out.scalar_type())};
+        mtl_setArgs<3>(computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+      } else if (use_scalar_kernel) {
         // Rebind the scalar in case we promoted it above; harmless when we
         // didn't, since this matches what bind_iter_tensors already did.
         mtl_setBuffer(computeEncoder, scalar_on_lhs ? input : other, scalar_on_lhs ? 1 : 2);
@@ -1563,6 +1582,6 @@ void* get_tensor_gpu_address(const at::TensorBase& t) {
 } // namespace at::native::mps
 
 // Check that c10::metal::ScalarType is strict subset (with matching values) of c10::ScalarType
-#define DTYPE_CHECKER(_n, _v) \
+#define DTYPE_CHECKER(_n, _v, _t) \
   static_assert(static_cast<int>(::c10::ScalarType::_n) == static_cast<int>(::c10::metal::ScalarType::_n));
 C10_METAL_ALL_TYPES_FUNCTOR(DTYPE_CHECKER)

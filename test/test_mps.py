@@ -8792,17 +8792,16 @@ class TestMPS(TestCaseMPS):
         check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")
         check(randint(100, dtype=torch.int32), randint(100, dtype=torch.int64), "+*-")
 
-        # In-place narrowing: out dtype is narrower than the iterator common
-        # dtype (e.g. half.maximum_(float) via clamp_min_). The cast kernel
-        # would otherwise write common-dtype-sized elements into the narrower
-        # output buffer. Regression for cosine_similarity on 0-d float16.
+        # Regression: in-place narrowing (half.clamp_min_(float)) broke
+        # cosine_similarity on 0-d float16.
         for shape in [(), (8,), (3, 5)]:
-            h = torch.full(shape, 0.5, device="mps", dtype=torch.float16)
-            f = torch.full(shape, 1e-8, device="mps", dtype=torch.float32)
-            h_cpu = h.cpu().clone()
-            h.clamp_min_(f)
-            h_cpu.clamp_min_(f.cpu())
-            self.assertEqual(h.cpu(), h_cpu)
+            with self.subTest(shape=shape):
+                h = torch.full(shape, 0.5, device="mps", dtype=torch.float16)
+                f = torch.full(shape, 1e-8, device="mps", dtype=torch.float32)
+                h_cpu = h.cpu().clone()
+                h.clamp_min_(f)
+                h_cpu.clamp_min_(f.cpu())
+                self.assertEqual(h.cpu(), h_cpu)
 
         # non contiguous cases/slices
         check(rand(100, 100)[10:50, 20:80], rand(100, 100)[10:50, 20:80])
@@ -8863,44 +8862,24 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
 
-# Conformance suite for the MPS binary TensorIterator dispatcher. Registers
-# a synthetic `foobar` Metal kernel via the standard REGISTER_BINARY_OP macros
-# and dispatches through MetalShaderLibrary::exec_binary_kernel -- the same
-# entry point real ops use (mul_stub, maximum_stub, eq_stub, ...). Each
-# `foobar_*` variant differs only in its TensorIterator cast configuration;
-# failures point at the dispatcher's handling of TI knobs, not at any
-# production kernel. Complements `test_binary_kernels`, which exercises the
-# same shapes with real ops against CPU as reference.
-#
-# Metal's runtime compiler can't resolve `#include <c10/metal/...>`, so we
-# splice the three c10 headers into the shader source as strings.
+# Conformance suite for the MPS binary TensorIterator dispatcher: two
+# synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
+# routed through the same exec_binary_kernel real ops use. One kernel
+# registration per functor is enough -- the dispatcher is dtype-independent
+# and the runtime input/output casts cover the matrix.
 
-_CONFORMANCE_FOOBAR_METAL = r"""
-struct foobar_functor {
+_CONFORMANCE_KERNELS_METAL = r"""
+struct simple_add_functor {
     template <typename T>
     inline T operator()(const T a, const T b) { return static_cast<T>(a + b); }
 };
+REGISTER_BINARY_OP(simple_add, float, float);
 
-REGISTER_BINARY_OP(foobar, float, float);
-REGISTER_BINARY_OP(foobar, half, half);
-REGISTER_BINARY_OP(foobar, int, int);
-REGISTER_BINARY_OP(foobar, long, long);
-REGISTER_BINARY_OP(foobar, short, short);
-REGISTER_BINARY_OP(foobar, char, char);
-REGISTER_BINARY_OP(foobar, uchar, uchar);
-
-struct foobar_cmp_functor {
+struct simple_ge_functor {
     template <typename T>
     inline bool operator()(const T a, const T b) { return a >= b; }
 };
-
-REGISTER_BINARY_OP(foobar_cmp, float, bool);
-REGISTER_BINARY_OP(foobar_cmp, half, bool);
-REGISTER_BINARY_OP(foobar_cmp, int, bool);
-REGISTER_BINARY_OP(foobar_cmp, long, bool);
-REGISTER_BINARY_OP(foobar_cmp, short, bool);
-REGISTER_BINARY_OP(foobar_cmp, char, bool);
-REGISTER_BINARY_OP(foobar_cmp, uchar, bool);
+REGISTER_BINARY_OP(simple_ge, float, bool);
 """
 
 _CONFORMANCE_CPP_SOURCE = r"""
@@ -8916,71 +8895,34 @@ void set_kernel_source(const std::string& src) {
     g_lib = std::make_unique<at::native::mps::MetalShaderLibrary>(src);
 }
 
-at::Tensor foobar_arith(const at::Tensor& a, const at::Tensor& b, std::optional<at::Tensor> out) {
-    TORCH_CHECK(g_lib != nullptr, "kernel source not set");
-    at::Tensor out_t = out.has_value() ? *out : at::Tensor();
-    auto iter = at::TensorIteratorConfig()
-        .add_output(out_t)
-        .add_input(a)
-        .add_input(b)
-        .promote_inputs_to_common_dtype(true)
-        .build();
-    g_lib->exec_binary_kernel(iter, "foobar");
-    return iter.output(0);
-}
-
-at::Tensor foobar_strict(const at::Tensor& a, const at::Tensor& b, std::optional<at::Tensor> out) {
-    TORCH_CHECK(g_lib != nullptr, "kernel source not set");
-    at::Tensor out_t = out.has_value() ? *out : at::Tensor();
-    auto iter = at::TensorIteratorConfig()
-        .add_output(out_t)
-        .add_input(a)
-        .add_input(b)
-        .check_all_same_dtype(true)
-        .build();
-    g_lib->exec_binary_kernel(iter, "foobar");
-    return iter.output(0);
-}
-
-at::Tensor foobar_arith_outcast(const at::Tensor& a, const at::Tensor& b, at::Tensor out) {
-    TORCH_CHECK(g_lib != nullptr, "kernel source not set");
-    auto iter = at::TensorIteratorConfig()
-        .add_output(out)
-        .add_input(a)
-        .add_input(b)
-        .promote_inputs_to_common_dtype(true)
-        .cast_common_dtype_to_outputs(true)
-        .build();
-    g_lib->exec_binary_kernel(iter, "foobar");
-    return iter.output(0);
-}
-
-at::Tensor foobar_cmp(const at::Tensor& a, const at::Tensor& b, std::optional<at::Tensor> out) {
+// Arithmetic-style: promote inputs to common, ask TI to cast on store when
+// out= dtype diverges from common.
+at::Tensor simple_add(const at::Tensor& a, const at::Tensor& b, std::optional<at::Tensor> out) {
     TORCH_CHECK(g_lib != nullptr, "kernel source not set");
     at::Tensor out_t = out.has_value() ? *out : at::Tensor();
     at::TensorIteratorConfig cfg;
-    cfg.add_output(out_t)
-       .add_input(a)
-       .add_input(b)
-       .promote_inputs_to_common_dtype(true);
-    if (!out_t.defined()) {
-        cfg.declare_static_dtype(at::kBool);
+    cfg.add_output(out_t).add_input(a).add_input(b).promote_inputs_to_common_dtype(true);
+    if (out_t.defined()) {
+        cfg.cast_common_dtype_to_outputs(true);
     }
     auto iter = cfg.build();
-    g_lib->exec_binary_kernel(iter, "foobar_cmp", std::nullopt, std::nullopt, at::kBool);
+    g_lib->exec_binary_kernel(iter, "simple_add");
     return iter.output(0);
 }
 
-at::Tensor foobar_cmp_typed(const at::Tensor& a, const at::Tensor& b, at::Tensor out) {
+// Comparison-style: mirrors set_up_comparison_op_config from TI.
+at::Tensor simple_ge(const at::Tensor& a, const at::Tensor& b, std::optional<at::Tensor> out) {
     TORCH_CHECK(g_lib != nullptr, "kernel source not set");
-    auto iter = at::TensorIteratorConfig()
-        .add_output(out)
-        .add_input(a)
-        .add_input(b)
-        .promote_inputs_to_common_dtype(true)
-        .cast_common_dtype_to_outputs(true)
-        .build();
-    g_lib->exec_binary_kernel(iter, "foobar_cmp", std::nullopt, std::nullopt, at::kBool);
+    at::Tensor out_t = out.has_value() ? *out : at::Tensor();
+    at::TensorIteratorConfig cfg;
+    cfg.add_output(out_t).add_input(a).add_input(b).promote_inputs_to_common_dtype(true);
+    if (!out_t.defined()) {
+        cfg.declare_static_dtype(at::kBool);
+    } else if (out_t.scalar_type() != at::kBool) {
+        cfg.cast_common_dtype_to_outputs(true);
+    }
+    auto iter = cfg.build();
+    g_lib->exec_binary_kernel(iter, "simple_ge", std::nullopt, std::nullopt, at::kBool);
     return iter.output(0);
 }
 
@@ -9009,7 +8951,7 @@ def _conformance_compose_metal_source():
         _conformance_read_metal_header("c10/metal/common.h"),
         _conformance_read_metal_header("c10/metal/utils.h"),
         _conformance_read_metal_header("c10/metal/indexing.h"),
-        _CONFORMANCE_FOOBAR_METAL,
+        _CONFORMANCE_KERNELS_METAL,
     ])
 
 
@@ -9023,14 +8965,7 @@ def _conformance_ext_handle():
         _conformance_ext = torch.utils.cpp_extension.load_inline(
             name="mps_iter_conformance",
             cpp_sources=_CONFORMANCE_CPP_SOURCE,
-            functions=[
-                "set_kernel_source",
-                "foobar_arith",
-                "foobar_strict",
-                "foobar_arith_outcast",
-                "foobar_cmp",
-                "foobar_cmp_typed",
-            ],
+            functions=["set_kernel_source", "simple_add", "simple_ge"],
             extra_include_paths=[os.path.join(_CONFORMANCE_REPO_ROOT, "aten", "src")],
             verbose=False,
         )
@@ -9047,35 +8982,26 @@ def _conformance_make_tensor(shape, dtype):
     return torch.randint(lo, hi, shape, dtype=dtype)
 
 
+# Only float-common input pairs: the kernel is registered for float; the
+# dispatcher's input-cast path handles runtime promotion of narrower operands.
 _CONFORMANCE_ARITH_DTYPE_PAIRS = [
     (torch.float32, torch.float32),
     (torch.float16, torch.float32),
     (torch.bfloat16, torch.float32),
     (torch.int32, torch.float32),
-    (torch.int8, torch.int32),
 ]
-
-_CONFORMANCE_STRICT_DTYPES = [
-    torch.uint8,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-    torch.float16,
-    torch.float32,
-]
-
-_CONFORMANCE_OUTCAST_OUT_DTYPES = [torch.float32, torch.float16, torch.int32]
 
 _CONFORMANCE_SHAPES = [(), (8,), (3, 5)]
-_CONFORMANCE_CALL_FORMS = ["functional", "out"]
 
 
 class TestBinaryIteratorConformance(TestCaseMPS):
+    # `out_dtype=None` exercises the functional form (TI allocates); other
+    # values exercise the `out=` path, including ones that diverge from the
+    # kernel's natural output and trigger the strided castout dispatch.
     @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
+    @parametrize("out_dtype", [None, torch.float32, torch.float16, torch.int32])
     @parametrize("shape", _CONFORMANCE_SHAPES)
-    @parametrize("call_form", _CONFORMANCE_CALL_FORMS)
-    def test_foobar_arith(self, a_dtype, b_dtype, shape, call_form):
+    def test_simple_add(self, a_dtype, b_dtype, out_dtype, shape):
         ext = _conformance_ext_handle()
         torch.manual_seed(0)
         a_cpu = _conformance_make_tensor(shape, a_dtype)
@@ -9084,23 +9010,23 @@ class TestBinaryIteratorConformance(TestCaseMPS):
         b = b_cpu.to("mps")
 
         common = torch.promote_types(a_dtype, b_dtype)
-        expected = a_cpu.to(common) + b_cpu.to(common)
-
-        if call_form == "functional":
-            result = ext.foobar_arith(a, b, None)
+        raw = a_cpu.to(common) + b_cpu.to(common)
+        if out_dtype is None:
+            expected = raw
+            result = ext.simple_add(a, b, None)
         else:
-            out = torch.empty(shape, dtype=expected.dtype, device="mps")
-            ext.foobar_arith(a, b, out)
-            result = out
+            expected = raw.to(out_dtype)
+            result = torch.empty(shape, dtype=out_dtype, device="mps")
+            ext.simple_add(a, b, result)
 
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result.cpu(), expected)
 
     @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
-    @parametrize("out_dtype", _CONFORMANCE_OUTCAST_OUT_DTYPES)
+    @parametrize("out_dtype", [None, torch.bool, torch.float32, torch.int32])
     @parametrize("shape", _CONFORMANCE_SHAPES)
-    def test_foobar_arith_outcast(self, a_dtype, b_dtype, out_dtype, shape):
+    def test_simple_ge(self, a_dtype, b_dtype, out_dtype, shape):
         ext = _conformance_ext_handle()
         torch.manual_seed(0)
         a_cpu = _conformance_make_tensor(shape, a_dtype)
@@ -9109,78 +9035,14 @@ class TestBinaryIteratorConformance(TestCaseMPS):
         b = b_cpu.to("mps")
 
         common = torch.promote_types(a_dtype, b_dtype)
-        expected = (a_cpu.to(common) + b_cpu.to(common)).to(out_dtype)
-        out = torch.empty(shape, dtype=out_dtype, device="mps")
-        ext.foobar_arith_outcast(a, b, out)
-
-        self.assertEqual(out.dtype, out_dtype)
-        self.assertEqual(out.shape, expected.shape)
-        self.assertEqual(out.cpu(), expected)
-
-    @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
-    @parametrize("shape", _CONFORMANCE_SHAPES)
-    @parametrize("call_form", _CONFORMANCE_CALL_FORMS)
-    def test_foobar_cmp(self, a_dtype, b_dtype, shape, call_form):
-        ext = _conformance_ext_handle()
-        torch.manual_seed(0)
-        a_cpu = _conformance_make_tensor(shape, a_dtype)
-        b_cpu = _conformance_make_tensor(shape, b_dtype)
-        a = a_cpu.to("mps")
-        b = b_cpu.to("mps")
-
-        common = torch.promote_types(a_dtype, b_dtype)
-        expected = a_cpu.to(common) >= b_cpu.to(common)
-
-        if call_form == "functional":
-            result = ext.foobar_cmp(a, b, None)
+        raw = a_cpu.to(common) >= b_cpu.to(common)
+        if out_dtype is None:
+            expected = raw
+            result = ext.simple_ge(a, b, None)
         else:
-            out = torch.empty(shape, dtype=torch.bool, device="mps")
-            ext.foobar_cmp(a, b, out)
-            result = out
-
-        self.assertEqual(result.dtype, torch.bool)
-        self.assertEqual(result.shape, expected.shape)
-        self.assertEqual(result.cpu(), expected)
-
-    @parametrize("a_dtype,b_dtype", _CONFORMANCE_ARITH_DTYPE_PAIRS)
-    @parametrize("out_dtype", _CONFORMANCE_OUTCAST_OUT_DTYPES)
-    @parametrize("shape", _CONFORMANCE_SHAPES)
-    def test_foobar_cmp_typed(self, a_dtype, b_dtype, out_dtype, shape):
-        ext = _conformance_ext_handle()
-        torch.manual_seed(0)
-        a_cpu = _conformance_make_tensor(shape, a_dtype)
-        b_cpu = _conformance_make_tensor(shape, b_dtype)
-        a = a_cpu.to("mps")
-        b = b_cpu.to("mps")
-
-        common = torch.promote_types(a_dtype, b_dtype)
-        expected = (a_cpu.to(common) >= b_cpu.to(common)).to(out_dtype)
-        out = torch.empty(shape, dtype=out_dtype, device="mps")
-        ext.foobar_cmp_typed(a, b, out)
-
-        self.assertEqual(out.dtype, out_dtype)
-        self.assertEqual(out.shape, expected.shape)
-        self.assertEqual(out.cpu(), expected)
-
-    @parametrize("dtype", _CONFORMANCE_STRICT_DTYPES)
-    @parametrize("shape", _CONFORMANCE_SHAPES)
-    @parametrize("call_form", _CONFORMANCE_CALL_FORMS)
-    def test_foobar_strict(self, dtype, shape, call_form):
-        ext = _conformance_ext_handle()
-        torch.manual_seed(0)
-        a_cpu = _conformance_make_tensor(shape, dtype)
-        b_cpu = _conformance_make_tensor(shape, dtype)
-        a = a_cpu.to("mps")
-        b = b_cpu.to("mps")
-
-        expected = a_cpu + b_cpu
-
-        if call_form == "functional":
-            result = ext.foobar_strict(a, b, None)
-        else:
-            out = torch.empty(shape, dtype=dtype, device="mps")
-            ext.foobar_strict(a, b, out)
-            result = out
+            expected = raw.to(out_dtype)
+            result = torch.empty(shape, dtype=out_dtype, device="mps")
+            ext.simple_ge(a, b, result)
 
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result.shape, expected.shape)
