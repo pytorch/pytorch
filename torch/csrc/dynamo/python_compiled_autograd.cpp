@@ -44,7 +44,7 @@ at trace time.
 
 Notes:
   - We require hooks to not change shapes of tensors.
-  - We require non-hook autograd nodes to be tracable.
+  - We require non-hook autograd nodes to be traceable.
 */
 
 namespace torch::dynamo::autograd {
@@ -1001,7 +1001,7 @@ static CacheNode* _compiled_autograd_impl(
           PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
       PyObject* pyobj = Py_None;
       if (auto pynode = dynamic_cast<PyNode*>(call.node.get())) {
-        pyobj = pynode->obj;
+        pyobj = pynode->pyobj();
       }
       check(PyObject_CallFunction(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));

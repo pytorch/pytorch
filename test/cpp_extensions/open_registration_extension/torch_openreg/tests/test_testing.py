@@ -89,15 +89,13 @@ op_combined_unsupported = _make_dummy_op("op_combined_unsupported")
 
 
 @contextmanager
-def _temp_attrs(obj, **attrs):
-    backup = {k: getattr(obj, k) for k in attrs}
-    for k, v in attrs.items():
-        setattr(obj, k, v)
+def _temp_test_configs(obj, **configs):
+    backup = {k: getattr(obj, k, None) for k in configs}
+    obj.set_test_configs(**configs)
     try:
         yield
     finally:
-        for k, v in backup.items():
-            setattr(obj, k, v)
+        obj.set_test_configs(**backup)
 
 
 class TestDeviceTypeOpenReg(TestCase):
@@ -150,18 +148,6 @@ class TestDeviceTypeOpenReg(TestCase):
         # If we reach here without a KeyError the safety check worked.
 
 
-# Modify PrivateUse1TestBase which is automatically included for OpenReg
-PrivateUse1TestBase.op_overrides = {
-    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
-    "op_skip_f32": [
-        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
-    ],
-    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
-    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
-    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
-}
-
-
 class TestSkippedSpecificTestCases(TestCase):
     executed_count = 0
 
@@ -188,13 +174,6 @@ class TestSkippedSpecificTestCases(TestCase):
 class TestSkippedWholeTestClass(TestCase):
     def test_skipped_class_member(self, device):
         self.fail("This class should not be instantiated for openreg")
-
-
-# PrivateUse1 can skip individual methods or an entire instantiated class.
-PrivateUse1TestBase.test_exclusions = {
-    "TestSkippedSpecificTestCases": ["test_skipped"],
-    "TestSkippedWholeTestClass": "*",
-}
 
 
 class TestSupportedOpsWithOverrides(TestCase):
@@ -226,16 +205,37 @@ class TestSupportedOpsWithOverrides(TestCase):
         type(self)._executed_combined[op.name] += 1
 
 
-instantiate_device_type_tests(TestDeviceTypeOpenReg, globals(), only_for=("openreg",))
+OPENREG_OP_OVERRIDES = {
+    "op_skip": [DecorateInfo(unittest.skip("skip op_skip"))],
+    "op_skip_f32": [
+        DecorateInfo(unittest.skip("skip op_skip"), dtypes=(torch.float32,))
+    ],
+    "op_xfail": [DecorateInfo(unittest.expectedFailure)],
+    # This overrides the 1e-5 precision already declared on op_precision's OpInfo.
+    "op_precision": [DecorateInfo(precisionOverride({torch.float32: 1e-2}))],
+}
+with _temp_test_configs(PrivateUse1TestBase, op_overrides=OPENREG_OP_OVERRIDES):
+    instantiate_device_type_tests(
+        TestDeviceTypeOpenReg, globals(), only_for=("openreg",)
+    )
+
 instantiate_device_type_tests(
     TestBypassDeviceRestrictions, globals(), only_for="openreg"
 )
-instantiate_device_type_tests(
-    TestSkippedSpecificTestCases, globals(), only_for="openreg"
-)
-instantiate_device_type_tests(TestSkippedWholeTestClass, globals(), only_for="openreg")
 
-with _temp_attrs(
+OPENREG_TEST_EXCLUSIONS = {
+    "TestSkippedSpecificTestCases": ["test_skipped"],
+    "TestSkippedWholeTestClass": "*",
+}
+with _temp_test_configs(PrivateUse1TestBase, test_exclusions=OPENREG_TEST_EXCLUSIONS):
+    instantiate_device_type_tests(
+        TestSkippedSpecificTestCases, globals(), only_for="openreg"
+    )
+    instantiate_device_type_tests(
+        TestSkippedWholeTestClass, globals(), only_for="openreg"
+    )
+
+with _temp_test_configs(
     PrivateUse1TestBase,
     op_overrides={
         "op_combined_skip": [DecorateInfo(unittest.skip("skip via op_overrides"))]
