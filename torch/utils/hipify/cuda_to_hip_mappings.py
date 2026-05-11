@@ -345,7 +345,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cub/device/device_select.cuh", "hipcub/hipcub.hpp"),
     ("nvtx3/nvtx3.hpp", "roctracer/roctx.h"),
     ("nvToolsExt.h", "roctracer/roctx.h"),
-    ("nvml.h", "rocm_smi/rocm_smi.h"),
+    ("nvml.h", "amd_smi/amdsmi.h"),
     ("tensorpipe/tensorpipe_cuda.h", "tensorpipe/tensorpipe_hip.h"),
 ])
 
@@ -2712,14 +2712,14 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvtxRangeStart", "roctxRangeStart"),
     ("nvtxRangeEnd", "roctxRangeStop"),
     ("nvtxRangeId_t", "int"),
-    ("nvmlReturn_t", "rsmi_status_t"),
-    ("NVML_SUCCESS", "RSMI_STATUS_SUCCESS"),
-    ("NVML_P2P_CAPS_INDEX_READ", "RSMI_STATUS_SUCCESS"),
-    ("NVML_P2P_STATUS_OK", "RSMI_STATUS_SUCCESS"),
-    ("NVML_ERROR_INSUFFICIENT_SIZE", "RSMI_STATUS_INSUFFICIENT_SIZE"),
-    ("nvmlDevice_t", "uint32_t"),
+    ("nvmlReturn_t", "amdsmi_status_t"),
+    ("NVML_SUCCESS", "AMDSMI_STATUS_SUCCESS"),
+    ("NVML_P2P_CAPS_INDEX_READ", "AMDSMI_STATUS_SUCCESS"),
+    ("NVML_P2P_STATUS_OK", "AMDSMI_STATUS_SUCCESS"),
+    ("NVML_ERROR_INSUFFICIENT_SIZE", "AMDSMI_STATUS_INSUFFICIENT_SIZE"),
+    ("nvmlDevice_t", "amdsmi_processor_handle"),
     ("nvmlGpuP2PStatus_t", "bool"),
-    ("nvmlProcessInfo_t", "rsmi_process_info_t"),
+    ("nvmlProcessInfo_t", "amdsmi_proc_info_t"),
     ("nvmlGpuP2PCapsIndex_t", "uint32_t"),
 ])
 

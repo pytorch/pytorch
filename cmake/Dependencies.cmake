@@ -1083,11 +1083,9 @@ if(USE_ROCM)
       endif()
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
+    # amd_smi header needed for symmetric memory (loaded at runtime via dlopen)
     if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
+      list(APPEND ROCM_INCLUDE_DIRS ${amd_smi_INCLUDE_DIR})
     endif()
 
     # ---[ Kernel asserts

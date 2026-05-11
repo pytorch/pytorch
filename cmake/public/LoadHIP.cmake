@@ -293,7 +293,7 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    find_package_and_print_version(rocm_smi REQUIRED)
+    find_package_and_print_version(amd_smi REQUIRED)
   endif()
 
   # Optional components.

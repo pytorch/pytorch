@@ -87,7 +87,7 @@ Memory management
 PyTorch uses a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
-``rocm-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
+``amd-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_reserved` and
 :meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory

@@ -88,7 +88,7 @@ ROCM_SO_FILES=(
     "librccl.so"
     "librocblas.so"
     "librocfft.so"
-    "librocm_smi64.so"
+    "libamd_smi.so"
     "librocrand.so"
     "librocsolver.so"
     "librocsparse.so"

@@ -140,6 +140,12 @@ if [ -d /opt/rocm/lib/rocm_sysdeps/lib ]; then
   export LD_LIBRARY_PATH=/opt/rocm/lib/rocm_sysdeps/lib:\${LD_LIBRARY_PATH}
   export PKG_CONFIG_PATH=/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:\${PKG_CONFIG_PATH:-}
 fi
+# Ensure amdsmi Python module is discoverable if not pip-installed
+if [ -d /opt/rocm/share/amd_smi ]; then
+  export PYTHONPATH=/opt/rocm/share/amd_smi:\${PYTHONPATH:-}
+elif [ -d /opt/rocm/lib/amd_smi ]; then
+  export PYTHONPATH=/opt/rocm/lib/amd_smi:\${PYTHONPATH:-}
+fi
 # Disable MSLK for theRock nightly (not yet supported)
 export USE_MSLK=0
 ROCM_ENV
@@ -256,6 +262,12 @@ export LD_LIBRARY_PATH=/opt/rocm/lib:\${LD_LIBRARY_PATH:-}
 # Device library path
 export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
 export MAGMA_HOME=/opt/rocm/magma
+# Ensure amdsmi Python module is discoverable if not pip-installed
+if [ -d /opt/rocm/share/amd_smi ]; then
+  export PYTHONPATH=/opt/rocm/share/amd_smi:\${PYTHONPATH:-}
+elif [ -d /opt/rocm/lib/amd_smi ]; then
+  export PYTHONPATH=/opt/rocm/lib/amd_smi:\${PYTHONPATH:-}
+fi
 ROCM_ENV
 
     echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
