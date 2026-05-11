@@ -5,8 +5,7 @@ for Python object semantics, especially `tp_*`, `nb_*`, `sq_*`, and `mp_*`
 protocol behavior.
 
 The goal is to close CPython protocol gaps in a systematic way. The goal is not
-to build a second CPython runtime inside Dynamo, and not to introduce a full
-`TypeVariableTracker` / `PyTypeObject` model. We use CPython's algorithms as
+to build a second CPython runtime inside Dynamo. We use CPython's algorithms as
 the semantic reference, then express them with Dynamo's existing
 `VariableTracker` machinery.
 
@@ -64,28 +63,22 @@ The exact structure differs by protocol, but the split is the same:
 - subclass hook override: the actual behavior for list, dict, tensor,
   user-defined object, constant, etc.
 
-This keeps the CPython algorithm in one place without moving all behavior into a
-separate type object abstraction.
+This keeps the CPython algorithm in one place without forcing a broader
+redesign.
 
-## What we are not doing
+## What not to mirror
 
-Earlier designs explored a more literal mirror of CPython's machinery, with a
-dedicated type tracker carrying slot tables, MRO, type dict, descriptor slots,
-and type flags. That was too much machinery for the benefit it provided.
+Do not spend Dynamo complexity on CPython implementation details that do not
+affect tracing semantics:
 
-Do not add or assume:
+- refcounting and object lifetime slots;
+- allocation and deallocation slots;
+- GC traversal slots;
+- exact C struct layout;
+- CPython's internal cache/version-tag machinery when Dynamo guards already
+  cover the invariant.
 
-- a new `TypeVariableTracker` as the main abstraction for this effort;
-- an `ob_type_vt` pointer on every `VariableTracker`;
-- full Dynamo-side copies of `PyTypeObject` slot tables;
-- a large migration that moves all behavior out of `VariableTracker`
-  subclasses before there is a concrete protocol gap to fix;
-- CPython implementation details that do not affect Dynamo tracing semantics,
-  such as refcounting, allocation, deallocation, GC traversal, exact C struct
-  layout, or type version tags.
-
-The useful part of CPython to mirror is the protocol algorithm and dispatch
-order, not the full runtime representation.
+The aim is a predictable semantic model, not a byte-for-byte copy of CPython.
 
 ## CPython model to use as reference
 
