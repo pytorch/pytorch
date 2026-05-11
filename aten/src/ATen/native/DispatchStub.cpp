@@ -38,7 +38,7 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::ZVECTOR;
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
-    int sve_vl = cpuinfo_get_max_arm_sve_length();
+    int sve_vl = cpuinfo_initialize() ? cpuinfo_get_max_arm_sve_length() : -1;
     if (sve_vl > 0 && cpuinfo_has_arm_bf16()) {
       if (envar == "sve256") {
         if (sve_vl == 256) {
