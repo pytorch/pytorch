@@ -1065,6 +1065,14 @@ def index_reduce(
     *,
     include_self: bool = True,
 ) -> torch.Tensor:
+    torch._check(
+        self.device == index.device and self.device == src.device,
+        lambda: (
+            f"index_reduce(): self, index and source expected to be in the same device, "
+            f"but got (self) {self.device}, (index) {index.device}, "
+            f"and (source) {src.device}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
