@@ -18387,26 +18387,26 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
-    def test_multinomial_lowering_no_graph_break(self):
-        # aten.multinomial must be handled by a registered lowering (extern fallback)
-        def fn(weights):
-            w = weights * 2.0
-            return torch.multinomial(w, num_samples=3, replacement=True)
+        def test_multinomial_lowering_no_graph_break(self):
+            # aten.multinomial must be handled by a registered lowering (extern fallback)
+            def fn(weights):
+                w = weights * 2.0
+                return torch.multinomial(w, num_samples=3, replacement=True)
 
-        inp = torch.rand(8, device=GPU_TYPE)
-        torch._dynamo.reset()
-        explanation = torch._dynamo.explain(fn)(inp)
+            inp = torch.rand(8, device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
 
-        self.assertEqual(
-            explanation.graph_break_count,
-            0,
-            f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
-        )
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
+            )
 
-        result = torch.compile(fn)(inp)
-        self.assertEqual(result.shape, torch.Size([3]))
-        self.assertTrue(result.min() >= 0)
-        self.assertTrue(result.max() < 8)
+            result = torch.compile(fn)(inp)
+            self.assertEqual(result.shape, torch.Size([3]))
+            self.assertTrue(result.min() >= 0)
+            self.assertTrue(result.max() < 8)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
