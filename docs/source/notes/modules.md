@@ -379,7 +379,7 @@ Training neural networks can often be tricky. For more information, check out:
 ## Module State
 
 In the previous section, we demonstrated training a module's "parameters", or learnable aspects of computation.
-Now, if we want to save the trained model to disk, we can do so by saving its ``state_dict`` (i.e. "state dictionary"):
+Now, if we want to save the trained model to disk, we can do so by saving its `state_dict` (i.e. "state dictionary"):
 
 ```{code-block} python
 # Save the module
@@ -399,7 +399,7 @@ computation but is not learnable. For such cases, PyTorch provides the concept o
 and "non-persistent". Following is an overview of the various types of state a module can have:
 
 - **Parameters** : learnable aspects of computation; contained within the `state_dict`
-* **Buffers** : non-learnable aspects of computation
+- **Buffers** : non-learnable aspects of computation
 
   - **Persistent** buffers: contained within the `state_dict` (i.e. serialized when saving & loading)
   - **Non-persistent** buffers: not contained within the `state_dict` (i.e. left out of serialization)
@@ -420,7 +420,7 @@ class RunningMean(nn.Module):
     return self.mean
 ```
 
-Now, the current value of the running mean is considered part of the module's ``state_dict``
+Now, the current value of the running mean is considered part of the module's `state_dict`
 and will be properly restored when loading the module from disk:
 
 ```{code-block} python
