@@ -81,7 +81,7 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
-  std::vector<CachingDeviceAllocator::SegmentInfo> host_segments;
+  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
   std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 

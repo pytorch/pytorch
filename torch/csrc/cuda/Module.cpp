@@ -25,7 +25,6 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/util/ApproximateClock.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -969,21 +968,37 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::list host_traces_list;
   if (host_alloc && host_alloc->is_history_enabled()) {
     auto host_segs = host_alloc->get_segments();
-    for (const auto& segmentInfo : host_segs) {
-      host_segments_list.append(segmentInfoToDict(segmentInfo));
+    for (const auto& seg : host_segs) {
+      py::dict segmentDict;
+      segmentDict[device_s] = -1;
+      segmentDict[address_s] = seg.address;
+      segmentDict[total_size_s] = seg.size;
+      segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
+      segmentDict[active_size_s] = seg.active ? seg.size : 0;
+      segmentDict[requested_size_s] = seg.size;
+      segmentDict[stream_s] = int64_t(0);
+      segmentDict[segment_type_s] = small_s;
+      segmentDict[segment_pool_id] = seg.owner_private_pool_id;
+      segmentDict[is_expandable_s] = false;
+      add_frame_key(segmentDict, seg.context_when_allocated);
+
+      py::dict blockDict;
+      blockDict[address_s] = seg.address;
+      blockDict[size_s] = seg.size;
+      blockDict[requested_size_s] = seg.size;
+      blockDict[state_s] =
+          (seg.allocated ? active_allocated_s
+                         : (seg.active ? active_pending_free_s : inactive_s));
+      add_frame_key(blockDict, seg.context_when_allocated);
+
+      py::list blocks;
+      blocks.append(blockDict);
+      segmentDict[blocks_s] = blocks;
+      host_segments_list.append(segmentDict);
     }
 
     if (include_traces) {
-      c10::ApproximateClockToUnixTimeConverter host_clock_converter;
-      auto host_tsc_to_ns = host_clock_converter.makeConverter();
-      auto host_tsc_to_us = [=](c10::approx_time_t t_approx) {
-        return host_tsc_to_ns(t_approx) / 1000;
-      };
-
       auto host_trace_entries = host_alloc->get_traces();
-      for (auto& te : host_trace_entries) {
-        te.time_.t_ = host_tsc_to_us(te.time_.approx_t_);
-      }
       for (const auto& te : host_trace_entries) {
         host_traces_list.append(traceEntryToDict(te));
       }
@@ -1199,6 +1214,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           const std::vector<std::string>&,
+          bool,
           bool)>(torch::cuda::_record_memory_history));
 
   m.def(
@@ -1212,6 +1228,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           bool,
           bool,
           const std::vector<std::string>&,
+          bool,
           bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {

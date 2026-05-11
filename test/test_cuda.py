@@ -5108,7 +5108,7 @@ class TestCudaAllocator(TestCase):
                 "all",
                 context="alloc",
                 stacks="python",
-                record_host=True,
+                record_pinned_host_memory=True,
                 clear_history=True,
             )
 
@@ -5172,12 +5172,41 @@ class TestCudaAllocator(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
+    def test_host_memory_snapshot_max_entries(self):
+        try:
+            torch._C._host_emptyCache()
+            max_entries = 4
+            torch.cuda.memory._record_memory_history(
+                "all",
+                max_entries=max_entries,
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+
+            # Allocate and free enough pinned tensors to overflow the ring
+            # buffer many times over (each alloc/free produces multiple trace
+            # entries: segment_alloc, alloc, free_requested, free_completed).
+            for i in range(20):
+                x = torch.empty(1024 + i, pin_memory=True)
+                del x
+                torch._C._host_emptyCache()
+
+            ss = torch.cuda.memory._snapshot()
+            self.assertLessEqual(len(ss["host_traces"]), max_entries)
+            # We did enough work that the buffer should be full.
+            self.assertEqual(len(ss["host_traces"]), max_entries)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
     def test_host_memory_snapshot_none_disables(self):
         try:
             torch._C._host_emptyCache()
             torch.cuda.memory._record_memory_history(
                 "all",
-                record_host=True,
+                record_pinned_host_memory=True,
                 clear_history=True,
             )
             x = torch.empty(1024, pin_memory=True)
@@ -5185,7 +5214,7 @@ class TestCudaAllocator(TestCase):
             self.assertGreater(len(ss["host_traces"]), 0)
             del x
 
-            # None should turn off host recording without record_host=True
+            # None should turn off host recording without record_pinned_host_memory=True
             torch.cuda.memory._record_memory_history(None)
 
             torch._C._host_emptyCache()
@@ -5194,6 +5223,38 @@ class TestCudaAllocator(TestCase):
             self.assertEqual(len(ss["host_segments"]), 0)
             self.assertEqual(len(ss["host_traces"]), 0)
             del y
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_host_only(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                record_pinned_host_memory=True,
+                record_cuda=False,
+                clear_history=True,
+            )
+
+            x = torch.empty(311, 411, pin_memory=True)
+            d = torch.empty(311, 411, device="cuda")
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Host traces should be recorded.
+            self.assertGreater(len(ss["host_traces"]), 0)
+            self.assertGreater(len(ss["host_segments"]), 0)
+
+            # CUDA traces should be empty since record_cuda=False, even though
+            # we allocated a CUDA tensor.
+            for device_trace in ss["device_traces"]:
+                self.assertEqual(len(device_trace), 0)
+
+            del x
+            del d
         finally:
             torch.cuda.memory._record_memory_history(None)
 

@@ -203,10 +203,11 @@ void _record_memory_history(
     bool compileContext,
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions,
-    bool record_host) {
+    bool record_pinned_host_memory,
+    bool record_cuda) {
   TORCH_CHECK(
-      !record_host || enabled,
-      "record_host requires memory history recording to be enabled");
+      !record_pinned_host_memory || enabled,
+      "record_pinned_host_memory requires memory history recording to be enabled");
   c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -223,15 +224,16 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
+  bool cuda_enabled = enabled && record_cuda;
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled,
+      cuda_enabled,
       recorder,
       trace_alloc_max_entries,
       when,
       clearHistory,
       skip_actions);
 
-  bool host_enabled = enabled && record_host;
+  bool host_enabled = enabled && record_pinned_host_memory;
   auto* host_alloc = at::getHostAllocator(at::kCUDA);
   if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
     host_alloc->record_history(
@@ -256,10 +258,11 @@ void _record_memory_history(
     bool compileContext,
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions,
-    bool record_host) {
+    bool record_pinned_host_memory,
+    bool record_cuda) {
   TORCH_CHECK(
-      !record_host || enabled.has_value(),
-      "record_host requires memory history recording to be enabled");
+      !record_pinned_host_memory || enabled.has_value(),
+      "record_pinned_host_memory requires memory history recording to be enabled");
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -295,15 +298,11 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
+  bool cuda_enabled = enabled.has_value() && record_cuda;
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(),
-      recorder,
-      max_entries,
-      when,
-      clearHistory,
-      skip_actions);
+      cuda_enabled, recorder, max_entries, when, clearHistory, skip_actions);
 
-  bool host_enabled = enabled.has_value() && record_host;
+  bool host_enabled = enabled.has_value() && record_pinned_host_memory;
   auto* host_alloc = at::getHostAllocator(at::kCUDA);
   if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
     host_alloc->record_history(
@@ -543,8 +542,38 @@ std::string _memory_snapshot_pickled() {
   }
 
   auto host_segments = new_list();
-  for (const auto& segmentInfo : snapshot.host_segments) {
-    host_segments.push_back(segmentInfoToDict(segmentInfo));
+  for (const auto& seg : snapshot.host_segments) {
+    auto segmentDict = new_dict();
+    segmentDict.insert(device_s, -1);
+    segmentDict.insert(address_s, static_cast<int64_t>(seg.address));
+    segmentDict.insert(total_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(
+        allocated_size_s, static_cast<int64_t>(seg.allocated ? seg.size : 0));
+    segmentDict.insert(
+        active_size_s, static_cast<int64_t>(seg.active ? seg.size : 0));
+    segmentDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(stream_s, int64_t(0));
+    segmentDict.insert(segment_type_s, small_s);
+    segmentDict.insert(
+        segment_pool_id,
+        std::tuple<int64_t, int64_t>(seg.owner_private_pool_id));
+    segmentDict.insert(is_expandable_s, false);
+    add_frame_key(segmentDict, seg.context_when_allocated);
+
+    auto blockDict = new_dict();
+    blockDict.insert(address_s, static_cast<int64_t>(seg.address));
+    blockDict.insert(size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(
+        state_s,
+        (seg.allocated ? active_allocated_s
+                       : (seg.active ? active_pending_free_s : inactive_s)));
+    add_frame_key(blockDict, seg.context_when_allocated);
+
+    auto blocks = new_list();
+    blocks.push_back(blockDict);
+    segmentDict.insert(blocks_s, blocks);
+    host_segments.push_back(segmentDict);
   }
 
   auto host_traces = new_list();
