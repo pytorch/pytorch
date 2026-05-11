@@ -6,10 +6,7 @@ import unittest
 
 import sympy
 
-from torch._inductor.codegen.simd import (
-    DerivedIterationRangesRoot,
-    IterationRangesRoot,
-)
+from torch._inductor.codegen.simd import DerivedIterationRangesRoot, IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import IndexingOptions, TritonKernel, TritonSymbols
 from torch._inductor.virtualized import V
