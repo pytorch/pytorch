@@ -221,6 +221,15 @@ class IterationRangesRoot(IterationRanges):
     def owns_mask(self, mask_var: str) -> bool:
         return mask_var == self.mask_name()
 
+    def supports_constant_mask(self) -> bool:
+        return True
+
+    def has_custom_codegen_header(self) -> bool:
+        return False
+
+    def named_constants(self) -> tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...]:
+        return ()
+
     def cache_clear(self) -> None:
         for node in self.nodes.values():
             node.cache_clear()
@@ -375,6 +384,76 @@ class IterationRangesEntry(IterationRanges):
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, IterationRangesEntry)
         return self.name == other.name
+
+
+class DerivedIterationRangesRoot(IterationRangesRoot):
+    """A root with reduced numel/block_size derived from a parent tree.
+
+    Used for the grouped reduction output: if the parent R tree covers 1024
+    columns with group_size=128, the derived root covers 8 groups. It shares
+    the parent's loop structure (same is_loop, prefix, loop variable) but
+    has its own block geometry:
+
+        parent R:  numel=1024, block_size=RBLOCK, offset=roffset
+        derived R: numel=8,    block_size=RBLOCK//128, offset=roffset//128
+
+    This lets the grouped reduction store at reduced-resolution offsets
+    while still running inside the parent's reduction loop.
+    """
+
+    def __init__(
+        self,
+        parent: IterationRangesRoot,
+        *,
+        numel: sympy.Expr,
+        block_size: sympy.Expr,
+        block_offset: sympy.Expr,
+        name_suffix: str = "reduced",
+        named_constants: tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...] = (),
+    ) -> None:
+        super().__init__(
+            name=f"{name_suffix}_{parent.name}",
+            numel=numel,
+            prefix=parent.prefix,
+            index=parent.index,
+            kernel=parent.kernel,
+            pid_cache=parent.pid_cache,
+            # Outer reductions are not always persistent. When the parent
+            # reduction tree is looped, any derived view of it must also stay
+            # loop-local; otherwise its block offset is emitted once in the
+            # kernel prologue and closes over a stale reduction offset from a
+            # previous loop iteration.
+            is_loop=parent.is_loop,
+            tensor_dim=parent.tensor_dim,
+            grid_dim=parent.grid_dim,
+            has_zdim=parent.has_zdim,
+        )
+        self._block_size = block_size
+        self._block_offset = block_offset
+        self._named_constants = named_constants
+
+    def block_size(self) -> sympy.Expr:
+        return self._block_size
+
+    def block_offset(self) -> sympy.Expr:
+        return self._block_offset
+
+    def index_sym(self) -> sympy.Symbol:
+        return sympy_index_symbol(self.name)
+
+    def mask_name(self) -> str:
+        return f"{self.name}_mask"
+
+    def supports_constant_mask(self) -> bool:
+        # Derived roots use expressions like R0_BLOCK // G rather than
+        # fixed-config block keys, so keep their masks explicit.
+        return False
+
+    def named_constants(self) -> tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...]:
+        return self._named_constants
+
+    def has_custom_codegen_header(self) -> bool:
+        return True
 
 
 def constant_repr(value: int | float) -> str:
@@ -969,21 +1048,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         if self.is_indirect_indexing(index):
             return False
 
-        index_numels = [1] * len(self.numels)
+        active_trees = self.active_range_trees()
+        index_numels = [1] * len(active_trees)
         for symbol in index.free_symbols:
-            if symbol not in self.range_tree_nodes:
+            entry = self.range_tree_nodes.get(symbol)
+            if entry is None:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
             assert isinstance(entry.parent, IterationRangesRoot)
-            index_numels[entry.parent.index] *= entry.length
+            # Find which active tree this entry belongs to (identity check
+            # because derived trees may shadow the same prefix).
+            tree_pos = next(
+                (i for i, tree in enumerate(active_trees) if tree is entry.parent),
+                None,
+            )
+            if tree_pos is None:
+                # The symbol belongs to an inactive tree family, e.g. a
+                # reduction symbol outside the reduction or a temporarily
+                # swapped-out derived tree.
+                continue
+            index_numels[tree_pos] *= entry.length
 
         # If the index variables only iterate over a subset of the kernel
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
             simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
-            for idx_range, iter_range in zip(index_numels, self.numels.values())
+            for idx_range, iter_range in zip(
+                index_numels, (tree.numel for tree in active_trees)
+            )
         )
 
     def index_to_str(self, index: sympy.Expr) -> str:
@@ -1038,9 +1131,27 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return self.codegen_indexing(simp_index)
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
+        # Hide reduction trees outside reduction loops so indexing and mask
+        # generation only see axes active in the current stage.
         return [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
+
+    @contextlib.contextmanager
+    def use_range_trees(
+        self, range_trees: Sequence[IterationRangesRoot]
+    ) -> Iterator[None]:
+        """Temporarily codegen against an alternate range-tree family."""
+        saved = self.range_trees
+        self.range_trees = list(range_trees)
+        # simplify_indexing depends on the active range trees, so swapping the
+        # tree family must invalidate any cached simplifications.
+        self.simplify_indexing.cache_clear()
+        try:
+            yield
+        finally:
+            self.range_trees = saved
+            self.simplify_indexing.cache_clear()
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -1061,6 +1172,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def codegen_nan_check(self) -> None:
         raise NotImplementedError("NYI: codegen_nan_check")
+
+    def iteration_ranges_codegen_header(
+        self,
+        entry: IterationRangesRoot,
+        code: IndentedBuffer,
+    ) -> None:
+        raise NotImplementedError("NYI: iteration_ranges_codegen_header")
 
     def deallocate_workspaces(self):
         wrapper = V.graph.wrapper_code
