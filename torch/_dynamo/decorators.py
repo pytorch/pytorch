@@ -1297,6 +1297,87 @@ def mark_dynamic(
 
 
 @forbid_in_graph
+def mark_batch_invariant(t: Any, dim: int | list[Any] | tuple[Any] = 0) -> None:
+    """Mark a tensor's dimension as a batch dim under batch-invariant compilation.
+
+    EXPERIMENTAL — partial implementation. The mark is propagated to
+    ``ShapeEnv.batch_invariant_symbols`` and queryable via
+    ``sizevars.is_batch_invariant_expr(expr)``, but **production code paths
+    do not yet consult the query**. As of today, the actual batch-invariance
+    behavior is gated on the global ``torch._inductor.config.batch_invariant``
+    flag, not on per-symbol marks. Setting this mark alone, without also
+    enabling the global flag, has no effect on compiled output.
+
+    The intended semantic (once Phase 1b lands):
+
+        torch.equal(f(x).narrow(d_out, 0, k), f(x.narrow(d, 0, k)))   # for any k
+
+    must hold for every output whose batch dim ``d_out`` traces back to ``x``'s
+    marked dim. Outputs without a batch dim (e.g. a scalar loss, or a reduction
+    over the batch dim) are unconstrained.
+
+    Known limitations:
+    - Mark on a static dim is a silent no-op (no symbol is allocated).
+    - Mark does not propagate across graph breaks; intermediate tensors in
+      a second sub-graph won't carry the mark.
+    - Mark does not survive ``tensor.clone()`` / ``.cuda()`` / view-slicing
+      at the user level — same as ``mark_dynamic``.
+    - ``torch.export`` discards the mark.
+
+    Composes with ``mark_dynamic``: a dim can be both dynamic (recompile-safe
+    under shape change) and batch-invariant (output stable across shape).
+    """
+    if is_traceable_wrapper_subclass(t):
+        _apply_func_to_inner_tensors_of_same_dim(mark_batch_invariant, t, dim)
+
+    # Parameters/buffers aren't batch dims — marking them is meaningless and
+    # almost certainly a user error (e.g. confusing a Linear's weight with an
+    # activation tensor).
+    if isinstance(t, torch.nn.Parameter):
+        import warnings
+        warnings.warn(
+            f"mark_batch_invariant called on an nn.Parameter (shape={tuple(t.shape)}). "
+            f"Parameters aren't batch dims; the mark is meaningless here. "
+            f"Mark activations / model inputs instead.",
+            stacklevel=2,
+        )
+
+    if isinstance(dim, int) and not isinstance(dim, bool):
+        # Normalize negative dim. dim < 0 is the natural PyTorch convention
+        # for "last dim". Without normalization the recording loop in
+        # meta_utils.py drops it via the bounds check.
+        if hasattr(t, "dim") and dim < 0:
+            ndim = t.dim()
+            if ndim == 0 or dim < -ndim:
+                raise IndexError(
+                    f"mark_batch_invariant: dim={dim} out of range for "
+                    f"tensor with {ndim} dims"
+                )
+            dim = dim + ndim
+        if hasattr(t, "dim") and dim >= t.dim():
+            raise IndexError(
+                f"mark_batch_invariant: dim={dim} out of range for "
+                f"tensor with {t.dim()} dims"
+            )
+        if not hasattr(t, "_dynamo_batch_invariant_dims"):
+            t._dynamo_batch_invariant_dims = set()
+        t._dynamo_batch_invariant_dims.add(dim)
+        return
+
+    if not isinstance(dim, (list, tuple)):
+        raise TypeError(
+            f"mark_batch_invariant: dim must be int or list/tuple of ints, "
+            f"got {type(dim).__name__}"
+        )
+    if len(dim) == 0:
+        raise ValueError(
+            "mark_batch_invariant: dim must be non-empty when sequence"
+        )
+    for i in dim:
+        mark_batch_invariant(t, i)
+
+
+@forbid_in_graph
 def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
     """
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
