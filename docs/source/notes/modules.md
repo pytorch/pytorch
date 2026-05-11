@@ -26,17 +26,17 @@ To get started, let's look at a simpler, custom version of PyTorch's {class}`~to
 This module applies an affine transformation to its input.
 
 ```{code-block} python
-   import torch
-   from torch import nn
+import torch
+from torch import nn
 
-   class MyLinear(nn.Module):
-     def __init__(self, in_features, out_features):
-       super().__init__()
-       self.weight = nn.Parameter(torch.randn(in_features, out_features))
-       self.bias = nn.Parameter(torch.randn(out_features))
+class MyLinear(nn.Module):
+  def __init__(self, in_features, out_features):
+    super().__init__()
+    self.weight = nn.Parameter(torch.randn(in_features, out_features))
+    self.bias = nn.Parameter(torch.randn(out_features))
 
-     def forward(self, input):
-       return (input @ self.weight) + self.bias
+  def forward(self, input):
+    return (input @ self.weight) + self.bias
 ```
 
 This simple module has the following fundamental characteristics of modules:
@@ -59,10 +59,10 @@ This simple module demonstrates how modules package state and computation togeth
 constructed and called:
 
 ```{code-block} python
-   m = MyLinear(4, 3)
-   sample_input = torch.randn(4)
-   m(sample_input)
-   : tensor([-0.3037, -1.0413, -4.2057], grad_fn=<AddBackward0>)
+m = MyLinear(4, 3)
+sample_input = torch.randn(4)
+m(sample_input)
+: tensor([-0.3037, -1.0413, -4.2057], grad_fn=<AddBackward0>)
 ```
 
 Note that the module itself is callable, and that calling it invokes its `forward()` function.
@@ -80,15 +80,15 @@ The full set of parameters registered by the module can be iterated through via 
 where the latter includes each parameter's name:
 
 ```{code-block} python
-   for parameter in m.named_parameters():
-     print(parameter)
-   : ('weight', Parameter containing:
-   tensor([[ 1.0597,  1.1796,  0.8247],
-           [-0.5080, -1.2635, -1.1045],
-           [ 0.0593,  0.2469, -1.4299],
-           [-0.4926, -0.5457,  0.4793]], requires_grad=True))
-   ('bias', Parameter containing:
-   tensor([ 0.3634,  0.2015, -0.8525], requires_grad=True))
+for parameter in m.named_parameters():
+  print(parameter)
+: ('weight', Parameter containing:
+tensor([[ 1.0597,  1.1796,  0.8247],
+        [-0.5080, -1.2635, -1.1045],
+        [ 0.0593,  0.2469, -1.4299],
+        [-0.4926, -0.5457,  0.4793]], requires_grad=True))
+('bias', Parameter containing:
+tensor([ 0.3634,  0.2015, -0.8525], requires_grad=True))
 ```
 
 In general, the parameters registered by a module are aspects of the module's computation that should be
@@ -102,15 +102,15 @@ The simplest way to do this is using the {class}`~torch.nn.Sequential` module. I
 multiple modules:
 
 ```{code-block} python
-   net = nn.Sequential(
-     MyLinear(4, 3),
-     nn.ReLU(),
-     MyLinear(3, 1)
-   )
+net = nn.Sequential(
+  MyLinear(4, 3),
+  nn.ReLU(),
+  MyLinear(3, 1)
+)
 
-   sample_input = torch.randn(4)
-   net(sample_input)
-   : tensor([-0.6749], grad_fn=<AddBackward0>)
+sample_input = torch.randn(4)
+net(sample_input)
+: tensor([-0.6749], grad_fn=<AddBackward0>)
 ```
 
 Note that {class}`~torch.nn.Sequential` automatically feeds the output of the first `MyLinear` module as input
@@ -123,18 +123,18 @@ full flexibility on how submodules are used for a module's computation.
 For example, here's a simple neural network implemented as a custom module:
 
 ```{code-block} python
-   import torch.nn.functional as F
+import torch.nn.functional as F
 
-   class Net(nn.Module):
-     def __init__(self):
-       super().__init__()
-       self.l0 = MyLinear(4, 3)
-       self.l1 = MyLinear(3, 1)
-     def forward(self, x):
-       x = self.l0(x)
-       x = F.relu(x)
-       x = self.l1(x)
-       return x
+class Net(nn.Module):
+  def __init__(self):
+    super().__init__()
+    self.l0 = MyLinear(4, 3)
+    self.l1 = MyLinear(3, 1)
+  def forward(self, x):
+    x = self.l0(x)
+    x = F.relu(x)
+    x = self.l1(x)
+    return x
 ```
 
 This module is composed of two "children" or "submodules" (\ `l0` and `l1`\ ) that define the layers of
@@ -143,42 +143,42 @@ children of a module can be iterated through via a call to {func}`~torch.nn.Modu
 {func}`~torch.nn.Module.named_children`:
 
 ```{code-block} python
-   net = Net()
-   for child in net.named_children():
-     print(child)
-   : ('l0', MyLinear())
-   ('l1', MyLinear())
+net = Net()
+for child in net.named_children():
+  print(child)
+: ('l0', MyLinear())
+('l1', MyLinear())
 ```
 
 To go deeper than just the immediate children, {func}`~torch.nn.Module.modules` and
 {func}`~torch.nn.Module.named_modules` *recursively* iterate through a module and its child modules:
 
 ```{code-block} python
-   class BigNet(nn.Module):
-     def __init__(self):
-       super().__init__()
-       self.l1 = MyLinear(5, 4)
-       self.net = Net()
-     def forward(self, x):
-       return self.net(self.l1(x))
+class BigNet(nn.Module):
+  def __init__(self):
+    super().__init__()
+    self.l1 = MyLinear(5, 4)
+    self.net = Net()
+  def forward(self, x):
+    return self.net(self.l1(x))
 
-   big_net = BigNet()
-   for module in big_net.named_modules():
-     print(module)
-   : ('', BigNet(
-     (l1): MyLinear()
-     (net): Net(
-       (l0): MyLinear()
-       (l1): MyLinear()
-     )
-   ))
-   ('l1', MyLinear())
-   ('net', Net(
-     (l0): MyLinear()
-     (l1): MyLinear()
-   ))
-   ('net.l0', MyLinear())
-   ('net.l1', MyLinear())
+big_net = BigNet()
+for module in big_net.named_modules():
+  print(module)
+: ('', BigNet(
+  (l1): MyLinear()
+  (net): Net(
+    (l0): MyLinear()
+    (l1): MyLinear()
+  )
+))
+('l1', MyLinear())
+('net', Net(
+  (l0): MyLinear()
+  (l1): MyLinear()
+))
+('net.l0', MyLinear())
+('net.l1', MyLinear())
 ```
 
 Sometimes, it's necessary for a module to dynamically define submodules.
@@ -186,26 +186,26 @@ The {class}`~torch.nn.ModuleList` and {class}`~torch.nn.ModuleDict` modules are 
 register submodules from a list or dict:
 
 ```{code-block} python
-   class DynamicNet(nn.Module):
-     def __init__(self, num_layers):
-       super().__init__()
-       self.linears = nn.ModuleList(
-         [MyLinear(4, 4) for _ in range(num_layers)])
-       self.activations = nn.ModuleDict({
-         'relu': nn.ReLU(),
-         'lrelu': nn.LeakyReLU()
-       })
-       self.final = MyLinear(4, 1)
-     def forward(self, x, act):
-       for linear in self.linears:
-         x = linear(x)
-         x = self.activations[act](x)
-       x = self.final(x)
-       return x
+class DynamicNet(nn.Module):
+  def __init__(self, num_layers):
+    super().__init__()
+    self.linears = nn.ModuleList(
+      [MyLinear(4, 4) for _ in range(num_layers)])
+    self.activations = nn.ModuleDict({
+      'relu': nn.ReLU(),
+      'lrelu': nn.LeakyReLU()
+    })
+    self.final = MyLinear(4, 1)
+  def forward(self, x, act):
+    for linear in self.linears:
+      x = linear(x)
+      x = self.activations[act](x)
+    x = self.final(x)
+    return x
 
-   dynamic_net = DynamicNet(3)
-   sample_input = torch.randn(4)
-   output = dynamic_net(sample_input, 'relu')
+dynamic_net = DynamicNet(3)
+sample_input = torch.randn(4)
+output = dynamic_net(sample_input, 'relu')
 ```
 
 For any given module, its parameters consist of its direct parameters as well as the parameters of all submodules.
@@ -213,47 +213,47 @@ This means that calls to {func}`~torch.nn.Module.parameters` and {func}`~torch.n
 recursively include child parameters, allowing for convenient optimization of all parameters within the network:
 
 ```{code-block} python
-   for parameter in dynamic_net.named_parameters():
-     print(parameter)
-   : ('linears.0.weight', Parameter containing:
-   tensor([[-1.2051,  0.7601,  1.1065,  0.1963],
-           [ 3.0592,  0.4354,  1.6598,  0.9828],
-           [-0.4446,  0.4628,  0.8774,  1.6848],
-           [-0.1222,  1.5458,  1.1729,  1.4647]], requires_grad=True))
-   ('linears.0.bias', Parameter containing:
-   tensor([ 1.5310,  1.0609, -2.0940,  1.1266], requires_grad=True))
-   ('linears.1.weight', Parameter containing:
-   tensor([[ 2.1113, -0.0623, -1.0806,  0.3508],
-           [-0.0550,  1.5317,  1.1064, -0.5562],
-           [-0.4028, -0.6942,  1.5793, -1.0140],
-           [-0.0329,  0.1160, -1.7183, -1.0434]], requires_grad=True))
-   ('linears.1.bias', Parameter containing:
-   tensor([ 0.0361, -0.9768, -0.3889,  1.1613], requires_grad=True))
-   ('linears.2.weight', Parameter containing:
-   tensor([[-2.6340, -0.3887, -0.9979,  0.0767],
-           [-0.3526,  0.8756, -1.5847, -0.6016],
-           [-0.3269, -0.1608,  0.2897, -2.0829],
-           [ 2.6338,  0.9239,  0.6943, -1.5034]], requires_grad=True))
-   ('linears.2.bias', Parameter containing:
-   tensor([ 1.0268,  0.4489, -0.9403,  0.1571], requires_grad=True))
-   ('final.weight', Parameter containing:
-   tensor([[ 0.2509], [-0.5052], [ 0.3088], [-1.4951]], requires_grad=True))
-   ('final.bias', Parameter containing:
-   tensor([0.3381], requires_grad=True))
+for parameter in dynamic_net.named_parameters():
+  print(parameter)
+: ('linears.0.weight', Parameter containing:
+tensor([[-1.2051,  0.7601,  1.1065,  0.1963],
+        [ 3.0592,  0.4354,  1.6598,  0.9828],
+        [-0.4446,  0.4628,  0.8774,  1.6848],
+        [-0.1222,  1.5458,  1.1729,  1.4647]], requires_grad=True))
+('linears.0.bias', Parameter containing:
+tensor([ 1.5310,  1.0609, -2.0940,  1.1266], requires_grad=True))
+('linears.1.weight', Parameter containing:
+tensor([[ 2.1113, -0.0623, -1.0806,  0.3508],
+        [-0.0550,  1.5317,  1.1064, -0.5562],
+        [-0.4028, -0.6942,  1.5793, -1.0140],
+        [-0.0329,  0.1160, -1.7183, -1.0434]], requires_grad=True))
+('linears.1.bias', Parameter containing:
+tensor([ 0.0361, -0.9768, -0.3889,  1.1613], requires_grad=True))
+('linears.2.weight', Parameter containing:
+tensor([[-2.6340, -0.3887, -0.9979,  0.0767],
+        [-0.3526,  0.8756, -1.5847, -0.6016],
+        [-0.3269, -0.1608,  0.2897, -2.0829],
+        [ 2.6338,  0.9239,  0.6943, -1.5034]], requires_grad=True))
+('linears.2.bias', Parameter containing:
+tensor([ 1.0268,  0.4489, -0.9403,  0.1571], requires_grad=True))
+('final.weight', Parameter containing:
+tensor([[ 0.2509], [-0.5052], [ 0.3088], [-1.4951]], requires_grad=True))
+('final.bias', Parameter containing:
+tensor([0.3381], requires_grad=True))
 ```
 
 It's also easy to move all parameters to a different device or change their precision using
 {func}`~torch.nn.Module.to`:
 
 ```{code-block} python
-   # Move all parameters to a CUDA device
-   dynamic_net.to(device='cuda')
+# Move all parameters to a CUDA device
+dynamic_net.to(device='cuda')
 
-   # Change precision of all parameters
-   dynamic_net.to(dtype=torch.float64)
+# Change precision of all parameters
+dynamic_net.to(dtype=torch.float64)
 
-   dynamic_net(torch.randn(5, device='cuda', dtype=torch.float64))
-   : tensor([6.5166], device='cuda:0', dtype=torch.float64, grad_fn=<AddBackward0>)
+dynamic_net(torch.randn(5, device='cuda', dtype=torch.float64))
+: tensor([6.5166], device='cuda:0', dtype=torch.float64, grad_fn=<AddBackward0>)
 ```
 
 More generally, an arbitrary function can be applied to a module and its submodules recursively by
@@ -261,16 +261,16 @@ using the {func}`~torch.nn.Module.apply` function. For example, to apply custom 
 of a module and its submodules:
 
 ```{code-block} python
-   # Define a function to initialize Linear weights.
-   # Note that no_grad() is used here to avoid tracking this computation in the autograd graph.
-   @torch.no_grad()
-   def init_weights(m):
-     if isinstance(m, nn.Linear):
-       nn.init.xavier_normal_(m.weight)
-       m.bias.fill_(0.0)
+# Define a function to initialize Linear weights.
+# Note that no_grad() is used here to avoid tracking this computation in the autograd graph.
+@torch.no_grad()
+def init_weights(m):
+  if isinstance(m, nn.Linear):
+    nn.init.xavier_normal_(m.weight)
+    m.bias.fill_(0.0)
 
-   # Apply the function recursively on the module and its submodules.
-   dynamic_net.apply(init_weights)
+# Apply the function recursively on the module and its submodules.
+dynamic_net.apply(init_weights)
 ```
 
 These examples show how elaborate neural networks can be formed through module composition and conveniently
@@ -292,25 +292,25 @@ Once a network is built, it has to be trained, and its parameters can be easily 
 Optimizers from {mod}`torch.optim`:
 
 ```{code-block} python
-   # Create the network (from previous section) and optimizer
-   net = Net()
-   optimizer = torch.optim.SGD(net.parameters(), lr=1e-4, weight_decay=1e-2, momentum=0.9)
+# Create the network (from previous section) and optimizer
+net = Net()
+optimizer = torch.optim.SGD(net.parameters(), lr=1e-4, weight_decay=1e-2, momentum=0.9)
 
-   # Run a sample training loop that "teaches" the network
-   # to output the constant zero function
-   for _ in range(10000):
-     input = torch.randn(4)
-     output = net(input)
-     loss = torch.abs(output)
-     net.zero_grad()
-     loss.backward()
-     optimizer.step()
+# Run a sample training loop that "teaches" the network
+# to output the constant zero function
+for _ in range(10000):
+  input = torch.randn(4)
+  output = net(input)
+  loss = torch.abs(output)
+  net.zero_grad()
+  loss.backward()
+  optimizer.step()
 
-   # After training, switch the module to eval mode to do inference, compute performance metrics, etc.
-   # (see discussion below for a description of training and evaluation modes)
-   ...
-   net.eval()
-   ...
+# After training, switch the module to eval mode to do inference, compute performance metrics, etc.
+# (see discussion below for a description of training and evaluation modes)
+...
+net.eval()
+...
 ```
 
 In this simplified example, the network learns to simply output zero, as any non-zero output is "penalized" according
@@ -332,11 +332,11 @@ After the above snippet has been run, note that the network's parameters have ch
 value of `l1`\ 's `weight` parameter shows that its values are now much closer to 0 (as may be expected):
 
 ```{code-block} python
-   print(net.l1.weight)
-   : Parameter containing:
-   tensor([[-0.0013],
-           [ 0.0030],
-           [-0.0008]], requires_grad=True)
+print(net.l1.weight)
+: Parameter containing:
+tensor([[-0.0013],
+        [ 0.0030],
+        [-0.0008]], requires_grad=True)
 ```
 
 Note that the above process is done entirely while the network module is in "training mode". Modules default to
@@ -348,27 +348,27 @@ and only switched to evaluation mode for inference or evaluation. Below is an ex
 that behaves differently between the two modes:
 
 ```{code-block} python
-   class ModalModule(nn.Module):
-     def __init__(self):
-       super().__init__()
+class ModalModule(nn.Module):
+  def __init__(self):
+    super().__init__()
 
-     def forward(self, x):
-       if self.training:
-         # Add a constant only in training mode.
-         return x + 1.
-       else:
-         return x
+  def forward(self, x):
+    if self.training:
+      # Add a constant only in training mode.
+      return x + 1.
+    else:
+      return x
 
 
-   m = ModalModule()
-   x = torch.randn(4)
+m = ModalModule()
+x = torch.randn(4)
 
-   print('training mode output: {}'.format(m(x)))
-   : tensor([1.6614, 1.2669, 1.0617, 1.6213, 0.5481])
+print('training mode output: {}'.format(m(x)))
+: tensor([1.6614, 1.2669, 1.0617, 1.6213, 0.5481])
 
-   m.eval()
-   print('evaluation mode output: {}'.format(m(x)))
-   : tensor([ 0.6614,  0.2669,  0.0617,  0.6213, -0.4519])
+m.eval()
+print('evaluation mode output: {}'.format(m(x)))
+: tensor([ 0.6614,  0.2669,  0.0617,  0.6213, -0.4519])
 ```
 Training neural networks can often be tricky. For more information, check out:
 
@@ -382,15 +382,15 @@ In the previous section, we demonstrated training a module's "parameters", or le
 Now, if we want to save the trained model to disk, we can do so by saving its ``state_dict`` (i.e. "state dictionary"):
 
 ```{code-block} python
-   # Save the module
-   torch.save(net.state_dict(), 'net.pt')
+# Save the module
+torch.save(net.state_dict(), 'net.pt')
 
-   ...
+...
 
-   # Load the module later on
-   new_net = Net()
-   new_net.load_state_dict(torch.load('net.pt'))
-   : <All keys matched successfully>
+# Load the module later on
+new_net = Net()
+new_net.load_state_dict(torch.load('net.pt'))
+: <All keys matched successfully>
 ```
 
 A module's `state_dict` contains state that affects its computation. This includes, but is not limited to, the
@@ -410,119 +410,119 @@ restored when loading a serialized form of the module, but we don't want it to b
 This snippet shows how to use {func}`~torch.nn.Module.register_buffer` to accomplish this:
 
 ```{code-block} python
-   class RunningMean(nn.Module):
-     def __init__(self, num_features, momentum=0.9):
-       super().__init__()
-       self.momentum = momentum
-       self.register_buffer('mean', torch.zeros(num_features))
-     def forward(self, x):
-       self.mean = self.momentum * self.mean + (1.0 - self.momentum) * x
-       return self.mean
+class RunningMean(nn.Module):
+  def __init__(self, num_features, momentum=0.9):
+    super().__init__()
+    self.momentum = momentum
+    self.register_buffer('mean', torch.zeros(num_features))
+  def forward(self, x):
+    self.mean = self.momentum * self.mean + (1.0 - self.momentum) * x
+    return self.mean
 ```
 
 Now, the current value of the running mean is considered part of the module's ``state_dict``
 and will be properly restored when loading the module from disk:
 
 ```{code-block} python
-   m = RunningMean(4)
-   for _ in range(10):
-     input = torch.randn(4)
-     m(input)
+m = RunningMean(4)
+for _ in range(10):
+  input = torch.randn(4)
+  m(input)
 
-   print(m.state_dict())
-   : OrderedDict([('mean', tensor([ 0.1041, -0.1113, -0.0647,  0.1515]))]))
+print(m.state_dict())
+: OrderedDict([('mean', tensor([ 0.1041, -0.1113, -0.0647,  0.1515]))]))
 
-   # Serialized form will contain the 'mean' tensor
-   torch.save(m.state_dict(), 'mean.pt')
+# Serialized form will contain the 'mean' tensor
+torch.save(m.state_dict(), 'mean.pt')
 
-   m_loaded = RunningMean(4)
-   m_loaded.load_state_dict(torch.load('mean.pt'))
-   assert(torch.all(m.mean == m_loaded.mean))
+m_loaded = RunningMean(4)
+m_loaded.load_state_dict(torch.load('mean.pt'))
+assert(torch.all(m.mean == m_loaded.mean))
 ```
 
 As mentioned previously, buffers can be left out of the module's `state_dict` by marking them as non-persistent:
 
 ```{code-block} python
-   self.register_buffer('unserialized_thing', torch.randn(5), persistent=False)
+self.register_buffer('unserialized_thing', torch.randn(5), persistent=False)
 ```
 
 Both persistent and non-persistent buffers are affected by model-wide device / dtype changes applied with
 {func}`~torch.nn.Module.to`:
 
 ```{code-block} python
-   # Moves all module parameters and buffers to the specified device / dtype
-   m.to(device='cuda', dtype=torch.float64)
+# Moves all module parameters and buffers to the specified device / dtype
+m.to(device='cuda', dtype=torch.float64)
 ```
 
 Buffers of a module can be iterated over using {func}`~torch.nn.Module.buffers` or
 {func}`~torch.nn.Module.named_buffers`.
 
 ```{code-block} python
-   for buffer in m.named_buffers():
-     print(buffer)
+for buffer in m.named_buffers():
+  print(buffer)
 ```
 
 The following class demonstrates the various ways of registering parameters and buffers within a module:
 
 ```{code-block} python
-   class StatefulModule(nn.Module):
-     def __init__(self):
-       super().__init__()
-       # Setting a nn.Parameter as an attribute of the module automatically registers the tensor
-       # as a parameter of the module.
-       self.param1 = nn.Parameter(torch.randn(2))
+class StatefulModule(nn.Module):
+  def __init__(self):
+    super().__init__()
+    # Setting a nn.Parameter as an attribute of the module automatically registers the tensor
+    # as a parameter of the module.
+    self.param1 = nn.Parameter(torch.randn(2))
 
-       # Alternative string-based way to register a parameter.
-       self.register_parameter('param2', nn.Parameter(torch.randn(3)))
+    # Alternative string-based way to register a parameter.
+    self.register_parameter('param2', nn.Parameter(torch.randn(3)))
 
-       # Reserves the "param3" attribute as a parameter, preventing it from being set to anything
-       # except a parameter. "None" entries like this will not be present in the module's state_dict.
-       self.register_parameter('param3', None)
+    # Reserves the "param3" attribute as a parameter, preventing it from being set to anything
+    # except a parameter. "None" entries like this will not be present in the module's state_dict.
+    self.register_parameter('param3', None)
 
-       # Registers a list of parameters.
-       self.param_list = nn.ParameterList([nn.Parameter(torch.randn(2)) for i in range(3)])
+    # Registers a list of parameters.
+    self.param_list = nn.ParameterList([nn.Parameter(torch.randn(2)) for i in range(3)])
 
-       # Registers a dictionary of parameters.
-       self.param_dict = nn.ParameterDict({
-         'foo': nn.Parameter(torch.randn(3)),
-         'bar': nn.Parameter(torch.randn(4))
-       })
+    # Registers a dictionary of parameters.
+    self.param_dict = nn.ParameterDict({
+      'foo': nn.Parameter(torch.randn(3)),
+      'bar': nn.Parameter(torch.randn(4))
+    })
 
-       # Registers a persistent buffer (one that appears in the module's state_dict).
-       self.register_buffer('buffer1', torch.randn(4), persistent=True)
+    # Registers a persistent buffer (one that appears in the module's state_dict).
+    self.register_buffer('buffer1', torch.randn(4), persistent=True)
 
-       # Registers a non-persistent buffer (one that does not appear in the module's state_dict).
-       self.register_buffer('buffer2', torch.randn(5), persistent=False)
+    # Registers a non-persistent buffer (one that does not appear in the module's state_dict).
+    self.register_buffer('buffer2', torch.randn(5), persistent=False)
 
-       # Reserves the "buffer3" attribute as a buffer, preventing it from being set to anything
-       # except a buffer. "None" entries like this will not be present in the module's state_dict.
-       self.register_buffer('buffer3', None)
+    # Reserves the "buffer3" attribute as a buffer, preventing it from being set to anything
+    # except a buffer. "None" entries like this will not be present in the module's state_dict.
+    self.register_buffer('buffer3', None)
 
-       # Adding a submodule registers its parameters as parameters of the module.
-       self.linear = nn.Linear(2, 3)
+    # Adding a submodule registers its parameters as parameters of the module.
+    self.linear = nn.Linear(2, 3)
 
-   m = StatefulModule()
+m = StatefulModule()
 
-   # Save and load state_dict.
-   torch.save(m.state_dict(), 'state.pt')
-   m_loaded = StatefulModule()
-   m_loaded.load_state_dict(torch.load('state.pt'))
+# Save and load state_dict.
+torch.save(m.state_dict(), 'state.pt')
+m_loaded = StatefulModule()
+m_loaded.load_state_dict(torch.load('state.pt'))
 
-   # Note that non-persistent buffer "buffer2" and reserved attributes "param3" and "buffer3" do
-   # not appear in the state_dict.
-   print(m_loaded.state_dict())
-   : OrderedDict([('param1', tensor([-0.0322,  0.9066])),
-                  ('param2', tensor([-0.4472,  0.1409,  0.4852])),
-                  ('buffer1', tensor([ 0.6949, -0.1944,  1.2911, -2.1044])),
-                  ('param_list.0', tensor([ 0.4202, -0.1953])),
-                  ('param_list.1', tensor([ 1.5299, -0.8747])),
-                  ('param_list.2', tensor([-1.6289,  1.4898])),
-                  ('param_dict.bar', tensor([-0.6434,  1.5187,  0.0346, -0.4077])),
-                  ('param_dict.foo', tensor([-0.0845, -1.4324,  0.7022])),
-                  ('linear.weight', tensor([[-0.3915, -0.6176],
-                                            [ 0.6062, -0.5992],
-                                            [ 0.4452, -0.2843]])),
-                  ('linear.bias', tensor([-0.3710, -0.0795, -0.3947]))])
+# Note that non-persistent buffer "buffer2" and reserved attributes "param3" and "buffer3" do
+# not appear in the state_dict.
+print(m_loaded.state_dict())
+: OrderedDict([('param1', tensor([-0.0322,  0.9066])),
+              ('param2', tensor([-0.4472,  0.1409,  0.4852])),
+              ('buffer1', tensor([ 0.6949, -0.1944,  1.2911, -2.1044])),
+              ('param_list.0', tensor([ 0.4202, -0.1953])),
+              ('param_list.1', tensor([ 1.5299, -0.8747])),
+              ('param_list.2', tensor([-1.6289,  1.4898])),
+              ('param_dict.bar', tensor([-0.6434,  1.5187,  0.0346, -0.4077])),
+              ('param_dict.foo', tensor([-0.0845, -1.4324,  0.7022])),
+              ('linear.weight', tensor([[-0.3915, -0.6176],
+                                        [ 0.6062, -0.5992],
+                                        [ 0.4452, -0.2843]])),
+              ('linear.bias', tensor([-0.3710, -0.0795, -0.3947]))])
 ```
 
 For more information, check out:
@@ -541,24 +541,24 @@ dtype, device (e.g. GPU), or initialization technique.
 Examples:
 
 ```{code-block} python
-   # Initialize module directly onto GPU.
-   m = nn.Linear(5, 3, device='cuda')
+# Initialize module directly onto GPU.
+m = nn.Linear(5, 3, device='cuda')
 
-   # Initialize module with 16-bit floating point parameters.
-   m = nn.Linear(5, 3, dtype=torch.half)
+# Initialize module with 16-bit floating point parameters.
+m = nn.Linear(5, 3, dtype=torch.half)
 
-   # Skip default parameter initialization and perform custom (e.g. orthogonal) initialization.
-   m = torch.nn.utils.skip_init(nn.Linear, 5, 3)
-   nn.init.orthogonal_(m.weight)
+# Skip default parameter initialization and perform custom (e.g. orthogonal) initialization.
+m = torch.nn.utils.skip_init(nn.Linear, 5, 3)
+nn.init.orthogonal_(m.weight)
 ```
 
 Note that the device and dtype options demonstrated above also apply to any floating-point buffers registered
 for the module:
 
 ```{code-block} python
-   m = nn.BatchNorm2d(3, dtype=torch.half)
-   print(m.running_mean)
-   : tensor([0., 0., 0.], dtype=torch.float16)
+m = nn.BatchNorm2d(3, dtype=torch.half)
+print(m.running_mean)
+: tensor([0., 0., 0.], dtype=torch.float16)
 ```
 
 While module writers can use any device or dtype to initialize parameters in their custom modules, good practice is
@@ -610,73 +610,73 @@ modify some inputs/outputs without having to change the module's `forward()` fun
 Below is an example demonstrating usage of forward and backward hooks:
 
 ```{code-block} python
-   torch.manual_seed(1)
+torch.manual_seed(1)
 
-   def forward_pre_hook(m, inputs):
-     # Allows for examination and modification of the input before the forward pass.
-     # Note that inputs are always wrapped in a tuple.
-     input = inputs[0]
-     return input + 1.
+def forward_pre_hook(m, inputs):
+  # Allows for examination and modification of the input before the forward pass.
+  # Note that inputs are always wrapped in a tuple.
+  input = inputs[0]
+  return input + 1.
 
-   def forward_hook(m, inputs, output):
-     # Allows for examination of inputs / outputs and modification of the outputs
-     # after the forward pass. Note that inputs are always wrapped in a tuple while outputs
-     # are passed as-is.
+def forward_hook(m, inputs, output):
+  # Allows for examination of inputs / outputs and modification of the outputs
+  # after the forward pass. Note that inputs are always wrapped in a tuple while outputs
+  # are passed as-is.
 
-     # Residual computation a la ResNet.
-     return output + inputs[0]
+  # Residual computation a la ResNet.
+  return output + inputs[0]
 
-   def backward_hook(m, grad_inputs, grad_outputs):
-     # Allows for examination of grad_inputs / grad_outputs and modification of
-     # grad_inputs used in the rest of the backwards pass. Note that grad_inputs and
-     # grad_outputs are always wrapped in tuples.
-     new_grad_inputs = [torch.ones_like(gi) * 42. for gi in grad_inputs]
-     return new_grad_inputs
+def backward_hook(m, grad_inputs, grad_outputs):
+  # Allows for examination of grad_inputs / grad_outputs and modification of
+  # grad_inputs used in the rest of the backwards pass. Note that grad_inputs and
+  # grad_outputs are always wrapped in tuples.
+  new_grad_inputs = [torch.ones_like(gi) * 42. for gi in grad_inputs]
+  return new_grad_inputs
 
-   # Create sample module & input.
-   m = nn.Linear(3, 3)
-   x = torch.randn(2, 3, requires_grad=True)
+# Create sample module & input.
+m = nn.Linear(3, 3)
+x = torch.randn(2, 3, requires_grad=True)
 
-   # ==== Demonstrate forward hooks. ====
-   # Run input through module before and after adding hooks.
-   print('output with no forward hooks: {}'.format(m(x)))
-   : output with no forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
-                                           [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
+# ==== Demonstrate forward hooks. ====
+# Run input through module before and after adding hooks.
+print('output with no forward hooks: {}'.format(m(x)))
+: output with no forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
+                                        [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
 
-   # Note that the modified input results in a different output.
-   forward_pre_hook_handle = m.register_forward_pre_hook(forward_pre_hook)
-   print('output with forward pre hook: {}'.format(m(x)))
-   : output with forward pre hook: tensor([[-0.5752, -0.7421,  0.4942],
-                                           [-0.0736,  0.5461,  0.0838]], grad_fn=<AddmmBackward>)
+# Note that the modified input results in a different output.
+forward_pre_hook_handle = m.register_forward_pre_hook(forward_pre_hook)
+print('output with forward pre hook: {}'.format(m(x)))
+: output with forward pre hook: tensor([[-0.5752, -0.7421,  0.4942],
+                                        [-0.0736,  0.5461,  0.0838]], grad_fn=<AddmmBackward>)
 
-   # Note the modified output.
-   forward_hook_handle = m.register_forward_hook(forward_hook)
-   print('output with both forward hooks: {}'.format(m(x)))
-   : output with both forward hooks: tensor([[-1.0980,  0.6396,  0.4666],
-                                             [ 0.3634,  0.6538,  1.0256]], grad_fn=<AddBackward0>)
+# Note the modified output.
+forward_hook_handle = m.register_forward_hook(forward_hook)
+print('output with both forward hooks: {}'.format(m(x)))
+: output with both forward hooks: tensor([[-1.0980,  0.6396,  0.4666],
+                                          [ 0.3634,  0.6538,  1.0256]], grad_fn=<AddBackward0>)
 
-   # Remove hooks; note that the output here matches the output before adding hooks.
-   forward_pre_hook_handle.remove()
-   forward_hook_handle.remove()
-   print('output after removing forward hooks: {}'.format(m(x)))
-   : output after removing forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
-                                                  [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
+# Remove hooks; note that the output here matches the output before adding hooks.
+forward_pre_hook_handle.remove()
+forward_hook_handle.remove()
+print('output after removing forward hooks: {}'.format(m(x)))
+: output after removing forward hooks: tensor([[-0.5059, -0.8158,  0.2390],
+                                              [-0.0043,  0.4724, -0.1714]], grad_fn=<AddmmBackward>)
 
-   # ==== Demonstrate backward hooks. ====
-   m(x).sum().backward()
-   print('x.grad with no backwards hook: {}'.format(x.grad))
-   : x.grad with no backwards hook: tensor([[ 0.4497, -0.5046,  0.3146],
-                                            [ 0.4497, -0.5046,  0.3146]])
+# ==== Demonstrate backward hooks. ====
+m(x).sum().backward()
+print('x.grad with no backwards hook: {}'.format(x.grad))
+: x.grad with no backwards hook: tensor([[ 0.4497, -0.5046,  0.3146],
+                                        [ 0.4497, -0.5046,  0.3146]])
 
-   # Clear gradients before running backward pass again.
-   m.zero_grad()
-   x.grad.zero_()
+# Clear gradients before running backward pass again.
+m.zero_grad()
+x.grad.zero_()
 
-   m.register_full_backward_hook(backward_hook)
-   m(x).sum().backward()
-   print('x.grad with backwards hook: {}'.format(x.grad))
-   : x.grad with backwards hook: tensor([[42., 42., 42.],
-                                         [42., 42., 42.]])
+m.register_full_backward_hook(backward_hook)
+m(x).sum().backward()
+print('x.grad with backwards hook: {}'.format(x.grad))
+: x.grad with backwards hook: tensor([[42., 42., 42.],
+                                      [42., 42., 42.]])
 ```
 
 ## Advanced Features
