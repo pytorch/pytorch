@@ -82,15 +82,6 @@ if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
 
 
-def get_profiler_activities(device_type):
-    activities = [ProfilerActivity.CPU]
-    if device_type not in ("cpu", "meta"):
-        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
-        if device_activity and device_activity in supported_activities():
-            activities.append(device_activity)
-    return activities
-
-
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
@@ -240,6 +231,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 torch.cuda.synchronize(gpu_id)
 
         is_rocm = torch.version.hip is not None
+        # on ROCm, Gemm shader is hipblaslt Shader, so we use UserArgs_MT to match.
         gemm_string = "userargs_mt" if is_rocm else "gemm"
         device_string = "hip" if is_rocm else "cuda"
 
@@ -252,8 +244,13 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 found_cuda = True
 
         if is_rocm:
+            # Note: On ROCm, device_indices (Node IDs) may start from values other than 0 (e.g. {2, 3})
+            # because systems can contain additional (non-GPU) devices detected by the kernel,
+            # resulting in offset indexing. Therefore, we validate the count of unique devices,
+            # not their specific indices.
             self.assertEqual(len(device_indices), 2)
         else:
+            # CUDA correctly reports logical device indices
             self.assertEqual(device_indices, {0, 1})
 
         self.assertTrue(found_cuda)
@@ -290,6 +287,8 @@ with profile(activities=[ProfilerActivity.CUDA]):
                         self.assertTrue("Device Type" in evt["args"])
                         self.assertTrue("Device Id" in evt["args"])
                         self.assertTrue("Bytes" in evt["args"])
+
+                        # Memory should be an instantaneous event.
                         self.assertTrue("dur" not in evt["args"])
                         self.assertTrue("cat" not in evt["args"])
                 self.assertTrue(found_out_of_memory_events)
@@ -299,44 +298,8 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 prof = run_profiler(create_cuda_tensor_oom)
                 check_trace(fname)
 
-    def test_flops(self):
-        model = torch.nn.Sequential(
-            nn.Conv2d(16, 33, 18),
-            nn.ReLU(),
-            nn.Linear(243, 243),
-            nn.ReLU(),
-        )
-        inputs = torch.randn(40, 16, 18, 260)
-        nested_tensor = torch.nested.nested_tensor(
-            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
-        )
-        with _profile(
-            record_shapes=True, with_flops=True, use_kineto=kineto_available()
-        ) as prof:
-            model(inputs)
-            nested_tensor = nested_tensor + nested_tensor
-        profiler_output = prof.key_averages(group_by_input_shape=True).table(
-            sort_by="cpu_time_total", row_limit=10
-        )
-        self.assertRegex(profiler_output, "Total M?FLOPs")
-        if not (kineto_available() and torch.cuda.is_available()):
-            return
-
-        with profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            record_shapes=True,
-            with_flops=True,
-        ) as kineto_profiler:
-            model(inputs)
-        profiler_output = kineto_profiler.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1
-        )
-        self.assertRegex(profiler_output, "Total M?FLOPs")
-
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -355,6 +318,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 workload()
 
             with TemporaryFileName(mode="w+") as fname:
+                # fname = "/tmp/kineto_out.json"
                 prof.export_chrome_trace(fname)
                 with open(fname) as f:
                     j = json.load(f)
@@ -377,6 +341,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
             torch._C._profiler._set_cuda_sync_enabled_val(False)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
@@ -408,6 +373,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                             seen_event_types.add(event["cat"])
                     self.assertTrue(cuda_external_id_events.issubset(seen_event_types))
 
+        # Run with External Id for CUDA events on and off
         for disable_external_correlation in [False, True]:
             with profile(
                 activities=activities,
@@ -418,25 +384,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_dict_syntax(self):
-        """Dict syntax collects only the requested activity types."""
-        with profile(
-            activities=[{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
-        ) as p:
-            x = torch.randn(10, 10).to("cuda")
-            y = torch.mm(x, x)
-        events = p.events()
-        self.assertGreater(len(events), 0)
-        print(events)
-        has_memcpy = any("Memcpy" in e.name for e in events)
-        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
-        has_runtime = any("cuda" in e.name for e in events)
-        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
-        has_overhead = any("Lazy Function Loading" in e.name for e in events)
-        self.assertFalse(has_overhead)
-
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_mixed_syntax(self):
         """Enum and dict entries can coexist for different activity groups."""
@@ -446,26 +394,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 x = torch.randn(10, 10).to("cuda")
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_nonmember_type_name(self):
-        """Activity type name that is not a member of the requested activity group raises RuntimeError."""
-        with self.assertRaises(RuntimeError):
-            with profile(
-                activities=[{ProfilerActivity.CUDA: ["CPU_OP"]}],
-            ) as p:
-                x = torch.randn(10, 10)
-                y = torch.mm(x, x)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_activity_filter_empty_list(self):
-        """Passing an empty list to activities means not collecting for the specified activity."""
-        with profile(
-            activities=[{ProfilerActivity.CUDA: []}],
-        ) as p:
-            x = torch.randn(10, 10).to("cuda")
-            y = torch.mm(x, x)
-        self.assertEqual(len(p.events()), 0)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
@@ -772,12 +700,11 @@ class TestProfiler(TestCase):
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         device = "cuda" if use_cuda else "cpu"
-        use_device = "cuda" if use_cuda else None
-        with _profile(use_device=use_device, use_kineto=True):
+        with _profile(use_device=device if use_cuda else None, use_kineto=True):
             self.payload(device=device)
 
         # rerun to avoid initial start overhead
-        with _profile(use_device=use_device, use_kineto=True) as p:
+        with _profile(use_device=device if use_cuda else None, use_kineto=True) as p:
             self.payload(device=device)
 
         self.assertTrue("aten::mm" in str(p))
@@ -1162,6 +1089,44 @@ class TestProfiler(TestCase):
         }
         judge(expected_event_count, prof)
 
+    def test_flops(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        nested_tensor = torch.nested.nested_tensor(
+            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
+        )
+        with _profile(
+            record_shapes=True, with_flops=True, use_kineto=kineto_available()
+        ) as prof:
+            model(inputs)
+            # test that nested tensor won't cause exception during flop compute
+            nested_tensor = nested_tensor + nested_tensor
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10
+        )
+        self.assertRegex(profiler_output, "Total M?FLOPs")
+        if not (kineto_available() and torch.cuda.is_available()):
+            return
+
+        with profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            with_flops=True,
+        ) as kineto_profiler:
+            model(inputs)
+        profiler_output = kineto_profiler.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1
+        )
+        self.assertRegex(profiler_output, "Total M?FLOPs")
+
     def test_override_time_units(self):
         US_IN_SECOND = 1000.0 * 1000.0
         US_IN_MS = 1000.0
@@ -1399,7 +1364,7 @@ class TestProfiler(TestCase):
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         device = "cuda" if use_cuda else "cpu"
-        with _profile(use_device="cuda" if use_cuda else None, use_kineto=True):
+        with _profile(use_device=device if use_cuda else None, use_kineto=True):
             self.payload(device=device)
 
         with TemporaryDirectoryName() as dname:
@@ -2799,9 +2764,36 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 found_mm = True
         self.assertTrue(found_mm)
         if use_cuda:
+            from torch._C import _get_privateuse1_backend_name
+
             device_type_enum = getattr(DeviceType, device.upper(), None)
+            if device_type_enum is None and device == _get_privateuse1_backend_name():
+                device_type_enum = DeviceType.PrivateUse1
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_dict_syntax(self):
+        """Dict syntax collects only the requested activity types."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        print(events)
+        # Verify we got GPU_MEMCPY events (HtoD copy from .to("cuda")).
+        has_memcpy = any("Memcpy" in e.name for e in events)
+        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
+        # Verify we got CUDA_RUNTIME events (e.g. cudaLaunchKernel).
+        has_runtime = any("cuda" in e.name for e in events)
+        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
+        # OVERHEAD events (e.g. Lazy Function Loading) should NOT appear.
+        has_overhead = any("Lazy Function Loading" in e.name for e in events)
+        self.assertFalse(has_overhead)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_duplicate_raises(self):
@@ -2824,6 +2816,28 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             ) as p:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_nonmember_type_name(self):
+        """Activity type name that is not a member of the requested activity group raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CUDA: ["CPU_OP"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_empty_list(self):
+        """Passing an empty list to activities means not collecting for the specified activity."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: []}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        self.assertEqual(len(p.events()), 0)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")

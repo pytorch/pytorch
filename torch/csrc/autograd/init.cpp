@@ -781,6 +781,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
       at::autocast::is_autocast_enabled(at::kIPU) ||
       at::autocast::is_autocast_enabled(at::kXLA) ||
       at::autocast::is_autocast_enabled(at::kHPU) ||
+      at::autocast::is_autocast_enabled(at::kMTIA) ||
       at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
     Py_RETURN_TRUE;
   } else {
@@ -1341,8 +1342,7 @@ static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
       c10::AutogradState::get_tls_state().get_graph_exec_group();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
-    Py_INCREF(obj);
-    return obj;
+    return Py_NewRef(obj);
   } else {
     Py_RETURN_NONE;
   }
@@ -1453,8 +1453,7 @@ static PyObject* pop_torch_function_stack(
   HANDLE_TH_ERRORS
   const auto& mode = at::impl::PythonTorchFunctionTLS::pop_stack();
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1471,8 +1470,7 @@ static PyObject* get_function_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1542,8 +1540,7 @@ static PyObject* pop_torch_dispatch_stack(
   // Note: We cannot use release() here because the SafePyObject may be shared
   // via ThreadLocalState copies, and release() would null out data_ causing
   // other shared_ptr holders to see nullptr.
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1560,8 +1557,7 @@ static PyObject* get_dispatch_stack_at(
   auto idx = _r.toInt64(0);
   const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1595,8 +1591,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1610,8 +1605,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
+  return Py_NewRef(r);
   END_HANDLE_TH_ERRORS
 }
 

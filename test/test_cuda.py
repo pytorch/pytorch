@@ -87,6 +87,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionLessThan,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -150,8 +151,10 @@ def skip_background_threads_on_windows(f):
 
 
 def get_wait_for_cpu_kernel():
-    """Returns a compiled CUDA spin-wait kernel that blocks the GPU stream until
-    the host sets a pinned int32 flag to non-zero. Requires SM70+.
+    """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
+    until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
+    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
 
     Usage::
 
@@ -171,7 +174,11 @@ def get_wait_for_cpu_kernel():
             __global__ void wait_for_cpu(int *pinned_cpu_flag) {
                 int flag = 0;
                 do {
+            #ifdef __HIP_PLATFORM_AMD__
+                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+            #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+            #endif
                 } while (flag == 0);
             }
             """,
@@ -320,6 +327,102 @@ class TestCuda(TestCase):
         torch.cuda.reset_accumulated_host_memory_stats()
 
         expected = empty_stats()
+
+    @serialTest()
+    def test_host_memory_stats_active_after_free_no_events(self):
+        """Regression test for free()'s no-events fast path.
+
+        When a pinned tensor is freed without any CUDA stream having been
+        recorded against its block (i.e. it was never used as the source of
+        an async H2D copy), the allocator pushes the block back onto the
+        free list directly. That path must decrement active_requests.current
+        and active_bytes.current; otherwise the counters grow monotonically
+        on every plain pin-and-drop cycle even though the underlying memory
+        is correctly recycled.
+
+        Two cycles exercise both alloc paths: the first triggers a new slab
+        via add_allocated_block, the second reuses the cached block via
+        get_free_block.
+        """
+        # host_memory_stats() returns an empty dict until the host caching
+        # allocator has been initialized; force init so the stat keys exist
+        # regardless of test ordering.
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            self.assertTrue(t.is_pinned())
+            del t
+            gc.collect()
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after a pin-and-drop cycle "
+                "with no async copy: the block is returned to the cache, so "
+                "the active counter must drop back to zero.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after a pin-and-drop cycle.",
+            )
+
+    @serialTest()
+    def test_host_memory_stats_active_after_event_drain(self):
+        """Regression test for the event-drain path through empty_cache.
+
+        When a pinned block is used as the source of a non_blocking H2D copy
+        and then freed, the block sits on the events queue until
+        process_events_for_specific_size drains it. That function takes a
+        size parameter that is -1 when invoked from process_events (the
+        all-sizes case, reached via _host_emptyCache). The decrement of
+        active_bytes_bucket_stats must use the block's actual size, not the
+        -1 parameter, otherwise active_bytes.current is incremented by 1
+        byte per drained event and active_bytes.freed goes negative.
+        """
+        torch.cuda.init()
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_peak_host_memory_stats()
+        torch.cuda.reset_accumulated_host_memory_stats()
+
+        for _ in range(2):
+            t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
+            t.cuda(non_blocking=True)
+            torch.cuda.synchronize()
+            del t
+            gc.collect()
+            # Drain via process_events_for_specific_size(-1, ...).
+            torch._C._host_emptyCache()
+
+            stats = torch.cuda.host_memory_stats()
+            self.assertEqual(
+                stats["active_bytes.current"],
+                0,
+                "active_bytes.current should be 0 after empty_cache drains "
+                "the events queue.",
+            )
+            self.assertEqual(
+                stats["active_requests.current"],
+                0,
+                "active_requests.current should be 0 after drain.",
+            )
+            self.assertGreaterEqual(
+                stats["active_bytes.freed"],
+                0,
+                "active_bytes.freed must be non-negative; a negative value "
+                "means the drain decremented by the wrong size.",
+            )
+            self.assertGreaterEqual(
+                stats["active_requests.freed"],
+                0,
+                "active_requests.freed must be non-negative.",
+            )
 
     def test_pinned_memory_empty_cache(self):
         try:
@@ -1915,7 +2018,7 @@ if __name__ == '__main__':
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -2817,9 +2920,10 @@ torch.cuda.synchronize()
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 / ROCm >= 7.0 required for external events in cuda graphs",
     )
+    @skipIfRocmVersionLessThan((7, 0))
     def test_graph_timing(self):
         torch.cuda.empty_cache()
         x = torch.randn(10240000, device="cuda")
@@ -4589,6 +4693,14 @@ print(ret)
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        # Regression check: no test in this class should leave the runtime
+        # expandable_segments knob mismatched against the suite's env-derived
+        # baseline. This is the only class that toggles it.
+        md = torch.cuda.memory._snapshot()["allocator_settings"]
+        self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -5133,6 +5245,11 @@ class TestCudaAllocator(TestCase):
             alloc(120)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
 
     @serialTest()
     def test_garbage_collect_expandable(self):
@@ -5165,6 +5282,11 @@ class TestCudaAllocator(TestCase):
             alloc(80)
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -6819,6 +6941,38 @@ class TestMemPool(TestCase):
             self._teardown_mempool_limited_memory_test()
 
     @serialTest()
+    def test_mempool_release_cached_blocks_during_diversion(self):
+        # Regression test for the bug where allocations failing inside
+        # `torch.cuda.use_mem_pool(...)` would skip the OOM-time
+        # release_cached_blocks() retry, because the gate read
+        # `captures_underway.empty()` — which is non-empty during any
+        # private-pool diversion, even when no real cudaStreamBeginCapture
+        # is active. The fix uses a separate `num_active_captures_` counter
+        # tracked by CUDAGraph::capture_begin/end, so default-pool cached
+        # blocks can still be reclaimed during plain mempool diversion.
+        nelem_1mb = 1024 * 1024
+        device, dtype = self._setup_mempool_limited_memory_test(80)
+        try:
+            # Reserve 60 MB on the default pool, then free → cached but not
+            # returned to the driver. memory_reserved stays at 60 MB.
+            a = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            del a
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                # 60 MB into the private pool. Reservation budget remaining
+                # is only 20 MB (80 cap − 60 cached), so cudaMalloc must
+                # fail. The OOM retry needs to call release_cached_blocks()
+                # on the default pool to free the 60 MB and retry. Pre-fix,
+                # that path was gated off and this would raise.
+                b = torch.empty(60 * nelem_1mb, device=device, dtype=dtype)
+            self.assertEqual(b.numel(), 60 * nelem_1mb)
+            del b
+            del pool
+        finally:
+            self._teardown_mempool_limited_memory_test()
+
+    @serialTest()
     def test_mempool_no_split(self):
         torch.cuda.empty_cache()
 
@@ -7279,6 +7433,10 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
+    @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
     # expandable_segments not supported (PYTORCH_C10_DRIVER_API_SUPPORTED not defined for windows builds)
     @unittest.skipIf(
         IS_WINDOWS and SM89OrLater,
@@ -7288,7 +7446,6 @@ class TestMemPool(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.empty_cache()
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool = torch.cuda.MemPool(allocator.allocator())
 
@@ -7311,8 +7468,6 @@ class TestMemPool(TestCase):
         self.assertEqual(
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
-
-        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
     @serialTest()
     def test_mempool_ctx_multithread(self):
@@ -9150,9 +9305,7 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
-    )
+    @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -9232,6 +9385,13 @@ class TestCudaDeviceParametrized(TestCase):
             torch.all(x_cpu == 1.0),
             "Copy should be done once end_event is synchronized",
         )
+        # On HIP graphs, the event-record node can become visible to
+        # event.synchronize() a few microseconds before the host-side
+        # stream state is updated; poll briefly so we exercise the
+        # invariant ("after sync the stream is drained") without flaking.
+        deadline = time.monotonic() + 0.1
+        while not work_stream.query() and time.monotonic() < deadline:
+            pass
         self.assertTrue(
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",

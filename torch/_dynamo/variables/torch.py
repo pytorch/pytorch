@@ -518,6 +518,9 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
@@ -1228,7 +1231,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch._functorch.predispatch._exit_dual_level(level=level_const)
 
             def cleanup():
-                new_level = torch._C._enter_dual_level()
+                new_level = torch._functorch.predispatch._enter_dual_level()
                 if new_level != level_const:
                     raise AssertionError("Invalid _exit_dual_level")
 
@@ -2105,14 +2108,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
+        @register(
+            torch.accelerator.current_stream,
+            torch.cuda.current_stream,
+            torch.xpu.current_stream,
+        )
         def handle_current_stream(
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
-            from .streams import CudaStreamVariable
+            from .streams import _get_stream_variable_cls
 
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
@@ -2132,10 +2139,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     device = None
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
-                if self.value is torch.cuda.current_stream and not isinstance(
-                    stream_var, CudaStreamVariable
+                stream_variable_cls = _get_stream_variable_cls(self.value)
+                if stream_variable_cls is not None and not isinstance(
+                    stream_var, stream_variable_cls
                 ):
-                    stream_var = CudaStreamVariable(
+                    stream_var = stream_variable_cls(
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
@@ -3790,12 +3798,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
-
-    def is_python_hashable(self) -> bool:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
