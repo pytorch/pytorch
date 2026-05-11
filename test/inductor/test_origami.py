@@ -51,7 +51,8 @@ if IS_ROCM:
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
 @unittest.skipIf(
     not (config.max_autotune and config.rocm.origami),
-    "Requires both max_autotune and origami to be enabled",
+    "Requires both max_autotune and origami to be enabled. "
+    "Set TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 to run.",
 )
 class TestOrigami(TestCase):
     def _make_fn_and_inputs(
