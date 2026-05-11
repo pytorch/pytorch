@@ -11104,12 +11104,40 @@ class TestIndexAddOverrideConds(TestCase):
         self.assertEqual(self._conds(self_t, idx, src), (True, True))
 
     def test_rejects_1d(self):
-        # 1D source -> (M, 1) after flatten; N=1 fails both TMA alignment
-        # and vec_elems divisibility.
+        # 1D source: N would be 1, which meets neither TMA alignment nor
+        # vec_elems divisibility, so _index_add_inner_size rejects.
         self_t = torch.zeros(100, device="cuda")
         src = torch.randn(50, device="cuda")
         idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_index_length_mismatch(self):
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        idx = torch.randint(0, 100, (49,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_trailing_shape_mismatch(self):
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 64, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_ndim_mismatch(self):
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 16, 8, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_deterministic_mode(self):
+        # The determinism gate lives in _base_cond_ok; call the wrapped
+        # cond to exercise the full dispatch-layer predicate.
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        idx = torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64)
+        with DeterministicGuard(True):
+            self.assertFalse(self.impl._tma_ia_cond(self_t, 0, idx, src))
+            self.assertFalse(self.impl._vs_ia_cond(self_t, 0, idx, src))
 
     def test_rejects_dim_nonzero(self):
         self_t = torch.zeros(100, 128, device="cuda")
@@ -11123,6 +11151,15 @@ class TestIndexAddOverrideConds(TestCase):
         src = torch.randn(50, 128, device="cuda")
         idx_2d = torch.randint(0, 100, (50, 128), device="cuda", dtype=torch.int64)
         self.assertEqual(self._conds(self_t, idx_2d, src), (False, False))
+
+    def test_rejects_empty_self(self):
+        # self.shape[0] == 0 with non-empty src would have every index
+        # out of range. Decline so aten raises the index error instead
+        # of our kernel silently writing OOB.
+        self_t = torch.zeros(0, 128, device="cuda")
+        src = torch.randn(5, 128, device="cuda")
+        idx = torch.zeros(5, device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")

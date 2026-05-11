@@ -23,6 +23,12 @@ guards the reduce. Producer and consumer cooperative groups are both
 does both roles. ``PipelineState.advance()`` handles the stage index +
 phase bit.
 
+The pipeline is software-pipelined across the flat sequence of
+``(entry, chunk)`` pairs: each loop iteration issues the TMA load for
+the current pair and consumes the previous one, keeping one TMA load
+in flight alongside an in-progress bulk-reduce. An epilogue drains
+the final outstanding load.
+
 Chunks along D at a compile-time ``chunk_elems``: small rows travel as
 a single chunk, large rows chunk at 512 B. The TMA descriptor OOB-clamp
 handles rows whose length isn't a multiple of ``chunk_elems``.
@@ -51,6 +57,7 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 import cutlass.cute.nvgpu.cpasync as cpasync
+import cutlass.cute.testing as cute_testing
 import cutlass.pipeline as pipeline
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
@@ -87,11 +94,17 @@ def _reduce_op_for(dtype):
 
 
 def _make_kernel(
-    dtype, elem_bytes: int, chunk_elems: int, reduce_op, contig: bool, scale: bool
+    dtype,
+    elem_bytes: int,
+    N: int,
+    chunk_elems: int,
+    reduce_op,
+    contig: bool,
+    scale: bool,
 ):
-    """Build a dtype-specialized kernel closure. dtype/elem_bytes/chunk_elems
-    /contig/scale are Python-time constants that the preprocessor folds at
-    cute.compile time.
+    """Build a dtype-specialized kernel closure. dtype/elem_bytes/N
+    /chunk_elems/contig/scale are Python-time constants that the
+    preprocessor folds at cute.compile time.
 
     ``chunk_elems`` is baked in at compile time. The TMA descriptor
     built in ``_launch`` (via ``make_tiled_tma_atom`` on the source
@@ -120,6 +133,22 @@ def _make_kernel(
     """
 
     chunk_bytes = chunk_elems * elem_bytes
+    # Compile-time derived values. num_chunks covers row_bytes with
+    # partial final chunk handled by TMA OOB clamp.
+    num_chunks = (N + chunk_elems - 1) // chunk_elems
+
+    @cute.jit
+    def _scale_smem(cbuf_ptr, alpha, dtype):
+        """Multiply chunk_elems smem slots starting at cbuf_ptr by
+        ``alpha`` (cast to ``dtype``), then release the generic write to
+        the async proxy so a subsequent bulk-reduce sees the scaled
+        values. Only lane 0 in a single-warp pipeline needs to call
+        this."""
+        alpha_t = dtype(alpha)
+        for i in cutlass.range_constexpr(chunk_elems):
+            slot = cute.make_tensor(cbuf_ptr + Int32(i), cute.make_layout(1))
+            slot[0] = slot[0] * alpha_t
+        cute.arch.fence_view_async_shared()
 
     @cute.kernel
     def _kernel(
@@ -127,9 +156,7 @@ def _make_kernel(
         tma_tensor_src: cute.Tensor,  # TMA-view of mSrc
         mIndex: cute.Tensor,
         mOut: cute.Tensor,
-        num_entries: Int32,
-        D: Int32,
-        chunk_tile_size: Int32,  # number of chunks per grid_y slot
+        chunks_per_cta: Int32,
         out_row_stride: Int64,
         alpha: cute.Numeric,
     ):
@@ -137,19 +164,22 @@ def _make_kernel(
         bidx, bidy, _ = cute.arch.block_idx()
         gdim_x, _, _ = cute.arch.grid_dim()
 
-        # Chunk-index range assigned to this CTA. bidy partitions the
-        # chunk axis into disjoint slices of chunk_tile_size; when
-        # chunk_tile_size == num_chunks, grid_y == 1 and every CTA sees
-        # the whole D.
-        num_chunks = (D + Int32(chunk_elems) - Int32(1)) // Int32(chunk_elems)
-        chunk_start = bidy * chunk_tile_size
-        chunk_end = chunk_start + chunk_tile_size
-        if chunk_end > num_chunks:
-            chunk_end = num_chunks
+        # num_entries (M_src) comes from mIndex's shape; mIndex is 1D
+        # of length M_src after host-side flattening.
+        num_entries = mIndex.shape[0]
 
-        # Reduce-side out-row stride: compile-time D (contig) or runtime.
+        # Chunk-index range assigned to this CTA. bidy partitions the
+        # chunk axis into disjoint slices of chunks_per_cta; when
+        # chunks_per_cta == num_chunks, grid_y == 1 and every CTA sees
+        # the whole D.
+        chunk_start = bidy * chunks_per_cta
+        chunk_end = chunk_start + chunks_per_cta
+        if chunk_end > Int32(num_chunks):
+            chunk_end = Int32(num_chunks)
+
+        # Reduce-side out-row stride: compile-time N (contig) or runtime.
         if const_expr(contig):
-            out_rs = Int64(D)
+            out_rs = Int64(N)
         else:
             out_rs = out_row_stride
 
@@ -190,14 +220,34 @@ def _make_kernel(
             pipeline.PipelineUserType.Consumer, 2
         )
 
+        # Software-pipelined schedule: at each iteration, issue the TMA
+        # load for the current (entry, chunk) pair, then consume the
+        # previous pair (bulk-reduce). With num_stages=2 this keeps one
+        # TMA load in flight while a bulk-reduce is running. Final
+        # iteration's load is drained in an epilogue after the main loop.
+        # pair_count is a runtime Int32 so the ``pair_count > 0`` branch
+        # stays in the compiled IR (a Python bool would be baked in at
+        # trace time).
+        pair_count = Int32(0)
+        prev_chunk_idx = Int32(0)
+        prev_r = Int64(0)
+
         base = bidx
         while base < num_entries:
             entry_id = base
-            r = Int64(mIndex[entry_id])
 
             chunk_idx = chunk_start
             while chunk_idx < chunk_end:
                 if tidx == Int32(0):
+                    r = Int64(mIndex[entry_id])
+                    # Bounds check: index values must be valid output
+                    # rows. Compiling with ``--enable-assertions`` turns
+                    # this into a device-side trap; otherwise it folds
+                    # away. Driver thread only -- no need to replicate
+                    # the check across all 32 lanes.
+                    cute_testing.assert_(r >= Int64(0))
+                    cute_testing.assert_(r < Int64(mOut.shape[0]))
+
                     pipe.producer_acquire(producer_state)
                     cute.copy(
                         tma_atom,
@@ -206,46 +256,62 @@ def _make_kernel(
                         tma_bar_ptr=pipe.producer_get_barrier(producer_state),
                     )
                     pipe.producer_commit(producer_state)
+                    producer_state.advance()
 
-                    pipe.consumer_wait(consumer_state)
-                    cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
+                    if pair_count > Int32(0):
+                        pipe.consumer_wait(consumer_state)
+                        cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(
+                            chunk_elems
+                        )
+                        if const_expr(scale):
+                            _scale_smem(cbuf_ptr, alpha, dtype)
 
-                    if const_expr(scale):
-                        # Scale smem in place before the bulk-reduce.
-                        # Only lane 0 needs to touch it (single-warp
-                        # pipeline + reduce is lane-0 gated anyway), then
-                        # fence_view_async_shared releases the generic
-                        # write to the async proxy so the bulk-reduce
-                        # sees the scaled values.
-                        alpha_t = dtype(alpha)
-                        for i in cutlass.range_constexpr(chunk_elems):
-                            slot = cute.make_tensor(
-                                cbuf_ptr + Int32(i), cute.make_layout(1)
-                            )
-                            slot[0] = slot[0] * alpha_t
-                        cute.arch.fence_view_async_shared()
+                        # Partial-chunk handling: actual valid element
+                        # count is min(chunk_elems, N - off). TMA
+                        # OOB-clamped the tail to 0 in smem, we reduce
+                        # only the valid bytes.
+                        off = prev_chunk_idx * Int32(chunk_elems)
+                        cur_elems = Int32(N) - off
+                        if cur_elems > Int32(chunk_elems):
+                            cur_elems = Int32(chunk_elems)
+                        cur_bytes = cur_elems * Int32(elem_bytes)
 
-                    # Partial-chunk handling: actual valid element count
-                    # is min(chunk_elems, D - off). TMA OOB-clamped the
-                    # tail to 0 in smem, we reduce only the valid bytes.
-                    off = chunk_idx * Int32(chunk_elems)
-                    cur_elems = D - off
-                    if cur_elems > Int32(chunk_elems):
-                        cur_elems = Int32(chunk_elems)
-                    cur_bytes = cur_elems * Int32(elem_bytes)
+                        dst_off = prev_r * out_rs + Int64(off)
+                        gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
+                        reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
+                        cute.arch.cp_async_bulk_commit_group()
+                        cute.arch.cp_async_bulk_wait_group(0, read=False)
+                        pipe.consumer_release(consumer_state)
+                        consumer_state.advance()
 
-                    dst_off = r * out_rs + Int64(off)
-                    gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
-                    reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
-                    cute.arch.cp_async_bulk_commit_group()
-                    cute.arch.cp_async_bulk_wait_group(0, read=False)
-                    pipe.consumer_release(consumer_state)
+                    prev_chunk_idx = chunk_idx
+                    prev_r = r
+                    pair_count = pair_count + Int32(1)
 
-                producer_state.advance()
-                consumer_state.advance()
                 chunk_idx = chunk_idx + Int32(1)
 
             base = base + gdim_x
+
+        # Epilogue: drain the last outstanding TMA load.
+        if tidx == Int32(0):
+            if pair_count > Int32(0):
+                pipe.consumer_wait(consumer_state)
+                cbuf_ptr = sBuf.iterator + consumer_state.index * Int32(chunk_elems)
+                if const_expr(scale):
+                    _scale_smem(cbuf_ptr, alpha, dtype)
+
+                off = prev_chunk_idx * Int32(chunk_elems)
+                cur_elems = Int32(N) - off
+                if cur_elems > Int32(chunk_elems):
+                    cur_elems = Int32(chunk_elems)
+                cur_bytes = cur_elems * Int32(elem_bytes)
+
+                dst_off = prev_r * out_rs + Int64(off)
+                gmem_dst_u64 = Int64((mOut.iterator + dst_off).toint())
+                reduce_op(gmem_dst_u64, cvta_smem(cbuf_ptr), cur_bytes)
+                cute.arch.cp_async_bulk_commit_group()
+                cute.arch.cp_async_bulk_wait_group(0, read=False)
+                pipe.consumer_release(consumer_state)
 
     @cute.jit
     def _launch(
@@ -253,9 +319,7 @@ def _make_kernel(
         mIndex: cute.Tensor,
         mOut: cute.Tensor,
         stream: cuda.CUstream,
-        num_entries: Int32,
-        D: Int32,
-        chunk_tile_size: Int32,
+        chunks_per_cta: Int32,
         grid_x: Int32,
         grid_y: Int32,
         out_row_stride: Int64,
@@ -275,9 +339,7 @@ def _make_kernel(
             tma_tensor_src,
             mIndex,
             mOut,
-            num_entries,
-            D,
-            chunk_tile_size,
+            chunks_per_cta,
             out_row_stride,
             alpha,
         ).launch(
@@ -315,7 +377,7 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
     elem_bytes = dtype.width // 8
     chunk_elems = _chunk_elems_for(torch_dtype, N)
     reduce_op = _reduce_op_for(dtype)
-    launcher = _make_kernel(dtype, elem_bytes, chunk_elems, reduce_op, contig, scale)
+    launcher = _make_kernel(dtype, elem_bytes, N, chunk_elems, reduce_op, contig, scale)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
         dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
@@ -333,12 +395,10 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool, scale: 
         mIndex_fake,
         mOut_fake,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        Int32(0),
-        Int32(0),
-        Int32(0),
-        Int32(0),
-        Int32(0),
-        Int64(0),
+        Int32(0),  # chunks_per_cta
+        Int32(0),  # grid_x
+        Int32(0),  # grid_y
+        Int64(0),  # out_row_stride
         alpha_dtype(0.0),
         options="--enable-tvm-ffi",
     )
@@ -369,7 +429,7 @@ def row_shape_supported(dtype: torch.dtype, N: int) -> bool:
 
 
 def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int]:
-    """Pick ``(grid_x, grid_y, chunk_tile_size)``.
+    """Pick ``(grid_x, grid_y, chunks_per_cta)``.
 
     Strategy: keep the classic 1D schedule (grid_y=1, whole chunk range
     per CTA with internal double-buffering) whenever the row-axis alone
@@ -388,11 +448,11 @@ def _plan_grid(M: int, D: int, chunk_elems: int, sm: int) -> tuple[int, int, int
     # Split the chunk axis until we hit the target.
     want_y = max(1, target_ctas // max(row_ctas, 1))
     grid_y = min(n_chunks, want_y)
-    chunk_tile_size = (n_chunks + grid_y - 1) // grid_y
-    # Recompute grid_y now that each y-slot holds chunk_tile_size chunks.
-    grid_y = (n_chunks + chunk_tile_size - 1) // chunk_tile_size
+    chunks_per_cta = (n_chunks + grid_y - 1) // grid_y
+    # Recompute grid_y now that each y-slot holds chunks_per_cta chunks.
+    grid_y = (n_chunks + chunks_per_cta - 1) // chunks_per_cta
     grid_x = row_ctas
-    return grid_x, grid_y, chunk_tile_size
+    return grid_x, grid_y, chunks_per_cta
 
 
 def tma_scatter_add_into(
@@ -418,15 +478,13 @@ def tma_scatter_add_into(
     compiled = _compile_tma_scatter(src.dtype, N, contig, scale)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
 
-    grid_x, grid_y, chunk_tile_size = _plan_grid(M, N, chunk_elems, sm)
+    grid_x, grid_y, chunks_per_cta = _plan_grid(M, N, chunk_elems, sm)
     alpha_dtype = _alpha_dtype_for(src.dtype)
     compiled(
         src,
         index_1d,
         out,
-        M,
-        N,
-        chunk_tile_size,
+        chunks_per_cta,
         grid_x,
         grid_y,
         out.stride(0),

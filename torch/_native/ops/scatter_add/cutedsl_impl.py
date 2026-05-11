@@ -147,7 +147,11 @@ def _expanded_1d_inner_size(
     for i in range(1, index.ndim):
         if index.stride(i) != 0:
             return None
-    if src.shape[0] == 0:
+    if src.shape[0] == 0 or self.shape[0] == 0:
+        # src.shape[0] == 0 is a no-op; self.shape[0] == 0 means every
+        # index is out of range. Either way, decline and let aten
+        # handle (and for self.shape[0] == 0, raise the proper index
+        # error -- our kernel would silently write OOB).
         return None
     N = math.prod(src.shape[1:])
     if N == 0:
@@ -240,30 +244,31 @@ def _index_add_inner_size(
     self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
 ) -> int | None:
     """Return ``prod(source.shape[1:])`` when index_add can take the
-    fast path, else ``None``."""
+    fast path, else ``None``. 1D sources are rejected (N would be 1,
+    which doesn't meet either kernel's alignment/divisibility
+    requirement) and fall through to aten.
+    """
     if self.dtype not in _SUPPORTED_DTYPES or self.dtype != source.dtype:
         return None
     if index.dtype not in (torch.int64, torch.int32):
         return None
     if dim != 0:
         return None
-    if self.ndim != source.ndim or self.ndim < 1:
+    if self.ndim != source.ndim or self.ndim < 2:
         return None
     # Inner-dim stride 1 with packed inner axes; same relaxation as the
     # scatter_add path. Slices like ``X[:, :K]`` work.
-    if self.ndim > 1 and (
-        not _inner_contiguous(self) or not _inner_contiguous(source)
-    ):
-        return None
-    if self.ndim == 1 and (self.stride(0) != 1 or source.stride(0) != 1):
+    if not _inner_contiguous(self) or not _inner_contiguous(source):
         return None
     if index.ndim != 1 or index.shape[0] != source.shape[0]:
         return None
     if self.shape[1:] != source.shape[1:]:
         return None
-    if source.shape[0] == 0:
+    if source.shape[0] == 0 or self.shape[0] == 0:
+        # Same reasoning as scatter_add: source empty is a no-op, self
+        # empty means every index is out of range -- let aten handle.
         return None
-    N = math.prod(source.shape[1:]) if source.ndim > 1 else 1
+    N = math.prod(source.shape[1:])
     if N == 0:
         return None
     return N
@@ -275,7 +280,7 @@ def _is_tma_index_add_supported(
     if not _has_sm90_plus():
         return False
     N = _index_add_inner_size(self, dim, index, source)
-    if N is None or N == 1:
+    if N is None:
         return False
     from .tma_kernel import min_d_divisor_for
 
@@ -286,7 +291,7 @@ def _is_vec_index_add_supported(
     self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
 ) -> bool:
     N = _index_add_inner_size(self, dim, index, source)
-    if N is None or N == 1:
+    if N is None:
         return False
     from .vec_scatter_kernel import vec_elems_for
 
@@ -404,13 +409,11 @@ def _make_index_add_cond(support_check, *, requires_out: bool = False) -> _OpCon
                 return False
             if out.dtype != self.dtype or out.shape != self.shape:
                 return False
-            if out.ndim == 0:
-                return False
-            # Same relaxation as scatter_add: inner dims packed, outer
-            # stride free. 1D out just needs stride 1.
-            if out.ndim > 1 and not _inner_contiguous(out):
-                return False
-            if out.ndim == 1 and out.stride(0) != 1:
+            # Support_check below rejects source.ndim < 2 via
+            # _index_add_inner_size, so out is guaranteed >= 2D here.
+            # Inner dims must be packed (same relaxation as scatter_add);
+            # outer stride is free so slices like ``X[:, :K]`` work.
+            if not _inner_contiguous(out):
                 return False
             return support_check(self, dim, index, source)
 
@@ -432,17 +435,12 @@ def _alpha_as_float(alpha) -> float:
 
 def _make_index_add_impls(kernel_getter):
     """Build (functional, out, in-place) impls for index_add. index is 1D
-    (length source.shape[0]); when source.ndim > 1 we view as (M, N),
-    otherwise we reshape to (M, 1) for the kernel."""
+    (length source.shape[0]); source is always >= 2D (the cond rejects
+    1D sources), so we flatten to (M, N) for the kernel."""
 
     def _run(dst: torch.Tensor, source: torch.Tensor, index: torch.Tensor, alpha):
-        if source.ndim == 1:
-            # 1D inputs have stride 1 (cond-enforced); reshape to (M, 1).
-            src_2d = source.unsqueeze(-1)
-            dst_2d = dst.unsqueeze(-1)
-        else:
-            src_2d = _flatten_2d_view(source)
-            dst_2d = _flatten_2d_view(dst)
+        src_2d = _flatten_2d_view(source)
+        dst_2d = _flatten_2d_view(dst)
         idx = index if index.dtype == torch.int64 else index.to(torch.int64)
         if not idx.is_contiguous():
             idx = idx.contiguous()
