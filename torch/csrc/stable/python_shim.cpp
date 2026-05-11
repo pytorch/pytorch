@@ -23,10 +23,6 @@ AOTITorchError torch_tensor_from_pyobject(
         "torch_tensor_from_pyobject: expected torch.Tensor, got ",
         Py_TYPE(obj)->tp_name);
 
-    // THPVariable_Unpack returns a const reference to the at::Tensor stored
-    // inside THPVariable::cdata. Copy-construct to bump the intrusive_ptr
-    // refcount on the underlying TensorImpl, then heap-allocate via
-    // new_tensor_handle so the resulting handle has independent ownership.
     *ret = new_tensor_handle(at::Tensor(THPVariable_Unpack(obj)));
   });
 }
@@ -45,10 +41,8 @@ AOTITorchError torch_tensor_to_pyobject(
         ? THPVariable_Wrap(*t, static_cast<PyTypeObject*>(py_type))
         : THPVariable_Wrap(*t);
     if (py == nullptr) {
-      // THPVariable_Wrap left the Python error indicator set; convert to a
-      // C++ exception so AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE turns it
-      // into AOTI_TORCH_FAILURE while the Python error remains set for the
-      // caller to observe via PyErr_Occurred().
+      // Forward the Python error (left set by THPVariable_Wrap) through
+      // AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE.
       throw python_error();
     }
     *ret = py;
