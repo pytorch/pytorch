@@ -597,6 +597,7 @@ def convolution(
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
+        assert bias is not None
         args = [x, weight, bias]
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
