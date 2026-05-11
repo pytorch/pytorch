@@ -2681,6 +2681,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cub::RowMajorTid", "hipcub::RowMajorTid"),
     ("cub::CachingDeviceAllocator", "hipcub::CachingDeviceAllocator"),
     ("cub::CountingInputIterator", "hipcub::CountingInputIterator"),
+    ("cub::DeviceHistogram", "hipcub::DeviceHistogram"),
     ("cub::DeviceRadixSort", "hipcub::DeviceRadixSort"),
     ("cub::DeviceReduce", "hipcub::DeviceReduce"),
     ("cub::DeviceRunLengthEncode", "hipcub::DeviceRunLengthEncode"),
