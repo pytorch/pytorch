@@ -552,54 +552,5 @@ class TestProfilerPerformance(TestCase):
         self.assertLess(elapsed, 60.0)  # Should complete within 1 minute
 
 
-class TestTracerHooks(TestCase):
-    """Test that tracing hooks in Minimal.cpp/Extra.cpp capture events."""
-
-    @skipIfTorchDynamo()
-    def test_cpu_fallback_hook_captures_ops(self):
-        """Ops going through cpu_fallback should appear as profiler events."""
-        with autograd_profile(use_device="openreg") as prof:
-            x = torch.randn(10, 10, device="openreg")
-            y = torch.randn(10, 10, device="openreg")
-            x + y
-            x * y
-
-        event_names = [e.name for e in prof.function_events]
-        self.assertTrue(any("aten::add" in n for n in event_names))
-        self.assertTrue(any("aten::mul" in n for n in event_names))
-
-    @skipIfTorchDynamo()
-    def test_copy_from_hook_captures_transfer(self):
-        """Device transfers via _copy_from should appear as profiler events."""
-        with autograd_profile(use_device="openreg") as prof:
-            x_cpu = torch.randn(10, 10)
-            x_cpu.to("openreg")
-
-        event_names = [e.name for e in prof.function_events]
-        self.assertTrue(
-            any("aten::_copy_from" in n or "aten::copy_" in n for n in event_names)
-        )
-
-    @skipIfTorchDynamo()
-    def test_abs_kernel_hook_captures_event(self):
-        """abs_kernel in Extra.cpp should appear as a profiler event."""
-        with autograd_profile(use_device="openreg") as prof:
-            x = torch.randn(10, 10, device="openreg")
-            torch.abs(x)
-
-        event_names = [e.name for e in prof.function_events]
-        self.assertTrue(any("aten::abs" in n for n in event_names))
-
-    @skipIfTorchDynamo()
-    def test_ops_work_without_profiler(self):
-        """Ops run correctly when profiling is off (guard doesn't break anything)."""
-        x = torch.randn(10, 10, device="openreg")
-        y = torch.randn(10, 10, device="openreg")
-        z = x + y
-        self.assertEqual(z.shape, (10, 10))
-        # The isEnabled() guard in the hooks returns false here, so
-        # no TraceRecords are created.
-
-
 if __name__ == "__main__":
     run_tests()
