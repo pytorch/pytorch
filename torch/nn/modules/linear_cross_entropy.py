@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Literal, NamedTuple
+from functools import cached_property
+from typing import Literal
 
 import torch
 
@@ -106,6 +107,13 @@ class LinearCrossEntropyOptions:
     gradient-sized allocation per call.
 
     Higher-order autograd (gradgrad, forward-mode AD) is unsupported.
+
+    Example::
+
+        options = LinearCrossEntropyOptions(allow_retain_graph=True)
+        loss = linear_cross_entropy(input, weight, target, options=options)
+        loss.backward(retain_graph=True)
+        loss.backward()  # second pass is allowed under this option
     """
 
     batch_chunk_size: int | None = None
@@ -163,7 +171,7 @@ class LinearCrossEntropyOptions:
       ``grad_linear_weight``; rows scattered into by the
       ``ignore_index`` correction take one extra dtype quantization
       per chunk (typically a few extra ULP). Saves
-      ``num_classes * in_features * sizeof(weight_grad_chunk_dtype)``
+      ``num_classes * in_features * sizeof(acc_dtype)``
       bytes — roughly 800 MB for an LLM head with mixed precision.
       The optimization only applies on CUDA when :attr:`acc_dtype`
       differs from the input dtype, and on any backend when
@@ -195,7 +203,9 @@ class LinearCrossEntropyOptions:
     """
 
     acc_dtype: torch.dtype | None = None
-    """Dtype for internal accumulation. Defaults to the input dtype.
+    """Dtype for internal accumulation. ``None`` (the default visible
+    in ``repr`` / :meth:`extra_repr`) is resolved to the input dtype
+    at call time — same semantics as passing the input dtype explicitly.
 
     Mixed-precision is currently limited to ``torch.float16``
     or ``torch.bfloat16`` input and ``acc_dtype=torch.float32``.
@@ -288,178 +298,34 @@ def _chunk_iter(total_size, chunk_size):
         yield start, min(chunk_size, total_size - start)
 
 
-class _LinearCrossEntropyChunkedSetup(NamedTuple):
-    """Pre-loop state computed by ``_linear_cross_entropy_setup``:
-    shape/device info, the dtype layout for every internal buffer,
-    and the prepared ``neg_weight_target`` plus its (possibly
-    re-mapped) ``target`` indices.
+def _make_empty(shape, dtype, device, when=True):
+    """Allocate an uninitialized tensor (``torch.empty``-like).
 
-    The fields named ``*_dtype`` drive the buffer allocations and
-    dispatch flags in ``_linear_cross_entropy_batch_chunked``. The
-    boolean flags (``is_cuda``, ``is_mps``, ``use_acc_dtype``,
-    ``is_memory_like``, ``is_ultralow``) are reused throughout the
-    chunked loop's dispatch. ``linear_weight_cast`` is computed by
-    the caller after this setup since it depends on
-    ``compute_input_grad`` dispatch and is naturally co-located
-    with the buffer allocation block.
+    When ``when`` is false, return a rank-matching empty tensor
+    (shape ``(0,) * len(shape)``) instead of allocating ``shape``.
+    The returned tensor preserves the rank of ``shape`` so callers
+    can treat the result uniformly regardless of ``when``.
     """
-
-    device: torch.device
-    dtype: torch.dtype
-    num_batches: int
-    in_features: int
-    num_classes: int
-    is_cuda: bool
-    is_mps: bool
-    use_acc_dtype: bool
-    is_memory_like: bool
-    is_ultralow: bool
-    output_dtype: torch.dtype
-    grad_input_dtype: torch.dtype
-    grad_linear_weight_dtype: torch.dtype
-    logits_buf_dtype: torch.dtype
-    weight_grad_chunk_dtype: torch.dtype
-    weight_chunk_dtype: torch.dtype
-    target: torch.Tensor
-    neg_weight_target: torch.Tensor
-
-
-def _linear_cross_entropy_setup(
-    input: torch.Tensor,
-    linear_weight: torch.Tensor,
-    target: torch.Tensor,
-    weight: torch.Tensor | None,
-    reduction: str,
-    ignore_index: int,
-    label_smoothing: float,
-    acc_policy: str,
-    acc_dtype: torch.dtype,
-) -> _LinearCrossEntropyChunkedSetup:
-    """Validate inputs, compute the internal dtype layout, and build
-    ``neg_weight_target``.
-
-    Pulled out of ``_linear_cross_entropy_batch_chunked`` so the main
-    function focuses on buffer allocation and the chunked loop.
-    """
-    # ===== Setup =====
-    device = input.device
-    dtype = input.dtype
-    num_batches, in_features = input.shape
-    num_classes, _ = linear_weight.shape
-    # CUDA gates the out_dtype= mm fast path; the non-CUDA path
-    # (CPU, MPS, XPU, ...) routes mixed-dtype mm through explicit casts
-    # until out_dtype= is validated on those backends.
-    is_cuda = input.device.type == "cuda"
-    is_mps = input.device.type == "mps"
-
-    # ===== Validation =====
-    if dtype != acc_dtype and not (
-        dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
-    ):
-        raise RuntimeError(
-            "linear_cross_entropy supports float32 acc_dtype with"
-            f" float16/bfloat16 inputs, but got {acc_dtype} acc_dtype and {dtype} inputs."
-        )
-    use_acc_dtype = dtype != acc_dtype
-
-    if target.dtype != torch.int64:
-        raise TypeError(
-            f"linear_cross_entropy: target dtype must be torch.int64, got {target.dtype}."
-        )
-
-    if label_smoothing > 0.0:
-        raise NotImplementedError(
-            "linear_cross_entropy does not support label smoothing"
-        )
-
-    if reduction not in {"mean", "sum"}:
-        raise NotImplementedError(f"linear_cross_entropy does not support {reduction=}")
-
-    # ===== Internal dtype layout =====
-    # "lowmemory" follows the same dtype layout as "memory"; the
-    # extra savings come from skipping weight_grad_chunk later, not
-    # from a different dtype layout. "ultralow" goes further: it
-    # keeps logits in the input dtype (bf16/fp16) and accumulates
-    # the softmax denominator into fp32 via sum(dtype=acc_dtype),
-    # decoupling the per-row weight tensor from logits_buf to
-    # preserve loss/grad accumulator precision.
-    is_memory_like = acc_policy in {"memory", "lowmemory", "ultralow"}
-    is_ultralow = acc_policy == "ultralow"
-    if use_acc_dtype:
-        output_dtype = acc_dtype if dtype == torch.float16 else dtype
-        grad_input_dtype = dtype if is_memory_like else acc_dtype
-        grad_linear_weight_dtype = dtype
-        # ultralow keeps logits at input dtype regardless;
-        # fp16+memory(-like) does the same for fp16 only;
-        # other use_acc_dtype configs upcast for softmax stability.
-        logits_buf_dtype = (
-            dtype
-            if is_ultralow or (dtype == torch.float16 and is_memory_like)
-            else acc_dtype
-        )
-        weight_grad_chunk_dtype = acc_dtype
-        # weight_chunk_dtype: kept at acc_dtype under ultralow even
-        # though logits_buf is at input dtype, so the per-row weight
-        # used in loss accumulation and softmax-denom division
-        # retains fp32 precision. For other policies, the
-        # logits_buf/weight_chunk dtypes coincide.
-        weight_chunk_dtype = acc_dtype if is_ultralow else logits_buf_dtype
-    else:
-        output_dtype = grad_input_dtype = grad_linear_weight_dtype = (
-            logits_buf_dtype
-        ) = weight_grad_chunk_dtype = weight_chunk_dtype = dtype
-
-    # ===== Build neg_weight_target =====
-    # Inf/NaN at X_[:, ignore_index] propagates through the
-    # masked-by-zero multiply (matches cross_entropy; differs from
-    # nll_loss). The mask is built from the original target so that
-    # out-of-range ignore_index values (mapped to 0 below) still get
-    # zeroed out correctly.
-    mask = target == ignore_index
-    if ignore_index < 0 or ignore_index >= num_classes:
-        target = torch.where(mask, 0, target)
-    if weight is None:
-        neg_weight_target = (~mask).to(weight_chunk_dtype)
-    elif target.numel() > weight.numel():
-        neg_weight_target = torch.where(
-            mask, 0, weight.to(weight_chunk_dtype).index_select(0, target)
-        )
-    else:
-        neg_weight_target = torch.where(
-            mask, 0, weight.index_select(0, target).to(weight_chunk_dtype)
-        )
-
-    if reduction == "mean":
-        d = neg_weight_target.sum()
-        neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
-    else:  # "sum"
-        neg_weight_target.neg_()
-
-    return _LinearCrossEntropyChunkedSetup(
+    return torch.empty(
+        shape if when else (0,) * len(shape),
         device=device,
         dtype=dtype,
-        num_batches=num_batches,
-        in_features=in_features,
-        num_classes=num_classes,
-        is_cuda=is_cuda,
-        is_mps=is_mps,
-        use_acc_dtype=use_acc_dtype,
-        is_memory_like=is_memory_like,
-        is_ultralow=is_ultralow,
-        output_dtype=output_dtype,
-        grad_input_dtype=grad_input_dtype,
-        grad_linear_weight_dtype=grad_linear_weight_dtype,
-        logits_buf_dtype=logits_buf_dtype,
-        weight_grad_chunk_dtype=weight_grad_chunk_dtype,
-        weight_chunk_dtype=weight_chunk_dtype,
-        target=target,
-        neg_weight_target=neg_weight_target,
+        requires_grad=False,
     )
 
 
-# Argument count of _linear_cross_entropy_batch_chunked; backward
-# returns this many gradient slots. Keep in sync with the signature.
-_NUM_OP_INPUTS = 13
+def _make_zeros(shape, dtype, device, when=True):
+    """Allocate a zero-initialized tensor (``torch.zeros``-like).
+
+    Same ``when=False`` rank-matching-empty behavior as
+    :func:`_make_empty`.
+    """
+    return torch.zeros(
+        shape if when else (0,) * len(shape),
+        device=device,
+        dtype=dtype,
+        requires_grad=False,
+    )
 
 
 def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
@@ -470,6 +336,692 @@ def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
     _, grad_input, grad_linear_weight = output
     ctx._gi = grad_input if compute_input_grad else None
     ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
+
+
+@dataclasses.dataclass
+class _ChunkViews:
+    """Per-iteration tensor views for the chunked loop.
+
+    The ``input``, ``linear_weight``, ``input_grad_logits``,
+    ``input_grad_linear_weight``, ``weight_grad_input``,
+    ``logits_upcast``, ``logits_downcast``, and ``grad_input_chunk``
+    properties resolve which operand variant or scratch destination
+    to use based on ctx dispatch flags, so the chunked-loop call
+    sites read like raw tensor operations. See each property's
+    docstring for the specific dispatch logic.
+    """
+
+    ctx: "_ChunkContext"
+    bchunk_start: int
+    bchunk_size: int
+    input_chunk: torch.Tensor
+    target_chunk: torch.Tensor
+    weight_chunk: torch.Tensor
+    logits: torch.Tensor
+    input_chunk_acc: torch.Tensor
+
+    @property
+    def input(self) -> torch.Tensor:
+        """Input operand for the forward ``mm``: ``input_chunk_acc``
+        when a non-CUDA mixed-dtype upcast is needed, else
+        ``input_chunk``.
+        """
+        return (
+            self.input_chunk_acc
+            if self.ctx.forward_uses_acc_input
+            else self.input_chunk
+        )
+
+    @property
+    def linear_weight(self) -> torch.Tensor:
+        """``linear_weight`` operand for the forward ``mm``: raw on
+        the cuBLAS ``out_dtype=`` path, ``linear_weight_cast``
+        otherwise.
+        """
+        ctx = self.ctx
+        return (
+            ctx.linear_weight
+            if ctx.forward_uses_cuda_out_dtype
+            else ctx.linear_weight_cast
+        )
+
+    @property
+    def input_grad_logits(self) -> torch.Tensor:
+        """``logits``-side operand for the input-grad ``addmm``:
+        the pre-cast ``logits_downcast`` on CUDA mixed-dtype, else
+        ``logits`` itself. ``logits_downcast`` aliases ``logits``
+        when no per-iter cast is needed (see :meth:`bind_chunk`).
+        """
+        if self.ctx.input_grad_uses_logits_lw:
+            return self.logits_downcast
+        return self.logits
+
+    @property
+    def input_grad_linear_weight(self) -> torch.Tensor:
+        """``linear_weight``-side operand for the input-grad
+        ``addmm``: raw when paired with ``logits_downcast``, else
+        ``linear_weight_cast``.
+        """
+        ctx = self.ctx
+        return (
+            ctx.linear_weight
+            if ctx.input_grad_uses_logits_lw
+            else ctx.linear_weight_cast
+        )
+
+    @property
+    def weight_grad_input(self) -> torch.Tensor:
+        """Input operand for the keep-path weight-grad ``mm``: raw
+        under the CUDA mixed-dtype path (cuBLAS ``out_dtype=``
+        requires matching-dtype mm operands, both at the input
+        dtype), accumulator-cast otherwise (so all operands share the
+        ``out=`` dtype after the upcast).
+        """
+        ctx = self.ctx
+        if ctx.is_cuda and not ctx.weight_grad_mm_same_dtype:
+            return self.input_chunk
+        return self.input_chunk_acc
+
+    @property
+    def logits_upcast(self) -> torch.Tensor:
+        """``logits``-side operand for the keep-path weight-grad
+        ``mm``, materialized in ``acc_dtype`` when needed.
+
+        Aliases ``logits`` on CUDA (cuBLAS' ``out_dtype=`` handles the
+        upcast inside the matmul) and when ``logits`` is already in
+        ``weight_grad_chunk``'s dtype. Otherwise (non-CUDA mixed-dtype
+        with ``logits`` at the input dtype) copies into
+        ``logits_acc_buf`` so the matmul has matching-dtype operands
+        and ``out``.
+        """
+        ctx = self.ctx
+        if ctx.is_cuda or ctx.weight_grad_mm_same_dtype:
+            return self.logits
+        return ctx.logits_acc_buf.narrow(0, 0, self.bchunk_size).copy_(self.logits)
+
+    @cached_property
+    def grad_input_chunk(self) -> torch.Tensor:
+        """Destination view for this iter's input-grad ``addmm``:
+        ``input_grad_acc_buf`` on the buf-and-copy path, a narrow
+        view of ``ctx.grad_input`` on the fast path. The buf-and-copy
+        commit happens in :meth:`_ChunkContext.chunks` post-yield.
+        """
+        ctx = self.ctx
+        if ctx.alloc_input_grad_acc_buf:
+            return ctx.input_grad_acc_buf.narrow(0, 0, self.bchunk_size)
+        return ctx.grad_input.narrow(0, self.bchunk_start, self.bchunk_size)
+
+    @cached_property
+    def logits_downcast(self) -> torch.Tensor:
+        """``logits`` cast to ``linear_weight.dtype`` for downstream
+        consumers (the input-grad addmm via :attr:`input_grad_logits`
+        and the inlined direct weight-grad ``addmm_``).
+
+        When ``loop_caches_logits_downcast`` fires, lazily allocates a
+        per-iter cast tensor on first access; ``cached_property``
+        caches the result on the instance so subsequent accesses in
+        the same iteration are O(1). Otherwise aliases ``self.logits``
+        directly (no copy).
+
+        First access must happen *after* the in-place modifications
+        to ``self.logits`` in the chunked-loop body finish.
+        """
+        ctx = self.ctx
+        if ctx.loop_caches_logits_downcast:
+            return self.logits.to(ctx.linear_weight.dtype)
+        return self.logits
+
+
+@dataclasses.dataclass
+class _ChunkContext:
+    """Per-call state for the chunked loop: shape and device info, the
+    full internal dtype layout, the prepared ``target`` and
+    ``neg_weight_target``, the (raw and optionally cast) ``linear_weight``,
+    all allocated buffers, the persistent outputs, and pre-computed
+    dispatch booleans.
+
+    Built once via ``_ChunkContext.build`` before the loop. Methods
+    exist only where real dispatch lives (``mm``, ``amax``,
+    ``dotgather``, ``sumexp_``, ``div``, ``mul``, ``to``);
+    each one hides the dtype/device/acc_policy dispatch behind a
+    single mathematical operation. Per-iteration math without
+    dispatch (loss accumulation, input-grad mul + addmm) is inlined
+    directly in the chunked loop body.
+
+    Buffers that the dispatch decided are not needed are present as
+    rank-matching empty tensors (``shape == (0,) * rank``) — `_make_empty`
+    / `_make_zeros`'s ``when=False`` behavior. They never get accessed
+    on those configs, but having them as fields means the dataclass
+    surface stays uniform.
+    """
+
+    # ===== Shape and device =====
+    dtype: torch.dtype
+    num_batches: int
+    in_features: int
+    num_classes: int
+    is_cuda: bool
+    use_acc_dtype: bool
+    is_ultralow: bool
+
+    # ===== Internal dtype layout =====
+    acc_dtype: torch.dtype
+    weight_chunk_dtype: torch.dtype
+    grad_input_dtype: torch.dtype
+    linear_weight_cast_dtype: torch.dtype
+
+    # ===== Per-call tensors =====
+    input: torch.Tensor
+    # ``target`` is the original (uncorrected) target; the per-iter
+    # ``target_chunk`` is sliced from :attr:`corrected_target`, which
+    # replaces out-of-range ignore_index values with 0 lazily.
+    target: torch.Tensor
+    weight: torch.Tensor | None
+    ignore_index: int
+    reduction: str
+    linear_weight: torch.Tensor
+
+    # ===== Always-allocated buffers =====
+    # The "when=" buffers (weight_grad_chunk, logits_acc_buf,
+    # input_grad_acc_buf, input_chunk_acc_buf, grad_input,
+    # grad_linear_weight) are cached_properties below — see each one's
+    # body for its dispatch flag and shape/dtype.
+    logits_buf: torch.Tensor
+    tmp: torch.Tensor
+
+    # ===== Persistent outputs =====
+    output: torch.Tensor
+
+    # ===== Per-call dispatch flags =====
+    compute_input_grad: bool
+    compute_linear_weight_grad: bool
+    alloc_weight_grad_chunk: bool
+    alloc_input_grad_acc_buf: bool
+    alloc_input_chunk_acc_buf: bool
+    alloc_logits_acc_buf: bool
+    forward_uses_acc_input: bool
+    forward_uses_cuda_out_dtype: bool
+    weight_grad_mm_same_dtype: bool
+    input_grad_uses_logits_lw: bool
+    loop_caches_logits_downcast: bool
+    weight_grad_uses_logits_buf_temp: bool
+
+    @cached_property
+    def _mask(self) -> torch.Tensor:
+        """``target == ignore_index`` — positions to exclude from the
+        weighted sum. Cached on the instance so :attr:`corrected_target`
+        and :attr:`neg_weight_target` share it.
+        """
+        return self.target == self.ignore_index
+
+    @cached_property
+    def corrected_target(self) -> torch.Tensor:
+        """``self.target`` with out-of-range ``ignore_index`` values
+        replaced by 0 (so downstream ``index_select`` / ``index_add_``
+        calls don't index out of bounds). Aliases ``self.target``
+        when ``ignore_index`` is in range.
+        """
+        if self.ignore_index < 0 or self.ignore_index >= self.num_classes:
+            return torch.where(self._mask, 0, self.target)
+        return self.target
+
+    @cached_property
+    def neg_weight_target(self) -> torch.Tensor:
+        """Per-row weighting factor for the chunked loss formula,
+        sign-adjusted and (for ``reduction="mean"``) normalized: each
+        position holds ``-(weight[target] if weight else 1) / d`` for
+        unmasked positions, ``0`` for masked positions. ``d`` is the
+        sum of unmasked weight magnitudes when ``reduction="mean"``;
+        for ``reduction="sum"`` the result is simply negated. The
+        chunked loop reads slices of this via ``chunk.weight_chunk``.
+        """
+        mask = self._mask
+        target = self.corrected_target
+        weight = self.weight
+        weight_chunk_dtype = self.weight_chunk_dtype
+        if weight is None:
+            neg_weight_target = (~mask).to(weight_chunk_dtype)
+        elif target.numel() > weight.numel():
+            neg_weight_target = torch.where(
+                mask, 0, weight.to(weight_chunk_dtype).index_select(0, target)
+            )
+        else:
+            neg_weight_target = torch.where(
+                mask, 0, weight.index_select(0, target).to(weight_chunk_dtype)
+            )
+        if self.reduction == "mean":
+            d = neg_weight_target.sum()
+            neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
+        else:  # "sum"
+            neg_weight_target.neg_()
+        return neg_weight_target
+
+    @cached_property
+    def linear_weight_cast(self) -> torch.Tensor:
+        """``self.linear_weight`` materialized in
+        ``linear_weight_cast_dtype`` when the dispatch demands a cast
+        (non-CUDA + ``use_acc_dtype``, or CUDA + ``use_acc_dtype`` +
+        accurate-mode input-grad). Otherwise aliases ``linear_weight``.
+        """
+        if self.linear_weight_cast_dtype != self.dtype:
+            return self.linear_weight.to(self.linear_weight_cast_dtype)
+        return self.linear_weight
+
+    @cached_property
+    def weight_grad_chunk(self) -> torch.Tensor:
+        """``(V, F)`` accumulator in ``acc_dtype`` for the keep-path
+        weight-grad ``mm``. Rank-empty (and unused) when the dispatch
+        chose the direct path (lowmemory / ultralow).
+        """
+        return _make_empty(
+            (self.num_classes, self.in_features),
+            self.acc_dtype,
+            self.input.device,
+            when=self.alloc_weight_grad_chunk,
+        )
+
+    @cached_property
+    def logits_acc_buf(self) -> torch.Tensor:
+        """``(B, V)`` scratch in ``acc_dtype`` for the keep-path
+        ``chunk.logits_upcast`` (non-CUDA mixed-dtype only). Rank-empty
+        otherwise.
+        """
+        return _make_empty(
+            (self.logits_buf.shape[0], self.num_classes),
+            self.acc_dtype,
+            self.input.device,
+            when=self.alloc_logits_acc_buf,
+        )
+
+    @cached_property
+    def input_grad_acc_buf(self) -> torch.Tensor:
+        """``(B, F)`` scratch for the input-grad ``addmm`` on the
+        buf-and-copy path (CPU mixed-dtype, MPS). Rank-empty on the
+        fast path where ``grad_input_chunk`` aliases ``grad_input``.
+        """
+        return _make_empty(
+            (self.logits_buf.shape[0], self.in_features),
+            self.linear_weight_cast_dtype,
+            self.input.device,
+            when=self.alloc_input_grad_acc_buf,
+        )
+
+    @cached_property
+    def input_chunk_acc_buf(self) -> torch.Tensor:
+        """``(B, F)`` buffer holding the per-chunk input in
+        ``acc_dtype``. Rank-empty when the dispatch keeps the input
+        at the user dtype.
+        """
+        return _make_empty(
+            (self.logits_buf.shape[0], self.in_features),
+            self.acc_dtype,
+            self.input.device,
+            when=self.alloc_input_chunk_acc_buf,
+        )
+
+    @cached_property
+    def grad_input(self) -> torch.Tensor:
+        """``input.shape`` gradient accumulator. Rank-empty (and
+        ignored by autograd) when ``compute_input_grad`` is False.
+        """
+        return _make_empty(
+            self.input.shape,
+            self.grad_input_dtype,
+            self.input.device,
+            when=self.compute_input_grad,
+        )
+
+    @cached_property
+    def grad_linear_weight(self) -> torch.Tensor:
+        """``linear_weight.shape`` zero-initialized gradient
+        accumulator. Rank-empty when ``compute_linear_weight_grad``
+        is False.
+        """
+        return _make_zeros(
+            self.linear_weight.shape,
+            self.dtype,
+            self.input.device,
+            when=self.compute_linear_weight_grad,
+        )
+
+    @classmethod
+    def build(
+        cls,
+        input: torch.Tensor,
+        linear_weight: torch.Tensor,
+        target: torch.Tensor,
+        weight: torch.Tensor | None,
+        reduction: str,
+        ignore_index: int,
+        label_smoothing: float,
+        batch_chunk_size: int,
+        acc_policy: str,
+        acc_dtype: torch.dtype,
+        compute_input_grad: bool,
+        compute_linear_weight_grad: bool,
+    ) -> "_ChunkContext":
+        # ===== Validation =====
+        if target.dtype != torch.int64:
+            raise TypeError(
+                f"linear_cross_entropy: target dtype must be torch.int64, got {target.dtype}."
+            )
+        if label_smoothing > 0.0:
+            raise NotImplementedError(
+                "linear_cross_entropy does not support label smoothing"
+            )
+        if reduction not in {"mean", "sum"}:
+            raise NotImplementedError(
+                f"linear_cross_entropy does not support {reduction=}"
+            )
+
+        device = input.device
+        dtype = input.dtype
+        num_batches, in_features = input.shape
+        num_classes, _ = linear_weight.shape
+        # CUDA gates the out_dtype= mm fast path; the non-CUDA path
+        # (CPU, MPS, XPU, ...) routes mixed-dtype mm through explicit
+        # casts until out_dtype= is validated on those backends.
+        is_cuda = device.type == "cuda"
+        is_mps = device.type == "mps"
+
+        if dtype != acc_dtype and not (
+            dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
+        ):
+            raise RuntimeError(
+                "linear_cross_entropy supports float32 acc_dtype with"
+                f" float16/bfloat16 inputs, but got {acc_dtype} acc_dtype and {dtype} inputs."
+            )
+        use_acc_dtype = dtype != acc_dtype
+
+        # ===== Internal dtype layout =====
+        # "lowmemory" follows the same dtype layout as "memory"; the
+        # extra savings come from skipping weight_grad_chunk later, not
+        # from a different dtype layout. "ultralow" goes further: it
+        # keeps logits in the input dtype (bf16/fp16) and accumulates
+        # the softmax denominator into fp32 via sum(dtype=acc_dtype),
+        # decoupling the per-row weight tensor from logits_buf to
+        # preserve loss/grad accumulator precision.
+        is_memory_like = acc_policy in {"memory", "lowmemory", "ultralow"}
+        is_ultralow = acc_policy == "ultralow"
+        if use_acc_dtype:
+            output_dtype = acc_dtype if dtype == torch.float16 else dtype
+            grad_input_dtype = dtype if is_memory_like else acc_dtype
+            # ultralow keeps logits at input dtype regardless;
+            # fp16+memory(-like) does the same for fp16 only;
+            # other use_acc_dtype configs upcast for softmax stability.
+            logits_buf_dtype = (
+                dtype
+                if is_ultralow or (dtype == torch.float16 and is_memory_like)
+                else acc_dtype
+            )
+            # weight_chunk_dtype: kept at acc_dtype under ultralow even
+            # though logits_buf is at input dtype, so the per-row weight
+            # used in loss accumulation and softmax-denom division
+            # retains fp32 precision. For other policies, the
+            # logits_buf/weight_chunk dtypes coincide.
+            weight_chunk_dtype = acc_dtype if is_ultralow else logits_buf_dtype
+        else:
+            output_dtype = grad_input_dtype = logits_buf_dtype = weight_chunk_dtype = (
+                dtype
+            )
+
+        # ===== Dispatch flags =====
+        # CUDA + use_acc_dtype + memory mode does NOT need linear_weight_cast:
+        # the forward mm uses out_dtype= on the original linear_weight, the
+        # input-grad goes through the storage-trick path with the original
+        # linear_weight, and the input-grad first-term mul gets implicit type
+        # promotion through TensorIterator.
+        needs_linear_weight_cast = use_acc_dtype and (
+            not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
+        )
+        linear_weight_cast_dtype = (
+            logits_buf_dtype if needs_linear_weight_cast else dtype
+        )
+        alloc_weight_grad_chunk = compute_linear_weight_grad and not (
+            acc_policy in {"lowmemory", "ultralow"}
+            and (is_cuda or logits_buf_dtype == dtype)
+        )
+        alloc_input_grad_acc_buf = (
+            compute_input_grad
+            and not is_cuda
+            and (grad_input_dtype != linear_weight_cast_dtype or is_mps)
+        )
+        alloc_input_chunk_acc_buf = use_acc_dtype and (
+            compute_linear_weight_grad or (not is_cuda and dtype != logits_buf_dtype)
+        )
+        forward_uses_acc_input = (
+            use_acc_dtype and not is_cuda and dtype != logits_buf_dtype
+        )
+        forward_uses_cuda_out_dtype = is_cuda and use_acc_dtype
+        weight_grad_mm_same_dtype = logits_buf_dtype == acc_dtype
+        # Storage-trick fires when logits' dtype differs from the input-
+        # grad accumulator dtype.
+        input_grad_uses_logits_lw = (
+            is_cuda and compute_input_grad and logits_buf_dtype != grad_input_dtype
+        )
+        # Per-iter ``logits.to(linear_weight.dtype)`` shared between the
+        # inlined input-grad addmm and the inlined direct weight-grad addmm_.
+        loop_caches_logits_downcast = input_grad_uses_logits_lw or (
+            compute_linear_weight_grad
+            and not alloc_weight_grad_chunk
+            and logits_buf_dtype != dtype
+        )
+        alloc_logits_acc_buf = (
+            alloc_weight_grad_chunk and not is_cuda and logits_buf_dtype != acc_dtype
+        )
+        # The direct weight-grad path needs to cast ``temp`` (acc_dtype)
+        # to grad_linear_weight.dtype (= input dtype) for index_add_
+        # (see ``_ChunkContext.to``). When the per-chunk logits_buf has
+        # enough bytes per row to hold the cast result
+        # (``num_classes * sizeof(logits_buf_dtype) >= in_features *
+        # sizeof(dtype)``), the cast writes into a narrowed view of
+        # logits_buf storage instead of allocating a fresh ``(B, F)``
+        # tensor per iteration.
+        weight_grad_uses_logits_buf_temp = (
+            not alloc_weight_grad_chunk
+            and use_acc_dtype
+            and num_classes * logits_buf_dtype.itemsize >= in_features * dtype.itemsize
+        )
+
+        # ``neg_weight_target``, ``linear_weight_cast``,
+        # ``weight_grad_chunk``, ``logits_acc_buf``, ``input_grad_acc_buf``,
+        # ``input_chunk_acc_buf``, ``grad_input``, and
+        # ``grad_linear_weight`` are computed lazily by cached_properties
+        # on :class:`_ChunkContext`; see the property bodies above.
+        return cls(
+            dtype=dtype,
+            num_batches=num_batches,
+            in_features=in_features,
+            num_classes=num_classes,
+            is_cuda=is_cuda,
+            use_acc_dtype=use_acc_dtype,
+            is_ultralow=is_ultralow,
+            acc_dtype=acc_dtype,
+            weight_chunk_dtype=weight_chunk_dtype,
+            grad_input_dtype=grad_input_dtype,
+            linear_weight_cast_dtype=linear_weight_cast_dtype,
+            input=input,
+            target=target,
+            weight=weight,
+            ignore_index=ignore_index,
+            reduction=reduction,
+            linear_weight=linear_weight,
+            logits_buf=torch.empty(
+                (batch_chunk_size, num_classes),
+                dtype=logits_buf_dtype,
+                device=device,
+                requires_grad=False,
+            ),
+            tmp=torch.empty(
+                (batch_chunk_size,),
+                dtype=logits_buf_dtype,
+                device=device,
+                requires_grad=False,
+            ),
+            output=_make_zeros((), output_dtype, device),
+            compute_input_grad=compute_input_grad,
+            compute_linear_weight_grad=compute_linear_weight_grad,
+            alloc_weight_grad_chunk=alloc_weight_grad_chunk,
+            alloc_input_grad_acc_buf=alloc_input_grad_acc_buf,
+            alloc_input_chunk_acc_buf=alloc_input_chunk_acc_buf,
+            alloc_logits_acc_buf=alloc_logits_acc_buf,
+            forward_uses_acc_input=forward_uses_acc_input,
+            forward_uses_cuda_out_dtype=forward_uses_cuda_out_dtype,
+            weight_grad_mm_same_dtype=weight_grad_mm_same_dtype,
+            input_grad_uses_logits_lw=input_grad_uses_logits_lw,
+            loop_caches_logits_downcast=loop_caches_logits_downcast,
+            weight_grad_uses_logits_buf_temp=weight_grad_uses_logits_buf_temp,
+        )
+
+    def chunks(self):
+        """Iterate the chunked loop, yielding a fresh ``_ChunkViews``
+        per iteration.
+
+        Post-yield, finalize the buf-and-copy input-grad path
+        (CPU mixed-dtype / MPS): the per-chunk addmm writes into
+        ``input_grad_acc_buf``, and we copy that slice into the
+        corresponding rows of ``ctx.grad_input``. Skipped on the
+        fast path where ``grad_input_chunk`` already aliases
+        ``ctx.grad_input``.
+
+        The chunk size is taken from ``self.logits_buf.shape[0]`` —
+        i.e., the ``batch_chunk_size`` the buffers were sized for at
+        build time.
+        """
+        batch_chunk_size = self.logits_buf.shape[0]
+        for bchunk_start, bchunk_size in _chunk_iter(
+            self.num_batches, batch_chunk_size
+        ):
+            chunk = self.bind_chunk(bchunk_start, bchunk_size)
+            yield chunk
+            if self.alloc_input_grad_acc_buf:
+                self.grad_input.narrow(0, bchunk_start, bchunk_size).copy_(
+                    chunk.grad_input_chunk
+                )
+
+    def bind_chunk(self, bchunk_start: int, bchunk_size: int) -> _ChunkViews:
+        input_chunk = self.input.narrow(0, bchunk_start, bchunk_size)
+        target_chunk = self.corrected_target.narrow(0, bchunk_start, bchunk_size)
+        weight_chunk = self.neg_weight_target.narrow(0, bchunk_start, bchunk_size)
+        logits = self.logits_buf.narrow(0, 0, bchunk_size)
+        input_chunk_acc = (
+            self.input_chunk_acc_buf.narrow(0, 0, bchunk_size).copy_(input_chunk)
+            if self.alloc_input_chunk_acc_buf
+            else input_chunk
+        )
+        return _ChunkViews(
+            ctx=self,
+            bchunk_start=bchunk_start,
+            bchunk_size=bchunk_size,
+            input_chunk=input_chunk,
+            target_chunk=target_chunk,
+            weight_chunk=weight_chunk,
+            logits=logits,
+            input_chunk_acc=input_chunk_acc,
+        )
+
+    def mm(self, mat1: torch.Tensor, mat2: torch.Tensor, *, out: torch.Tensor) -> None:
+        """``out = mat1 @ mat2`` with dtype-aware dispatch.
+
+        - same-dtype: plain ``torch.mm``.
+        - mismatch: ``torch.mm(out_dtype=out.dtype)`` so cuBLAS
+          upcasts inside the matmul (``mat1`` and ``mat2`` must
+          still share dtype).
+        """
+        if mat1.dtype == out.dtype:
+            torch.mm(mat1, mat2, out=out)
+        else:
+            torch.mm(mat1, mat2, out_dtype=out.dtype, out=out)
+
+    def amax(self, x: torch.Tensor) -> torch.Tensor:
+        """Returns ``x.amax(dim=1, keepdim=True)``, reusing
+        ``self.tmp`` as the scratch buffer for the per-row max
+        rather than allocating a fresh tensor.
+        """
+        out = self.tmp.narrow(0, 0, x.shape[0]).unsqueeze(1)
+        torch.amax(x, dim=1, keepdim=True, out=out)
+        return out
+
+    def dotgather(
+        self, weight: torch.Tensor, x: torch.Tensor, indices: torch.Tensor
+    ) -> torch.Tensor:
+        """Returns ``<weight, x[i, indices[i]]>`` — the weighted sum
+        of per-row gathered values. Equivalent to
+        ``weight.dot(x.gather(1, indices.unsqueeze(1)).squeeze(1))``,
+        with a final cast to ``weight.dtype`` so the dtype-strict
+        ``torch.dot`` accepts mismatched operand dtypes (no-op when
+        they match).
+        """
+        return weight.dot(x.gather(1, indices.unsqueeze(1)).squeeze(1).to(weight.dtype))
+
+    def sumexp_(self, x: torch.Tensor, dim: int) -> torch.Tensor:
+        """In-place exp + dim-wise sum: ``x := exp(x); return sum(x, dim)``.
+
+        When ``self.is_ultralow`` is set, the reduction runs
+        in ``self.acc_dtype`` (preserves precision when summing many
+        low-precision values); otherwise in ``x``'s dtype.
+        """
+        return x.exp_().sum(dim, dtype=self.acc_dtype if self.is_ultralow else None)
+
+    def div(self, num: torch.Tensor, den: torch.Tensor) -> torch.Tensor:
+        """Returns ``num / den`` written into ``self.tmp`` rather than
+        a fresh tensor.
+
+        When ``num``/``den`` are in a wider dtype than ``self.tmp``,
+        ``torch.div(out=)`` runs the division at the operand dtype
+        and casts on store — no temporary tensor.
+        """
+        factor = self.tmp.narrow(0, 0, num.shape[0])
+        torch.div(num, den, out=factor)
+        return factor
+
+    def mul(self, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+        """Element-wise ``x * w.unsqueeze(1)`` (per-row weighted x).
+
+        Picks a destination from in-flight scratch to avoid a fresh
+        allocation:
+
+        - ``use_acc_dtype``: mutate ``x`` in place.
+        - ``num_classes >= in_features``: write into a narrowed view
+          of ``logits_buf`` storage.
+        - otherwise: allocate a fresh tensor.
+        """
+        if self.use_acc_dtype:
+            return x.mul_(w.unsqueeze(1))
+        if self.num_classes >= self.in_features:
+            return torch.mul(
+                x,
+                w.unsqueeze(1),
+                out=self.logits_buf.narrow(0, 0, x.shape[0]).narrow(
+                    1, 0, self.in_features
+                ),
+            )
+        return x * w.unsqueeze(1)
+
+    def to(self, x: torch.Tensor, *, dtype: torch.dtype) -> torch.Tensor:
+        """Returns ``x`` cast to ``dtype``, reusing ``logits_buf``
+        storage as the cast destination when possible.
+
+        Three sub-paths, in order of work:
+
+        - ``x.dtype == dtype``: no cast needed, return ``x`` directly.
+        - ``weight_grad_uses_logits_buf_temp``: write the cast into a
+          narrowed view of ``logits_buf`` storage. Saves a fresh
+          ``(B, F)`` allocation per iter.
+        - else: fresh ``x.to(dtype)`` allocation. Fires only when
+          ``logits_buf``'s shape can't hold the cast result.
+        """
+        if x.dtype == dtype:
+            return x
+        if self.weight_grad_uses_logits_buf_temp:
+            x = (
+                self.logits_buf.view(dtype)
+                .narrow(0, 0, x.shape[0])
+                .narrow(1, 0, x.shape[1])
+                .copy_(x)
+            )
+            return x
+        return x.to(dtype)
 
 
 @torch.library.custom_op(
@@ -502,12 +1054,19 @@ def _linear_cross_entropy_batch_chunked(
     (slower). Computing the gradient in the same chunk-loop iteration
     that produces the loss term keeps peak memory at one chunk's worth
     of logits.
+
+    Per-call buffers, the (raw and optionally cast) ``linear_weight``,
+    persistent outputs, and dispatch booleans live on ``_ChunkContext``;
+    each iteration's narrow views and shared per-iter casts live on
+    ``_ChunkViews``. The loop body just iterates phases; the dispatch
+    matrix (device / dtype / acc_policy) is pre-baked into ctx
+    booleans and consumed by phase methods.
     """
     # Body uses compute_input_grad / compute_linear_weight_grad as
     # passed; do not derive from input.requires_grad — composite-
     # compliance tests unwrap tensors before reaching the impl, losing
     # requires_grad metadata.
-    setup = _linear_cross_entropy_setup(
+    ctx = _ChunkContext.build(
         input,
         linear_weight,
         target,
@@ -515,358 +1074,111 @@ def _linear_cross_entropy_batch_chunked(
         reduction,
         ignore_index,
         label_smoothing,
+        batch_chunk_size,
         acc_policy,
         acc_dtype,
+        compute_input_grad,
+        compute_linear_weight_grad,
     )
-    device = setup.device
-    dtype = setup.dtype
-    num_batches = setup.num_batches
-    in_features = setup.in_features
-    num_classes = setup.num_classes
-    is_cuda = setup.is_cuda
-    is_mps = setup.is_mps
-    use_acc_dtype = setup.use_acc_dtype
-    is_ultralow = setup.is_ultralow
-    output_dtype = setup.output_dtype
-    grad_input_dtype = setup.grad_input_dtype
-    grad_linear_weight_dtype = setup.grad_linear_weight_dtype
-    logits_buf_dtype = setup.logits_buf_dtype
-    weight_grad_chunk_dtype = setup.weight_grad_chunk_dtype
-    target = setup.target
-    neg_weight_target = setup.neg_weight_target
+    dtype = ctx.dtype
+    output = ctx.output
+    grad_input = ctx.grad_input
+    grad_linear_weight = ctx.grad_linear_weight
+    weight_grad_chunk = ctx.weight_grad_chunk
+    linear_weight_cast = ctx.linear_weight_cast
 
-    # linear_weight_cast: linear_weight materialized in
-    # logits_buf_dtype when actually needed:
-    # - non-CUDA + use_acc_dtype: forward mm operands and the
-    #   buf-and-copy input-grad addmm need matching dtypes.
-    # - CUDA + use_acc_dtype + accurate-mode input-grad
-    #   (grad_input_dtype == logits_buf_dtype): the fast-path addmm
-    #   needs self/mat2 to match logits' dtype.
-    # CUDA + use_acc_dtype + memory mode does NOT need the cast: the
-    # forward mm uses out_dtype= on the original linear_weight, the
-    # input-grad goes through the storage-trick path with the
-    # original linear_weight, and the input-grad first-term mul gets
-    # implicit type promotion through TensorIterator. Kept here
-    # (rather than in _linear_cross_entropy_setup) because the gate
-    # depends on compute_input_grad and the result is naturally
-    # co-located with the buffer-allocation block below.
-    if use_acc_dtype and (
-        not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
-    ):
-        linear_weight_cast = linear_weight.to(logits_buf_dtype)
-    else:
-        linear_weight_cast = linear_weight
-
-    # ===== Buffer allocations =====
-    # TODO: per-call allocations cannot be cached across training-loop
-    # iterations from inside the op. The largest in practice are
-    # logits_buf and linear_weight_cast; a user-supplied workspace via
-    # LinearCrossEntropyOptions should target those first, with
-    # weight_grad_chunk/logits_acc_buf/input_grad_acc_buf as follow-ups.
-    #
-    # make_empty / make_zeros wrap torch.empty / torch.zeros with a
-    # `when=False` fast path that returns a rank-matching empty tensor
-    # ((0,) * len(shape)), so persistent outputs returned to the
-    # caller still have the expected number of dimensions even when
-    # the corresponding gradient is not being computed.
-    def make_empty(shape, dtype, when=True):
-        return torch.empty(
-            shape if when else (0,) * len(shape),
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-        )
-
-    def make_zeros(shape, dtype, when=True):
-        return torch.zeros(
-            shape if when else (0,) * len(shape),
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-        )
-
-    # Chunk buffer used to hold logits, then softmax of logits.
-    logits_buf = make_empty((batch_chunk_size, num_classes), logits_buf_dtype)
-    # weight_grad_chunk: per-chunk weight-gradient scratch.
-    # Skipped under acc_policy="lowmemory" when an addmm-into-grad_lw
-    # path is available (CUDA, or any backend with same-dtype mm).
-    keep_weight_grad_chunk = compute_linear_weight_grad and not (
-        acc_policy in {"lowmemory", "ultralow"}
-        and (is_cuda or logits_buf_dtype == grad_linear_weight_dtype)
-    )
-    weight_grad_chunk = make_empty(
-        (num_classes, in_features),
-        weight_grad_chunk_dtype,
-        when=keep_weight_grad_chunk,
-    )
-    # logits_acc_buf: upcast scratch for the weight-grad mm in the
-    # fp16+memory non-CUDA path (where logits_buf is fp16 but
-    # weight_grad_chunk is fp32). Tied to keep_weight_grad_chunk —
-    # lowmemory's addmm path doesn't need the upcast scratch.
-    logits_acc_buf = make_empty(
-        (batch_chunk_size, num_classes),
-        acc_dtype,
-        when=keep_weight_grad_chunk and not is_cuda and logits_buf_dtype != acc_dtype,
-    )
-    # input_grad_acc_buf: non-narrow scratch for the buf-and-copy
-    # input-grad path on:
-    # - CPU mixed dtype (avoids dtype-strict addmm + bf16 subtract).
-    # - MPS (avoids an addmm bug where M aliasing out= on a narrow
-    #   view of grad_input gives ~48% relative error vs fp64).
-    use_input_grad_acc = (
-        compute_input_grad
-        and not is_cuda
-        and (grad_input_dtype != linear_weight_cast.dtype or is_mps)
-    )
-    input_grad_acc_buf = make_empty(
-        (batch_chunk_size, in_features),
-        linear_weight_cast.dtype,
-        when=use_input_grad_acc,
-    )
-    # input_chunk_acc_buf: pre-cast input chunk. Replaces a per-
-    # iteration input_chunk.to(acc_dtype) allocation with a copy_
-    # into this buffer. Used by the weight-grad path and (for non-CUDA
-    # mixed dtype) by the forward mm; fp16+memory has dtype ==
-    # logits_buf_dtype so the forward mm cast is a no-op there.
-    use_input_chunk_acc = use_acc_dtype and (
-        compute_linear_weight_grad or (not is_cuda and dtype != logits_buf_dtype)
-    )
-    input_chunk_acc_buf = make_empty(
-        (batch_chunk_size, in_features), acc_dtype, when=use_input_chunk_acc
-    )
-    # Chunk-sized scratch reused per iteration: first as logits_max
-    # (must match logits.dtype = logits_buf_dtype for amax's out=),
-    # then as tmp_chunk after logits.sub_(logits_max). Under
-    # ultralow's bf16-logits layout the weight_chunk/softmax_denom
-    # division still casts to bf16 for tmp_chunk, but the
-    # subsequent logits.mul_ promotes through fp32 internally so
-    # the final bf16 logits matches what an fp32 tmp_chunk would
-    # have produced.
-    tmp = make_empty((batch_chunk_size,), logits_buf_dtype)
-
-    # Persistent outputs:
-    grad_input = make_empty(input.shape, grad_input_dtype, when=compute_input_grad)
-    grad_linear_weight = make_zeros(
-        linear_weight.shape,
-        grad_linear_weight_dtype,
-        when=compute_linear_weight_grad,
-    )
-    output = make_zeros((), output_dtype)
-    if reduction == "mean" and num_batches == 0:
+    if reduction == "mean" and ctx.num_batches == 0:
         output.fill_(torch.nan)
 
-    # ===== Loop dispatch flags (constant across iterations) =====
     compute_grads = compute_input_grad or compute_linear_weight_grad
-    forward_use_acc_input = use_acc_dtype and not is_cuda and dtype != logits_buf_dtype
-    use_cuda_out_dtype = is_cuda and use_acc_dtype
-    weight_grad_mm_same_dtype = logits_buf_dtype == weight_grad_chunk_dtype
-    # Storage-trick fires when logits' dtype differs from the input-
-    # grad accumulator dtype: addmm needs operands in grad_input_dtype,
-    # so logits is cast down via a bf16 view of logits_buf storage.
-    # Uses logits_buf_dtype (not linear_weight_cast.dtype) because
-    # linear_weight_cast may now be the original bf16 tensor in CUDA
-    # memory mode.
-    input_grad_uses_logits_lw = (
-        is_cuda and compute_input_grad and logits_buf_dtype != grad_input_dtype
-    )
-    # Per-iter `logits.to(linear_weight.dtype)` is needed by:
-    # - The input-grad addmm (input_grad_uses_logits_lw).
-    # - The lowmemory weight-grad mm Part 1 when logits is in a
-    #   wider dtype than grad_linear_weight (cuBLAS rejects fp32
-    #   inputs with bf16 out_dtype).
-    # In every config where both fire, the target dtype is the same
-    # (linear_weight.dtype == grad_linear_weight.dtype in memory-like
-    # layouts), so a single cast is shared.
-    need_logits_cast_per_iter = input_grad_uses_logits_lw or (
-        compute_linear_weight_grad
-        and not keep_weight_grad_chunk
-        and logits_buf_dtype != grad_linear_weight_dtype
-    )
 
-    # chunking along batches dimension:
-    for bchunk_start, bchunk_size in _chunk_iter(num_batches, batch_chunk_size):
-        # ----- Per-chunk views -----
-        input_chunk = input.narrow(0, bchunk_start, bchunk_size)
-        target_chunk = target.narrow(0, bchunk_start, bchunk_size)
-        weight_chunk = neg_weight_target.narrow(0, bchunk_start, bchunk_size)
-        if logits_buf.shape[0] != bchunk_size:
-            logits = logits_buf.narrow(0, 0, bchunk_size)
-        else:
-            logits = logits_buf
-        if use_input_chunk_acc:
-            input_chunk_acc = input_chunk_acc_buf.narrow(0, 0, bchunk_size).copy_(
-                input_chunk
-            )
-        else:
-            input_chunk_acc = input_chunk
+    # Do not ``break`` from this loop — ``ctx.chunks()`` runs a
+    # post-yield grad_input commit that the in-flight chunk needs.
+    for chunk in ctx.chunks():
+        logits = chunk.logits
+        weight_chunk = chunk.weight_chunk
+        target_chunk = chunk.target_chunk
 
-        # ----- Forward: logits = input_chunk @ linear_weight.T -----
-        # CUDA + use_acc_dtype lets cuBLAS upcast via out_dtype= on
-        # original tensors; non-CUDA mixed-dtype needs the pre-cast
-        # input_chunk_acc and linear_weight_cast.
-        mat1 = input_chunk_acc if forward_use_acc_input else input_chunk
-        mat2 = linear_weight.T if use_cuda_out_dtype else linear_weight_cast.T
-        if use_cuda_out_dtype:
-            torch.mm(mat1, mat2, out_dtype=logits.dtype, out=logits)
-        else:
-            torch.mm(mat1, mat2, out=logits)
-
-        # ----- Softmax + loss accumulation -----
-        logits_max = tmp.narrow(0, 0, bchunk_size).unsqueeze(1)
-        torch.amax(logits, dim=1, keepdim=True, out=logits_max)
-        logits.sub_(logits_max)
-        # output += sum_i weight_chunk[i] * logits[i, target_chunk[i]];
-        # weight_chunk already carries the reduction sign. torch.dot
-        # is dtype-strict, so cast the gather to weight_chunk's dtype
-        # — under ultralow weight_chunk is acc_dtype while logits is
-        # the input dtype; the .to() is a no-op when they match.
-        output.add_(
-            weight_chunk.dot(
-                logits.gather(1, target_chunk.unsqueeze(1))
-                .squeeze(1)
-                .to(weight_chunk.dtype)
-            )
-        )
-        # Under ultralow, logits is in dtype (bf16/fp16); upcast the
-        # softmax denominator's accumulator so summing C low-dtype
-        # values doesn't lose precision (cuBLAS reductions roughly
-        # add log2(C) * eps cumulative error from the input dtype).
-        if is_ultralow:
-            softmax_denom = logits.exp_().sum(dim=1, dtype=acc_dtype)
-        else:
-            softmax_denom = logits.exp_().sum(dim=1)
-
+        ctx.mm(chunk.input, chunk.linear_weight.T, out=logits)
+        logits.sub_(ctx.amax(logits))  # softmax stability
+        # output += <weight_chunk, logits[:, target_chunk]>
+        output.add_(ctx.dotgather(weight_chunk, logits, target_chunk))
+        softmax_denom = ctx.sumexp_(logits, dim=1)
         if compute_grads:
-            if is_ultralow:
-                # weight_chunk and softmax_denom are acc_dtype while
-                # tmp/logits are dtype; torch.div with out=dtype is
-                # dtype-strict, so compute the factor in acc_dtype
-                # and cast to logits.dtype for the in-place multiply.
-                factor = (weight_chunk / softmax_denom).to(logits.dtype)
-            else:
-                tmp_chunk = tmp.narrow(0, 0, bchunk_size)
-                torch.div(weight_chunk, softmax_denom, out=tmp_chunk)
-                factor = tmp_chunk
-            # MPS: in-place mul_ on a narrow view of logits_buf
-            # doesn't propagate to parent storage; the out= form does.
-            torch.mul(logits, factor.unsqueeze(1), out=logits)
-
+            # logits *= weight_chunk / softmax_denom         (= softmax(logits) * w)
+            # MPS: in-place mul_ on a narrow view of logits_buf doesn't
+            # propagate to parent storage; the out= form does.
+            torch.mul(
+                logits,
+                ctx.div(weight_chunk, softmax_denom).unsqueeze(1),
+                out=logits,
+            )
+        # output -= <weight_chunk, log(softmax_denom)>
         output.sub_(weight_chunk.dot(softmax_denom.log_()))
 
-        # Pre-cast logits to linear_weight.dtype if any of the
-        # downstream addmms (lowmemory weight-grad mm, or input-grad
-        # storage-trick replacement) needs it. Doing this once and
-        # sharing avoids two separate per-iteration casts.
-        logits_cast = (
-            logits.to(linear_weight.dtype) if need_logits_cast_per_iter else logits
-        )
+        if compute_grads:
+            if compute_input_grad:
+                grad_input_chunk = chunk.grad_input_chunk
+                input_grad_logits = chunk.input_grad_logits
+                input_grad_linear_weight = chunk.input_grad_linear_weight
 
-        # ----- Weight-grad mm (Part 1): consumes logits in logits_buf.dtype -----
-        # Split from the accumulation step so the input-grad branch
-        # below can reuse logits_buf's storage as a bf16 view.
-        # Two top-level dispatches: keep_weight_grad_chunk drives the
-        # acc_policy="lowmemory" path that addmm_'s straight into
-        # grad_linear_weight, skipping the (V, F) scratch.
-        if compute_linear_weight_grad:
-            if keep_weight_grad_chunk:
-                if weight_grad_mm_same_dtype:
-                    torch.mm(logits.T, input_chunk_acc, out=weight_grad_chunk)
-                elif is_cuda:
-                    torch.mm(
-                        logits.T,
-                        input_chunk,
-                        out_dtype=weight_grad_chunk.dtype,
+                # grad_input_chunk = linear_weight_cast[target_chunk] * weight_chunk
+                # (.to() handles dtype-strict torch.mul under ultralow)
+                torch.mul(
+                    torch.index_select(linear_weight_cast, 0, target_chunk),
+                    weight_chunk.to(grad_input_chunk.dtype).unsqueeze(1),
+                    out=grad_input_chunk,
+                )
+                # grad_input_chunk -= input_grad_logits @ input_grad_linear_weight
+                torch.addmm(
+                    grad_input_chunk,
+                    input_grad_logits,
+                    input_grad_linear_weight,
+                    alpha=-1,
+                    out=grad_input_chunk,
+                )
+            if compute_linear_weight_grad:
+                input_chunk_acc = chunk.input_chunk_acc
+
+                # grad_linear_weight += per-chunk weight grad
+                # (= -logits.T @ input + input*weight scattered at target rows)
+                if ctx.alloc_weight_grad_chunk:
+                    # Build the per-chunk weight grad in acc_dtype scratch,
+                    # then commit to grad_lw with one sub_ — keeps the
+                    # bulk-minus-correction subtraction in fp32 for precision.
+                    logits_upcast = chunk.logits_upcast
+                    weight_grad_input = chunk.weight_grad_input
+                    ctx.mm(
+                        logits_upcast.T,
+                        weight_grad_input,
                         out=weight_grad_chunk,
                     )
+                    temp = ctx.mul(input_chunk_acc, weight_chunk)
+                    weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
+                    grad_linear_weight.sub_(weight_grad_chunk)
                 else:
-                    logits_acc_chunk = logits_acc_buf.narrow(0, 0, bchunk_size).copy_(
-                        logits
+                    # Stream bulk + correction directly into grad_lw without
+                    # a (V, F) scratch (lowmemory / ultralow paths).
+                    grad_linear_weight.addmm_(
+                        chunk.logits_downcast.T, chunk.input_chunk, alpha=-1
                     )
-                    torch.mm(logits_acc_chunk.T, input_chunk_acc, out=weight_grad_chunk)
-            else:
-                # Direct in-place addmm into grad_linear_weight.
-                # cuBLAS Tensor Cores use an fp32 internal accumulator
-                # regardless of operand dtype, giving the same
-                # precision as the keep_weight_grad_chunk path's
-                # fp32 mm + cast. logits_cast already matches
-                # grad_linear_weight.dtype when a cast is needed.
-                grad_linear_weight.addmm_(logits_cast.T, input_chunk, alpha=-1)
+                    temp = ctx.to(
+                        ctx.mul(input_chunk_acc, weight_chunk),
+                        dtype=grad_linear_weight.dtype,
+                    )
+                    grad_linear_weight.index_add_(0, target_chunk, temp, alpha=1)
 
-        # ----- Input-grad: lw_cast[target]*w - logits @ lw_cast -----
-        if compute_input_grad:
-            if use_input_grad_acc:
-                grad_input_chunk = input_grad_acc_buf.narrow(0, 0, bchunk_size)
-            else:
-                grad_input_chunk = grad_input.narrow(0, bchunk_start, bchunk_size)
+    return (
+        output.to(dtype),
+        grad_input.to(dtype),
+        grad_linear_weight,
+    )
 
-            # First term: linear_weight_cast[target] * weight_chunk.
-            # Under ultralow, weight_chunk is acc_dtype while
-            # linear_weight_cast and grad_input_chunk are dtype;
-            # torch.mul with out= is dtype-strict, so cast
-            # weight_chunk down to match. The .to() is a no-op when
-            # dtypes already match.
-            torch.mul(
-                torch.index_select(linear_weight_cast, 0, target_chunk),
-                weight_chunk.to(grad_input_chunk.dtype).unsqueeze(1),
-                out=grad_input_chunk,
-            )
 
-            # Second term: subtract logits @ linear_weight_cast.
-            # On CUDA mixed-dtype, logits_cast is the pre-cast bf16
-            # view of logits (shared with Part 1 above). cuBLAS is
-            # dtype-strict, so the cast is required; the caching
-            # allocator reuses the same slot across iterations, so
-            # peak memory does not grow with the loop.
-            if input_grad_uses_logits_lw:
-                mat1, mat2 = logits_cast, linear_weight
-            else:
-                mat1, mat2 = logits, linear_weight_cast
-            torch.addmm(grad_input_chunk, mat1, mat2, alpha=-1, out=grad_input_chunk)
-
-            if use_input_grad_acc:
-                # Buf-and-copy: cast/copy scratch back into grad_input.
-                # Used for CPU mixed-dtype (avoids dtype-strict addmm
-                # and bf16 subtract precision loss) and MPS (avoids
-                # an addmm bug where M aliasing out= on a narrow view
-                # of grad_input gives ~48% relative error vs fp64).
-                grad_input.narrow(0, bchunk_start, bchunk_size).copy_(grad_input_chunk)
-
-        # ----- Weight-grad accumulation (Part 2): does not touch logits_buf -----
-        if compute_linear_weight_grad:
-            if use_acc_dtype:
-                # Safe to mutate: input_chunk_acc is a fresh copy in
-                # input_chunk_acc_buf; next iteration's copy_ overwrites.
-                temp = input_chunk_acc.mul_(weight_chunk.unsqueeze(1))
-            elif num_classes >= in_features:
-                # input_chunk_acc is a view of user's input (cannot
-                # mutate). Reuse logits storage — its values are no
-                # longer needed after the weight-grad mm above.
-                temp = torch.mul(
-                    input_chunk_acc,
-                    weight_chunk.unsqueeze(1),
-                    out=logits.narrow(1, 0, in_features),
-                )
-            else:
-                # No suitable buffer to reuse; allocate per chunk.
-                temp = input_chunk_acc * weight_chunk.unsqueeze(1)
-            if keep_weight_grad_chunk:
-                # Original: scatter into scratch (alpha=-1), then sub_
-                # the whole chunk into grad_lw (one fp-cast per element).
-                weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
-                grad_linear_weight.sub_(weight_grad_chunk)
-            else:
-                # lowmemory: the mm part was already subtracted into
-                # grad_linear_weight via addmm_(alpha=-1) above; the
-                # ignore-index correction adds (sign flipped from -1
-                # to +1) directly into grad_lw at scattered rows.
-                # index_add_ is dtype-strict (unlike sub_), so cast
-                # temp to grad_lw.dtype first; .to() is a no-op when
-                # dtypes already match (non-acc_dtype paths).
-                grad_linear_weight.index_add_(
-                    0, target_chunk, temp.to(grad_linear_weight.dtype), alpha=1
-                )
-
-    return output.to(dtype), grad_input.to(dtype), grad_linear_weight
+# Argument count of _linear_cross_entropy_batch_chunked; backward returns
+# this many gradient slots. Update if the op's signature changes — the
+# backward function fails with a tuple-length mismatch if this drifts.
+_NUM_OP_INPUTS = 13
 
 
 @_linear_cross_entropy_batch_chunked.register_fake

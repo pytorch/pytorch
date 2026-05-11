@@ -377,7 +377,7 @@ def _check_custom_op_aliasing(
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
+            msg = f"{e} This is deprecated and will become an error in a future version of PyTorch."
             warnings.warn(msg, UserWarning, stacklevel=3)
 
 
@@ -3169,6 +3169,7 @@ def _codegen_compiled_backward(
         "    all_args = _prologue_(_saved, _ctx_.symints,"
         " _ctx_.opaque_objects, grad_args)"
     )
+    lines.append("    del _saved")
 
     if num_rng > 0:
         lines.append("    _rng_add_(_ctx_, all_args)")
@@ -3263,6 +3264,7 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
+
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with

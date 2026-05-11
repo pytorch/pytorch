@@ -37,7 +37,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
-    download_file, get_function_arglist, load_tests, skipIfMPS, \
+    download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
@@ -48,7 +48,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipMPSIf, \
+    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
@@ -7542,6 +7543,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         adjusted = options._adjust(128, 4096, 50000, torch.float32)
         self.assertEqual(adjusted.batch_chunk_size, 16)
 
+    @parametrize_test("acc_policy", ["unknown", "Memory", ""])
+    def test_linear_cross_entropy_options_invalid_acc_policy_raises(self, acc_policy):
+        """__post_init__ rejects acc_policy outside the documented set."""
+        with self.assertRaisesRegex(ValueError, "acc_policy"):
+            nn.LinearCrossEntropyOptions(acc_policy=acc_policy)
+
+    @parametrize_test(
+        "chunking_method",
+        ["aspect_ratio:0", "aspect_ratio:-1", "aspect_ratio:foo",
+         "aspect_ratio:", "unknown"],
+    )
+    def test_linear_cross_entropy_options_invalid_chunking_method_raises(
+        self, chunking_method,
+    ):
+        """__post_init__ rejects malformed or unsupported chunking_method."""
+        with self.assertRaisesRegex(ValueError, "chunking_method"):
+            nn.LinearCrossEntropyOptions(chunking_method=chunking_method)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
@@ -11690,6 +11709,8 @@ class TestNNDeviceType(NNTestCase):
         issue_24823_2()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
+    @skipMPSIf(MACOS_VERSION < 15.0, "macOS 14 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
@@ -11735,6 +11756,8 @@ class TestNNDeviceType(NNTestCase):
             large_view.grad.zero_()
 
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float)  # MPS doesn't support float64
+    @skipMPSIf(MACOS_VERSION < 15.0, "macOS 14 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
@@ -14630,13 +14653,17 @@ if __name__ == '__main__':
                     expected_input_grad_max_ulp_diff = 68
                     expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
-                    expected_max_ulp_diff = 2
+                    expected_max_ulp_diff = 1
                     if "mps" in device:
                         expected_input_grad_max_ulp_diff = 60601
                         expected_weight_grad_max_ulp_diff = 73
                     else:
-                        expected_input_grad_max_ulp_diff = 256
-                        expected_weight_grad_max_ulp_diff = 257
+                        # Bounds measured on A100; loosen if a different
+                        # platform's ``torch.div(out=)`` lowering rounds
+                        # differently — the fp64-reference check above
+                        # still validates correctness regardless.
+                        expected_input_grad_max_ulp_diff = 65
+                        expected_weight_grad_max_ulp_diff = 95
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14790,6 +14817,29 @@ if __name__ == '__main__':
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_default(self, device, dtype):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
+
+    @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory", "ultralow"])
+    def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
+        """Forward-only path under torch.no_grad(): exercises the
+        rank-empty grad-buffer branches (compute_*_grad both False).
+        Compares chunked output to the reference (options=None).
+        """
+        torch.manual_seed(0)
+        N, F, C = 13, 7, 11
+        inp = torch.randn(N, F, device=device)
+        weight = torch.randn(C, F, device=device)
+        target = torch.randint(0, C, (N,), device=device)
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=4, acc_policy=acc_policy,
+        )
+        with torch.no_grad():
+            chunked = nn.functional.linear_cross_entropy(
+                inp, weight, target, reduction="mean", options=options,
+            )
+            reference = nn.functional.linear_cross_entropy(
+                inp, weight, target, reduction="mean", options=None,
+            )
+        self.assertEqual(chunked, reference)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["memory", "accurate", "lowmemory", "ultralow"])
