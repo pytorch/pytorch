@@ -204,6 +204,23 @@ class IterationRangesRoot(IterationRanges):
     def __repr__(self) -> str:
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
 
+    def block_size(self) -> sympy.Expr:
+        return sympy.Symbol(f"{self.prefix.upper()}BLOCK", integer=True, positive=True)
+
+    def block_size_str(self) -> str:
+        return str(self.block_size())
+
+    def block_offset(self) -> sympy.Expr:
+        # iteration_ranges_codegen_header uses this to derive the tile-local
+        # base index for the tree.
+        return sympy.Symbol(f"{self.prefix}offset", integer=True, nonnegative=True)
+
+    def mask_name(self) -> str:
+        return f"{self.prefix}mask"
+
+    def owns_mask(self, mask_var: str) -> bool:
+        return mask_var == self.mask_name()
+
     def cache_clear(self) -> None:
         for node in self.nodes.values():
             node.cache_clear()
@@ -233,6 +250,14 @@ class IterationRangesRoot(IterationRanges):
             self.var_ranges[node.symbol()] = length
             self.nodes[expr] = node
         return self.nodes[expr]
+
+    def full_range(self) -> IterationRangesEntry:
+        """Return the canonical entry for this root's unsplit logical index.
+
+        This is ``lookup(1, numel)``, so the entry is interned in
+        ``range_tree_nodes`` just like split entries.
+        """
+        return self.lookup(sympy.S.One, self.numel)
 
     def construct_entries(
         self, lengths: list[sympy.Expr]
@@ -265,7 +290,7 @@ class IterationRangesRoot(IterationRanges):
             return (divisor_hint, not length_is_one_hint)
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
-        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes = [n for n in nodes if n and n.root is self]
         nodes.sort(key=lambda x: get_sort_key(x))
         divisor = sympy.S.One
         index_vars = []
@@ -612,39 +637,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             )
         )
 
-    def triton_tensor_ndim(self) -> int:
-        return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
-
-    def indexing_size_str(self, i: int) -> str:
-        sizes = ["None"] * self.triton_tensor_ndim()
-        sizes[i] = ":"
-        return f"[{', '.join(sizes)}]"
-
-    def dense_size_list(self) -> list[str]:
-        sizes = ["1"] * self.triton_tensor_ndim()
-        for tree in self.range_trees:
-            if tree.tensor_dim is None:
-                continue
-
-            if not tree.is_reduction or self.inside_reduction:
-                sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
-        return sizes
-
-    def create_constant_mask(self, entry) -> str:
-        x = entry.prefix
-        if entry.tensor_dim is None:
-            sizestr = self.dense_size_str()
-            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
-        sizes = ["None"] * self.triton_tensor_ndim()
-        sizes[entry.tensor_dim] = ":"
-        suffix = ", ".join(sizes)
-        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
-        return out
-
-    def dense_size_str(self) -> str:
-        sizes = self.dense_size_list()
-        return f"[{', '.join(sizes)}]"
-
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         if not isinstance(index, ModularIndexing):
             return index
@@ -656,11 +648,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # the index now contains xindex/etc, which is nonstandard, fix it up
         return sympy_subs(
             new_index,
-            {
-                tree_node.root.index_sym(): tree_node.root.lookup(
-                    sympy.S.One, tree_node.root.numel
-                ).symbol()
-            },
+            {tree_node.root.index_sym(): tree_node.root.full_range().symbol()},
         )
 
     def combine_contiguous_dims(
