@@ -6404,6 +6404,23 @@ class CommonTemplate:
 
         self.common(foo, (inp, weight), check_lowp=False)
 
+    def test_layer_norm_numerics_under_autocast(self):
+        # https://github.com/pytorch/pytorch/issues/168126
+        norm = torch.nn.LayerNorm(128, eps=1e-5, device=self.device)
+        linear = torch.nn.Linear(128, 128, bias=False, device=self.device)
+
+        def f(x):
+            return linear(norm(x))
+
+        compiled_f = torch.compile(f, fullgraph=True)
+
+        with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            torch.manual_seed(42)
+            x = torch.randn(4, 32, 32, 128, device=self.device)
+            out_eager = f(x)
+            out_compiled = compiled_f(x)
+            torch.testing.assert_close(out_eager, out_compiled)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -17613,7 +17630,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_native_layer_norm_relu",
+                    "triton_poi_fused_relu",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -17626,7 +17643,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -17886,6 +17903,10 @@ if RUN_GPU:
 
         def test_layer_norm_inplaces_after_matmul(self):
             # https://github.com/pytorch/pytorch/issues/132826
+            # Originally checked that the matmul output buffer is reused in-place
+            # by the LayerNorm Triton kernel. native_layer_norm is now a fallback
+            # (issue #168126), so there's no Triton kernel to do that reuse.
+            # Just keep the correctness check.
             batch_size = 32
             seq_length = 50
             hidden_size = 768
@@ -17902,8 +17923,6 @@ if RUN_GPU:
                 torch.randn(hidden_size, hidden_size, device=GPU_TYPE),
             ]
             fn_opt = torch.compile(fn)
-            code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         @torch._functorch.config.patch("donated_buffer", True)
