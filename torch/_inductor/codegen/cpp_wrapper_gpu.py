@@ -946,25 +946,26 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generating triton kernel callers can modify the prefix (cached dtypes),
         # so do this before running finalize_prefix(), but put the generated code
         # after the finalize_prefix() code.
-        self.prefix = IndentedBuffer()
-        for kernel in self._triton_call_wrappers.values():
-            self.prefix.writeline("\n")
-            kernel.generate(self)
+        triton_prefix = IndentedBuffer()
+        with self._target_buf("prefix", triton_prefix):
+            for kernel in self._triton_call_wrappers.values():
+                self.prefix.writeline("\n")
+                kernel.generate(self)
 
-        if self._lazy_kernel_names:
-            start_compile_body = (
-                "loadLazyCompileFuncs();\n"
-                "    _module_pending_kernels = PyDict_New();\n"
-                '    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");\n'
-                "    "
-                + "\n    ".join(
-                    f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
-                    for name in self._lazy_kernel_names
+            if self._lazy_kernel_names:
+                start_compile_body = (
+                    "loadLazyCompileFuncs();\n"
+                    "    _module_pending_kernels = PyDict_New();\n"
+                    '    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");\n'
+                    "    "
+                    + "\n    ".join(
+                        f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
+                        for name in self._lazy_kernel_names
+                    )
                 )
-            )
-            self.include_extra_header("mutex")
-            self.prefix.splice(
-                f"""\
+                self.include_extra_header("mutex")
+                self.prefix.splice(
+                    f"""\
 // Start parallel compilation of all Triton kernels.
 static inline void start_all_triton_kernel_compiles() {{
     {start_compile_body}
@@ -979,9 +980,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
     }});
 }}
 """
-            )
-
-        triton_prefix = self.prefix
+                )
 
         self.prefix = IndentedBuffer()
         super().finalize_prefix()
