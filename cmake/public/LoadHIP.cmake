@@ -123,6 +123,24 @@ message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
 message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
 
 if(WIN32)
+  # CMake 4.3.0+ regression: the Windows-MSVC platform module seeds
+  # CMAKE_HIP_FLAGS{,_<CONFIG>} with MSVC-style defaults (/DWIN32 /D_WINDOWS,
+  # /O2 /Ob2 /DNDEBUG) when C/CXX use clang-cl. clang++ (GNU frontend) for HIP
+  # rejects them. Strip them and reinstate GNU equivalents. Not needed on
+  # CMake 4.2.x, but safe to run there too.
+  foreach(_cfg "" _DEBUG _RELEASE _MINSIZEREL _RELWITHDEBINFO)
+    if(DEFINED CMAKE_HIP_FLAGS${_cfg})
+      string(REGEX REPLACE "(^| )/[a-zA-Z][a-zA-Z0-9_:=.]*" "" CMAKE_HIP_FLAGS${_cfg} "${CMAKE_HIP_FLAGS${_cfg}}")
+      string(STRIP "${CMAKE_HIP_FLAGS${_cfg}}" CMAKE_HIP_FLAGS${_cfg})
+    endif()
+  endforeach()
+  string(APPEND CMAKE_HIP_FLAGS_RELEASE " -O3 -DNDEBUG")
+  string(APPEND CMAKE_HIP_FLAGS_RELWITHDEBINFO " -O2 -DNDEBUG -g")
+  string(APPEND CMAKE_HIP_FLAGS_MINSIZEREL " -Os -DNDEBUG")
+  string(APPEND CMAKE_HIP_FLAGS_DEBUG " -O0 -g")
+endif()
+
+if(WIN32)
   # After enable_language(HIP), the platform module Windows-Clang-HIP.cmake
   # sets MSVC-style compile/link rules (because C/CXX use MSVC frontend).
   # Override them all with GNU-style rules for clang++.
