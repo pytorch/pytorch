@@ -21,9 +21,10 @@ from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
 from .utils import (
     cache_on_self,
+    decompose_index,
+    flatten_index,
     reduction_num_outputs,
     sympy_index_symbol_with_prefix,
-    sympy_product,
     sympy_subs,
 )
 from .virtualized import ops, V
@@ -298,8 +299,6 @@ class LoopBody:
         The old iteration vars are expressed as functions of the new vars via
         FloorDiv and ModularIndexing on the flat index.
         """
-        from torch.utils._sympy.functions import ModularIndexing
-
         old_body = self
         old_iter_sizes = self.sizes[0]
         reduce_sizes = self.sizes[1]
@@ -315,15 +314,8 @@ class LoopBody:
             index = [*itertools.chain.from_iterable(indices)]
             new_iter_idx = index[: len(new_iter_sizes)]
             reduce_idx = index[len(new_iter_sizes) :]
-            # Build flat index from new iter vars
-            flat = sympy.S.Zero
-            for v, s in zip(new_iter_idx, new_iter_sizes):
-                flat = flat * s + v
-            # Express old iter vars from flat index
-            old_iter_idx: list[sympy.Expr] = []
-            for i, old_size in enumerate(old_iter_sizes):
-                tail = sympy_product(old_iter_sizes[i + 1 :])
-                old_iter_idx.append(ModularIndexing(flat, tail, old_size))
+            flat = flatten_index(new_iter_idx, new_iter_sizes)
+            old_iter_idx = decompose_index(flat, old_iter_sizes)
             return old_body(old_iter_idx, list(reduce_idx))
 
         loop_body = LoopBody(
