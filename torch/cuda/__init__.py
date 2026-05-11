@@ -13,6 +13,7 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import platform
 import threading
 import traceback
 import warnings
@@ -52,7 +53,9 @@ _queued_calls: list[
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
+_HAS_AMDSMI = False
 _PYNVML_ERR = None
+_AMDSMI_ERR = None
 try:
     from torch import version as _version
 
@@ -104,8 +107,13 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with _amdsmi_cdll_hook():
-                import amdsmi  # type: ignore[import]
+            try:
+                with _amdsmi_cdll_hook():
+                    import amdsmi  # type: ignore[import]
+                _HAS_AMDSMI = True
+            except ModuleNotFoundError as err:
+                _AMDSMI_ERR = err
+                raise
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -312,12 +320,28 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
 }
 
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases
-PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 80, 86, 90},
-    "12.8": {70, 80, 86, 90, 100, 120},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
+# TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
+# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# .github/scripts/generate_binary_build_matrix.py.
+PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
+
+
+def _host_arch_key() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine == "aarch64" else "x86_64"
 
 
 def _code_compatible_with_device(device_cc: int, code_cc: int):
@@ -334,8 +358,10 @@ def _code_compatible_with_device(device_cc: int, code_cc: int):
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
     name = get_device_name(device_index)
 
+    arch = _host_arch_key()
     compatible_releases: list[str] = []
-    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+    for cuda, by_arch in PYTORCH_RELEASES_CODE_CC.items():
+        build_ccs = by_arch.get(arch, set())
         if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
             compatible_releases.append(cuda)
 
@@ -348,10 +374,27 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
+        )
         lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  For CUDA {cuda} use pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
+    else:
+        lines.append(
+            f"No published PyTorch CUDA builds for release {torch.__version__} support this GPU. "
+            "Visit https://pytorch.org/get-started/locally/ to find a compatible release."
         )
 
     warnings.warn("\n".join(lines), stacklevel=2)
@@ -883,7 +926,7 @@ def _parse_visible_devices() -> list[int] | list[str]:
 
 
 def _raw_device_count_amdsmi() -> int:
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return -1
     try:
         amdsmi.amdsmi_init()
@@ -917,7 +960,7 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> list[str] | None:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return None
     try:
         amdsmi.amdsmi_init()
@@ -1131,7 +1174,7 @@ def device_count() -> int:
 
 def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
     if arch_flags is None:
@@ -1306,11 +1349,10 @@ def _get_pynvml_handler(device: Device = None):
 
 
 def _get_amdsmi_handler(device: Device = None):
-    if not _HAS_PYNVML:
+    if not _HAS_AMDSMI:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
-        ) from _PYNVML_ERR
+        ) from _AMDSMI_ERR
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -1322,11 +1364,49 @@ def _get_amdsmi_handler(device: Device = None):
     return handle
 
 
+_cached_hip_to_amdsmi: dict[int, int] | None = None
+
+
+def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
+    r"""Return amdsmi index from HIP device index. They are not always the same.
+
+    Assume amdsmi_init() already completes successfully."""
+    global _cached_hip_to_amdsmi
+    if _cached_hip_to_amdsmi is None:
+        amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
+
+        def gen():
+            for amdsmi_idx, handle in enumerate(amdsmi_handles):
+                info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
+                if "hip_id" in info:
+                    yield info["hip_id"], amdsmi_idx
+
+        _cached_hip_to_amdsmi = dict(gen())
+        if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
+            warnings.warn(
+                "Cannot translate HIP ID to AMD SMI ID due to"
+                " lack of translation information prior to ROCm 6.4."
+                " Functions that rely on amdsmi"
+                " (e.g. temperature()) may operate on wrong devices."
+            )
+    if device not in _cached_hip_to_amdsmi:
+        warnings.warn(
+            f"Cannot translate HIP ID {device} to AMD SMI ID due to"
+            " undetected HIP ID from amdsmi."
+            " amdsmi_get_gpu_enumeration_info() only report these HIP IDs"
+            f" {list(_cached_hip_to_amdsmi.keys())}."
+            " Functions that rely on amdsmi"
+            " (e.g. temperature()) may operate on wrong devices."
+        )
+    return _cached_hip_to_amdsmi.get(device, device)
+
+
 def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
-    if type(visible_devices[0]) is str:
+    visible_device_is_str = type(visible_devices[0]) is str
+    if visible_device_is_str:
         uuids = _raw_device_uuid_amdsmi()
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
@@ -1339,7 +1419,10 @@ def _get_amdsmi_device_index(device: Device) -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    if visible_device_is_str:
+        return idx_map[idx]
+    else:
+        return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
@@ -1937,6 +2020,7 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",

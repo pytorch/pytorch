@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -239,6 +238,11 @@ register_artifact(
 register_artifact(
     "benchmarking",
     "Detailed Inductor benchmarking information.",
+    off_by_default=True,
+)
+register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
     off_by_default=True,
 )
 register_artifact(

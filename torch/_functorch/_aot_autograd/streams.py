@@ -6,6 +6,7 @@ import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
+from torch.fx.node import map_arg
 from torch.utils._runtime_estimation import (
     _FLOAT_TYPES,
     _IGNORE_OPS,
@@ -15,7 +16,7 @@ from torch.utils._runtime_estimation import (
 
 
 if TYPE_CHECKING:
-    from .schemas import ViewAndMutationMeta  # noqa: TC004
+    from .schemas import ViewAndMutationMeta
 
 from .indexed_dict import IndexedDict
 
@@ -29,6 +30,8 @@ _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
     torch.ops.streams.synchronize_event.default,
+    torch.ops.streams.synchronize_device.default,
+    torch.ops.streams.synchronize_stream.default,
 )
 
 
@@ -427,17 +430,24 @@ def _wrap_sync_node(
             replacements[dep] = getitem_node
             visited.add(getitem_node)
 
-    # Replace uses of dependencies that come after sync_node
+    # Replace uses of dependencies that come after sync_node.
+    # Use map_arg to handle nested structures (e.g. output node's list args).
     for dep, getitem_node in replacements.items():
         for user in list(dep.users.keys()):
             if user is control_deps_node:
                 continue
             if user in visited:
                 continue
-            user.args = tuple(getitem_node if arg is dep else arg for arg in user.args)
-            user.kwargs = {
-                k: getitem_node if v is dep else v for k, v in user.kwargs.items()
-            }
+            # Don't replace forward outputs in the output node — they belong
+            # to the forward partition and must not reference backward nodes.
+            if user.op == "output" and not is_bwd_node(dep):
+                continue
+
+            def _replace(n: Node) -> Node:
+                return getitem_node if n is dep else n
+
+            user.args = map_arg(user.args, _replace)
+            user.kwargs = map_arg(user.kwargs, _replace)
 
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)
@@ -479,6 +489,23 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
 
         if node.op == "call_function":
             if node.target in _SYNC_OPS:
+                # synchronize_device and synchronize_stream block the CPU,
+                # so all subsequent kernel launches are host-ordered after
+                # them. Treat both as full barriers across all streams.
+                if node.target in (
+                    torch.ops.streams.synchronize_device.default,
+                    torch.ops.streams.synchronize_stream.default,
+                ):
+                    all_stream_deps: list[Node] = [
+                        n for nodes in stream_to_nodes.values() for n in nodes
+                    ]
+                    if all_stream_deps:
+                        found_sync = True
+                        _wrap_sync_node(gm, node, all_stream_deps, visited)
+                    stream_to_nodes.clear()
+                    node = next_node
+                    continue
+
                 event_index: int = node.args[0]  # type: ignore[assignment]
 
                 # synchronize_event blocks the CPU thread, so it acts
@@ -499,6 +526,12 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 else:
                     sync_stream = node.args[1]  # type: ignore[assignment]
                     deps_before_sync = list(stream_to_nodes.get(sync_stream, ()))
+                    # Nodes without explicit stream annotation (custom.stream=None)
+                    # run on the current/default stream. Include them when the sync
+                    # op references a stream, since the unannotated nodes are
+                    # implicitly on that stream.
+                    if None in stream_to_nodes and sync_stream is not None:
+                        deps_before_sync.extend(stream_to_nodes[None])
 
                 # For wait_event and synchronize_event, add a cross-event
                 # dependency on the matching record_event's control_deps node
@@ -551,6 +584,8 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     stream_to_nodes.clear()
                 else:
                     stream_to_nodes[sync_stream] = []
+                    if None in stream_to_nodes:
+                        stream_to_nodes[None] = []
             elif "val" in node.meta:
                 stream = get_stream(node)
                 stream_to_nodes.setdefault(stream, []).append(node)
