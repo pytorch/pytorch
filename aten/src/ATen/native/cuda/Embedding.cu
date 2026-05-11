@@ -293,7 +293,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     cuda::cub::radix_sort_pairs(
       indices.const_data_ptr<index_t>(), sorted_indices.mutable_data_ptr<index_t>(),
       range.const_data_ptr<index_t>(), orig_indices.mutable_data_ptr<index_t>(),
-      num_indices, false/*, 0, nbits*/);
+      num_indices, false, 0, nbits);
   });
 
   if (scale_grad_by_freq) {
