@@ -3122,9 +3122,9 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3161,14 +3161,14 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    detach = torch.ops.aten.detach.default(sin);  detach = None
+    alias = torch.ops.aten.alias.default(sin);  alias = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach_1 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    cos = torch.ops.aten.cos.default(detach_2);  detach_2 = None
+    alias_1 = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    cos = torch.ops.aten.cos.default(alias_2);  alias_2 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3230,14 +3230,14 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1)
+    alias = torch.ops.aten.alias.default(mm_1)
     sin_1 = torch.ops.aten.sin.default(mm_1);  mm_1 = None
     empty_like_1 = torch.ops.aten.empty_like.default(sin_1);  sin_1 = None
     bernoulli__1 = torch.ops.aten.bernoulli_.float(empty_like_1);  empty_like_1 = None
     div__1 = torch.ops.aten.div_.Scalar(bernoulli__1, 0.5);  bernoulli__1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, div__1);  expand = div__1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul_2);  t = mul_2 = None
