@@ -3993,7 +3993,11 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from torch._higher_order_ops.wrap import (
+            lazy_activation_checkpoint,
+            register_lazy_activation_checkpoint_function,
+            TagActivationCheckpoint,
+        )
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
@@ -4032,6 +4036,37 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
+
+        if self.value is lazy_activation_checkpoint:
+            try:
+                checkpoint_function = args[0].as_python_constant()
+            except NotImplementedError as exc:
+                unimplemented(
+                    gb_type="lazy_activation_checkpoint_function",
+                    context=f"checkpoint function: {args[0]}",
+                    explanation="The prototype lazy activation checkpoint path only "
+                    "supports checkpointing Python functions that can be guarded as "
+                    "constants.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=exc,
+                )
+            checkpoint_arg_count = sum(arg.is_tensor() for arg in args[1:]) + sum(
+                arg.is_tensor() for arg in gmod_kwargs.values()
+            )
+            pos_arg_count = sum(arg.is_tensor() for arg in args[1:])
+            function_kwarg_names = tuple(
+                name for name, arg in gmod_kwargs.items() if arg.is_tensor()
+            )
+            checkpoint_kwargs["_checkpoint_arg_count"] = ConstantVariable.create(
+                checkpoint_arg_count
+            )
+            checkpoint_kwargs["_function_id"] = ConstantVariable.create(
+                register_lazy_activation_checkpoint_function(checkpoint_function)
+            )
+            checkpoint_kwargs["_pos_arg_count"] = ConstantVariable.create(pos_arg_count)
+            checkpoint_kwargs["_function_kwarg_names"] = ConstantVariable.create(
+                function_kwarg_names
+            )
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
@@ -6178,6 +6213,7 @@ _hop_name_to_variable_class = {
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
     "wrap_activation_checkpoint": CheckpointHigherOrderVariable,
     "tag_activation_checkpoint": CheckpointHigherOrderVariable,
+    "lazy_activation_checkpoint": CheckpointHigherOrderVariable,
     "_export_tracepoint": ExportTracepointHigherOrderVariable,
     "trace_wrapped": TraceWrappedHigherOrderOperatorVariable,
     "strict_mode": StrictModeHigherOrderVariable,
