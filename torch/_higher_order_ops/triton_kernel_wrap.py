@@ -218,6 +218,51 @@ class Intermediate:
         return self.idx < 0
 
 
+@dataclasses.dataclass(frozen=True)
+class InductionVar(Intermediate):
+    """
+    Represents the loop induction variable in scf.for.
+
+    example:
+    %r = scf.for %k = %1 to %2 step %3 iter_args(...) -> ... {
+
+    InductionVar.lb = %1
+    InductionVar.ub = %2
+    InductionVar.step = %3
+    """
+
+    lb: Intermediate | Param
+    ub: Intermediate | Param
+    step: Intermediate | Param
+
+
+@dataclasses.dataclass(frozen=True)
+class IterArg(Intermediate):
+    """
+    Replaces the iter_arg block arguments of scf.for and captures the
+    iter_arg-yield relationship.
+
+    example:
+    %result = scf.for %k = %1 to %2 step %3 iter_args(%p1 = %p2) -> ... {
+          ...
+          %p3 = tt.addptr %p1, %p4 : ...
+          scf.yield %p3 : ...
+    }
+
+    IterArg.init = %p2
+    IterArg.next = %p3 (from yield)
+    IterArg.iv = %k
+
+    NOTE: Here, IterArg replaces %p1. Upwards DFS from IterArg.next will
+    eventually traverse back to itself (%p1), creating a cycle.
+    This has to be accounted for.
+    """
+
+    init: Intermediate | Param
+    next: Intermediate | Param
+    iv: InductionVar
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class Op:
     name: str
@@ -230,6 +275,9 @@ class Op:
     # `is_pure = True` assumes the asm block has no side-effects
     is_pure: bool = False
 
+    int_attrs: dict[str, int] = dataclasses.field(default_factory=dict)
+    list_attrs: dict[str, tuple] = dataclasses.field(default_factory=dict)
+
     def __post_init__(self) -> None:
         if self.name == "tt.call":
             if self.fn_call_name is None:
@@ -239,6 +287,26 @@ class Op:
                 raise AssertionError(
                     f"fn_call_name must be None for non-tt.call op, got {self.fn_call_name}"
                 )
+
+    def get_int_attr(self, key: str) -> int:
+        # When calling get_int_attr we expect there to be a valid return.
+        # Raise otherwise.
+        value = self.int_attrs.get(key, None)
+        if value is None:
+            log.debug("Missing int_attr %s on op %s", key, self)
+            raise KeyError(key)
+
+        return value
+
+    def get_list_attr(self, key: str) -> tuple:
+        # When calling get_list_attr we expect there to be a valid return.
+        # Raise otherwise.
+        value = self.list_attrs.get(key, None)
+        if value is None:
+            log.debug("Missing list_attr %s on op %s", key, self)
+            raise KeyError(key)
+
+        return value
 
 
 def generate_ttir(
@@ -653,12 +721,37 @@ def ttir_to_functions(
                         # block args: 2 (%iv, %arg)
                         # op operands: 4 (%lb, %ub, %step, %init)
                         # `%arg` is mapping to `%init`
-                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
-                            if i == 0:
-                                next_fake_intermediate -= 1
-                                replacements[idx] = Intermediate(next_fake_intermediate)
+
+                        block_ops_peek = op_stack.get(block_id, {})
+                        yield_args = None
+                        if block_ops_peek:
+                            _, last_ops = next(reversed(block_ops_peek.items()))
+                            if all(op.name == "scf.yield" for op in last_ops):
+                                # To account for induction variable in iter_arg:
+                                # For index i, yield.arg[i] == "next value" for iter_arg i - 1
+                                yield_args = last_ops[0].args
+
+                        block_args = block_id_to_block_arg_ids[block_id]
+                        iv_idx = block_args[0]
+                        iv = InductionVar(
+                            idx=iv_idx,
+                            lb=Intermediate(operand_ids[0]),
+                            ub=Intermediate(operand_ids[1]),
+                            step=Intermediate(operand_ids[2]),
+                        )
+                        replacements[iv_idx] = iv
+
+                        for i, idx in enumerate(block_args[1:], start=1):
+                            if yield_args is not None:
+                                replacements[idx] = IterArg(
+                                    idx=idx,
+                                    init=Intermediate(operand_ids[i + 2]),
+                                    next=yield_args[i - 1],  # corresponding yield arg
+                                    iv=iv,
+                                )
                             else:
                                 replacements[idx] = Intermediate(operand_ids[i + 2])
+
                     elif name == "scf.while":
                         # example:
                         # %3:3 = scf.while (%arg2 = %1, %arg3 = %2, %arg4 = %c0_i32_8) ...
@@ -777,8 +870,27 @@ def ttir_to_functions(
                 )
         else:
             callee = None
-            if name == "tt.call":
+            op_int_attrs: dict[str, int] = {}
+            op_list_attrs: dict[str, tuple] = {}
+
+            # Used for symbolic analysis, see SymbolicAnalyzer for usage.
+            if name == "tt.get_program_id":
+                op_int_attrs["axis"] = op.get_int_attr("axis")
+            elif name == "arith.constant":
+                op_int_attrs["value"] = op.get_constant_value()
+            elif name == "tt.make_range":
+                op_int_attrs["start"] = op.get_int_attr("start")
+                op_int_attrs["end"] = op.get_int_attr("end")
+            elif name == "tt.call":
                 callee = op.get_flat_symbol_ref_attr("callee")
+
+            # Any op which changes shape attributed should go here.
+            elif name in ["tt.broadcast", "tt.expand_dims", "tt.splat"]:
+                out_shape = op.get_result(0).get_shape()
+                if out_shape is not None:
+                    # get_shape() returns a list
+                    op_list_attrs["out_shape"] = tuple(out_shape)
+
             args: list[Param | Intermediate] = [
                 Intermediate(operand) for operand in operand_ids
             ]
@@ -792,115 +904,35 @@ def ttir_to_functions(
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
+                    block_ops[res].append(
+                        Op(
+                            name,
+                            callee,
+                            args,
+                            res,
+                            is_pure=is_pure,
+                            int_attrs=op_int_attrs,
+                            list_attrs=op_list_attrs,
+                        )
+                    )
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
                 block_ops[fake_res].append(
-                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                    Op(
+                        name,
+                        callee,
+                        args,
+                        fake_res,
+                        is_pure=is_pure,
+                        int_attrs=op_int_attrs,
+                        list_attrs=op_list_attrs,
+                    )
                 )
 
     ttir_module.walk(mlir_to_functions)
 
     return functions
-
-
-class MemoizeWithCycleCheck:
-    fn: Callable[..., Any]
-    cache: dict[tuple[Any], Any]
-
-    def __init__(self, fn: Callable[..., Any]) -> None:
-        self.fn = fn
-        self.reset()
-
-    def __call__(
-        self,
-        functions: dict[str, dict[Intermediate, list[Op]]],
-        fn_name: str,
-        *args: Any,
-    ) -> Any:
-        key: tuple[Any, ...] = (fn_name, *args)
-        if key not in self.cache:
-            self.cache[key] = None
-            self.cache[key] = self.fn(functions, fn_name, *args)
-        if self.cache[key] is None:
-            raise RuntimeError("Recursion is not supported")
-        return self.cache[key]
-
-    def reset(self) -> None:
-        self.cache = {}
-
-
-@MemoizeWithCycleCheck
-def get_tma_stores(
-    functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
-) -> set[Intermediate | Param]:
-    """
-    Identifies all intermediates and parameters that are written to by a
-    `tt.experimental_descriptor_store`. It tracks only the specific values
-    written to via experimental_descriptor_store and the input values to
-    `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
-    to tt.experimental_descriptor_store - not any recursive values
-    used to construct those values.
-
-    For example: for
-      tt.reinterpret_tensor_descriptor(Intermediate(idx=0), ...)
-      Intermediate(idx=1) = tt.experimental_descriptor_store(Intermediate(idx=0), ...)
-    this function will return [Intermediate(idx=0), Intermediate(idx=1)],
-
-    However
-      Intermediate(idx=4) = arith.addptr(Intermediate(idx=2), Intermediate(idx=3))
-      Intermediate(idx=5) = tt.experimental_descriptor_store(Intermediate(idx=4), ...)
-      tt.experimental_descriptor_store(Intermediate(idx=5), ...)
-    this function will mark only idx=4 and idx=5 (but not idx=2 or idx=3)
-
-    If an intermediate/parameter is passed into a function and is written to
-    via experimental_descriptor_store within that function, the argument to the
-    function will also be marked.
-    """
-
-    result: set[Intermediate | Param] = set()
-
-    ops = functions[fn_name]
-    for op_list in ops.values():
-        for op in op_list:
-            if op.name == "tt.call":
-                if op.fn_call_name not in functions:
-                    raise AssertionError(
-                        f"Function {op.fn_call_name} not found in functions for TMA stores"
-                    )
-                # pyrefly: ignore [bad-argument-type]
-                tma_stores = get_tma_stores(functions, op.fn_call_name)
-                for i, inp in enumerate(op.args):
-                    if Param(idx=i) in tma_stores:
-                        result.add(inp)
-            elif op.name == "tt.experimental_descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.experimental_descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
-            elif op.name == "tt.descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
-
-    for val in list(result):
-        if val in ops:
-            if not isinstance(val, Intermediate):
-                continue
-            for op in ops[val]:
-                if op.name == "tt.reinterpret_tensor_descriptor":
-                    if len(op.args) < 1:
-                        raise AssertionError(
-                            "tt.reinterpret_tensor_descriptor expected at least 1 arg, "
-                            f"got {len(op.args)}"
-                        )
-                    result.add(op.args[0])
-
-    return result
 
 
 @dataclasses.dataclass
@@ -909,192 +941,11 @@ class TensorAccesses:
     can_fuse_epilogue: bool
 
 
-@MemoizeWithCycleCheck
-def analyze_kernel_access(
-    functions: dict[str, dict[Intermediate, list[Op]]],
-    fn_name: str,
-    num_args: int,
-    tensor_names: tuple[str, ...],
-    tensor_arg_indices: frozenset[int] | None,
-) -> TensorAccesses:
-    """
-    Analyzes the graph to detect which arguments are written to and which are read.
-
-    For writes: traverses from write sinks (tt.store, tt.atomic_cas, etc.) backwards
-    to identify input pointers that are written to.
-
-    For reads: traverses from read operations (tt.load) backwards to identify
-    input pointers that are read from.
-
-    Returns ReadWrites with StarDep objects for each accessed tensor.
-    """
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
-
-    # Name of mutation op to mutated parameter indices
-    # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
-    # All the OPs that have MemWrite trait.
-    # What if Triton exposed this?
-    WRITE_OPS = {
-        "tt.store": [0],
-        "tt.atomic_cas": [0],
-        "tt.atomic_rmw": [0],
-        "tt.experimental_descriptor_store": [0],
-        "tt.experimental_tensormap_create": [0],
-        "tt.descriptor_store": [0],
-    }
-    READ_OPS = {
-        "tt.load": [0],
-        "tt.load_tensor_descriptor": [0],
-        "tt.descriptor_load": [0],
-    }
-    UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
-
-    write_stack: list[Param | Intermediate] = []
-    read_stack: list[Param | Intermediate] = []
-
-    ops = functions[fn_name]
-    tma_stores = get_tma_stores(functions, fn_name)
-
-    for op_list in ops.values():
-        for op in op_list:
-            # If we encounter an operation with effects that cannot be reliably analyzed
-            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
-            if op.name in UNKNOWN_OPS:
-                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
-                    continue
-                raise RuntimeError(
-                    f"ttir analysis hit an op we do not know how to analyze: {op.name}"
-                )
-
-            if op.name == "tt.experimental_tensormap_create":
-                # Note: this is how we implement experimental_descriptor_store mutation analysis.
-                # for on-device TMA.
-                # experimental_tensormap_store(a, b, ...) stores b to the location specified
-                # by descriptor in the memory of a.
-                # To track this, we first find all the intermediates/params to which we store via
-                # experimental_tensormap_store (get_tma_stores, called above). Then, during this
-                # analysis we wait to find the corresponding experimental_tensormap_create (if it
-                # exists), at which point we will mark the global_ptr as mutated (as done below).
-                if len(op.args) < 2:
-                    raise AssertionError(
-                        f"tt.experimental_tensormap_create expected at least 2 args, "
-                        f"got {len(op.args)}"
-                    )
-                if op.args[0] in tma_stores:
-                    write_stack.append(op.args[1])
-
-            if op.name == "tt.call":
-                if op.fn_call_name not in functions:
-                    raise AssertionError(
-                        f"Function {op.fn_call_name} not found in functions dict"
-                    )
-                # Create placeholder names for nested function arguments
-                nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
-
-                # Do not pass tensor_arg_indices, most outer call of
-                # analyze_kernel_access will filter Param nodes.
-                accesses = analyze_kernel_access(
-                    functions,
-                    # pyrefly: ignore [bad-argument-type]
-                    op.fn_call_name,
-                    len(op.args),
-                    nested_names,
-                    None,
-                )
-                # Map back from StarDep names to args
-                written_set = {dep.name for dep in accesses.read_writes.writes}
-                read_set = {dep.name for dep in accesses.read_writes.reads}
-                for arg, name in zip(op.args, nested_names):
-                    if name in written_set:
-                        write_stack.append(arg)
-                    if name in read_set:
-                        read_stack.append(arg)
-            else:
-                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
-                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
-
-    # For these ops, only the first argument (base pointer) refers to actual
-    # memory. The remaining arguments are shape/stride/offset metadata and
-    # should not be traced during mutation analysis.
-    POINTER_ONLY_OPS = {
-        "tt.make_tensor_ptr",
-        "tt.advance",
-        "tt.make_tensor_descriptor",
-    }
-
-    def _find_arg_access_count(
-        initial_stack: list[Param | Intermediate],
-        skip_loads: bool,
-    ) -> dict[int, int]:
-        """DFS traversal to find argument indices that are accessed (and how many times they are accessed)."""
-        access_count = dict()
-        stack = initial_stack[:]
-
-        while stack:
-            arg = stack.pop()
-
-            if isinstance(arg, Param):
-                if arg.idx >= num_args:
-                    continue
-                if tensor_arg_indices is not None and arg.idx not in tensor_arg_indices:
-                    continue
-                if arg.idx not in access_count:
-                    access_count[arg.idx] = 1
-                else:
-                    access_count[arg.idx] += 1
-            elif isinstance(arg, Intermediate) and not arg.fake():
-                for op in ops[arg]:
-                    if skip_loads and op.name == "tt.load":
-                        continue
-                    if op.name in POINTER_ONLY_OPS:
-                        stack.append(op.args[0])
-                    else:
-                        stack.extend(op.args)
-
-        return access_count
-
-    write_count = _find_arg_access_count(write_stack, skip_loads=True)
-    read_count = _find_arg_access_count(read_stack, skip_loads=False)
-
-    writes: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(write_count.keys())
-    )
-    reads: OrderedSet[Dep] = OrderedSet(
-        StarDep(tensor_names[i]) for i in sorted(read_count.keys())
-    )
-
-    read_writes = ReadWrites(
-        reads=reads,
-        writes=writes,
-        index_exprs=OrderedSet(),
-    )
-
-    def _decide_can_fuse_epilogue():
-        # only do epilogue fusion if the kernel has a single output tensor
-        if len(write_count) != 1:
-            return False
-
-        written_arg_index = next(iter(write_count))
-        # only do epilogue fusion if the written tensor is written exactly once
-        if write_count[written_arg_index] != 1:
-            return False
-
-        written_arg_name = next(iter(writes)).name
-        #  cannot fuse if the kernel also reads from the output buffer
-        if any(read_dep.name == written_arg_name for read_dep in reads):
-            return False
-
-        return True
-
-    can_fuse_epilogue = _decide_can_fuse_epilogue()
-
-    return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
-
-
 def identify_accessed_tensors(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    grid: Any = None,
 ) -> TensorAccesses:
     """
     Given a triton kernel and the arguments for this kernel, this function
@@ -1103,7 +954,7 @@ def identify_accessed_tensors(
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
 
-    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+    from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
     from torch._inductor.ir import TensorBox
 
     ttir_module = None
@@ -1126,11 +977,6 @@ def identify_accessed_tensors(
             raise AssertionError(
                 f"Kernel name {kernel_fn_name} not found in TTIR kernel name {kernel_name}"
             )
-        # Reset the cache between top level invocations
-        # The cache for analyze kernel access is mainly used for cycle
-        # detection, so each top level invocation needs a clean cache
-        analyze_kernel_access.reset()
-        get_tma_stores.reset()
 
         # Build frozenset of indices corresponding to tensor args only.
         # Used to filter out scalars which are transitively captured as mutated
@@ -1141,13 +987,14 @@ def identify_accessed_tensors(
             if isinstance(kwargs.get(name), (Tensor, TensorBox))
         )
 
-        return analyze_kernel_access(
+        return KernelAccessAnalyzer(
             functions,
             kernel_name,
-            len(ordered_arg_names),
+            kwargs,
+            grid,
             tuple(ordered_arg_names),
             tensor_arg_indices,
-        )
+        ).analyze()
     except Exception:
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
@@ -1167,7 +1014,9 @@ def identify_accessed_tensors(
             for key, value in kwargs.items()
             if isinstance(value, (Tensor, TensorBox))
         ]
-        all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
+        all_deps = OrderedSet(
+            UserTritonDep(name=name, index=None) for name in all_tensor_names
+        )
         all_deps = typing.cast(OrderedSet[Dep], all_deps)
         return TensorAccesses(
             ReadWrites(
@@ -2455,3 +2304,670 @@ class TraceableTritonKernelWrapper:
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
         return arg
+
+
+class KernelAccessAnalyzer:
+    def __init__(
+        self,
+        functions: dict[str, dict[Intermediate, list[Op]]],
+        fn_name: str,
+        kwargs: dict[str, Any],
+        grid: Any,
+        tensor_names: tuple[str, ...],
+        tensor_arg_indices: frozenset[int] | None,
+    ):
+        from torch._inductor.dependencies import UserTritonDep  # noqa: TC001
+
+        self.WRITE_OPS = {
+            "tt.store": [0],
+            "tt.atomic_cas": [0],
+            "tt.atomic_rmw": [0],
+            "tt.experimental_descriptor_store": [0],
+            "tt.experimental_tensormap_create": [0],
+            "tt.descriptor_store": [0],
+        }
+        self.READ_OPS = {
+            "tt.load": [0],
+            "tt.load_tensor_descriptor": [0],
+            "tt.descriptor_load": [0],
+        }
+        self.UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
+
+        self.functions = functions
+        self.fn_name = fn_name
+        self.num_args = len(tensor_names)
+        self.kwargs = kwargs
+        self.grid = grid
+        self.tensor_names = tensor_names
+        self.tensor_arg_indices = tensor_arg_indices
+
+        self.write_accesses: dict[int, list[UserTritonDep | int]] = {}
+        self.read_accesses: dict[int, list[UserTritonDep | int]] = {}
+
+        import torch._inductor.config
+
+        epilogue_fusion = (
+            torch._inductor.config.epilogue_fusion_user_defined_triton_kernel
+        )
+        self.extract_symbolic = epilogue_fusion and self.grid is not None
+        self._symbolic = SymbolicAnalyzer(self) if self.extract_symbolic else None
+
+    def get_sinks(
+        self, fn_name: str
+    ) -> tuple[list[Param | Intermediate], list[Param | Intermediate]]:
+        ops = self.functions[fn_name]
+
+        tma_stores = KernelAccessAnalyzer._get_tma_stores(self.functions, fn_name)
+
+        write_sinks: list[Param | Intermediate] = []
+        read_sinks: list[Param | Intermediate] = []
+
+        for op_list in ops.values():
+            for op in op_list:
+                op_name = op.name
+                # If we encounter an operation with effects that cannot be reliably analyzed
+                # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
+                if op_name in self.UNKNOWN_OPS:
+                    if op_name == "tt.elementwise_inline_asm" and op.is_pure:
+                        continue
+                    raise RuntimeError(
+                        f"ttir analysis hit an op we do not know how to analyze: {op.name}"
+                    )
+
+                # NOTE: This is how we implement experimental_descriptor_store mutation_analysis.
+                # for on-device TMA.
+                # experimental_tensormap_store(a, b, ...) stores b to the location specified
+                # by descriptor in the memory of a.
+                # To track this, we first fgind all the intermediates/params to which we stored via
+                # experminetal_tensormap_store (get_tma_stores, called above). then, during this analysis
+                # we wait to find the corresponding experimental_tensormap_create (if it exists), at which
+                # point we will mark the global_ptr as mutated (as done below).
+                if op_name == "tt.experimental_tensormap_create":
+                    if len(op.args) < 2:
+                        raise AssertionError(
+                            f"tt.experimental_tensormap_create expected at least 2 args, "
+                            f"got {len(op.args)}"
+                        )
+                    if op.args[0] in tma_stores:
+                        write_sinks.append(op.args[1])
+
+                elif op_name == "tt.call":
+                    fn_call_name = op.fn_call_name
+                    if fn_call_name is None or fn_call_name not in self.functions:
+                        raise AssertionError(
+                            f"Function {op.fn_call_name} not found in functions dict"
+                        )
+
+                    nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
+
+                    # Do not pass tensor_arg_indices, most outer call of
+                    # analyze_kernel_access will filter Param nodes.
+                    nested_analyzer = KernelAccessAnalyzer(
+                        self.functions,
+                        fn_call_name,
+                        self.kwargs,
+                        self.grid,
+                        nested_names,
+                        None,
+                    )
+                    nested = nested_analyzer.analyze()
+                    written_set = {dep.name for dep in nested.read_writes.writes}
+                    read_set = {dep.name for dep in nested.read_writes.reads}
+                    for arg, name in zip(op.args, nested_names):
+                        if name in written_set:
+                            write_sinks.append(arg)
+                        if name in read_set:
+                            read_sinks.append(arg)
+
+                # TODO: We need to worry about masks as well, but only
+                # for symbolic tracing.
+                elif indices := self.WRITE_OPS.get(op_name):
+                    write_sinks.extend(op.args[idx] for idx in indices)
+                elif indices := self.READ_OPS.get(op_name):
+                    read_sinks.extend(op.args[idx] for idx in indices)
+
+        return read_sinks, write_sinks
+
+    @staticmethod
+    def _get_tma_stores(
+        functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str
+    ) -> set[Intermediate | Param]:
+        """
+        Identifies all intermediates and parameters that are written to by a
+        `tt.experimental_descriptor_store`. It tracks only the specific values
+        written to via experimental_descriptor_store and the input values to
+        `tt.reinterpret_tensor_descriptor` used to construct the direct inputs
+        to tt.experimental_descriptor_store - not any recursive values
+        used to construct those values.
+
+        For example: for
+          tt.reinterpret_tensor_descriptor(Intermediate(idx=0), ...)
+          Intermediate(idx=1) = tt.experimental_descriptor_store(Intermediate(idx=0), ...)
+        this function will return [Intermediate(idx=0), Intermediate(idx=1)],
+
+        However
+          Intermediate(idx=4) = arith.addptr(Intermediate(idx=2), Intermediate(idx=3))
+          Intermediate(idx=5) = tt.experimental_descriptor_store(Intermediate(idx=4), ...)
+          tt.experimental_descriptor_store(Intermediate(idx=5), ...)
+        this function will mark only idx=4 and idx=5 (but not idx=2 or idx=3)
+
+        If an intermediate/parameter is passed into a function and is written to
+        via experimental_descriptor_store within that function, the argument to the
+        function will also be marked.
+        """
+
+        result: set[Intermediate | Param] = set()
+
+        ops = functions[fn_name]
+        for op_list in ops.values():
+            for op in op_list:
+                if op.name == "tt.call":
+                    if op.fn_call_name not in functions:
+                        raise AssertionError(
+                            f"Function {op.fn_call_name} not found in functions for TMA stores"
+                        )
+                    # pyrefly: ignore [bad-argument-type]
+                    tma_stores = KernelAccessAnalyzer._get_tma_stores(
+                        functions, op.fn_call_name
+                    )
+                    for i, inp in enumerate(op.args):
+                        if Param(idx=i) in tma_stores:
+                            result.add(inp)
+                elif op.name == "tt.experimental_descriptor_store":
+                    if len(op.args) < 1:
+                        raise AssertionError(
+                            f"tt.experimental_descriptor_store expected at least 1 arg, got {len(op.args)}"
+                        )
+                    result.add(op.args[0])
+                elif op.name == "tt.descriptor_store":
+                    if len(op.args) < 1:
+                        raise AssertionError(
+                            f"tt.descriptor_store expected at least 1 arg, got {len(op.args)}"
+                        )
+                    result.add(op.args[0])
+
+        for val in list(result):
+            if val in ops:
+                if not isinstance(val, Intermediate):
+                    continue
+                for op in ops[val]:
+                    if op.name == "tt.reinterpret_tensor_descriptor":
+                        if len(op.args) < 1:
+                            raise AssertionError(
+                                "tt.reinterpret_tensor_descriptor expected at least 1 arg, "
+                                f"got {len(op.args)}"
+                            )
+                        result.add(op.args[0])
+
+        return result
+
+    def _analyze_sinks(
+        self,
+        sinks: list[Param | Intermediate],
+        accesses: dict[int, list[sympy.Expr | int]],
+        skip_loads: bool,
+    ):
+        # NOTE: It would be preferred to share recursion state. Specifically,
+        # to continue conservative tracing from the current node in the event
+        # of failure during symbolic tracing. This would imply that the recursion
+        # stack would have to be shared.
+        #
+        # However, separate stacks does prevent very unlikely stack smashes during
+        # symbolic tracing/recursion.
+        # Separate states also allow for simpler Param handling: symbolic tracing
+        # handles Sympy.expr, and conservative tracing handles access counts.
+        ops = self.functions[self.fn_name]
+        conservative = ConservativeAnalyzer(self.num_args, self.tensor_arg_indices)
+
+        for sink in sinks:
+            if self.extract_symbolic:
+                try:
+                    self._symbolic.traverse(sink, ops, accesses)  # type: ignore[union-attr]
+                except SymbolicFailure as e:
+                    log.debug(
+                        "Symbolic analysis failed at op '%s', switching to conservative",
+                        e.op_name,
+                    )
+                    self.extract_symbolic = False
+                    conservative.traverse(sink, ops, accesses, skip_loads)
+                except Exception:
+                    log.debug("Symbolic analysis failed, switching to conservative")
+                    self.extract_symbolic = False
+                    conservative.traverse(sink, ops, accesses, skip_loads)
+            else:
+                conservative.traverse(sink, ops, accesses, skip_loads)
+
+    def analyze(self):
+        read_sinks, write_sinks = self.get_sinks(self.fn_name)
+
+        self._analyze_sinks(write_sinks, self.write_accesses, skip_loads=True)
+        self._analyze_sinks(read_sinks, self.read_accesses, skip_loads=False)
+
+        from torch._inductor.dependencies import Dep, ReadWrites, UserTritonDep
+        from torch.utils._ordered_set import OrderedSet
+
+        writes: OrderedSet[Dep]
+        reads: OrderedSet[Dep]
+        if self.extract_symbolic:
+            writes = OrderedSet(
+                dep
+                for i in sorted(self.write_accesses.keys())
+                for dep in self.write_accesses[i]
+                if isinstance(dep, UserTritonDep)
+            )
+            reads = OrderedSet(
+                dep
+                for i in sorted(self.read_accesses.keys())
+                for dep in self.read_accesses[i]
+                if isinstance(dep, UserTritonDep)
+            )
+        else:
+            writes = OrderedSet(
+                UserTritonDep(name=self.tensor_names[i], index=None)
+                for i in sorted(self.write_accesses.keys())
+            )
+            reads = OrderedSet(
+                UserTritonDep(name=self.tensor_names[i], index=None)
+                for i in sorted(self.read_accesses.keys())
+            )
+
+        return TensorAccesses(
+            read_writes=ReadWrites(
+                reads=reads, writes=writes, index_exprs=OrderedSet()
+            ),
+            can_fuse_epilogue=self._decide_can_fuse_epilogue(),
+        )
+
+    def _decide_can_fuse_epilogue(self) -> bool:
+        # only do epilogue fusion if the kernel has a single output tensor
+        if len(self.write_accesses) != 1:
+            return False
+
+        written_idx = next(iter(self.write_accesses))
+        # only do epilogue fusion if the written tensor is written exactly once
+        if len(self.write_accesses[written_idx]) != 1:
+            return False
+
+        #  cannot fuse if the kernel also reads from the output buffer
+        written_name = self.tensor_names[written_idx]
+        if any(self.tensor_names[i] == written_name for i in self.read_accesses):
+            return False
+
+        return True
+
+
+class ConservativeAnalyzer:
+    def __init__(self, num_args: int, tensor_arg_indices: frozenset[int] | None):
+        self.num_args = num_args
+        self.tensor_arg_indices = tensor_arg_indices
+
+        # For these ops, only the first argument (base pointer) refers to actual
+        # memory. The remaining arguments are shape/stride/offset metadata and
+        # should not be traced during mutation analysis.
+        self.POINTER_ONLY_OPS = {
+            "tt.make_tensor_ptr",
+            "tt.advance",
+            "tt.make_tensor_descriptor",
+        }
+
+    def traverse(
+        self,
+        node: Param | Intermediate,
+        ops: dict[Intermediate, list[Op]],
+        accesses: dict[int, list[sympy.Expr | int]],
+        skip_loads: bool,
+    ):
+        stack = [node]
+
+        while stack:
+            arg = stack.pop()
+
+            if isinstance(arg, Param):
+                if arg.idx >= self.num_args:
+                    continue
+                if (
+                    self.tensor_arg_indices is not None
+                    and arg.idx not in self.tensor_arg_indices
+                ):
+                    continue
+
+                accesses[arg.idx] = accesses.get(arg.idx, [])
+                accesses[arg.idx].append(1)
+            elif isinstance(arg, IterArg):
+                stack.append(arg.init)
+            elif isinstance(arg, InductionVar):
+                pass
+            elif isinstance(arg, Intermediate) and not arg.fake():
+                for op in ops[arg]:
+                    if skip_loads and op.name == "tt.load":
+                        continue
+                    if op.name in self.POINTER_ONLY_OPS:
+                        stack.append(op.args[0])
+                    else:
+                        stack.extend(op.args)
+
+        return accesses
+
+
+class SymbolicFailure(Exception):
+    def __init__(self, op_name: str):
+        self.op_name = op_name
+        super().__init__(f"Symbolic analysis failed at op '{op_name}'")
+
+
+class SymbolicAnalyzer:
+    """
+    Traces pointer arithmetic to produce symbolic index expressions for each
+    tensor access.
+
+    For each access sink, this class walks the def-use chain upwards building
+    a SymPy expression that represents the memory index as a function of the
+    kernel's configuration. The expected form of a fully resolved expression is:
+        p{idx} + <index_expr>
+    where p{idx} is a placeholder symbol for the base pointer of tensor
+    argument idx, and <index_expr> is extracted and stored in the UserTritonDep.
+
+    Symbols are only minted only for the following leaves:
+      - Program IDs (tt.get_program_id): bounded by the corresponding grid dimension
+      - Range variables (tt.make_range): bounded by end - start
+      - Induction variables (InductionVar): derived from loop bounds and step
+      - Iteration arguments (IterArg): modeled as init + iv * step
+
+    Bounds are read and stored in the appropriate dataclass (Op, InductionVar, ...) from
+    MLIR integer attributes during TTIR parsing. If a required attr is absent,
+    `Op.get_int_attr` raises, and this traversal will fall back to ConservativeAnalyzer.
+
+    Shape-context ops (tt.expand_dims, tt.broadcast, tt.splat, ...) do not mint
+    symbols but update `current_shape` before recursing, so the same SSA
+    node can produce different expressions depending on how its output is
+    broadcast. The recursion cache therefore keys on (ssa_idx, current_shape)
+    rather than ssa_idx alone.
+
+    Redundant div/mod operations are simplified via `_get_bound`: if an
+    upper bound B for an expression is known and B <= k, then
+      expr % k  →  expr      (mod is identity)
+      expr // k →  0         (quotient is zero)
+    """
+
+    def __init__(self, analyzer: KernelAccessAnalyzer):
+        self.kwargs = analyzer.kwargs
+        self.arg_names = analyzer.tensor_names
+        self.grid = analyzer.grid
+        self.functions = analyzer.functions
+
+        self.recursion_cache: dict[tuple, sympy.Expr] = {}
+        self.current_shape: tuple | None = None
+        self._sym_counter = itertools.count()
+
+        # See: https://docs.sympy.org/latest/explanation/best-practices
+        # Avoid subclassing sympy.Symbol, Therefore, we store param attributes
+        # externally.
+        self.param_to_tensor: dict[sympy.Symbol, Any] = {}
+        self.sym_bounds: dict[sympy.Symbol, int] = {}
+
+        self.op_handlers: dict[str, Callable[[Op], sympy.Expr]] = {
+            # Leaves
+            "tt.get_program_id": self._handle_program_id,
+            "tt.make_range": self._handle_make_range,
+            "arith.constant": self._handle_constant,
+            # Arithmetic
+            "tt.addptr": self._handle_add,
+            "arith.addi": self._handle_add,
+            "arith.subi": self._handle_sub,
+            "arith.muli": self._handle_mul,
+            "arith.divsi": self._handle_div,
+            "arith.remsi": self._handle_rem,
+            "arith.minsi": self._handle_min,
+            # Shape context handlers
+            "tt.expand_dims": self._handle_shape_context,
+            "tt.broadcast": self._handle_shape_context,
+            "tt.splat": self._handle_shape_context,
+            # Passthroughs
+            "arith.extsi": self._handle_passthrough,
+            "arith.bitcast": self._handle_passthrough,
+            # Call
+            "tt.call": self._handle_call,
+        }
+
+    def traverse(
+        self,
+        sink: Intermediate | Param,
+        ops: dict[Intermediate, list[Op]],
+        accesses: dict[int, list[sympy.Expr | int]],
+    ):
+        from torch._inductor.dependencies import UserTritonDep
+
+        self.ops = ops
+        self.accesses = accesses
+        self.current_shape = None
+        expr = self._build_expr(sink)
+
+        # Separate the pointer symbol (p{idx}) from the index expression.
+        # The expr should be of the form: <ptr_symbol> + <index_expr>
+        # We find the single param symbol and subtract it out.
+        ptr_syms = {s for s in expr.free_symbols if s in self.param_to_tensor}
+
+        if len(ptr_syms) != 1:
+            raise SymbolicFailure("expected exactly one pointer symbol in expr")
+
+        (ptr_sym,) = ptr_syms
+        tensor_name = self.param_to_tensor[ptr_sym]
+        index = expr - ptr_sym
+        local_syms = index.free_symbols
+        var_names = tuple(s for s in self.sym_bounds if s in local_syms)
+        sizes = tuple(self.sym_bounds[s] for s in var_names)
+
+        param_idx = int(str(ptr_sym)[1:])  # strip 'p' prefix
+        tensor_name = self.arg_names[param_idx]
+
+        accesses[param_idx] = accesses.get(param_idx, [])
+        accesses[param_idx].append(
+            UserTritonDep(
+                name=tensor_name,
+                index=index,
+                var_names=var_names,
+                size=sizes,
+            )
+        )
+
+    def _build_expr(self, node: Intermediate | Param) -> sympy.Expr:
+        if isinstance(node, Param):
+            param_name = self.arg_names[node.idx]
+            param_value = self.kwargs.get(param_name)
+
+            # Handle integers and floats as parameters
+            if isinstance(param_value, (int, sympy.Integer)):
+                return sympy.Integer(param_value)
+            elif isinstance(param_value, (float, sympy.Float)):
+                return sympy.Float(param_value)
+
+            # Else, handle a tensor
+            sym = sympy.Symbol(f"p{node.idx}")
+            self.param_to_tensor[sym] = param_name
+            return sym
+
+        cache_key = (node.idx, self.current_shape)
+        if cache_key in self.recursion_cache:
+            return self.recursion_cache[cache_key]
+
+        if isinstance(node, IterArg):
+            cache_key = (node.idx, self.current_shape)
+            init = self._build_expr(node.init)
+            iv = self._build_expr(node.iv)
+
+            # node.next computes the updated iter_arg value using the
+            # current iter_arg value (this node) — e.g. %p3 = %p1 + stride
+            # where %p1 is this IterArg. Recursing into next would hit this
+            # IterArg again, creating a cycle. We break the cycle by caching
+            # init as before recursing.
+            self.recursion_cache[cache_key] = init
+            next_expr = self._build_expr(node.next)
+            step = next_expr - init
+            result = init + iv * step
+
+        elif isinstance(node, InductionVar):
+            sym = self._next_sym()
+            lb = self._build_expr(node.lb)
+            ub = self._build_expr(node.ub)
+            step = self._build_expr(node.step)
+            self.sym_bounds[sym] = sympy.ceiling((ub - lb) / step)
+            result = lb + sym * step
+
+        elif isinstance(node, Intermediate) and not node.fake():
+            op_list = self.ops.get(node)
+
+            assert op_list is not None  # noqa: S101
+            op = op_list[0]
+            name = op.name
+
+            handler = self.op_handlers.get(name)
+            if handler is None:
+                raise SymbolicFailure(op.name)
+
+            result = handler(op)
+        else:
+            raise SymbolicFailure("")
+
+        self.recursion_cache[cache_key] = result
+        return result
+
+    def _next_sym(self) -> sympy.Symbol:
+        # Do we want prefixes correlating to origin for readability?
+        # For example, make_range mints "lane_0".
+        sym = sympy.Symbol(f"i{next(self._sym_counter)}")
+        return sym
+
+    def _get_bound(self, expr: sympy.Expr) -> int | None:
+        """Compute upper bound for expr, returns None otherwise.
+
+        Certain expressions accumulate redundant `div`s and `rem`s
+        that can be simplified away.
+
+        An upper bound is calculated for expr, i.e. a value `B` such that
+        `expr` < `B` always hold. It is then the callers responsibility to
+        perform the following simplification:
+          - arith.remsi(expr, k): if B <= k, expr % k == expr  (mod dropped)
+          - arith.divsi(expr, k): if B <= k, expr // k == 0    (div is zero)
+
+        Bound derivation:
+          - Plain symbol s:   B = sym_bounds[s]
+          - Mod(x, k):        B = k  (regardless of x)
+          - Composite expr:   Substitute each symbol's maximum
+                              value (sym_bounds[s] - 1) and evaluate,
+                              then add 1 for B.
+        """
+        from torch.utils._sympy.functions import PythonMod
+
+        if isinstance(expr, sympy.Symbol) and expr in self.sym_bounds:
+            return self.sym_bounds[expr]
+        elif isinstance(expr, PythonMod):
+            rhs = expr.args[1]
+            if isinstance(rhs, sympy.Integer):
+                return int(rhs)
+        substituted = expr.subs({s: b - 1 for s, b in self.sym_bounds.items()})
+        if isinstance(substituted, (sympy.Integer, sympy.core.numbers.Integer)):
+            return int(substituted) + 1
+        return None
+
+    def _handle_program_id(self, op: Op) -> sympy.Expr:
+        axis = op.get_int_attr("axis")
+
+        # grid may be a single TritonGridTupleType or a list[TritonGridTupleType] (one per autotuner config).
+        # If a list, take the first entry — all configs share the same grid structure.
+        grid = self.grid[0] if isinstance(self.grid, list) else self.grid
+        bound = grid[axis]
+        sym = self._next_sym()
+        self.sym_bounds[sym] = bound
+        return sym
+
+    def _handle_make_range(self, op: Op) -> sympy.Expr:
+        start = op.get_int_attr("start")
+        end = op.get_int_attr("end")
+        sym = self._next_sym()
+        self.sym_bounds[sym] = end - start
+        return start + sym
+
+    def _handle_constant(self, op: Op) -> sympy.Expr:
+        return sympy.Integer(op.get_int_attr("value"))
+
+    def _handle_add(self, op: Op) -> sympy.Expr:
+        return self._build_expr(op.args[0]) + self._build_expr(op.args[1])
+
+    def _handle_sub(self, op: Op) -> sympy.Expr:
+        return self._build_expr(op.args[0]) - self._build_expr(op.args[1])
+
+    def _handle_mul(self, op: Op) -> sympy.Expr:
+        return self._build_expr(op.args[0]) * self._build_expr(op.args[1])
+
+    def _handle_div(self, op: Op) -> sympy.Expr:
+        lhs = self._build_expr(op.args[0])
+        rhs = self._build_expr(op.args[1])
+        return self._handle_div_exprs(lhs, rhs)
+
+    def _handle_min(self, op: Op) -> sympy.Expr:
+        lhs = self._build_expr(op.args[0])
+        rhs = self._build_expr(op.args[1])
+        # NOTE: min of two sympy.Integer will fold to a constant
+        return sympy.Min(lhs, rhs)
+
+    def _handle_rem(self, op: Op) -> sympy.Expr:
+        from torch.utils._sympy.functions import PythonMod
+
+        lhs = self._build_expr(op.args[0])
+        rhs = self._build_expr(op.args[1])
+        bound = self._get_bound(lhs)
+        if bound is not None and bound <= rhs:
+            return lhs
+        return PythonMod(lhs, rhs)
+
+    def _handle_div_exprs(self, lhs: sympy.Expr, rhs: sympy.Expr) -> sympy.Expr:
+        from torch.utils._sympy.functions import FloorDiv
+
+        bound = self._get_bound(lhs)
+        if bound is not None and bound <= rhs:
+            return sympy.Integer(0)
+        return FloorDiv(lhs, rhs)
+
+    def _handle_passthrough(self, op: Op) -> sympy.Expr:
+        return self._build_expr(op.args[0])
+
+    def _handle_shape_context(self, op: Op) -> sympy.Expr:
+        out_shape = op.get_list_attr("out_shape")
+        prev_shape = self.current_shape
+        self.current_shape = out_shape
+        result = self._build_expr(op.args[0])
+        self.current_shape = prev_shape
+        return result
+
+    def _handle_call(self, op: Op) -> sympy.Expr:
+        func_name = op.fn_call_name
+
+        if func_name is None:
+            raise SymbolicFailure("tt.call: func_name is None")
+
+        if "triton.language.standard.cdiv" in func_name:
+            fn_ops = self.functions[func_name]
+            call_args = [self._build_expr(arg) for arg in op.args]
+
+            saved_ops, saved_arg_names, saved_kwargs = (
+                self.ops,
+                self.arg_names,
+                self.kwargs,
+            )
+            self.ops = fn_ops
+            self.arg_names = tuple(f"_arg{i}" for i in range(len(call_args)))
+            self.kwargs = {f"_arg{i}": v for i, v in enumerate(call_args)}
+
+            try:
+                for op_list in fn_ops.values():
+                    fn_op = op_list[0]
+                    if fn_op.name in ("arith.divsi", "arith.divui"):
+                        dividend = self._build_expr(fn_op.args[0])
+                        divisor = self._build_expr(fn_op.args[1])
+                        return self._handle_div_exprs(dividend, divisor)
+            finally:
+                self.ops = saved_ops
+                self.arg_names = saved_arg_names
+                self.kwargs = saved_kwargs
+
+        raise SymbolicFailure(f"tt.call: unhandled func_name ({func_name})")

@@ -3780,8 +3780,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
     def test_get_tma_stores(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
-            get_tma_stores,
             Intermediate,
+            KernelAccessAnalyzer,
             Op,
             Param,
         )
@@ -3809,8 +3809,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
             },
         }
 
-        self.assertEqual(get_tma_stores(functions, "helper"), set())
-        self.assertEqual(get_tma_stores(functions, "main"), set())
+        self.assertEqual(
+            KernelAccessAnalyzer._get_tma_stores(functions, "helper"), set()
+        )
+        self.assertEqual(KernelAccessAnalyzer._get_tma_stores(functions, "main"), set())
 
         functions["helper"][Intermediate(idx=-1)] = [
             Op(
@@ -3820,12 +3822,14 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 Intermediate(idx=-1),
             )
         ]
-        get_tma_stores.reset()
 
         self.assertEqual(
-            get_tma_stores(functions, "helper"), {Param(idx=0), Intermediate(idx=0)}
+            KernelAccessAnalyzer._get_tma_stores(functions, "helper"),
+            {Param(idx=0), Intermediate(idx=0)},
         )
-        self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
+        self.assertEqual(
+            KernelAccessAnalyzer._get_tma_stores(functions, "main"), {Param(idx=0)}
+        )
 
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
@@ -5216,6 +5220,480 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             msg = "@triton.heuristics must return constant values because configs can only contain constant values."
             with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
                 compiled_f(dst, src, N=N)
+
+
+def make_kernel_access_analyzer_test(fn):
+    @requires_gpu
+    def test_fn(self):
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
+
+        (
+            kernel,
+            inputs,
+            grid,
+            tma_descriptor_metadata,
+            expected_reads,
+            expected_writes,
+        ) = fn()
+        ta = identify_accessed_tensors(kernel, inputs, tma_descriptor_metadata, grid)
+
+        self.assertEqual(list(ta.read_writes.writes), list(expected_writes))
+        self.assertEqual(list(ta.read_writes.reads), list(expected_reads))
+
+    return test_fn
+
+
+class KernelAccessAnalyzerTests(torch._inductor.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = False
+        super().tearDownClass()
+
+    @make_kernel_access_analyzer_test
+    def test_matmul():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+        from torch.utils._sympy.functions import FloorDiv, PythonMod
+
+        # Kernel adapted from:
+        # https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html
+        @triton.jit
+        def matmul_kernel(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M,
+            N,
+            K,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+            stride_cm,
+            stride_cn,
+            BLOCK_SIZE_M: tl.constexpr,
+            BLOCK_SIZE_N: tl.constexpr,
+            BLOCK_SIZE_K: tl.constexpr,
+            GROUP_SIZE_M: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            group_id = pid // num_pid_in_group
+            first_pid_m = group_id * GROUP_SIZE_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+            pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+            pid_n = (pid % num_pid_in_group) // group_size_m
+
+            tl.assume(pid_m >= 0)
+            tl.assume(pid_n >= 0)
+            tl.assume(stride_am > 0)
+            tl.assume(stride_ak > 0)
+            tl.assume(stride_bn > 0)
+            tl.assume(stride_bk > 0)
+            tl.assume(stride_cm > 0)
+            tl.assume(stride_cn > 0)
+
+            offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+            offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+            offs_k = tl.arange(0, BLOCK_SIZE_K)
+            a_ptrs = a_ptr + (
+                offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+            )
+            b_ptrs = b_ptr + (
+                offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+            )
+
+            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+            for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
+                a = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                b = tl.load(
+                    b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
+                )
+                accumulator = tl.dot(a, b, accumulator)
+
+                a_ptrs += BLOCK_SIZE_K * stride_ak
+                b_ptrs += BLOCK_SIZE_K * stride_bk
+
+            c = accumulator.to(tl.float16)
+
+            offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+            c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+            c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+            tl.store(c_ptrs, c, mask=c_mask)
+
+        BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M = 64, 64, 32, 8
+        M, N, K = 512, 512, 512
+        a = torch.randn(M, K, device="cuda")
+        b = torch.randn(K, N, device="cuda")
+        c = torch.empty(M, N, device="cuda")
+        GRID = (triton.cdiv(M, BLOCK_SIZE_M) * triton.cdiv(N, BLOCK_SIZE_N),)
+        stride_am = a.stride(0)  # K=512
+        stride_ak = a.stride(1)  # 1
+        stride_bk = b.stride(0)  # N=512
+        stride_bn = b.stride(1)  # 1
+        stride_cm = c.stride(0)  # N=512
+        stride_cn = c.stride(1)  # 1
+
+        i0, i1, i2, i3, i4, i5, i6, i7 = sympy.symbols("i0 i1 i2 i3 i4 i5 i6 i7")
+
+        return (
+            matmul_kernel,
+            {
+                "a_ptr": a,
+                "b_ptr": b,
+                "c_ptr": c,
+                "M": M,
+                "N": N,
+                "K": K,
+                "stride_am": stride_am,
+                "stride_ak": stride_ak,
+                "stride_bk": stride_bk,
+                "stride_bn": stride_bn,
+                "stride_cm": stride_cm,
+                "stride_cn": stride_cn,
+                "BLOCK_SIZE_M": BLOCK_SIZE_M,
+                "BLOCK_SIZE_N": BLOCK_SIZE_N,
+                "BLOCK_SIZE_K": BLOCK_SIZE_K,
+                "GROUP_SIZE_M": GROUP_SIZE_M,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr",
+                    index=BLOCK_SIZE_M * stride_am * PythonMod(i0, GROUP_SIZE_M)
+                    + i3 * stride_am
+                    + i5 * BLOCK_SIZE_K * stride_ak
+                    + i4 * stride_ak,
+                    var_names=(i0, i3, i4, i5),
+                    size=(
+                        GRID[0],
+                        BLOCK_SIZE_M,
+                        BLOCK_SIZE_K,
+                        triton.cdiv(K, BLOCK_SIZE_K),
+                    ),
+                ),
+                UserTritonDep(
+                    name="b_ptr",
+                    index=FloorDiv(i0, GROUP_SIZE_M) * BLOCK_SIZE_N * stride_bn
+                    + i7 * stride_bn
+                    + i5 * BLOCK_SIZE_K * stride_bk
+                    + i6 * stride_bk,
+                    var_names=(i0, i5, i6, i7),
+                    size=(
+                        GRID[0],
+                        triton.cdiv(K, BLOCK_SIZE_K),
+                        BLOCK_SIZE_K,
+                        BLOCK_SIZE_N,
+                    ),
+                ),
+            ],
+            [
+                UserTritonDep(
+                    name="c_ptr",
+                    index=PythonMod(i0, GROUP_SIZE_M) * BLOCK_SIZE_M * stride_cm
+                    + i1 * stride_cm
+                    + FloorDiv(i0, GROUP_SIZE_M) * BLOCK_SIZE_N * stride_cn
+                    + i2 * stride_cn,
+                    var_names=(i0, i1, i2),
+                    size=(GRID[0], BLOCK_SIZE_M, BLOCK_SIZE_N),
+                )
+            ],
+        )
+
+    @make_kernel_access_analyzer_test
+    def test_reverse():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+
+        @triton.jit
+        def reverse_kernel(a_ptr, b_ptr, N, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < N
+            a = tl.load(a_ptr + offsets, mask=mask)
+            tl.store(b_ptr + (N - 1 - offsets), a, mask=mask)
+
+        N = 1024
+        BLOCK_SIZE = 256
+        GRID = (triton.cdiv(N, BLOCK_SIZE),)
+        t = torch.randn(N, device="cuda")
+
+        i0, i1 = sympy.symbols("i0 i1")
+
+        return (
+            reverse_kernel,
+            {
+                "a_ptr": t,
+                "b_ptr": t,
+                "N": N,
+                "BLOCK_SIZE": BLOCK_SIZE,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr",
+                    index=i0 * BLOCK_SIZE + i1,
+                    var_names=(i0, i1),
+                    size=(GRID[0], BLOCK_SIZE),
+                ),
+            ],
+            [
+                UserTritonDep(
+                    name="b_ptr",
+                    index=N - 1 - (i0 * BLOCK_SIZE + i1),
+                    var_names=(i0, i1),
+                    size=(GRID[0], BLOCK_SIZE),
+                ),
+            ],
+        )
+
+    @make_kernel_access_analyzer_test
+    def test_cdiv_variants():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+
+        @triton.jit
+        def cdiv_variants_kernel(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            out_ptr,
+            N,
+            D,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            # cdiv with constexpr divisor, dynamic dividend
+            for i in range(tl.cdiv(N, BLOCK_SIZE)):
+                offsets = i * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < N
+                a = tl.load(a_ptr + offsets, mask=mask)
+
+            # cdiv with dynamic divisor, dynamic dividend
+            for j in range(tl.cdiv(N, D)):
+                offsets = j * D + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < N
+                b = tl.load(b_ptr + offsets, mask=mask)
+
+            # cdiv with dynamic divisor, constexpr dividend
+            for k in range(tl.cdiv(1024, D)):
+                offsets = k * D + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < N
+                c = tl.load(c_ptr + offsets, mask=mask)
+
+        t1 = torch.randn(1024, device="cuda")
+        t2 = torch.randn(1024, device="cuda")
+        t3 = torch.randn(1024, device="cuda")
+        out = torch.zeros(1024, device="cuda")
+        BLOCK_SIZE = 256
+        GRID = (1,)
+
+        i0, i1, i2, i3, i4, i5 = sympy.symbols("i0 i1 i2 i3 i4 i5")
+
+        return (
+            cdiv_variants_kernel,
+            {
+                "a_ptr": t1,
+                "b_ptr": t2,
+                "c_ptr": t3,
+                "out_ptr": out,
+                "N": 1024,
+                "D": 256,
+                "BLOCK_SIZE": BLOCK_SIZE,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr", index=i0 * 256 + i1, var_names=(i0, i1), size=(4, 256)
+                ),
+                UserTritonDep(
+                    name="b_ptr", index=i2 * 256 + i3, var_names=(i2, i3), size=(4, 256)
+                ),
+                UserTritonDep(
+                    name="c_ptr", index=i4 * 256 + i5, var_names=(i4, i5), size=(4, 256)
+                ),
+            ],
+            [],
+        )
+
+    @make_kernel_access_analyzer_test
+    def test_broadcast_reshape():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+
+        @triton.jit
+        def broadcast_kernel(a_ptr, b_ptr, out_ptr, N, BLOCK_SIZE: tl.constexpr):
+            for k in range(tl.cdiv(N, BLOCK_SIZE)):
+                offsets = k * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < N
+
+                a = tl.load(a_ptr + offsets[:, None], mask=mask[:, None])
+                b = tl.load(b_ptr + offsets[None, :], mask=mask[None, :])
+
+                out = a + b
+
+                tl.store(
+                    out_ptr + offsets[:, None] * BLOCK_SIZE + offsets[None, :],
+                    out,
+                    mask=mask[:, None] & mask[None, :],
+                )
+
+        t1 = torch.randn(1024, device="cuda")
+        t2 = torch.randn(1024, device="cuda")
+        out = torch.randn(1024 * 1024, device="cuda")
+        BLOCK_SIZE = 256
+        GRID = (triton.cdiv(1024, BLOCK_SIZE),)
+
+        i0, i1, i2 = sympy.symbols("i0 i1 i2")
+
+        return (
+            broadcast_kernel,
+            {
+                "a_ptr": t1,
+                "b_ptr": t2,
+                "out_ptr": out,
+                "N": 1024,
+                "BLOCK_SIZE": BLOCK_SIZE,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr", index=i0 * 256 + i1, var_names=(i0, i1), size=(4, 256)
+                ),
+                UserTritonDep(
+                    name="b_ptr", index=i0 * 256 + i2, var_names=(i0, i2), size=(4, 256)
+                ),
+            ],
+            [
+                UserTritonDep(
+                    name="out_ptr",
+                    index=(i0 * 256 + i1) * 256 + i0 * 256 + i2,
+                    var_names=(i0, i1, i2),
+                    size=(4, 256, 256),
+                ),
+            ],
+        )
+
+    @make_kernel_access_analyzer_test
+    def test_loop_post_ptr_add():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+
+        @triton.jit
+        def loop_post_ptr_add_step(
+            a_ptr, b_ptr, stride, N, BLOCK_SIZE: tl.constexpr, STEP: tl.constexpr
+        ):
+            ptrs = a_ptr + tl.arange(0, BLOCK_SIZE)
+            for k in range(0, tl.cdiv(N, BLOCK_SIZE), STEP):
+                a = tl.load(ptrs)
+                tl.store(b_ptr + k * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE), a)
+                ptrs += stride
+
+        t = torch.randn(1024)
+        stride = 256
+        BLOCK_SIZE = 256
+        N = t.numel()
+        STEP = 2
+        GRID = (1,)
+
+        i0, i1, i2, i3 = sympy.symbols("i0 i1 i2 i3")
+
+        return (
+            loop_post_ptr_add_step,
+            {
+                "a_ptr": t,
+                "b_ptr": t,
+                "stride": stride,
+                "N": N,
+                "BLOCK_SIZE": BLOCK_SIZE,
+                "STEP": STEP,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr",
+                    index=i2 + i3 * STEP * stride,
+                    var_names=(i2, i3),
+                    size=(256, triton.cdiv(N, BLOCK_SIZE) // STEP),
+                ),
+            ],
+            [
+                UserTritonDep(
+                    name="b_ptr",
+                    index=i0 * STEP * BLOCK_SIZE + i1,
+                    var_names=(i0, i1),
+                    size=(triton.cdiv(N, BLOCK_SIZE) // STEP, 256),
+                ),
+            ],
+        )
+
+    @make_kernel_access_analyzer_test
+    def test_simple_loop():
+        import sympy
+
+        from torch._inductor.dependencies import UserTritonDep
+
+        @triton.jit
+        def simple_loop_kernel(a_ptr, b_ptr, N, BLOCK_SIZE: tl.constexpr):
+            for k in range(tl.cdiv(N, BLOCK_SIZE)):
+                offsets = k * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < N
+                a = tl.load(a_ptr + offsets, mask=mask)
+                tl.store(b_ptr + offsets, a, mask=mask)
+
+        t = torch.randn(1024)
+        BLOCK_SIZE = 256
+        N = t.numel()
+        GRID = (1,)
+
+        i0, i1 = sympy.symbols("i0 i1")
+
+        return (
+            simple_loop_kernel,
+            {
+                "a_ptr": t,
+                "b_ptr": t,
+                "N": N,
+                "BLOCK_SIZE": BLOCK_SIZE,
+            },
+            GRID,
+            {},
+            [
+                UserTritonDep(
+                    name="a_ptr",
+                    index=i0 * BLOCK_SIZE + i1,
+                    var_names=(i0, i1),
+                    size=(triton.cdiv(N, BLOCK_SIZE), BLOCK_SIZE),
+                ),
+            ],
+            [
+                UserTritonDep(
+                    name="b_ptr",
+                    index=i0 * BLOCK_SIZE + i1,
+                    var_names=(i0, i1),
+                    size=(triton.cdiv(N, BLOCK_SIZE), BLOCK_SIZE),
+                ),
+            ],
+        )
 
 
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
