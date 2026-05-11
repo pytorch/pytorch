@@ -151,8 +151,10 @@ def skip_background_threads_on_windows(f):
 
 
 def get_wait_for_cpu_kernel():
-    """Returns a compiled CUDA spin-wait kernel that blocks the GPU stream until
-    the host sets a pinned int32 flag to non-zero. Requires SM70+.
+    """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
+    until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
+    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
 
     Usage::
 
@@ -167,25 +169,21 @@ def get_wait_for_cpu_kernel():
     if _wait_for_cpu_kernel is None:
         from torch.cuda import _compile_kernel
 
-        if torch.version.hip:
-            kernel_source = r"""
+        _wait_for_cpu_kernel = _compile_kernel(
+            r"""
             __global__ void wait_for_cpu(int *pinned_cpu_flag) {
                 int flag = 0;
                 do {
-                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
-                } while (flag == 0);
-            }
-            """
-        else:
-            kernel_source = r"""
-            __global__ void wait_for_cpu(int *pinned_cpu_flag) {
-                int flag = 0;
-                do {
+            #ifdef __HIP_PLATFORM_AMD__
+                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+            #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+            #endif
                 } while (flag == 0);
             }
-            """
-        _wait_for_cpu_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
+            """,
+            "wait_for_cpu",
+        )
     return _wait_for_cpu_kernel
 
 
@@ -2827,8 +2825,9 @@ torch.cuda.synchronize()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH,
-        "CUDA >= 11.0 ROCM >= 7.3 required for external events in cuda graphs.",
+        "CUDA >= 11.0 / ROCm >= 7.0 required for external events in cuda graphs",
     )
+    @skipIfRocmVersionLessThan((7, 0))
     def test_graph_timing(self):
         torch.cuda.empty_cache()
         x = torch.randn(10240000, device="cuda")
@@ -7255,6 +7254,7 @@ class TestMemPool(TestCase):
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -7264,7 +7264,7 @@ class TestMemPool(TestCase):
         # Exercises the insert_events path in endAllocateToPool.
         spin_wait_kernel = get_wait_for_cpu_kernel()
 
-        torch._C._accelerator_setAllocatorSettings(
+        torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
         )
         torch.cuda.empty_cache()
@@ -7333,7 +7333,7 @@ class TestMemPool(TestCase):
 
         self.assertEqual(data_ptr, reused_ptr)
 
-        torch._C._accelerator_setAllocatorSettings(
+        torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:False"
         )
 
@@ -9209,7 +9209,7 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @skipIfRocmVersionLessThan((7, 3))
+    @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -9289,8 +9289,13 @@ class TestCudaDeviceParametrized(TestCase):
             torch.all(x_cpu == 1.0),
             "Copy should be done once end_event is synchronized",
         )
-        # sync to ensure that work_stream is done before checking query
-        torch.cuda.synchronize()
+        # On HIP graphs, the event-record node can become visible to
+        # event.synchronize() a few microseconds before the host-side
+        # stream state is updated; poll briefly so we exercise the
+        # invariant ("after sync the stream is drained") without flaking.
+        deadline = time.monotonic() + 0.1
+        while not work_stream.query() and time.monotonic() < deadline:
+            pass
         self.assertTrue(
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",

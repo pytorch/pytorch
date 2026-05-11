@@ -141,9 +141,9 @@ struct CUDAEvent {
         ".");
     CUDAGuard guard(device_index_);
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 70300
+#if !defined(USE_ROCM) || ROCM_VERSION >= 70000
     // it is an error to use cudaEventRecordExternal when not doing stream
-    // capture
+    // capture (same applies to hipEventRecordExternal on ROCm 7.0+)
     unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
                               c10::cuda::CaptureStatus::None &&
                           external_)
@@ -168,9 +168,9 @@ struct CUDAEvent {
   void block(const CUDAStream& stream) {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
-#if defined(USE_ROCM) && ROCM_VERSION >= 70300
+#if !defined(USE_ROCM) || ROCM_VERSION >= 70000
       // it is an error to use cudaEventWaitExternal when not doing stream
-      // capture
+      // capture (same applies to hipEventWaitExternal on ROCm 7.0+)
       unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
                                 c10::cuda::CaptureStatus::None &&
                             external_)
@@ -252,8 +252,9 @@ struct CUDAEvent {
 
   void createEvent(DeviceIndex device_index) {
     external_ = (flags_ & cudaEventExternal) != 0;
-#if defined(USE_ROCM) && ROCM_VERSION < 70300
-    TORCH_CHECK(!external_, "External events require ROCm 7.3+");
+#if defined(USE_ROCM) && ROCM_VERSION < 70000
+    TORCH_CHECK(
+        !external_, "External CUDA-graph events on ROCm require ROCm 7.0+");
 #endif
     flags_ &= ~cudaEventExternal;
     device_index_ = device_index;
