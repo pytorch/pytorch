@@ -976,11 +976,12 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self, device, records):
+    def test_lru_cache_warning_issued_during_tracing(self, records):
         prev_default = torch._C._get_default_device()
         try:
-            torch.set_default_device(device)
+            torch.set_default_device(torch.accelerator.current_accelerator())
 
             @torch.compile(backend="eager")
             def f(x):
@@ -9163,7 +9164,6 @@ instantiate_parametrized_tests(ReproTests)
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices)
-instantiate_device_type_tests(LRUCacheWarningTests, globals(), only_for=("cuda",))
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
