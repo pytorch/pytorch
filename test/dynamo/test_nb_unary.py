@@ -709,9 +709,9 @@ class NbUnaryTests(TestCase):
 
         real = torch.rand(1, dtype=torch.float32)
         imag = torch.rand(1, dtype=torch.float32)
-        complex = torch.complex(real, imag)
-        eager_result = fn(complex)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(complex)
+        complex_val = torch.complex(real, imag)
+        eager_result = fn(complex_val)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(complex_val)
         self.assertEqual(result.dtype, eager_result.dtype)
 
 
