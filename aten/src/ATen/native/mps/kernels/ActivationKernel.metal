@@ -230,7 +230,7 @@ REGISTER_BINARY_OP(silu_backward, bfloat, bfloat);
 
 template <typename T>
 static inline float gelu_dispatch_tanh(float x) {
-  if constexpr (::metal::is_same_v<T, float>) {
+  if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
     return ::metal::tanh(x);
   } else {
     return ::metal::fast::tanh(x);
