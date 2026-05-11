@@ -414,6 +414,227 @@ void dispatch_bf16_grouped_kernel_on_ab_transpose(
   }
 }
 
+// _foreach_mm: same CUTLASS grouped GEMM but reads from separate tensor pointers
+template <
+    typename ArchTag,
+    bool a_row_major,
+    bool b_row_major,
+    bool PONGOr2SM,
+    typename TB_M,
+    typename TB_N,
+    typename TB_K>
+void bf16bf16_foreach_mm_impl(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+  using DtypeA = cutlass::bfloat16_t;
+  using DtypeB = cutlass::bfloat16_t;
+  using DtypeOutput = cutlass::bfloat16_t;
+  using DtypeAccum = float;
+  using LayoutA = cute::conditional_t<
+      a_row_major,
+      cutlass::layout::RowMajor,
+      cutlass::layout::ColumnMajor>;
+  constexpr int AlignmentA = 16 / sizeof(DtypeA);
+  using LayoutB = cute::conditional_t<
+      b_row_major,
+      cutlass::layout::RowMajor,
+      cutlass::layout::ColumnMajor>;
+  constexpr int AlignmentB = 16 / sizeof(DtypeB);
+  using LayoutOutput = cutlass::layout::RowMajor;
+  constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
+  using OperatorClass = cutlass::arch::OpClassTensorOp;
+  using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
+  using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
+  using KernelSchedule =
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::KernelSchedule;
+  using EpilogueSchedule =
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::EpilogueSchedule;
+  using ProblemShape = cutlass::gemm::GroupProblemShape<
+      cute::Shape<int32_t, int32_t, int32_t>>;
+
+  using CollectiveEpilogue =
+      typename cutlass::epilogue::collective::CollectiveBuilder<
+          ArchTag, OperatorClass, TileShape, ClusterShape,
+          cutlass::epilogue::collective::EpilogueTileAuto,
+          DtypeAccum, DtypeAccum,
+          void, LayoutOutput*, AlignmentOutput,
+          DtypeOutput, LayoutOutput*, AlignmentOutput,
+          EpilogueSchedule,
+          cutlass::epilogue::fusion::LinearCombination<DtypeOutput, DtypeAccum>>::CollectiveOp;
+
+  using CollectiveMainloop =
+      typename cutlass::gemm::collective::CollectiveBuilder<
+          ArchTag, OperatorClass,
+          DtypeA, LayoutA*, AlignmentA,
+          DtypeB, LayoutB*, AlignmentB,
+          DtypeAccum, TileShape, ClusterShape,
+          cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
+              sizeof(typename CollectiveEpilogue::SharedStorage))>,
+          KernelSchedule>::CollectiveOp;
+
+  using GemmKernelBase = cutlass::gemm::kernel::GemmUniversal<
+      ProblemShape, CollectiveMainloop, CollectiveEpilogue>;
+  using GemmKernel = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+      at::cuda::detail::enable_3x_kernel_for_sm10<GemmKernelBase>,
+      at::cuda::detail::enable_3x_kernel_for_sm9x<GemmKernelBase>>;
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
+  using StrideA = typename Gemm::GemmKernel::InternalStrideA;
+  using StrideB = typename Gemm::GemmKernel::InternalStrideB;
+  using StrideOutput = typename Gemm::GemmKernel::InternalStrideD;
+
+  int32_t group_count = static_cast<int32_t>(self_list.size());
+  int32_t M = self_list[0].size(0);
+  int32_t K = self_list[0].size(1);
+  int32_t N = mat2_list[0].size(1);
+
+  TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
+
+  const int group_alignment = 16 / sizeof(void*);
+  const int aligned_group_count =
+      round_up_to_nearest_multiple(group_count, group_alignment);
+  const int64_t problem_shape_size =
+      group_count * ((int64_t)sizeof(ProblemShape::UnderlyingProblemShape));
+  const int64_t stride_size = 3 * group_count * ((int64_t)sizeof(StrideA));
+  int64_t input_args_size = aligned_group_count * 3 * sizeof(void*) +
+      problem_shape_size + stride_size;
+
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto input_buf = allocator.allocate(input_args_size);
+  void* buf_ptr = input_buf.get();
+  DtypeA** inputA_ptrs = reinterpret_cast<DtypeA**>(buf_ptr);
+  DtypeB** inputB_ptrs =
+      reinterpret_cast<DtypeB**>(inputA_ptrs + aligned_group_count);
+  DtypeOutput** output_ptrs =
+      reinterpret_cast<DtypeOutput**>(inputB_ptrs + aligned_group_count);
+  static_assert(
+      sizeof(StrideA) == 8, "expected StrideA to be 8 bytes for alignment");
+  StrideA* stride_A =
+      reinterpret_cast<StrideA*>(output_ptrs + aligned_group_count);
+  StrideB* stride_B = reinterpret_cast<StrideB*>(stride_A + group_count);
+  StrideOutput* stride_output =
+      reinterpret_cast<StrideOutput*>(stride_B + group_count);
+  ProblemShape::UnderlyingProblemShape* problem_sizes =
+      reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
+          stride_output + group_count);
+
+  // Build pointer arrays on host, copy to device.
+  // Synchronous copy because host_ptrs is stack-allocated and would be
+  // freed before an async copy completes.
+  std::vector<void*> host_ptrs(3 * aligned_group_count, nullptr);
+  for (int i = 0; i < group_count; i++) {
+    host_ptrs[i] = self_list[i].data_ptr();
+    host_ptrs[aligned_group_count + i] = mat2_list[i].data_ptr();
+    host_ptrs[2 * aligned_group_count + i] = outputs[i].data_ptr();
+  }
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  AT_CUDA_CHECK(cudaMemcpy(
+      buf_ptr, host_ptrs.data(),
+      3 * aligned_group_count * sizeof(void*),
+      cudaMemcpyHostToDevice));
+
+  int64_t lda = a_row_major ? self_list[0].stride(-2) : self_list[0].stride(-1);
+  int64_t ldb = b_row_major ? mat2_list[0].stride(-2) : mat2_list[0].stride(-1);
+  int64_t ldoutput = outputs[0].stride(-2);
+
+  at::cuda::detail::prepare_foreach_mm_data<<<1, group_count, 0, stream>>>(
+      problem_sizes, stride_A, stride_B, stride_output,
+      M, N, K, lda, ldb, ldoutput);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  typename Gemm::Arguments arguments{
+      cutlass::gemm::GemmUniversalMode::kGrouped,
+      {group_count, problem_sizes, nullptr},
+      {(const DtypeA**)inputA_ptrs,
+       stride_A,
+       (const DtypeB**)inputB_ptrs,
+       stride_B},
+      {{},
+       nullptr,
+       stride_output,
+       output_ptrs,
+       stride_output}};
+
+  arguments.epilogue.thread.alpha = 1.0;
+  arguments.epilogue.thread.dAlpha = {cute::_0{}, cute::_0{}, 0};
+
+  int sm_count =
+      at::cuda::getDeviceProperties(outputs[0].device().index())->multiProcessorCount;
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    sm_count -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+  arguments.hw_info.sm_count = sm_count;
+
+  size_t workspace_size = Gemm::get_workspace_size(arguments);
+  auto workspace = allocator.allocate(workspace_size);
+  Gemm gemm;
+  TORCH_CHECK(
+      gemm.can_implement(arguments) == cutlass::Status::kSuccess,
+      "cutlass cannot implement");
+  TORCH_CHECK(
+      gemm.initialize(arguments, workspace.get()) == cutlass::Status::kSuccess,
+      "cutlass cannot initialize");
+  auto status = gemm(at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "cutlass cannot run, error ",
+      int(status));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <bool a_row_major, bool b_row_major>
+void dispatch_bf16_foreach_mm_on_tile_size(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+  int32_t M = self_list[0].size(0);
+  int32_t N = mat2_list[0].size(1);
+  bool small = (M <= 128 || N <= 128);
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm10x = properties != nullptr && properties->major == 10;
+  const bool sm11x = properties != nullptr && properties->major == 11;
+
+  if (sm10x || sm11x) {
+    if (small) {
+      bf16bf16_foreach_mm_impl<
+          cutlass::arch::Sm100, a_row_major, b_row_major,
+          false, cute::_128, cute::_256, cute::_64>(self_list, mat2_list, outputs);
+    } else {
+      bf16bf16_foreach_mm_impl<
+          cutlass::arch::Sm100, a_row_major, b_row_major,
+          true, cute::_256, cute::_256, cute::_64>(self_list, mat2_list, outputs);
+    }
+  } else {
+    if (small) {
+      bf16bf16_foreach_mm_impl<
+          cutlass::arch::Sm90, a_row_major, b_row_major,
+          true, cute::_64, cute::_128, cute::_128>(self_list, mat2_list, outputs);
+    } else {
+      bf16bf16_foreach_mm_impl<
+          cutlass::arch::Sm90, a_row_major, b_row_major,
+          false, cute::_128, cute::_256, cute::_64>(self_list, mat2_list, outputs);
+    }
+  }
+}
+
+void dispatch_bf16_foreach_mm_on_ab_transpose(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+  bool a_row_major = self_list[0].stride(-1) == 1;
+  bool b_row_major = mat2_list[0].stride(-1) == 1;
+  if (a_row_major && b_row_major) {
+    dispatch_bf16_foreach_mm_on_tile_size<true, true>(self_list, mat2_list, outputs);
+  } else if (a_row_major && !b_row_major) {
+    dispatch_bf16_foreach_mm_on_tile_size<true, false>(self_list, mat2_list, outputs);
+  } else if (!a_row_major && b_row_major) {
+    dispatch_bf16_foreach_mm_on_tile_size<false, true>(self_list, mat2_list, outputs);
+  } else {
+    dispatch_bf16_foreach_mm_on_tile_size<false, false>(self_list, mat2_list, outputs);
+  }
+}
+
 } // namespace
 #endif
 
@@ -429,6 +650,17 @@ void bf16bf16_grouped_mm(
   dispatch_bf16_grouped_kernel_on_ab_transpose(mat_a, mat_b, offs, bias, out);
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");
+#endif
+}
+
+void bf16bf16_foreach_mm(
+    at::TensorList self_list,
+    at::TensorList mat2_list,
+    std::vector<at::Tensor>& outputs) {
+#if defined(BUILD_GG_KERNEL)
+  dispatch_bf16_foreach_mm_on_ab_transpose(self_list, mat2_list, outputs);
+#else
+  TORCH_CHECK(false, "foreach mm is not supported on your system");
 #endif
 }
 
