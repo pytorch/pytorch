@@ -1984,27 +1984,14 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         # filter out NodeScheduleMarker
-        base_scheduler_nodes = [
+        base_scheduler_nodes: list[BaseSchedulerNode] = [
             node for node in node_schedule if isinstance(node, BaseSchedulerNode)
         ]
-        self.codegen_comment(base_scheduler_nodes, final_kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_begin()
-            V.graph.wrapper_code.write_kernel_context_guard(
-                final_kernel.kernel_name,
-                base_scheduler_nodes,  # type: ignore[arg-type]
-            )
-        final_kernel.call_kernel(final_kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_end()
-
-        if config.nan_asserts:
-            final_kernel.codegen_nan_check()
-        if config.warn_mix_layout:
-            final_kernel.warn_mix_layout(kernels[0].kernel_name)
-
-        V.graph.removed_buffers |= final_kernel.removed_buffers
-        V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
+        self._launch_kernel_and_cleanup(
+            final_kernel,
+            base_scheduler_nodes,
+            free_buffers=False,
+        )
 
         if (
             V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
@@ -2026,6 +2013,35 @@ class SIMDScheduling(BaseScheduling):
                     )
 
         self.free_buffers_in_scheduler()
+
+    def _launch_kernel_and_cleanup(
+        self,
+        kernel,
+        base_scheduler_nodes: list[BaseSchedulerNode],
+        *,
+        free_buffers: bool = True,
+    ) -> None:
+        self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_begin()
+            V.graph.wrapper_code.write_kernel_context_guard(
+                kernel.kernel_name,
+                base_scheduler_nodes,
+            )
+        kernel.call_kernel(kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_end()
+
+        if config.nan_asserts:
+            kernel.codegen_nan_check()
+        if config.warn_mix_layout:
+            kernel.warn_mix_layout(kernel.kernel_name)
+
+        V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
+        if free_buffers:
+            self.free_buffers_in_scheduler()
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
