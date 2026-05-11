@@ -125,7 +125,7 @@ class VecMask {
   VectorizedN<T, N> mask_;
 
   template <typename U>
-  static T value_to_mask(U b) {
+  constexpr static T value_to_mask(U b) {
     if constexpr (std::is_same_v<T, bool>) {
       return static_cast<bool>(b);
     } else {
