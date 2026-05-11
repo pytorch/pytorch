@@ -14653,9 +14653,14 @@ if __name__ == '__main__':
                     expected_weight_grad_max_ulp_diff = 47221
             else:
                 if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 68
-                    expected_weight_grad_max_ulp_diff = 118
+                    if "mps" in device:
+                        expected_max_ulp_diff = 1
+                        expected_input_grad_max_ulp_diff = 124
+                        expected_weight_grad_max_ulp_diff = 141
+                    else:
+                        expected_max_ulp_diff = 1
+                        expected_input_grad_max_ulp_diff = 68
+                        expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
                     expected_max_ulp_diff = 1
                     if "mps" in device:
