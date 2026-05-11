@@ -5,9 +5,11 @@ import re
 import sys
 import unittest
 
+import numpy as np
+
 import torch
 import torch._dynamo
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -100,22 +102,27 @@ def make_pallas(cls):
     return test_class
 
 
-def _skip_if(condition_fn, reason):
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(self, *args, **kwargs):
-            if condition_fn(self):
-                self.skipTest(reason)
-            fn(self, *args, **kwargs)
+def _skip_if(condition_fn):
+    def skip(fn=None, *, reason=None):
+        def decorator(fn):
+            @functools.wraps(fn)
+            def wrapper(self, *args, **kwargs):
+                if condition_fn(self):
+                    self.skipTest(reason or f"Not yet working on {self.DEVICE}")
+                fn(self, *args, **kwargs)
 
-        return wrapper
+            return wrapper
 
-    return decorator
+        if fn is not None:
+            return decorator(fn)
+        return decorator
+
+    return skip
 
 
-skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
-skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
-skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu")
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda")
 
 
 class PallasTestsMixin:
@@ -245,10 +252,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda(reason="sqrt primitive not implemented in Pallas Mosaic GPU")
     def test_sqrt(self):
         """Test sqrt operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sqrt primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             return torch.sqrt(x)
@@ -392,13 +398,11 @@ class PallasTestsMixin:
                 expected = fn(x, y)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_cuda(
+        reason="iteration variables not supported in Pallas GPU (Mosaic) backend"
+    )
     def test_different_shapes(self):
         """Test with different tensor shapes."""
-        if self.DEVICE == "cuda":
-            self.skipTest(
-                "iteration variables not supported in Pallas GPU (Mosaic) backend"
-            )
 
         def fn(x):
             return x * 2.0
@@ -464,14 +468,11 @@ class PallasTestsMixin:
                 expected = operate_on_tensor(x_t_contiguous)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_cuda(reason="strided access not supported in Pallas GPU (Mosaic) backend")
     def test_strided_int_pallas(self):
         """Test strided access patterns with the Pallas backend."""
-        if self.DEVICE == "cuda":
-            self.skipTest("strided access not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
-            # Access every other element (strided access)
             return x[::2] * 2.0
 
         compiled = self._compile(fn)
@@ -481,14 +482,11 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_cuda(reason="strided access not supported in Pallas GPU (Mosaic) backend")
     def test_strided_offset_pallas(self):
         """Test strided access with offset."""
-        if self.DEVICE == "cuda":
-            self.skipTest("strided access not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
-            # Access every other element starting from index 1
             return x[1::2] + 1.0
 
         compiled = self._compile(fn)
@@ -632,7 +630,7 @@ class PallasTestsMixin:
         x = base_2d[::2, ::2].unsqueeze(0)
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="TPU doesn't support float 64")
     def test_stride_non_contiguous_dtypes(self):
         """Test non-contiguous patterns with various dtypes."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -664,7 +662,6 @@ class PallasTestsMixin:
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
 
-    @skip_if_tpu
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
         compiled = self._compile(lambda a, b, c: a * b + c)
@@ -689,6 +686,80 @@ class PallasTestsMixin:
         s = torch.tensor(2.0, device=self.DEVICE)  # scalar
         compiled_bcast = self._compile(lambda x, y, s: x + y * s)
         self.assertEqual(compiled_bcast(x, y, s), x + y * s)
+
+    @skip_if_cuda
+    def test_scalar_scalar_ops(self):
+        """Test scalar-scalar operations."""
+
+        def test_add(a, b):
+            return a + b
+
+        def test_mul(a, b):
+            return a * b
+
+        def test_sub(a, b):
+            return a - b
+
+        def test_div(a, b):
+            return a / b
+
+        for fn in [test_add, test_mul, test_sub, test_div]:
+            with self.subTest(op=fn.__name__):
+                compiled = self._compile(fn)
+
+                # Test with 0-D tensors (scalars)
+                a = torch.tensor(3.5, dtype=torch.float32, device=self.DEVICE)
+                b = torch.tensor(2.0, dtype=torch.float32, device=self.DEVICE)
+
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
+
+                # Ensure result is also scalar
+                self.assertEqual(result.dim(), 0)
+                self.assertEqual(result.dtype, torch.float32)
+
+    def test_scalar_tensor_ops(self):
+        """Test scalar-tensor operations."""
+
+        def test_scalar_add_tensor(s, t):
+            return s + t
+
+        def test_tensor_add_scalar(t, s):
+            return t + s
+
+        def test_scalar_mul_tensor(s, t):
+            return s * t
+
+        def test_tensor_mul_scalar(t, s):
+            return t * s
+
+        shapes = [(16,), (8, 8), (4, 4, 4)]
+
+        for shape in shapes:
+            for fn in [
+                test_scalar_add_tensor,
+                test_tensor_add_scalar,
+                test_scalar_mul_tensor,
+                test_tensor_mul_scalar,
+            ]:
+                with self.subTest(op=fn.__name__, shape=shape):
+                    compiled = self._compile(fn)
+
+                    # Create 0-D scalar tensor
+                    scalar = torch.tensor(2.5, dtype=torch.float32, device=self.DEVICE)
+                    tensor = torch.randn(shape, dtype=torch.float32, device=self.DEVICE)
+
+                    if "scalar" in fn.__name__.split("_")[0]:
+                        result = compiled(scalar, tensor)
+                        expected = fn(scalar, tensor)
+                    else:
+                        result = compiled(tensor, scalar)
+                        expected = fn(tensor, scalar)
+
+                    self.assertEqual(result, expected)
+                    self.assertEqual(result.shape, shape)
+                    self.assertEqual(result.dtype, torch.float32)
 
     def test_non_power_of_2_sizes(self):
         """Test that non-power-of-2 tensor sizes work correctly.
@@ -724,11 +795,10 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="Cannot do int indexing on TPU")
+    @skip_if_cuda(reason="gather not supported in Pallas GPU (Mosaic) backend")
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest("gather not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x, indices):
             # Use indices to gather elements from x
@@ -745,15 +815,14 @@ class PallasTestsMixin:
         expected = fn(x, indices)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="Cannot do int indexing on TPU")
+    # Pallas Mosaic backend doesn't support gather operations with array indices
+    # This limitation is in the Pallas/Mosaic lowering, not our implementation
+    @skip_if_cuda(
+        reason="Multi-dimensional gather not supported on Pallas Mosaic (CUDA) backend"
+    )
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
-        if self.DEVICE == "cuda":
-            # Pallas Mosaic backend doesn't support gather operations with array indices
-            # This limitation is in the Pallas/Mosaic lowering, not our implementation
-            self.skipTest(
-                "Multi-dimensional gather not supported on Pallas Mosaic (CUDA) backend"
-            )
 
         def fn(x, row_indices):
             # Select specific rows using integer array indexing
@@ -960,7 +1029,6 @@ class PallasTestsMixin:
                 expected = fn(a, b)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -974,10 +1042,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda(reason="integer_pow primitive not implemented in Pallas Mosaic GPU")
     def test_reciprocal(self):
         """Test reciprocal operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("integer_pow primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             return torch.reciprocal(x)
@@ -1002,7 +1069,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(
+        reason="Pallas loweing crash: https://github.com/jax-ml/jax/issues/36149"
+    )
     def test_erf(self):
         """Test erf operation."""
 
@@ -1016,7 +1085,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(
+        reason="Pallas loweing crash: https://github.com/jax-ml/jax/issues/36149"
+    )
     def test_atan2(self):
         """Test atan2 operation."""
 
@@ -1082,11 +1153,10 @@ class PallasTestsMixin:
                 expected = fn(x)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
+    @skip_if_tpu(reason="reduce_prod primitive not implemented in Pallas TPU lowering")
+    @skip_if_cuda(reason="reduce_prod primitive not implemented in Pallas Mosaic GPU")
     def test_prod_reduction(self):
         """Test prod reduction."""
-        if self.DEVICE == "cuda":
-            self.skipTest("reduce_prod primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             # Use smaller values to avoid overflow
@@ -1121,6 +1191,27 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
+    def test_non_stride1_reduction(self):
+        """Test reductions along non-innermost axis on square tensors.
+
+        On square tensors (e.g. 8x8), the reduction axis cannot be inferred
+        from shape alone since both dims have the same size. This verifies
+        that stride-based axis detection works for both dim=0 and dim=1.
+        """
+        x = torch.randn(8, 8, device=self.DEVICE)
+        for dim in [0, 1]:
+            with self.subTest(dim=dim):
+                torch._dynamo.reset()
+
+                def fn(x, dim=dim):
+                    return x.sum(dim)
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
@@ -1141,7 +1232,6 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1155,9 +1245,11 @@ class PallasTestsMixin:
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
                 var_result, mean_result = compiled(x)
-                var_expected, mean_expected = fn(x)
-                self.assertEqual(mean_result, mean_expected)
-                self.assertEqual(var_result, var_expected)
+                # Eager mode torch_tpu doesn't support lowering var_mean, so comparing with numpy
+                var_expected = np.var(x.cpu().numpy(), axis=-1, keepdims=True, ddof=1)
+                mean_expected = np.mean(x.cpu().numpy(), axis=-1, keepdims=True)
+                self.assertEqual(mean_result.cpu().numpy(), mean_expected)
+                self.assertEqual(var_result.cpu().numpy(), var_expected)
 
     @skip_if_cuda
     def test_layer_norm(self):
@@ -1206,7 +1298,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
+    @skip_if_tpu  # stack+where fusion doesn't broadcast correctly on TPU yet
     def test_rope_interleaved(self):
         """Test Rotary Position Embedding with interleaved halves.
 
@@ -1231,7 +1323,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
+    @skip_if_tpu  # output last dim 10 not 128-aligned, Mosaic rejects it
     def test_chained_stride_slice(self):
         """Test that chained stride slices compose into a single strided access.
 
@@ -1249,11 +1341,75 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda
+    @skip_if_tpu  # store uses flatten+scatter, unsupported on Mosaic
+    def test_strided_multi_dim(self):
+        """Test strided access on multiple dimensions simultaneously."""
+
+        def fn(x):
+            return x[::2, ::3] + 1.0
+
+        compiled = self._compile(fn)
+
+        # 8 % 2 == 0 and 12 % 3 == 0
+        x = torch.randn(8, 12, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu  # falls back to flatten+gather, unsupported on Mosaic
+    def test_strided_non_divisible(self):
+        """Test strided access where dim is not divisible by stride.
+
+        Falls back to flatten+gather on CPU (blocks tiling).
+        """
+
+        def fn(x):
+            return x[::3] * 2.0
+
+        compiled = self._compile(fn)
+
+        # 16 % 3 != 0 → should fall back
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_strided_large_offset(self):
+        """Test strided access where offset >= stride (skip blocks)."""
+
+        def fn(x):
+            return x[5::2] + 1.0
+
+        compiled = self._compile(fn)
+
+        # offset=5, stride=2: skip=2, r=1 → reshape(5,2)[2:,1]
+        x = torch.arange(10, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu  # store uses scatter, unsupported on Mosaic
+    def test_strided_large_offset_2d(self):
+        """Test 2D strided access where offset >= stride on last dim."""
+
+        def fn(x):
+            return x[:, 5::2] * 2.0
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(4, 8, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
     @skip_if_tpu
+    @skip_if_cuda(reason="arange not supported in Pallas GPU (Mosaic) backend")
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
-        if self.DEVICE == "cuda":
-            self.skipTest("arange not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
@@ -1384,7 +1540,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_warpgroup_size_2d_128x128(self):
         """Test 2D tensor with 128x128 and tiling-exercising sizes."""
 
@@ -1579,7 +1734,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 
@@ -1644,6 +1798,815 @@ class PallasTestsMixin:
 
         result = compiled(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
         expected = transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
+        self.assertEqual(result, expected)
+
+    def _run_transformer_layer(
+        self,
+        seq_len,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
+    ):
+        """Run a Llama-style transformer layer forward pass and verify correctness.
+
+        Architecture: RMSNorm -> Multi-Head Attention -> Residual ->
+                      RMSNorm -> SwiGLU FFN -> Residual
+        """
+        torch._dynamo.reset()
+
+        def transformer_layer(
+            x,
+            rms_w1,
+            rms_w2,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            w_gate,
+            w_up,
+            w_down,
+            mask,
+        ):
+            T, C = x.shape
+
+            # Pre-attention RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+            # Multi-head self-attention
+            q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)  # (H, T, D)
+            k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+            v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+            scale = 1.0 / (head_dim**0.5)
+            att = (q @ k.transpose(-2, -1)) * scale  # (H, T, T)
+            att = att + mask  # causal mask broadcasts (T, T) -> (H, T, T)
+            att = torch.softmax(att, dim=-1)
+            attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)  # (T, C)
+
+            x = x + (attn_out @ w_o)
+
+            # Pre-FFN RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+            # SwiGLU FFN
+            gate = torch.nn.functional.silu(h @ w_gate)
+            up = h @ w_up
+            x = x + ((gate * up) @ w_down)
+
+            return x
+
+        compiled = self._compile(transformer_layer)
+
+        # Scale weights by 1/sqrt(fan_in) to keep activations O(1) and
+        # avoid rsqrt amplification of reduction-order diffs.
+        s = hidden_dim**-0.5
+        w_q = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_k = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_v = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_o = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_gate = torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s
+        w_up = torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s
+        w_down = torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s
+        rms_w1 = torch.ones(hidden_dim, device=self.DEVICE)
+        rms_w2 = torch.ones(hidden_dim, device=self.DEVICE)
+
+        # Causal mask (T, T) - broadcasts over heads
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
+
+        result = compiled(
+            x,
+            rms_w1,
+            rms_w2,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            w_gate,
+            w_up,
+            w_down,
+            mask,
+        )
+        expected = transformer_layer(
+            x,
+            rms_w1,
+            rms_w2,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            w_gate,
+            w_up,
+            w_down,
+            mask,
+        )
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    @skip_if_cuda
+    def test_transformer_layer_tiny(self):
+        """Test full Llama-style transformer layer at tiny dimensions."""
+        self._run_transformer_layer(
+            seq_len=32,
+            hidden_dim=64,
+            num_heads=2,
+            head_dim=32,
+            ffn_dim=256,
+        )
+
+    @skip_if_cuda
+    def test_transformer_layer_medium(self):
+        """Test full Llama-style transformer layer at Llama-7B dimensions."""
+        self._run_transformer_layer(
+            seq_len=128,
+            hidden_dim=4096,
+            num_heads=32,
+            head_dim=128,
+            ffn_dim=11008,
+            atol=2e-2,
+            rtol=1e-2,
+        )
+
+    @skip_if_cuda
+    def test_transformer_layer_large(self):
+        """Test full Llama-style transformer layer at Llama-405B dimensions."""
+        self._run_transformer_layer(
+            seq_len=32,
+            hidden_dim=16384,
+            num_heads=128,
+            head_dim=128,
+            ffn_dim=53248,
+            atol=2e-2,
+            rtol=1e-2,
+        )
+
+    @skip_if_cuda
+    def test_permute_contiguous_3d(self):
+        """Test that permute + contiguous on a 3D tensor produces correct results."""
+
+        def fn(x):
+            return x.permute(1, 0, 2).contiguous()
+
+        compiled = self._compile(fn)
+        x = torch.randn(2, 32, 32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_transpose_contiguous_2d(self):
+        """Test that transpose + contiguous on a 2D tensor compiles and runs."""
+
+        def fn(x):
+            return x.transpose(0, 1).contiguous()
+
+        compiled = self._compile(fn)
+        x = torch.randn(2, 32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_permute_contiguous_2d_asymmetric(self):
+        """Test transpose+contiguous on asymmetric 2D shapes."""
+
+        def fn(x):
+            return x.transpose(0, 1).contiguous()
+
+        compiled = self._compile(fn)
+        for shape in [(10000, 2), (2, 10000), (8, 128), (128, 8), (3, 256)]:
+            with self.subTest(shape=shape):
+                x = torch.randn(*shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_permute_contiguous_3d_all_perms(self):
+        """Test non-identity 3D permutations with distinct dim sizes."""
+        all_perms = [
+            (1, 0, 2),
+            (0, 2, 1),
+            (2, 1, 0),  # full-rank detection
+        ]
+        x = torch.randn(2, 1152, 2048, device=self.DEVICE)
+
+        for perm in all_perms:
+            with self.subTest(perm=perm):
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_permute_contiguous_3d_collapsed(self):
+        """Test 3D permutations that require collapsed-dim detection."""
+        all_perms = [
+            (2, 0, 1),
+            (1, 2, 0),
+        ]
+        x = torch.randn(2, 1152, 2048, device=self.DEVICE)
+
+        for perm in all_perms:
+            with self.subTest(perm=perm):
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_permute_contiguous_3d_large_notile(self):
+        """Test 3D perms with large shape but no tiling (dim=1024 exact fit)."""
+        perms = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
+
+        x = torch.randn(2, 1152, 1024, device=self.DEVICE)
+
+        for perm in perms:
+            with self.subTest(perm=perm):
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_permute_contiguous_3d_medium(self):
+        """Test 3D perms with medium shape that triggers tiling on last dim."""
+        perms = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
+
+        x = torch.randn(2, 8, 2048, device=self.DEVICE)
+
+        for perm in perms:
+            with self.subTest(perm=perm):
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_permute_contiguous_3d_small(self):
+        """Test 3D perms with small shapes that produce grid=(1,)."""
+        all_perms = [
+            (1, 0, 2),
+            (0, 2, 1),
+            (2, 1, 0),
+            (2, 0, 1),
+            (1, 2, 0),
+        ]
+        # (2,0,1) on (2,8,16) triggers a Mosaic "unsupported shape cast"
+        # bug on TPU due to internal tile padding (128x16 -> 16x128).
+        tpu_skip = {(2, 0, 1)} if self.DEVICE == "tpu" else set()
+        x = torch.randn(2, 8, 16, device=self.DEVICE)
+
+        for perm in all_perms:
+            if perm in tpu_skip:
+                continue
+            with self.subTest(perm=perm):
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_permute_contiguous_4d(self):
+        """Test all 23 non-identity 4D permutations with multi-tile grids."""
+        all_perms = [
+            (0, 1, 3, 2),
+            (0, 2, 1, 3),
+            (0, 2, 3, 1),
+            (0, 3, 1, 2),
+            (0, 3, 2, 1),
+            (1, 0, 2, 3),
+            (1, 0, 3, 2),
+            (1, 2, 0, 3),
+            (1, 2, 3, 0),
+            (1, 3, 0, 2),
+            (1, 3, 2, 0),
+            (2, 0, 1, 3),
+            (2, 0, 3, 1),
+            (2, 1, 0, 3),
+            (2, 1, 3, 0),
+            (2, 3, 0, 1),
+            (2, 3, 1, 0),
+            (3, 0, 1, 2),
+            (3, 0, 2, 1),
+            (3, 1, 0, 2),
+            (3, 1, 2, 0),
+            (3, 2, 0, 1),
+            (3, 2, 1, 0),
+        ]
+        needs_large_first = {
+            (0, 3, 2, 1),
+            (1, 3, 0, 2),
+            (1, 3, 2, 0),
+            (2, 3, 1, 0),
+            (3, 0, 2, 1),
+            (3, 1, 0, 2),
+            (3, 1, 2, 0),
+            (3, 2, 0, 1),
+            (3, 2, 1, 0),
+        }
+        shapes = {
+            "large_last": (2, 4, 128, 2048),
+            "large_first": (1152, 1152, 2, 4),
+        }
+
+        for perm in all_perms:
+            key = "large_first" if perm in needs_large_first else "large_last"
+            shape = shapes[key]
+            with self.subTest(perm=perm, shape=shape):
+                x = torch.randn(*shape, device=self.DEVICE)
+
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    def _run_transformer(
+        self,
+        num_layers,
+        seq_len,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
+    ):
+        """Run a multi-layer Llama-style transformer and verify correctness."""
+        torch._dynamo.reset()
+
+        def transformer(x, mask, *layer_params):
+            T, C = x.shape
+            params_per_layer = (
+                9  # rms_w1, rms_w2, w_q, w_k, w_v, w_o, w_gate, w_up, w_down
+            )
+
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+
+                # Pre-attention RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+                # Multi-head self-attention
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+
+                x = x + (attn_out @ w_o)
+
+                # Pre-FFN RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+                # SwiGLU FFN
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+
+            return x
+
+        compiled = self._compile(transformer)
+
+        s = hidden_dim**-0.5
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),  # rms_w1
+                    torch.ones(hidden_dim, device=self.DEVICE),  # rms_w2
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_q
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_k
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_v
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,  # w_o
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,  # w_gate
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,  # w_up
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,  # w_down
+                ]
+            )
+
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
+
+        result = compiled(x, mask, *all_params)
+        expected = transformer(x, mask, *all_params)
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    @skip_if_cuda
+    def test_transformer_tiny(self):
+        """Test a 4-layer Llama-style transformer at tiny dimensions."""
+        self._run_transformer(
+            num_layers=4,
+            seq_len=32,
+            hidden_dim=64,
+            num_heads=2,
+            head_dim=32,
+            ffn_dim=256,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @skip_if_cuda
+    def test_transformer_medium(self):
+        """Test a 4-layer transformer at Llama-7B-like dimensions."""
+        self._run_transformer(
+            num_layers=4,
+            seq_len=128,
+            hidden_dim=4096,
+            num_heads=32,
+            head_dim=128,
+            ffn_dim=11008,
+            atol=0.1,
+            rtol=1e-2,
+        )
+
+    def _run_transformer_lm(
+        self,
+        num_layers,
+        seq_len,
+        vocab_size,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
+    ):
+        """Run a full Llama-style LM (embedding + layers + norm + lm_head)."""
+        torch._dynamo.reset()
+
+        def transformer_lm(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *layer_params
+        ):
+            # Token embedding via gather
+            x = embed_table[token_ids]  # (T, C)
+            T, C = x.shape
+            params_per_layer = 9
+
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+
+                # Pre-attention RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+                # Multi-head self-attention
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+
+                x = x + (attn_out @ w_o)
+
+                # Pre-FFN RMSNorm
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+                # SwiGLU FFN
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+
+            # Final RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6) * final_rms_w
+
+            # LM head
+            logits = x @ lm_head_w  # (T, V)
+            return logits
+
+        compiled = self._compile(transformer_lm)
+
+        s = hidden_dim**-0.5
+        embed_table = torch.randn(vocab_size, hidden_dim, device=self.DEVICE) * s
+        final_rms_w = torch.ones(hidden_dim, device=self.DEVICE)
+        lm_head_w = torch.randn(hidden_dim, vocab_size, device=self.DEVICE) * s
+
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,
+                ]
+            )
+
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        token_ids = torch.randint(0, vocab_size, (seq_len,), device=self.DEVICE)
+
+        result = compiled(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *all_params
+        )
+        expected = transformer_lm(
+            token_ids, embed_table, final_rms_w, lm_head_w, mask, *all_params
+        )
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    @unittest.skip("numerical mismatch in embedding + RMSNorm fusion")
+    def test_transformer_lm_tiny(self):
+        """Test a full LM (embed + 4 layers + norm + lm_head) at tiny dims."""
+        self._run_transformer_lm(
+            num_layers=4,
+            seq_len=32,
+            vocab_size=256,
+            hidden_dim=64,
+            num_heads=2,
+            head_dim=32,
+            ffn_dim=256,
+        )
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_embedding_lookup(self):
+        """Test simple embedding table lookup (integer indexing)."""
+
+        def fn(token_ids, embed_table):
+            return embed_table[token_ids]
+
+        compiled = self._compile(fn)
+        embed_table = torch.randn(256, 64, device=self.DEVICE)
+        token_ids = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(token_ids, embed_table)
+        expected = fn(token_ids, embed_table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_basic(self):
+        """Test bare embedding lookup via indirect access detection."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_non_128_dim(self):
+        """Test indirect access with D not divisible by 128."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 100, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_large_vocab(self):
+        """Test indirect access with larger vocabulary."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(2048, 128, device=self.DEVICE)
+        indices = torch.randint(0, 2048, (64,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_add(self):
+        """Test embedding + pointwise add fused."""
+
+        def fn(indices, table, bias):
+            return table[indices] + bias
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        bias = torch.randn(32, 64, device=self.DEVICE)
+        result = compiled(indices, table, bias)
+        expected = fn(indices, table, bias)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_mul(self):
+        """Test embedding + pointwise multiply with broadcast."""
+
+        def fn(indices, table, scale):
+            return table[indices] * scale
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        scale = torch.randn(64, device=self.DEVICE)
+        result = compiled(indices, table, scale)
+        expected = fn(indices, table, scale)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_fused_chain(self):
+        """Test embedding + chained add and multiply."""
+
+        def fn(indices, table, bias, scale):
+            x = table[indices] + bias
+            return x * scale
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        bias = torch.randn(32, 64, device=self.DEVICE)
+        scale = torch.randn(64, device=self.DEVICE)
+        result = compiled(indices, table, bias, scale)
+        expected = fn(indices, table, bias, scale)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_nn_embedding(self):
+        """Test nn.functional.embedding path through indirect access."""
+
+        def fn(indices, weight):
+            return torch.nn.functional.embedding(indices, weight)
+
+        compiled = self._compile(fn)
+        weight = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (32,), device=self.DEVICE)
+        result = compiled(indices, weight)
+        expected = fn(indices, weight)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_single_token(self):
+        """Test indirect access with seq=1."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.randint(0, 256, (1,), device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda(reason="scalar prefetch not supported in Pallas GPU (Mosaic) backend")
+    def test_indirect_access_duplicate_indices(self):
+        """Test indirect access with repeated indices."""
+
+        def fn(indices, table):
+            return table[indices]
+
+        compiled = self._compile(fn)
+        table = torch.randn(256, 64, device=self.DEVICE)
+        indices = torch.tensor([0, 1, 0, 1, 2, 2, 3, 3], device=self.DEVICE)
+        result = compiled(indices, table)
+        expected = fn(indices, table)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_transformer_with_final_norm_and_lm_head(self):
+        """Test multi-layer transformer + final RMSNorm + LM head (no embedding)."""
+        torch._dynamo.reset()
+        num_layers = 4
+        seq_len = 32
+        hidden_dim = 64
+        num_heads = 2
+        head_dim = 32
+        ffn_dim = 256
+        vocab_size = 256
+
+        def transformer_with_head(x, final_rms_w, lm_head_w, mask, *layer_params):
+            T, C = x.shape
+            params_per_layer = 9
+            for i in range(num_layers):
+                offset = i * params_per_layer
+                rms_w1 = layer_params[offset]
+                rms_w2 = layer_params[offset + 1]
+                w_q = layer_params[offset + 2]
+                w_k = layer_params[offset + 3]
+                w_v = layer_params[offset + 4]
+                w_o = layer_params[offset + 5]
+                w_gate = layer_params[offset + 6]
+                w_up = layer_params[offset + 7]
+                w_down = layer_params[offset + 8]
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+                q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)
+                k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+                v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+                scale = 1.0 / (head_dim**0.5)
+                att = (q @ k.transpose(-2, -1)) * scale
+                att = att + mask
+                att = torch.softmax(att, dim=-1)
+                attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)
+                x = x + (attn_out @ w_o)
+                variance = x.pow(2).mean(-1, keepdim=True)
+                h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+                gate = torch.nn.functional.silu(h @ w_gate)
+                up = h @ w_up
+                x = x + ((gate * up) @ w_down)
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6) * final_rms_w
+            return x @ lm_head_w
+
+        compiled = self._compile(transformer_with_head)
+        s = hidden_dim**-0.5
+        final_rms_w = torch.ones(hidden_dim, device=self.DEVICE)
+        lm_head_w = torch.randn(hidden_dim, vocab_size, device=self.DEVICE) * s
+        all_params = []
+        for _ in range(num_layers):
+            all_params.extend(
+                [
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.ones(hidden_dim, device=self.DEVICE),
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s,
+                    torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s,
+                ]
+            )
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
+        result = compiled(x, final_rms_w, lm_head_w, mask, *all_params)
+        expected = transformer_with_head(x, final_rms_w, lm_head_w, mask, *all_params)
         self.assertEqual(result, expected)
 
     def test_warpgroup_size_2d_aligned_32x8(self):

@@ -53,7 +53,7 @@ struct TORCH_API Graph {
 
   // Dump the captured graph to a file for debugging purposes. The file format
   // and content are backend-specific.
-  void debug_dump(const std::string& path) const {
+  void debug_dump(const std::string& path) {
     impl_->debug_dump(path);
   }
 

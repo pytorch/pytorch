@@ -303,18 +303,6 @@ class autocast:
                 )
                 warnings.warn(error_message, stacklevel=2)
                 enabled = False
-                # Special case for MPS bfloat16 support on macOS < 14
-                if (
-                    self.device == "mps"
-                    and self.fast_dtype == torch.bfloat16
-                    and not torch.backends.mps.is_macos_or_newer(14, 0)
-                ):
-                    error_message = (
-                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
-                        "on macOS versions below 14. Disabling autocast."
-                    )
-                    warnings.warn(error_message, stacklevel=2)
-                    enabled = False
         self._enabled = enabled
 
     def __enter__(self):
@@ -382,7 +370,19 @@ class autocast:
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
+        if not callable(func):
+            raise TypeError(
+                f"autocast()(func) requires a callable, but got {type(func).__name__}. "
+                f"Did you mean to use autocast as a context manager? For example:\n"
+                f"    with torch.autocast(device_type=...):\n"
+                f"        output = model(input)"
+            )
         return autocast_decorator(self, func)
+
+
+# Subclass to distinguish autocast variables created by _enter_autocast (and not managed by a with statement)
+class _UnmanagedAutocast(autocast):
+    pass
 
 
 # These functions aren't meant for public usage.
@@ -394,7 +394,7 @@ def _enter_autocast(*vals):
         return torch.overrides.handle_torch_function(
             torch.amp._enter_autocast, [], *vals
         )
-    mode = torch.amp.autocast(*vals)
+    mode = _UnmanagedAutocast(*vals)
     mode.__enter__()
     return mode
 

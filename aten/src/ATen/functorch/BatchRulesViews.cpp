@@ -10,6 +10,7 @@
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/TensorBody.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <ATen/InferSize.h>
 
@@ -300,7 +301,7 @@ std::tuple<Tensor, std::optional<int64_t>> roll_batch_rule(const Tensor& self, s
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
   output = output.reshape_symint(old_shape);
-  return std::make_tuple(output, 0);
+  return std::make_tuple(std::move(output), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> diagonal_batching_rule(
@@ -425,6 +426,19 @@ std::tuple<Tensor, std::optional<int64_t>> view_batching_rule(
   return std::make_tuple(self_.view_symint(size_), 0);
 }
 
+std::tuple<Tensor, std::optional<int64_t>> view_dtype_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    ScalarType dtype) {
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  TORCH_CHECK(
+      logical_rank != 0 || self.itemsize() == c10::elementSize(dtype),
+      "self.dim() cannot be 0 to view ", self.scalar_type(), " as ", dtype, " (different element sizes)");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  return std::make_tuple(self_.view(dtype), 0);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> view_copy_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -498,7 +512,6 @@ std::tuple<Tensor, std::optional<int64_t>> narrow_copy_batch_rule(
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
   auto result = self_.narrow_copy_symint(dim, std::move(start), std::move(length));
-
   return std::make_tuple(std::move(result), 0);
 }
 
@@ -512,6 +525,18 @@ std::tuple<std::vector<Tensor>, std::optional<int64_t>> unsafe_split_batch_rule(
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
   auto result = self_.unsafe_split_symint(std::move(split_size), dim);
+  return std::make_tuple(std::move(result), 0);
+}
+
+std::tuple<std::vector<Tensor>, std::optional<int64_t>> unbind_copy_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  dim = maybe_wrap_dim(dim, logical_rank) + 1;
+  auto result = at::unbind_copy(self_, dim);
   return std::make_tuple(std::move(result), 0);
 }
 
@@ -570,7 +595,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diagonal_backward, diagonal_backward_batch_rule);
   VMAP_SUPPORT(select_backward, select_backward_batch_rule);
   VMAP_SUPPORT(slice_backward, slice_backward_batch_rule);
+  VMAP_SUPPORT2(unbind_copy, int, unbind_copy_batch_rule);
   VMAP_SUPPORT(view, view_batching_rule);
+  VMAP_SUPPORT2(view, dtype, view_dtype_batch_rule);
   VMAP_SUPPORT(view_copy, view_copy_batch_rule);
   VMAP_SUPPORT(expand, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand)), &ATEN_FN(expand)>));
   VMAP_SUPPORT(expand_copy, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand_copy)), &ATEN_FN(expand_copy)>));

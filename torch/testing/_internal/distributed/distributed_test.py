@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 from collections import defaultdict, namedtuple, OrderedDict
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
@@ -197,9 +198,6 @@ skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
-
-DEFAULT_TIMEOUT = 300
-CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
 
 def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
@@ -400,14 +398,6 @@ class ControlFlowToyModel(nn.Module):
             return self.lin2(F.relu(self.lin1(x)))
         else:
             return F.relu(self.lin1(x))
-
-
-def get_timeout(test_id):
-    test_name = test_id.split(".")[-1]
-    if test_name in CUSTOMIZED_TIMEOUT:
-        return CUSTOMIZED_TIMEOUT[test_name]
-    else:
-        return DEFAULT_TIMEOUT
 
 
 default_pg_timeout = 60
@@ -906,6 +896,24 @@ class DistributedTest:
                 self._test_barrier_timeout(group_id, timeout)
 
         @skip_but_pass_in_sandcastle_if(
+            BACKEND != "gloo", "Only gloo backend supports timeouts"
+        )
+        def test_barrier_timeout_arg(self):
+            """Test that the timeout argument to barrier() overrides PG default.
+
+            Create a PG with a large default timeout, then have only rank 0
+            call barrier with a tiny timeout. The barrier should time out using
+            the per-call timeout (1ms) rather than the PG default (300s).
+            """
+            pg = dist.new_group(timeout=timedelta(seconds=300))
+
+            if dist.get_rank() == 0:
+                with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                    dist.barrier(group=pg, timeout=timedelta(seconds=0.001))
+
+            dist.destroy_process_group(pg)
+
+        @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
@@ -1018,7 +1026,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                f"Rank {world_size} is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -1034,7 +1042,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                r"Rank -\d+ is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
@@ -5004,7 +5012,7 @@ class DistributedTest:
                     self.register_buffer("buffer", torch.randn(1, 2))
                     self.p = torch.nn.Parameter(torch.randn(10, 5), requires_grad=False)
 
-                def forward(self_, x):  # noqa: B902
+                def forward(self_, x):
                     params = self_.m.parameters()
                     for p in params:
                         self.assertEqual(mp_config.param_dtype, p.dtype)
@@ -7975,11 +7983,11 @@ class DistributedTest:
             }
 
             class ToyModel(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 10, bias=False)
 
-                def forward(self_, x, expected_type):  # noqa: B902
+                def forward(self_, x, expected_type):
                     # Similar to scatter, the recursive to in the single-device
                     # case does not move tensors if they are in a custom type.
                     self.assertTrue(isinstance(x, expected_type))
@@ -8038,11 +8046,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 1)
 
-                def forward(self_, input, expected_type):  # noqa: B902
+                def forward(self_, input, expected_type):
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -9558,7 +9566,7 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
 
             def buffer_comm_hook(ddp, named_buffers):
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 futs = [
                     dist.all_reduce(
                         buffer, group=ddp.process_group, async_op=True
@@ -9660,7 +9668,7 @@ class DistributedTest:
             def buffer_comm_hook(ddp, named_buffers):
                 # named_buffers is a Dict[str, Tensor] representing a mapping
                 # from buffer name to buffer.
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 ddp._default_broadcast_coalesced(buffers)
 
             model = NetWithBuffers().cuda(rank)
@@ -10023,6 +10031,152 @@ class DistributedTest:
                 rank_0_buf = bufs[0]
                 for buf in bufs[1:]:
                     self.assertEqual(rank_0_buf, buf)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_join_respects_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank + 42)
+            torch.cuda.manual_seed(rank + 42)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("rank_local", torch.randn(10))
+
+                def forward(self, x):
+                    return self.fc(x) + self.rank_local
+
+            model = NetWithBuffers().cuda(rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+
+            buf_before = ddp.module.rank_local.detach().clone()
+
+            # Uneven inputs: rank 0 finishes first.
+            num_iters = rank + 1
+            with ddp.join():
+                for _ in range(num_iters):
+                    inp = torch.randn(2, 10, device=rank)
+                    ddp(inp).sum().backward()
+
+            buf_after = ddp.module.rank_local.detach().clone()
+            # _sync_final_model must respect forward_sync_buffers=False.
+            self.assertEqual(buf_before, buf_after)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_init_sync_buffers_with_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("frozen_coeff", torch.randn(10))
+
+                def forward(self, x):
+                    return self.a(x) + self.frozen_coeff
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+            self.assertFalse(model_ddp.forward_sync_buffers)
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            for buf in bufs[1:]:
+                self.assertEqual(bufs[0], buf)
+
+            if rank == 0:
+                model_ddp.module.frozen_coeff += 1
+            inp = torch.randn(2, 10, device=rank)
+            model_ddp(inp).sum().backward()
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            if dist.get_world_size() > 1:
+                self.assertNotEqual(bufs[0], bufs[1])
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffers_deprecation_warning(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+
+            def _count_broadcast_buffers_warnings(caught):
+                return len(
+                    [
+                        w
+                        for w in caught
+                        if issubclass(w.category, FutureWarning)
+                        and "broadcast_buffers" in str(w.message)
+                    ]
+                )
+
+            # Passing broadcast_buffers (True or False) should warn.
+            for val in (True, False):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=val,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+
+            # Both specified: forward_sync_buffers takes precedence, warning fires.
+            for bb, fsb in ((False, True), (True, False)):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    ddp = torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=bb,
+                        forward_sync_buffers=fsb,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+                self.assertEqual(ddp.forward_sync_buffers, fsb)
+
+            # Default (no broadcast_buffers) and forward_sync_buffers only: no warning.
+            for kwargs in ({}, {"forward_sync_buffers": False}):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        **kwargs,
+                    )
+                self.assertEqual(_count_broadcast_buffers_warnings(caught), 0)
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(

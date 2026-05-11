@@ -36,7 +36,7 @@ import itertools
 import logging
 import os
 import pstats
-import random
+import random  # noqa: F401 -- eval_frame_cpp.cpp imports random at runtime; torch.package needs this to detect the dependency
 import subprocess
 import sys
 import tempfile
@@ -79,6 +79,7 @@ from torch.utils._python_dispatch import (
     _disable_current_modes,
     any_torch_dispatch_mode_on_stack,
     is_in_any_mode_without_ignore_compile_internals,
+    is_traceable_wrapper_subclass,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
@@ -98,12 +99,15 @@ from .cache_size import (
     exceeds_recompile_limit,
     is_recompilation,
 )
+from .code_context import code_context
 from .eval_frame import (
+    _get_cache_entries_for_region,
+    _get_total_cache_entry_count,
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    get_eval_frame_isolate_recompiles_id,
     innermost_backend,
-    innermost_fn,
     skip_code,
     TorchPatcher,
 )
@@ -218,6 +222,28 @@ def _clear_fake_mode_weakrefs(
     describer.lookup_storage.clear()
 
 
+def clear_compile_context_weakrefs(
+    tracer_output: DynamoTracerOutput | None,
+    compiler_fn: CompilerFn,
+) -> None:
+    """Clear WeakIdRef entries that can block swap_tensors after compile."""
+    should_clear = config.invalidate_compile_context_weakrefs
+    if should_clear is None:
+        should_clear = _is_registered_backend(innermost_backend(compiler_fn))
+    if not should_clear or not tracer_output:
+        return
+    # Use output_graph_for_cleanup which is set even on error paths
+    # (output_graph is None when the compilation errored).
+    output_graph = tracer_output.output_graph_for_cleanup
+    if output_graph is None:
+        return
+    tc = output_graph.tracing_context
+    tc.tensor_to_context.clear()
+    _clear_fake_mode_weakrefs(tc.fake_mode)
+    if hasattr(output_graph, "_old_fake_mode"):
+        _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+
+
 class Tracker:
     def __init__(self) -> None:
         self.seen: list[ReferenceType[CodeType]] = []
@@ -293,9 +319,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
-        2) Save/restore python random state
-        3) Save/restore torch random state
-        4) Monkey patch torch.fx.graph_module._forward_from_src
+        2) Save/restore torch random state
+        3) Monkey patch torch.fx.graph_module._forward_from_src
+
+    NOTE: Python random state is preserved in eval_frame_cpp.cpp instead,
+    so that it wraps more of the compilation pipeline.
     """
 
     @functools.wraps(fn)
@@ -318,7 +346,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
-            py_rng_state = random.getstate()
             prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
@@ -335,22 +362,17 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             exit_stack.enter_context(
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
-            exit_stack.enter_context(torch_function_mode_stack_state_mgr)
             reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert torch._C._len_torch_function_stack() == 0, (
-                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
-                )
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
-                random.setstate(py_rng_state)
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
@@ -365,9 +387,10 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert guards.check(), (
-                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
-                )
+                if not guards.check():
+                    raise AssertionError(
+                        f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                    )
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
@@ -481,7 +504,8 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
     def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         trace_id = CompileContext.current_trace_id()
-        assert trace_id, "Trace id is None"
+        if not trace_id:
+            raise AssertionError("Trace id is None")
         profile_path = Path(
             os.path.join(
                 tempfile.gettempdir(),
@@ -565,7 +589,8 @@ def get_compile_id(
         frame_state["_id"] = FRAME_COUNTER
         FRAME_COUNTER += 1
     frame_id = frame_state["_id"]
-    assert isinstance(frame_id, int)
+    if not isinstance(frame_id, int):
+        raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
     frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
     FRAME_COMPILE_COUNTER[frame_id] += 1
@@ -588,6 +613,7 @@ class ConvertFrameAssert:
         export: bool = False,
         export_constraints: Any | None = None,
         package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -596,6 +622,7 @@ class ConvertFrameAssert:
         self._export = export
         self._export_constraints = export_constraints
         self._package = package
+        self._recompile_limit = recompile_limit
         self._box = ConvertFrameBox()
 
     @property
@@ -605,6 +632,7 @@ class ConvertFrameAssert:
             self._one_graph,
             self._export,
             self._export_constraints,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -619,7 +647,19 @@ class ConvertFrameAssert:
         increment_frame()
         code = frame.f_code
 
-        cache_size = compute_cache_size(frame, cache_entry)
+        isolate_recompiles_id = get_eval_frame_isolate_recompiles_id()
+        cache_entries = _get_cache_entries_for_region(code, isolate_recompiles_id)
+        # For recompile-reason logging: lookup() also checks the default (-1)
+        # bucket for isolated regions, so include those entries here to avoid
+        # dropping their guard-failure reasons.
+        if isolate_recompiles_id >= 0:
+            cache_entries_for_reasons = cache_entries + _get_cache_entries_for_region(
+                code, -1
+            )
+        else:
+            cache_entries_for_reasons = cache_entries
+        total_count = _get_total_cache_entry_count(code)
+        cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
             return ConvertFrameReturn()
@@ -723,7 +763,15 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         try:
-            with compile_context(CompileContext(compile_id)):
+            compile_ctx = compile_context(CompileContext(compile_id))
+            # When recompile_limit is set, temporarily override the global
+            # config so the existing exceeds_recompile_limit check uses it.
+            recompile_ctx = (
+                config.patch(recompile_limit=self._recompile_limit)
+                if self._recompile_limit is not None
+                else contextlib.nullcontext()
+            )
+            with compile_ctx, recompile_ctx:
                 result = _compile(
                     frame.f_code,
                     frame.f_globals,
@@ -736,6 +784,8 @@ class ConvertFrameAssert:
                     self._export_constraints,
                     hooks,
                     cache_entry,
+                    cache_entries,
+                    cache_entries_for_reasons,
                     cache_size,
                     frame,
                     frame_state=frame_state,
@@ -762,10 +812,16 @@ def convert_frame_assert(
     export: bool = False,
     export_constraints: Any | None = None,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
-        compiler_fn, one_graph, export, export_constraints, package
+        compiler_fn,
+        one_graph,
+        export,
+        export_constraints,
+        package,
+        recompile_limit,
     )
 
 
@@ -776,12 +832,47 @@ from torch.utils.hooks import RemovableHandle
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
+_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY = "bytecode_hook_side_effects"
+
+
+def get_compiled_code_side_effects(
+    code: types.CodeType,
+) -> tuple[str, ...] | None:
+    """Return Dynamo's replayed Python side-effect sources for compiled code.
+
+    Returns ``None`` when ``code`` was not produced by Dynamo or no metadata was
+    attached to it.
+    """
+    if not code_context.has_context(code):
+        return None
+    side_effects = code_context.get_context(code).get(
+        _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY
+    )
+    if side_effects is None:
+        return None
+    return side_effects
+
+
+def compiled_code_has_side_effects(code: types.CodeType) -> bool:
+    """Return whether Dynamo recorded replayed Python side effects for compiled code."""
+    return bool(get_compiled_code_side_effects(code))
+
+
+def _copy_code_context(src_code: types.CodeType, dst_code: types.CodeType) -> None:
+    if not code_context.has_context(src_code):
+        return
+    src_context = code_context.get_context(src_code)
+    if _BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY in src_context:
+        code_context.get_context(dst_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
+            src_context[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY]
+        )
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     """Register hooks for bytecode generated by Dynamo. The hook can do some
-    logging, as well as return a new code object to be used. Please refer
-    to `BytecodeHook` for the hook signature.
+    logging, as well as return a new code object to be used. Hooks can query
+    `get_compiled_code_side_effects(new_code)` for replayed Python side effect
+    sources. Please refer to `BytecodeHook` for the hook signature.
     """
     handle = RemovableHandle(_bytecode_hooks)
     _bytecode_hooks[handle.id] = hook
@@ -861,8 +952,10 @@ def trace_frame(
         run_tracer()
         tracer_output = DynamoTracerOutput(tracer)
         output = tracer_output.output_graph
-        assert output is not None
-        assert output.output_instructions
+        if output is None:
+            raise AssertionError("tracer output_graph must not be None")
+        if not output.output_instructions:
+            raise AssertionError("output_graph must have output_instructions")
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
@@ -887,6 +980,7 @@ class DynamoOutput:
 
     tracer_output: DynamoTracerOutput
     bytecode: types.CodeType
+    pycode: list[list[str] | None]
     last_attempt_start_time: float | None
 
     def build_guards(
@@ -894,15 +988,16 @@ class DynamoOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
-        assert output_graph is not None
+        if output_graph is None:
+            raise AssertionError("output_graph must not be None when building guards")
         return CheckFunctionManager(
             code,
             output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -915,7 +1010,10 @@ class DynamoOutput:
         kwdefaults: dict[str, Any] | None = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
-        assert output_graph is not None
+        if output_graph is None:
+            raise AssertionError(
+                "output_graph must not be None when producing graph capture output"
+            )
         return GraphCaptureOutput(
             OutputGraphCommon(
                 output_graph.dump_guards_state(),
@@ -927,6 +1025,7 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.pycode,
             self.tracer_output.closure,
             argdefs,
             kwdefaults,
@@ -955,6 +1054,7 @@ class BackendInput:
 @dataclass(frozen=True)
 class GraphRuntimeEnv:
     bytecode: types.CodeType
+    pycode: list[list[str] | None]
     import_sources: dict[str, str]
     used_globals: dict[str, Any]
     closure: tuple[Any, ...] | None
@@ -968,6 +1068,7 @@ class GraphRuntimeEnv:
         compiled_fn: Callable[..., Any],
         *,
         extra_globals: dict[str, Any] | None = None,
+        use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -983,8 +1084,13 @@ class GraphRuntimeEnv:
         # check that all external references are available
         self._check_external_refs(f_globals)
 
+        if use_python_codegen:
+            bytecode = self._build_python_wrapper(f_globals, backend_id)
+        else:
+            bytecode = self.bytecode
+
         fn = types.FunctionType(
-            self.bytecode,
+            bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
@@ -992,6 +1098,40 @@ class GraphRuntimeEnv:
         if self.kwdefaults:
             fn.__kwdefaults__ = self.kwdefaults
         return fn
+
+    def _build_python_wrapper_source(self) -> str:
+        """Build Python source for the wrapper function from generated pycode."""
+        pycode_parts = [p for p in self.pycode if p is not None]
+        if not pycode_parts:
+            raise RuntimeError("No Python code generated from Dynamo.")
+        orig_code = self.bytecode
+        argcount = orig_code.co_argcount
+        varnames = orig_code.co_varnames[:argcount]
+        argnames = ", ".join(varnames)
+
+        func_lines = ["def __generate_func__():"]
+        func_lines.append(f"    def __dynamo_func__({argnames}):")
+        for part in pycode_parts:
+            for line in part:
+                func_lines.append(f"        {line}")
+        func_lines.append("        return __ret")
+        func_lines.append("    return __dynamo_func__")
+        func_lines.append("__dynamo_generated_func__ = __generate_func__()")
+        return "\n".join(func_lines)
+
+    def _build_python_wrapper(
+        self, f_globals: dict[str, Any], backend_id: str
+    ) -> types.CodeType:
+        """Build a Python code object from the generated pycode strings."""
+        func_source = self._build_python_wrapper_source()
+        # Execute to get the function, then extract its code
+        namespace: dict[str, Any] = f_globals.copy()
+        # exec() should be fine because we only define a function in the scope
+        # without actually running the code inside the function, so in theory
+        # it should be safe.
+        exec(func_source, namespace)
+        func = namespace["__dynamo_generated_func__"]
+        return func.__code__
 
     def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
         # pyrefly: ignore [implicit-any]
@@ -1007,6 +1147,20 @@ class GraphRuntimeEnv:
             )
 
 
+def _safe_builtins_dict(builtins_dict: dict[str, Any]) -> dict[str, Any]:
+    """Filter a builtins dict to only picklable entries for serialization."""
+    import pickle
+
+    result = {}
+    for k, v in builtins_dict.items():
+        try:
+            pickle.dumps(v)
+            result[k] = v
+        except Exception:
+            pass
+    return result
+
+
 @dataclass
 class GraphCaptureOutput:
     """
@@ -1017,6 +1171,7 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    pycode: list[list[str] | None]
     closure: tuple[Any, ...] | None
     argdefs: tuple[Any, ...] | None
     kwdefaults: dict[str, Any] | None
@@ -1027,13 +1182,13 @@ class GraphCaptureOutput:
         code: types.CodeType,
         hooks: Hooks | None = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             self.output_graph,
-            cache_entry,
+            cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
@@ -1056,8 +1211,20 @@ class GraphCaptureOutput:
         # Scan bytecode for all external references
         external_refs = self._get_external_refs(self.bytecode)
 
+        # Best-effort serialization of builtins referenced by the bytecode.
+        # Similar to how guards prune __builtins_dict__ to only used entries.
+        import builtins as _builtins
+
+        for ref in external_refs:
+            if ref not in used_globals:
+                if ref.startswith("__builtins_dict__") and ref in self.f_globals:
+                    used_globals[ref] = _safe_builtins_dict(self.f_globals[ref])
+                elif hasattr(_builtins, ref):
+                    used_globals[ref] = getattr(_builtins, ref)
+
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
+            pycode=self.pycode,
             import_sources=self.import_sources,
             used_globals=used_globals,
             closure=self.closure,
@@ -1107,15 +1274,18 @@ class CaptureOutput:
         *,
         compiled_fn: Callable[..., Any] | None = None,
         extra_globals: dict[str, Any] | None = None,
+        use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
-        assert self.backend_input is not None
+        if self.backend_input is None:
+            raise AssertionError("backend_input must not be None")
         backend_id = self.backend_input.backend_id
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
             backend_id,
             compiled_fn,
             extra_globals=extra_globals,
+            use_python_codegen=use_python_codegen,
         )
 
 
@@ -1196,7 +1366,10 @@ def _get_frame(
     closure = fn.__closure__ or ()
     freevars = fn.__code__.co_freevars
     if freevars or closure:
-        assert len(closure) == len(freevars)
+        if len(closure) != len(freevars):
+            raise AssertionError(
+                f"closure length ({len(closure)}) must match freevars length ({len(freevars)})"
+            )
         f_locals.update(
             {name: cell.cell_contents for name, cell in zip(freevars, closure)}
         )
@@ -1279,14 +1452,19 @@ def _fullgraph_capture_frame(
         tracing_context = TracingContext.get()
         fake_mode = tracing_context.fake_mode
         tensor_to_context = tracing_context.tensor_to_context
-        assert fake_mode is not None
-        assert isinstance(gm.meta["backend_id"], str)
+        if fake_mode is None:
+            raise AssertionError("fake_mode must not be None")
+        if not isinstance(gm.meta["backend_id"], str):
+            raise AssertionError(
+                f"gm.meta['backend_id'] must be a str, got {type(gm.meta['backend_id'])}"
+            )
         backend_input = BackendInput(
             gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
         return gm
 
     try:
+        # TODO with torch._dynamo.config.patch(generate_pycode=True):
         dynamo_output = compile_frame(
             frame.code,
             frame.globals,
@@ -1369,8 +1547,8 @@ def compile_frame(  # type: ignore[return]
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> DynamoTracerOutput:
-        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-            torch.overrides._get_current_function_mode_stack()
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = list(
+            torch_function_mode_stack_state_mgr.stack
         )
         tracer_output = trace_frame(
             code,
@@ -1391,7 +1569,8 @@ def compile_frame(  # type: ignore[return]
             package=package,
         )
 
-        assert tracer_output is not None
+        if tracer_output is None:
+            raise AssertionError("tracer_output must not be None after transform")
         return tracer_output
 
     last_attempt_start_time = None
@@ -1401,10 +1580,18 @@ def compile_frame(  # type: ignore[return]
         try:
             with dynamo_timed(f"compile_attempt_{attempt}", log_pt2_compile_event=True):
                 bytecode, tracer_output = transform_code_object(code, transform)
-                assert tracer_output is not None
+                if tracer_output is None:
+                    raise AssertionError(
+                        "tracer_output must not be None after transform_code_object"
+                    )
+                if tracer_output.output_graph is None:
+                    raise AssertionError(
+                        "tracer_output.output_graph must not be None after transform_code_object"
+                    )
                 return DynamoOutput(
                     tracer_output=tracer_output,
                     bytecode=bytecode,
+                    pycode=tracer_output.output_graph.output_pycode,
                     last_attempt_start_time=last_attempt_start_time,
                 )
         except exc.RestartAnalysis as e:
@@ -1438,7 +1625,7 @@ def compile_frame(  # type: ignore[return]
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
                 failed_tracer_output._cleanup_output_graph()
-            log.debug(  # noqa: G200
+            log.debug(
                 "Received signal to skip frame (without graph break): %s %s \
                 %s %s",
                 e,
@@ -1461,6 +1648,8 @@ def _compile(
     export_constraints: Any | None,
     hooks: Hooks,
     cache_entry: CacheEntry | None,
+    cache_entries: list[CacheEntry],
+    cache_entries_for_reasons: list[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: DynamoFrameType | None = None,
     frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
@@ -1492,7 +1681,13 @@ def _compile(
                 )
             )
             stack.enter_context(CompileTimeInstructionCounter.record())
-            return _compile_inner(code, one_graph, hooks)
+            stack.enter_context(torch_function_mode_stack_state_mgr)
+            result = _compile_inner(code, one_graph, hooks)
+            if torch._C._len_torch_function_stack() != 0:
+                raise AssertionError(
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
+            return result
 
         return (
             ConvertFrameReturn(),
@@ -1536,37 +1731,52 @@ def _compile(
                 payload_fn=lambda: dis.Bytecode(code).dis(),
             )
         out_code = None
+        from .graph_id_filter import get_dynamo_config_override_for_compile_id
+
+        dynamo_config_override = get_dynamo_config_override_for_compile_id(
+            compile_id, config.debug_dynamo_config_override
+        )
         try:
-            dynamo_output = compile_frame(
-                code,
-                globals,
-                locals,
-                builtins,
-                closure,
-                compiler_fn,
-                one_graph,
-                restart_reasons,
-                export=export,
-                export_constraints=export_constraints,
-                frame_state=frame_state,
-                distributed_state=distributed_state,
-                package=package,
-            )
+            with (
+                config.patch(dynamo_config_override)
+                if dynamo_config_override
+                else contextlib.nullcontext()
+            ):
+                dynamo_output = compile_frame(
+                    code,
+                    globals,
+                    locals,
+                    builtins,
+                    closure,
+                    compiler_fn,
+                    one_graph,
+                    restart_reasons,
+                    export=export,
+                    export_constraints=export_constraints,
+                    frame_state=frame_state,
+                    distributed_state=distributed_state,
+                    package=package,
+                )
         except exc.SkipFrame as e:
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
-            assert e._torch_dynamo_tracer_output is not None
+            if e._torch_dynamo_tracer_output is None:
+                raise AssertionError(
+                    "SkipFrame exception must have _torch_dynamo_tracer_output set"
+                ) from None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
-        assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
-            "compiler collective wasn't run before compilation completed"
-        )
+        if distributed_state is not None and distributed_state.all_states is None:  # type: ignore[has-type]
+            raise AssertionError(
+                "compiler collective wasn't run before compilation completed"
+            )
         out_code = dynamo_output.bytecode
         tracer_output = dynamo_output.tracer_output
         if dynamo_output.last_attempt_start_time is not None:
             last_attempt_start_time = dynamo_output.last_attempt_start_time
 
-        assert out_code is not None
+        if out_code is None:
+            raise AssertionError("out_code must not be None after compilation")
         log_bytecode(
             "MODIFIED BYTECODE",
             code.co_name,
@@ -1586,17 +1796,24 @@ def _compile(
                 payload_fn=lambda: dis.Bytecode(out_code).dis(),
             )
 
+        if tracer_output.output_graph is None:
+            raise AssertionError("tracer_output.output_graph must not be None")
+        output = tracer_output.output_graph
+        code_context.get_context(out_code)[_BYTECODE_HOOK_SIDE_EFFECTS_CONTEXT_KEY] = (
+            tuple(output.get_replayed_side_effect_source_refs())
+        )
+
         for idx, hook in enumerate(_bytecode_hooks.values()):
             with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
                 hook_output = hook(code, out_code)
                 if hook_output is not None:
+                    if hook_output is not out_code:
+                        _copy_code_context(out_code, hook_output)
                     out_code = hook_output
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
-        assert tracer_output.output_graph is not None
-        output = tracer_output.output_graph
 
         from .bytecode_debugger import BREAKPOINT_MARKER
 
@@ -1620,27 +1837,35 @@ def _compile(
                 + bool(code.co_flags & inspect.CO_VARKEYWORDS)
             )
 
-        assert out_code is not None
+        if out_code is None:
+            raise AssertionError(
+                "out_code must not be None after bytecode hook processing"
+            )
 
         total_argcount_old = count_args(code)
         total_argcount_new = count_args(out_code)
-        msg = "arg mismatch: "
-        msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
-        msg += f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
-        assert (
+        if (
             code.co_varnames[:total_argcount_old]
-            == out_code.co_varnames[:total_argcount_new]
-        ), msg
+            != out_code.co_varnames[:total_argcount_new]
+        ):
+            msg = "arg mismatch: "
+            msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
+            msg += (
+                f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
+            )
+            raise AssertionError(msg)
 
-        msg = "free var mismatch: "
-        msg += f"old code object has free var {code.co_freevars}, "
-        msg += f"new code object has free var {out_code.co_freevars}"
-        assert code.co_freevars == out_code.co_freevars, msg
+        if code.co_freevars != out_code.co_freevars:
+            msg = "free var mismatch: "
+            msg += f"old code object has free var {code.co_freevars}, "
+            msg += f"new code object has free var {out_code.co_freevars}"
+            raise AssertionError(msg)
 
-        msg = "cell var mismatch: "
-        msg += f"old code object has cell var {code.co_cellvars}, "
-        msg += f"new code object has cell var {out_code.co_cellvars}"
-        assert code.co_cellvars == out_code.co_cellvars, msg
+        if code.co_cellvars != out_code.co_cellvars:
+            msg = "cell var mismatch: "
+            msg += f"old code object has cell var {code.co_cellvars}, "
+            msg += f"new code object has cell var {out_code.co_cellvars}"
+            raise AssertionError(msg)
 
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
@@ -1651,19 +1876,30 @@ def _compile(
         if output.export and output.is_empty_graph():
             return ConvertFrameReturn(), tracer_output
 
-        assert output.guards is not None
+        if output.guards is None:
+            raise AssertionError("output.guards must not be None")
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        with dynamo_timed("build_guards", log_pt2_compile_event=True):
+        # Temporarily restore the mode stack so guard expressions that
+        # reference modes can evaluate.  DisableTorchFunction prevents
+        # __torch_function__ dispatch during guard construction so modes
+        # with mutable state aren't triggered.
+        build_guards_ctx = contextlib.ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
                 save=package is not None,
-                cache_entry=cache_entry,
+                cache_entries=cache_entries,
             )
 
         if package is not None:
-            assert check_fn.guards_state is not None
+            if check_fn.guards_state is None:
+                raise AssertionError("check_fn.guards_state must not be None")
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
@@ -1688,7 +1924,7 @@ def _compile(
         return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
-    code_context = (
+    package_code_context = (
         package.code_context(code) if package is not None else contextlib.nullcontext()
     )
     with (
@@ -1704,7 +1940,7 @@ def _compile(
             phase_name="entire_frame_compile",
             dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
         ),
-        code_context,
+        package_code_context,
     ):
         restart_reasons: set[str] = set()
         if compile_pg := get_compile_pg():
@@ -1716,34 +1952,15 @@ def _compile(
         recompile_reason: str | None = None
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, innermost_fn(compiler_fn)
+                cache_entries_for_reasons, frame, innermost_backend(compiler_fn)
             )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
-        inline_inbuilt_nn_modules_candidate = False
-        if not config.inline_inbuilt_nn_modules and frame:
-            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, innermost_fn(compiler_fn), skip_logging=True
-            )
-            inbuilt_nn_recompile_reason = (
-                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
-            )
-
-            if (
-                inbuilt_nn_recompile_reason is not None
-                and "[inline-inbuilt-nn-modules-candidate]"
-                in inbuilt_nn_recompile_reason
-            ):
-                inline_inbuilt_nn_modules_candidate = True
-
-        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
-        # regardless of whether inline_inbuilt_nn_modules is set or not
         metrics_context.update_outer(
             {
                 "recompile_reason": recompile_reason,
-                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+                "inline_inbuilt_nn_modules_candidate": False,
             }
         )
 
@@ -1847,6 +2064,30 @@ def _compile(
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         tracer_output = None
+
+        if (
+            config.debug_backend_override
+            or config.debug_dynamo_config_override
+            or config.debug_inductor_config_override
+        ):
+            # Eagerly validate config override strings before entering the
+            # compilation try/except so that typos surface as clean ValueErrors
+            # instead of being wrapped as InternalTorchDynamoError.
+            from .graph_id_filter import (
+                _validate_backend_names,
+                _validate_dynamo_config_keys,
+                _validate_inductor_config_keys,
+            )
+
+            if err := _validate_backend_names(config.debug_backend_override):
+                raise ValueError(err)
+            if err := _validate_dynamo_config_keys(config.debug_dynamo_config_override):
+                raise ValueError(err)
+            if err := _validate_inductor_config_keys(
+                config.debug_inductor_config_override
+            ):
+                raise ValueError(err)
+
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 
@@ -1869,6 +2110,7 @@ def _compile(
                 if recompile_reason and "size mismatch at index" in recompile_reason:
                     _log_size_mismatch_recompile()
 
+            clear_compile_context_weakrefs(tracer_output, compiler_fn)
             return guarded_code
         except Exception as e:
             # NB: e's msg is mutated here to add user stack, but we DON'T want
@@ -2014,7 +2256,7 @@ def _compile(
                 )
 
             # Cleanup guards unless if in export, which will return guards
-            # Make sure to to do this after collecting metrics
+            # Make sure to do this after collecting metrics
             if (
                 tracer_output is not None
                 and tracer_output.output_graph is not None
@@ -2022,24 +2264,7 @@ def _compile(
             ):
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
-            # Clear WeakIdRef entries that can block swap_tensors after compile.
-            # Determine whether to clear based on config and backend type.
-            should_clear = config.invalidate_compile_context_weakrefs
-            if should_clear is None:
-                # Default: clear for registered backends, don't clear for custom
-                # Unwrap the compiler_fn to get the actual backend function
-                should_clear = _is_registered_backend(innermost_backend(compiler_fn))
-            if should_clear:
-                if tracer_output and tracer_output.output_graph:
-                    tc = tracer_output.output_graph.tracing_context
-                    tc.tensor_to_context.clear()
-                    # Clear both the current fake_mode and the old_fake_mode
-                    # (the original is stored before backend_fake_mode replaces it)
-                    _clear_fake_mode_weakrefs(tc.fake_mode)
-                    if hasattr(tracer_output.output_graph, "_old_fake_mode"):
-                        _clear_fake_mode_weakrefs(
-                            tracer_output.output_graph._old_fake_mode
-                        )
+            clear_compile_context_weakrefs(tracer_output, compiler_fn)
 
 
 class ConvertFrame:
@@ -2048,18 +2273,25 @@ class ConvertFrame:
         compiler_fn: CompilerFn,
         hooks: Hooks,
         package: CompilePackage | None = None,
+        recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
-            compiler_fn, one_graph=False, package=package
+            compiler_fn,
+            one_graph=False,
+            package=package,
+            recompile_limit=recompile_limit,
         )
         self._hooks = hooks
+        self._recompile_limit = recompile_limit
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        # Used by DDPOptimizer to swap in its own backend.
         return lambda backend: convert_frame(
             backend,
             self._hooks,
+            recompile_limit=self._recompile_limit,
         )
 
     def __call__(
@@ -2086,7 +2318,8 @@ class ConvertFrame:
             error_on_graph_break = (
                 self._inner_convert._box.error_on_graph_break is not None
             )
-            assert error_on_graph_break is not None
+            if error_on_graph_break is None:
+                raise AssertionError("error_on_graph_break must not be None") from None
             if self._inner_convert._box.error_on_graph_break:
                 # NOTE we _might_ have to wrap the current in a custom exception
                 # in order to correctly bubble up to the top-level compile wrapper in
@@ -2175,7 +2408,9 @@ class ConvertFrame:
                 isinstance(e, exc.TorchDynamoException)
                 and e.frame_exec_strategy is not None
             ):
-                return ConvertFrameReturn(frame_exec_strategy=e.frame_exec_strategy)
+                return ConvertFrameReturn(
+                    frame_exec_strategy=e.frame_exec_strategy,
+                )
 
         return ConvertFrameReturn()
 
@@ -2184,9 +2419,15 @@ def convert_frame(
     compiler_fn: CompilerFn,
     hooks: Hooks,
     package: CompilePackage | None = None,
+    recompile_limit: int | None = None,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    return ConvertFrame(compiler_fn, hooks, package=package)
+    return ConvertFrame(
+        compiler_fn,
+        hooks,
+        package=package,
+        recompile_limit=recompile_limit,
+    )
 
 
 # TODO mlazos: add support for same args, or record them
@@ -2212,8 +2453,10 @@ def replay(filename: str) -> None:
                 export=False,
                 export_constraints=None,
                 hooks=Hooks(),
-                cache_size=CacheSizeRelevantForFrame(0, 0),
                 cache_entry=None,
+                cache_entries=[],
+                cache_entries_for_reasons=[],
+                cache_size=CacheSizeRelevantForFrame(0, 0),
                 frame=None,
                 frame_state={},
                 compile_id=CompileId(frame_id=42, frame_compile_id=999),
@@ -2255,7 +2498,8 @@ class CatchErrorsWrapper:
         cache_entry: CacheEntry | None,
         frame_state: dict[str, int | FrameStateSizeEntry],
     ) -> ConvertFrameReturn:
-        assert frame_state is not None
+        if frame_state is None:
+            raise AssertionError("frame_state must not be None")
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code, frame=frame)
@@ -2311,6 +2555,21 @@ class CatchErrorsWrapper:
         ):
             # nametuple constructor/_make
             return ConvertFrameReturn()
+
+        if (
+            frame.f_code.co_name == "__init__"
+            and frame.f_code.co_argcount > 0
+            and frame.f_code.co_varnames
+            and is_traceable_wrapper_subclass(
+                frame.f_locals.get(frame.f_code.co_varnames[0])
+            )
+        ):
+            # Skip tracing __init__ of traceable wrapper subclasses: self is
+            # partially initialized at this point (attributes set by __init__
+            # don't exist yet), so faking it would call __tensor_flatten__ and
+            # crash. Run eagerly instead, matching @torch._disable_dynamo behavior.
+            return ConvertFrameReturn()
+
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
@@ -2321,11 +2580,12 @@ class CatchErrorsWrapper:
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=self._torchdynamo_orig_backend._torchdynamo_orig_backend,  # type: ignore[attr-defined]
                     )
-                    assert hasattr(
+                    if not hasattr(
                         self._torchdynamo_orig_backend, "_clone_with_backend"
-                    ), (
-                        "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    )
+                    ):
+                        raise AssertionError(
+                            "DDPOptimizer only supports callback fns that know how to clone themselves."
+                        )
                     hijacked_callback = (
                         self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,

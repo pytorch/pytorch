@@ -51,8 +51,10 @@ from torch.testing._internal.opinfo import core as opinfo_core
 from torch.utils import _pytree as pytree
 
 
-# A combo key is (input_placement_strs, output_placement_str)
-ComboKey = tuple[tuple[str, ...], str]
+# A combo key is (input_placement_strs, output_placement_strs)
+# For single-output ops: (("S(0)",), ("P(min)",))
+# For multi-output ops:  (("S(0)",), ("P(min)", "P(min)"))
+ComboKey = tuple[tuple[str, ...], tuple[str, ...]]
 
 # Partial reduce ops to enumerate
 PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
@@ -60,6 +62,7 @@ PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 SKIP_OPS: dict[str, str] = {
     "bernoulli": "non-deterministic (random sampling)",
     "empty_like": "uninitialized memory",
+    "exponential": "non-deterministic (random sampling)",
     "new_empty": "uninitialized memory",
     "new_empty_strided": "uninitialized memory",
     "nn.functional.dropout": "non-deterministic (random masking)",
@@ -71,27 +74,7 @@ SKIP_OPS: dict[str, str] = {
 }
 
 
-@dataclass
-class PlacementCombination:
-    """Represents a combination of input and output placements."""
-
-    input_placements: tuple[Placement, ...]  # One placement per input tensor
-    output_placement: Placement  # Placement for the output tensor
-
-    def __hash__(self):
-        return hash(
-            (tuple(str(p) for p in self.input_placements), str(self.output_placement))
-        )
-
-    def __eq__(self, other):
-        if not isinstance(other, PlacementCombination):
-            return NotImplemented
-        return tuple(str(p) for p in self.input_placements) == tuple(
-            str(p) for p in other.input_placements
-        ) and str(self.output_placement) == str(other.output_placement)
-
-    def __str__(self):
-        return f"inputs={placement_tuple_to_str(self.input_placements)}, output={placement_tuple_to_str((self.output_placement,))}"
+PlacementCombination = tuple[tuple[Placement, ...], tuple[Placement, ...]]
 
 
 @dataclass
@@ -99,7 +82,7 @@ class Discrepancy:
     """Represents a discrepancy between ground truth and DTensor's rules."""
 
     input_placements: tuple[str, ...]
-    output_placement: str
+    output_placements: tuple[str, ...]
     sample_idx: int
     input_shapes: tuple[tuple[int, ...], ...]
     discrepancy_type: str  # "false_positive" or "false_negative"
@@ -150,21 +133,6 @@ class _FalsePositiveMitigations:
     non_rounded_negated_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
 
 
-def placement_tuple_to_str(placements: tuple[Placement, ...]) -> str:
-    """Convert a tuple of placements to a readable string."""
-    parts: list[str] = []
-    for p in placements:
-        if isinstance(p, Shard):
-            parts.append(f"S({p.dim})")
-        elif isinstance(p, Replicate):
-            parts.append("R")
-        elif isinstance(p, Partial):
-            parts.append(f"P({p.reduce_op})")
-        else:
-            parts.append(str(p))
-    return "(" + ", ".join(parts) + ")"
-
-
 def parse_placement(s: str) -> Placement | None:
     """
     Parse a placement string back to a placement object.
@@ -191,6 +159,7 @@ def is_fully_replicated(placements: tuple[Placement, ...]) -> bool:
 
 def is_trivial_shard(p: Placement, tensor_shape: tuple[int, ...]) -> bool:
     """Check if placement is a Shard on a size-1 dimension."""
+    # NOTE: isinstance(_, Shard) does not match _StridedShard; see _is_shard_like().
     return (
         isinstance(p, Shard) and p.dim < len(tensor_shape) and tensor_shape[p.dim] == 1
     )
@@ -228,7 +197,7 @@ def normalize_placement_str(p_str: str, shape: tuple[int, ...]) -> str:
 def normalize_combo_key(
     combo_key: ComboKey,
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> ComboKey:
     """
     Normalize a combo_key by converting trivial shards to Replicate.
@@ -238,25 +207,26 @@ def normalize_combo_key(
     - S(0), R -> R on input [1,4] becomes R, R -> R
 
     Args:
-        combo_key: (input_placement_strs, output_placement_str) tuple
+        combo_key: (input_placement_strs, output_placement_strs) tuple
         input_shapes: Shapes of input tensors
-        output_shape: Shape of output tensor
+        output_shapes: Shapes of output tensors
 
     Returns:
         Normalized combo_key with trivial shards converted to Replicate
     """
-    input_placement_strs, output_placement_str = combo_key
+    input_placement_strs, output_placement_strs = combo_key
 
-    # Normalize input placements
     normalized_inputs = tuple(
         normalize_placement_str(p_str, shape)
         for p_str, shape in zip(input_placement_strs, input_shapes)
     )
 
-    # Normalize output placement
-    normalized_output = normalize_placement_str(output_placement_str, output_shape)
+    normalized_outputs = tuple(
+        normalize_placement_str(p_str, shape)
+        for p_str, shape in zip(output_placement_strs, output_shapes)
+    )
 
-    return (normalized_inputs, normalized_output)
+    return (normalized_inputs, normalized_outputs)
 
 
 def get_1d_input_placements_for_tensor(
@@ -461,6 +431,121 @@ def _create_partial_input(
     return LocalTensor(local_tensors)
 
 
+def _shard_tensors(
+    tensors: list[tuple[str, torch.Tensor]],
+    input_placements: tuple[Placement, ...],
+    world_size: int,
+    mesh: DeviceMesh,
+    mask_shift: int = 0,
+) -> list[LocalTensor | torch.Tensor]:
+    """Create sharded LocalTensors from tensors according to placements."""
+    local_tensors: list[LocalTensor | torch.Tensor] = []
+    for tensor_idx, ((name, tensor), placement) in enumerate(
+        zip(tensors, input_placements)
+    ):
+        if isinstance(placement, Partial):
+            local_tensor = _create_partial_input(
+                tensor, placement, world_size, tensor_idx, mask_shift
+            )
+        elif isinstance(placement, Replicate):
+            _tmp = {r: tensor.clone() for r in range(world_size)}
+            # pyrefly: ignore [bad-argument-type, bad-argument-count]
+            local_tensor = LocalTensor(_tmp)
+        elif isinstance(placement, Shard):
+            shard_dim = placement.dim
+            chunks = tensor.tensor_split(world_size, dim=shard_dim)
+            _tmp = {
+                r: chunks[r].clone(memory_format=torch.contiguous_format)
+                for r in range(world_size)
+            }
+            # pyrefly: ignore [bad-argument-type, bad-argument-count]
+            local_tensor = LocalTensor(_tmp)
+        else:
+            dt = distribute_tensor(tensor.clone(), mesh, (placement,))
+            local_tensor = dt.to_local()
+        local_tensors.append(local_tensor)
+    return local_tensors
+
+
+def _compare_outputs(
+    local_output: Any,
+    ground_truth: torch.Tensor | list[torch.Tensor],
+    output_placements: tuple[Placement, ...],
+    mesh: DeviceMesh,
+    world_size: int,
+) -> tuple[bool, str]:
+    """Compare op output (wrapped as DTensor) against ground truth."""
+    if isinstance(local_output, (list, tuple)):
+        local_outputs = list(local_output)
+    else:
+        local_outputs = [local_output]
+
+    if isinstance(ground_truth, list):
+        ground_truths = ground_truth
+    else:
+        ground_truths = [ground_truth]
+
+    if len(local_outputs) != len(ground_truths):
+        return (
+            False,
+            f"Output count mismatch: got {len(local_outputs)}, "
+            f"expected {len(ground_truths)}",
+        )
+
+    if len(local_outputs) != len(output_placements):
+        return (
+            False,
+            f"Output count mismatch with placements: "
+            f"got {len(local_outputs)}, expected {len(output_placements)}",
+        )
+
+    for i, (local_out, gt, out_plc) in enumerate(
+        zip(local_outputs, ground_truths, output_placements)
+    ):
+        if not isinstance(local_out, torch.Tensor):
+            return False, f"Local output[{i}] is not a tensor: {type(local_out)}"
+
+        if not isinstance(local_out, LocalTensor):
+            return False, f"LocalTensor inputs produced non-LocalTensor output[{i}]"
+
+        output_dt = DTensor.from_local(
+            local_out,
+            mesh,
+            (out_plc,),
+            shape=gt.shape,
+            stride=gt.stride(),
+        )
+
+        if isinstance(out_plc, Replicate):
+            local_values = [local_out._local_tensors[r] for r in range(world_size)]
+            all_same = all(
+                torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
+                for lv in local_values[1:]
+            )
+            if not all_same:
+                return (
+                    False,
+                    f"Replicate output[{i}] but local values differ across ranks",
+                )
+
+        full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
+
+        if isinstance(full_output, LocalTensor):
+            full_output = full_output._local_tensors[0]
+
+        if gt.shape != full_output.shape:
+            return (
+                False,
+                f"Shape mismatch[{i}]: expected {gt.shape}, got {full_output.shape}",
+            )
+
+        if not torch.allclose(gt, full_output, atol=1e-5, rtol=1e-5, equal_nan=True):
+            max_diff = (gt - full_output).abs().max().item()
+            return False, f"Value mismatch[{i}]: max_diff={max_diff:.6f}"
+
+    return True, ""
+
+
 def validate_combination(
     op: Callable[..., Any],
     sample_input: SampleInput,
@@ -470,9 +555,12 @@ def validate_combination(
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
     mask_shift: int = 0,
-) -> tuple[bool, str]:
+) -> tuple[bool | None, str]:
     """
     Validate a single placement combination against ground truth.
+
+    Returns (True, "") if valid, (False, error_msg) if invalid, or
+    (None, reason) if the combination cannot be tested (e.g. uneven shards).
 
     The validation logic:
     1. Shard inputs according to input placements to get local tensors
@@ -499,33 +587,17 @@ def validate_combination(
             device = tensors[0][1].device.type if tensors else "cpu"
             mesh = init_device_mesh(device, (world_size,))
 
-        local_tensors = []
-        for tensor_idx, ((name, tensor), placement) in enumerate(
-            zip(tensors, combination.input_placements)
-        ):
-            if isinstance(placement, Partial):
-                local_tensor = _create_partial_input(
-                    tensor, placement, world_size, tensor_idx, mask_shift
-                )
-            elif isinstance(placement, Replicate):
-                _tmp = {r: tensor.clone() for r in range(world_size)}
-                # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensor = LocalTensor(_tmp)
-            elif isinstance(placement, Shard):
-                # Create sharded LocalTensor directly to work in LocalTensorMode
-                shard_dim = placement.dim
-                chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                _tmp = {
-                    r: chunks[r].clone(memory_format=torch.contiguous_format)
-                    for r in range(world_size)
-                }
-                # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensor = LocalTensor(_tmp)
-            else:
-                # Fallback for other placement types
-                dt = distribute_tensor(tensor.clone(), mesh, (placement,))
-                local_tensor = dt.to_local()
-            local_tensors.append(local_tensor)
+        # Uneven shards produce SymInt in LocalTensor's wrapper shape,
+        # which breaks C++ overload resolution before __torch_dispatch__
+        # can intercept. Return None to signal "untestable".
+        for (name, tensor), placement in zip(tensors, combination[0]):
+            if isinstance(placement, Shard):
+                if tensor.size(placement.dim) % world_size != 0:
+                    return None, "uneven shard"
+
+        local_tensors = _shard_tensors(
+            tensors, combination[0], world_size, mesh, mask_shift
+        )
 
         local_idx = 0
 
@@ -547,68 +619,9 @@ def validate_combination(
 
         local_output = op(local_input, *local_args, **local_kwargs)
 
-        # Normalize to list for uniform handling of single/multi-output ops
-        if isinstance(local_output, (list, tuple)):
-            local_outputs = list(local_output)
-        else:
-            local_outputs = [local_output]
-
-        if isinstance(ground_truth, list):
-            ground_truths = ground_truth
-        else:
-            ground_truths = [ground_truth]
-
-        if len(local_outputs) != len(ground_truths):
-            return (
-                False,
-                f"Output count mismatch: got {len(local_outputs)}, expected {len(ground_truths)}",
-            )
-
-        for i, (local_out, gt) in enumerate(zip(local_outputs, ground_truths)):
-            if not isinstance(local_out, torch.Tensor):
-                return False, f"Local output[{i}] is not a tensor: {type(local_out)}"
-
-            if not isinstance(local_out, LocalTensor):
-                return False, f"LocalTensor inputs produced non-LocalTensor output[{i}]"
-
-            output_dt = DTensor.from_local(
-                local_out,
-                mesh,
-                (combination.output_placement,),
-                shape=gt.shape,
-                stride=gt.stride(),
-            )
-
-            if isinstance(combination.output_placement, Replicate):
-                local_values = [local_out._local_tensors[r] for r in range(world_size)]
-                all_same = all(
-                    torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
-                    for lv in local_values[1:]
-                )
-                if not all_same:
-                    return (
-                        False,
-                        f"Replicate output[{i}] but local values differ across ranks",
-                    )
-
-            full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
-
-            if isinstance(full_output, LocalTensor):
-                full_output = full_output._local_tensors[0]
-
-            if gt.shape != full_output.shape:
-                return (
-                    False,
-                    f"Shape mismatch[{i}]: expected {gt.shape}, got {full_output.shape}",
-                )
-
-            if not torch.allclose(
-                gt, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
-            ):
-                max_diff = (gt - full_output).abs().max().item()
-                return False, f"Value mismatch[{i}]: max_diff={max_diff:.6f}"
-
-        return True, ""
+        return _compare_outputs(
+            local_output, ground_truth, combination[1], mesh, world_size
+        )
 
     except Exception as e:
         # TODO: This is too broad. Consider: (1) explicit checks for shard dim
@@ -619,30 +632,104 @@ def validate_combination(
         return False, f"Exception: {type(e).__name__}: {e}"
 
 
+def extract_tensors_from_args(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> list[tuple[str, torch.Tensor]]:
+    """Extract tensor arguments from captured aten args/kwargs.
+
+    Unlike extract_tensors_from_sample which walks SampleInput pytrees,
+    this walks the flat aten-level args and kwargs directly.
+    """
+    tensors: list[tuple[str, torch.Tensor]] = []
+    idx = 0
+
+    def _collect(x: Any) -> Any:
+        nonlocal idx
+        if isinstance(x, torch.Tensor):
+            tensors.append((f"tensor_{idx}", x))
+            idx += 1
+        return x
+
+    pytree.tree_map(_collect, args)
+    pytree.tree_map(_collect, kwargs)
+    return tensors
+
+
+def validate_aten_combination(
+    aten_op: OpOverload,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
+    ground_truth: torch.Tensor | list[torch.Tensor],
+    combination: PlacementCombination,
+    world_size: int,
+    mesh: DeviceMesh,
+    mask_shift: int = 0,
+) -> tuple[bool | None, str]:
+    """Validate a placement combination using aten-level captured args.
+
+    Works directly with aten op args/kwargs instead of SampleInput pytrees.
+    Replaces tensors in the flat args/kwargs with sharded LocalTensors,
+    calls the aten op, and compares output.
+
+    Returns (True, ""), (False, error_msg), or (None, reason) if untestable.
+    """
+    try:
+        tensors = extract_tensors_from_args(captured_args, captured_kwargs)
+        if not tensors:
+            return False, "No tensor args in captured aten call"
+
+        for (name, tensor), placement in zip(tensors, combination[0]):
+            if isinstance(placement, Shard):
+                if tensor.size(placement.dim) % world_size != 0:
+                    return None, "uneven shard"
+
+        local_tensors = _shard_tensors(
+            tensors, combination[0], world_size, mesh, mask_shift
+        )
+
+        local_idx = 0
+
+        def _replace_with_local(a: Any) -> Any:
+            nonlocal local_idx
+            if isinstance(a, torch.Tensor):
+                local = local_tensors[local_idx]
+                local_idx += 1
+                return local
+            return a
+
+        local_args = pytree.tree_map(_replace_with_local, captured_args)
+        local_kwargs = pytree.tree_map(_replace_with_local, captured_kwargs)
+
+        local_output = aten_op(*local_args, **local_kwargs)
+
+        return _compare_outputs(
+            local_output, ground_truth, combination[1], mesh, world_size
+        )
+
+    except Exception as e:
+        return False, f"Exception: {type(e).__name__}: {e}"
+
+
 def has_pmin_pmax(
-    input_placements: tuple[Placement, ...], output_placement: Placement
+    input_placements: tuple[Placement, ...],
+    output_placements: tuple[Placement, ...],
 ) -> bool:
     """Check if any placement is Partial(min) or Partial(max)."""
-    for p in input_placements:
+    for p in (*input_placements, *output_placements):
         if isinstance(p, Partial) and p.reduce_op in ("min", "max"):
             return True
-    if isinstance(output_placement, Partial) and output_placement.reduce_op in (
-        "min",
-        "max",
-    ):
-        return True
     return False
 
 
 def has_any_partial(
-    input_placements: tuple[Placement, ...], output_placement: Placement
+    input_placements: tuple[Placement, ...],
+    output_placements: tuple[Placement, ...],
 ) -> bool:
     """Check if any placement is Partial (any reduce op)."""
-    for p in input_placements:
+    for p in (*input_placements, *output_placements):
         if isinstance(p, Partial):
             return True
-    if isinstance(output_placement, Partial):
-        return True
     return False
 
 
@@ -678,7 +765,7 @@ def _run_op_on_sample(op: Callable[..., Any], sample: SampleInput) -> Any:
 def _extract_rules_from_op_strategy(
     op_strategy: Any,
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> set[ComboKey]:
     """Extract normalized sharding rules from an OpStrategy.
 
@@ -694,22 +781,27 @@ def _extract_rules_from_op_strategy(
         if spec.input_specs is None:
             continue
         if isinstance(spec.output_specs, tuple):
-            first_output_spec = spec.output_specs[0]
-            # output_specs tuple can contain None for non-tensor outputs
-            # (e.g. SDPA's philox_seed/offset, layer norm backward with
-            # output_mask). The validator doesn't support mixed outputs.
-            if first_output_spec is None:
-                raise NotImplementedError(
-                    f"Strategy has None in output_specs, indicating mixed "
-                    f"tensor/non-tensor outputs which the validator does not "
-                    f"support. output_specs: {spec.output_specs}"
-                )
-            output_plc = first_output_spec.placements[0]
+            output_plcs: list[Placement] = []
+            has_none = False
+            for out_spec in spec.output_specs:
+                if out_spec is None:
+                    # None means the output placement is undefined for this
+                    # strategy (e.g. indices under P(max) reduction). Skip it.
+                    has_none = True
+                    break
+                output_plcs.append(out_spec.placements[0])
+            if has_none:
+                continue
         else:
-            output_plc = spec.output_spec.placements[0]
+            # Single DTensorSpec — the propagator duplicates it for all
+            # outputs of multi-output ops, so we do the same here.
+            output_plcs = [spec.output_spec.placements[0]] * len(output_shapes)
         input_plcs = tuple(s.placements[0] for s in spec.input_specs)
-        rule_key = (tuple(str(p) for p in input_plcs), str(output_plc))
-        normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shape)
+        rule_key: ComboKey = (
+            tuple(str(p) for p in input_plcs),
+            tuple(str(p) for p in output_plcs),
+        )
+        normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shapes)
         if not is_fully_replicated(
             tuple(parse_placement(p) or Replicate() for p in normalized_rule[0])
         ):
@@ -718,34 +810,41 @@ def _extract_rules_from_op_strategy(
 
 
 class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
-    """Dispatch mode that captures aten ops called and their args."""
+    """Dispatch mode that captures aten ops called, their args, and return values."""
 
     def __init__(self, target_op_name: str = ""):
         self.target_op_name = target_op_name.lower()
-        self.all_ops: list[tuple[OpOverload, tuple[Any, ...], dict[str, Any]]] = []
+        self.all_ops: list[tuple[OpOverload, tuple[Any, ...], dict[str, Any], Any]] = []
         self.best_match: OpOverload | None = None
         self.best_match_args: tuple[Any, ...] | None = None
         self.best_match_kwargs: dict[str, Any] | None = None
+        self.best_match_result: Any = None
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        result = func(*args, **kwargs)
         if func.namespace == "aten":
-            self.all_ops.append((func, args, kwargs))
+            self.all_ops.append((func, args, kwargs, result))
             op_name = func.name().split("::")[1].split(".")[0].lower()
             if self.target_op_name and self.target_op_name in op_name:
                 if self.best_match is None:
                     self.best_match = func
                     self.best_match_args = args
                     self.best_match_kwargs = kwargs
-        return func(*args, **kwargs)
+                    self.best_match_result = result
+        return result
 
 
 def get_aten_op_for_sample(
     op: Callable[..., Any], sample: SampleInput, op_name: str = ""
-) -> tuple[OpOverload | None, tuple[Any, ...], dict[str, Any]]:
+) -> _CaptureAtenOp:
     """
-    Determine the actual aten op that will be dispatched for a given sample.
+    Capture aten ops dispatched for a given sample.
+
+    Returns the _CaptureAtenOp object containing all captured ops with their
+    args, kwargs, and return values. Use best_match for the primary op or
+    all_ops for exhaustive iteration.
     """
     with _CaptureAtenOp(op_name) as capture:
         try:
@@ -756,16 +855,15 @@ def get_aten_op_for_sample(
         except Exception:
             pass
 
-    if capture.best_match is not None:
-        captured_op = capture.best_match
-        captured_args = capture.best_match_args
-        captured_kwargs = capture.best_match_kwargs
-    elif capture.all_ops:
-        captured_op, captured_args, captured_kwargs = capture.all_ops[0]
-    else:
-        return None, (), {}
+    # Populate best_match from first op if target match wasn't found
+    if capture.best_match is None and capture.all_ops:
+        first_op, first_args, first_kwargs, first_result = capture.all_ops[0]
+        capture.best_match = first_op
+        capture.best_match_args = first_args
+        capture.best_match_kwargs = first_kwargs
+        capture.best_match_result = first_result
 
-    return captured_op, captured_args, captured_kwargs
+    return capture
 
 
 def query_single_dim_strategy(
@@ -980,7 +1078,7 @@ def _query_dtensor_rules(
     captured_args: tuple[Any, ...],
     captured_kwargs: dict[str, Any],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
     world_size: int,
     verbose: bool,
 ) -> set[ComboKey]:
@@ -998,6 +1096,7 @@ def _query_dtensor_rules(
     non_tensor_kwargs = {
         k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
     }
+    n_outputs = len(output_shapes)
     propagator = DTensor._op_dispatcher.sharding_propagator
     rules: set[ComboKey] = set()
 
@@ -1007,15 +1106,15 @@ def _query_dtensor_rules(
         )
         if strategy_result:
             for combo in strategy_result:
-                if len(combo) >= num_tensors + 1:
-                    output_plc = combo[0]
-                    input_plcs = tuple(combo[1 : num_tensors + 1])
-                    rule_key = (
+                if len(combo) >= n_outputs + num_tensors:
+                    output_plcs = combo[:n_outputs]
+                    input_plcs = tuple(combo[n_outputs : n_outputs + num_tensors])
+                    rule_key: ComboKey = (
                         tuple(str(p) for p in input_plcs),
-                        str(output_plc),
+                        tuple(str(p) for p in output_plcs),
                     )
                     normalized_rule = normalize_combo_key(
-                        rule_key, input_shapes, output_shape
+                        rule_key, input_shapes, output_shapes
                     )
                     if not is_fully_replicated(
                         tuple(
@@ -1054,7 +1153,7 @@ def _query_dtensor_rules(
             strategy_func = propagator.op_strategy_funcs[aten_op]
             output_strategy = strategy_func(op_schema)
             rules |= _extract_rules_from_op_strategy(
-                output_strategy, input_shapes, output_shape
+                output_strategy, input_shapes, output_shapes
             )
         except Exception as e:
             if verbose:
@@ -1094,7 +1193,7 @@ def _query_dtensor_rules(
                 )
                 if output_strategy is not None:
                     rules |= _extract_rules_from_op_strategy(
-                        output_strategy, input_shapes, output_shape
+                        output_strategy, input_shapes, output_shapes
                     )
             except Exception as e:
                 if verbose:
@@ -1108,17 +1207,22 @@ def _validate_with_mitigations(
     sample: SampleInput,
     tensors: list[tuple[str, torch.Tensor]],
     input_placements: tuple[Placement, ...],
-    output_placement: Placement,
+    output_placements: tuple[Placement, ...],
     ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _FalsePositiveMitigations,
-) -> bool:
-    """Validate a combination, including false positive mitigation re-checks."""
-    combo = PlacementCombination(input_placements, output_placement)
+) -> bool | None:
+    """Validate a combination, including false positive mitigation re-checks.
+
+    Returns True (valid), False (invalid), or None (untestable).
+    """
+    combo: PlacementCombination = (input_placements, output_placements)
     is_valid, _ = validate_combination(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
+    if is_valid is None:
+        return None
 
     # Flipped-mask mitigation: the checkerboard mask that controls offset
     # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
@@ -1126,8 +1230,8 @@ def _validate_with_mitigations(
     # to catch index-returning ops (argmin/argmax) where the result
     # coincidentally matches because the dominant value happens to land on
     # a position where both mask orientations preserve argmin/argmax.
-    if is_valid and has_any_partial(input_placements, output_placement):
-        flipped_valid, _ = validate_combination(
+    if is_valid and has_any_partial(input_placements, output_placements):
+        is_valid, _ = validate_combination(
             op,
             sample,
             tensors,
@@ -1137,68 +1241,170 @@ def _validate_with_mitigations(
             mesh,
             mask_shift=1,
         )
-        is_valid = is_valid and flipped_valid
 
     if (
         is_valid
         and mitigations.negated_sample
-        and has_pmin_pmax(input_placements, output_placement)
+        and has_pmin_pmax(input_placements, output_placements)
     ):
         if mitigations.negated_tensors is None:
             raise AssertionError("negated_tensors is None")
         if mitigations.negated_ground_truth is None:
             raise AssertionError("negated_ground_truth is None")
-        negated_combo = PlacementCombination(input_placements, output_placement)
-        negated_valid, _ = validate_combination(
+        is_valid, _ = validate_combination(
             op,
             mitigations.negated_sample,
             mitigations.negated_tensors,
-            negated_combo,
+            combo,
             mitigations.negated_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and negated_valid
 
     if (
         is_valid
         and mitigations.non_rounded_sample
-        and has_any_partial(input_placements, output_placement)
+        and has_any_partial(input_placements, output_placements)
     ):
         if mitigations.non_rounded_ground_truth is None:
             raise AssertionError("non_rounded_ground_truth is None")
-        non_rounded_combo = PlacementCombination(input_placements, output_placement)
-        non_rounded_valid, _ = validate_combination(
+        is_valid, _ = validate_combination(
             op,
             mitigations.non_rounded_sample,
             tensors,
-            non_rounded_combo,
+            combo,
             mitigations.non_rounded_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and non_rounded_valid
 
     if (
         is_valid
         and mitigations.non_rounded_negated_sample
-        and has_pmin_pmax(input_placements, output_placement)
+        and has_pmin_pmax(input_placements, output_placements)
     ):
         if mitigations.non_rounded_negated_tensors is None:
             raise AssertionError("non_rounded_negated_tensors is None")
         if mitigations.non_rounded_negated_ground_truth is None:
             raise AssertionError("non_rounded_negated_ground_truth is None")
-        nr_negated_combo = PlacementCombination(input_placements, output_placement)
-        nr_negated_valid, _ = validate_combination(
+        is_valid, _ = validate_combination(
             op,
             mitigations.non_rounded_negated_sample,
             mitigations.non_rounded_negated_tensors,
-            nr_negated_combo,
+            combo,
             mitigations.non_rounded_negated_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and nr_negated_valid
+
+    return is_valid
+
+
+@dataclass
+class _AtenFalsePositiveMitigations:
+    """Bundle of negated variants for aten-level false positive detection.
+
+    Unlike _FalsePositiveMitigations, this works with captured aten args/kwargs
+    directly, without SampleInput. The rounding_mode mitigation is skipped
+    since it's an OpInfo-level concept that doesn't appear in captured aten kwargs.
+    """
+
+    negated_args: tuple[Any, ...] | None = None
+    negated_kwargs: dict[str, Any] | None = None
+    negated_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
+
+
+def _negate_tensors_in_tree(tree: Any) -> Any:
+    """Negate all tensors in a pytree structure."""
+
+    def _negate(x: Any) -> Any:
+        if isinstance(x, torch.Tensor):
+            return -x
+        return x
+
+    return pytree.tree_map(_negate, tree)
+
+
+def _prepare_aten_mitigations(
+    aten_op: OpOverload,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
+) -> _AtenFalsePositiveMitigations:
+    """Create negated variants for aten-level false positive detection."""
+    m = _AtenFalsePositiveMitigations()
+    try:
+        m.negated_args = _negate_tensors_in_tree(captured_args)
+        m.negated_kwargs = _negate_tensors_in_tree(captured_kwargs)
+        result = aten_op(*m.negated_args, **m.negated_kwargs)
+        if _is_tensor_output(result):
+            m.negated_ground_truth = _to_ground_truth(result)
+        else:
+            m.negated_args = None
+            m.negated_kwargs = None
+    except Exception:
+        m.negated_args = None
+        m.negated_kwargs = None
+    return m
+
+
+def _validate_aten_with_mitigations(
+    aten_op: OpOverload,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
+    input_placements: tuple[Placement, ...],
+    output_placements: tuple[Placement, ...],
+    ground_truth: torch.Tensor | list[torch.Tensor],
+    world_size: int,
+    mesh: DeviceMesh,
+    mitigations: _AtenFalsePositiveMitigations,
+) -> bool | None:
+    """Validate an aten-level combination with false positive mitigations.
+
+    Returns True (valid), False (invalid), or None (untestable).
+    """
+    combo: PlacementCombination = (input_placements, output_placements)
+    is_valid, _ = validate_aten_combination(
+        aten_op,
+        captured_args,
+        captured_kwargs,
+        ground_truth,
+        combo,
+        world_size,
+        mesh,
+    )
+    if is_valid is None:
+        return None
+
+    if is_valid and has_any_partial(input_placements, output_placements):
+        is_valid, _ = validate_aten_combination(
+            aten_op,
+            captured_args,
+            captured_kwargs,
+            ground_truth,
+            combo,
+            world_size,
+            mesh,
+            mask_shift=1,
+        )
+
+    if (
+        is_valid
+        and mitigations.negated_args is not None
+        and has_pmin_pmax(input_placements, output_placements)
+    ):
+        if mitigations.negated_kwargs is None:
+            raise AssertionError("negated_kwargs must not be None")
+        if mitigations.negated_ground_truth is None:
+            raise AssertionError("negated_ground_truth must not be None")
+        is_valid, _ = validate_aten_combination(
+            aten_op,
+            mitigations.negated_args,
+            mitigations.negated_kwargs,
+            mitigations.negated_ground_truth,
+            combo,
+            world_size,
+            mesh,
+        )
 
     return is_valid
 
@@ -1206,11 +1412,11 @@ def _validate_with_mitigations(
 def _assert_keys_normalized(
     keys: set[ComboKey],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> None:
     """Assert all combo keys have trivial shards already normalized to Replicate."""
     for key in keys:
-        if key != normalize_combo_key(key, input_shapes, output_shape):
+        if key != normalize_combo_key(key, input_shapes, output_shapes):
             raise AssertionError(
                 f"Key {key} contains un-normalized trivial shards; "
                 f"call normalize_combo_key before _compare_rules"
@@ -1221,7 +1427,7 @@ def _compare_rules(
     ground_truth_valid: set[ComboKey],
     dtensor_rules: set[ComboKey],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
     sample_idx: int,
     scalar_args: tuple[Any, ...],
     scalar_kwargs: dict[str, Any],
@@ -1229,13 +1435,16 @@ def _compare_rules(
     variant: str,
     stats: ComparisonStats,
     sample: SampleInput | None = None,
+    untestable: set[ComboKey] | None = None,
 ) -> None:
     """Compare ground truth valid rules against DTensor claimed rules, updating stats."""
     if not dtensor_rules:
         return
+    if untestable is None:
+        untestable = set()
 
-    _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
-    _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
+    _assert_keys_normalized(ground_truth_valid, input_shapes, output_shapes)
+    _assert_keys_normalized(dtensor_rules, input_shapes, output_shapes)
 
     op_str = str(aten_op)
     for combo_key in ground_truth_valid:
@@ -1244,11 +1453,11 @@ def _compare_rules(
             stats.true_positives_by_op[op_str] = (
                 stats.true_positives_by_op.get(op_str, 0) + 1
             )
-        else:
+        elif combo_key not in untestable:
             stats.false_negatives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
-                    output_placement=combo_key[1],
+                    output_placements=combo_key[1],
                     sample_idx=sample_idx,
                     input_shapes=input_shapes,
                     discrepancy_type="false_negative",
@@ -1261,11 +1470,11 @@ def _compare_rules(
             )
 
     for combo_key in dtensor_rules:
-        if combo_key not in ground_truth_valid:
+        if combo_key not in ground_truth_valid and combo_key not in untestable:
             stats.false_positives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
-                    output_placement=combo_key[1],
+                    output_placements=combo_key[1],
                     sample_idx=sample_idx,
                     input_shapes=input_shapes,
                     discrepancy_type="false_positive",
@@ -1323,14 +1532,15 @@ def _print_discrepancy_section(
     )
     for d in discrepancies:
         op_str = str(d.aten_op)
-        key = (d.input_placements, d.output_placement)
+        key = (d.input_placements, d.output_placements)
         by_op[op_str][key].append(d)
 
     for op_str in sorted(by_op.keys()):
         print(f"\n  [{op_str}]")
         for (inp, out), discs in sorted(by_op[op_str].items(), key=str):
             inp_str = ", ".join(inp)
-            print(f"    {inp_str} -> {out}")
+            out_str = out[0] if len(out) == 1 else "(" + ", ".join(out) + ")"
+            print(f"    {inp_str} -> {out_str}")
             if show_repro:
                 limit = len(discs) if show_repro < 0 else show_repro
                 for d in discs[:limit]:
@@ -1351,11 +1561,11 @@ def _print_comparison_summary(
     fp_by_op: dict[str, set[ComboKey]] = defaultdict(set)
     for d in stats.false_positives:
         op_str = str(d.aten_op)
-        fp_by_op[op_str].add((d.input_placements, d.output_placement))
+        fp_by_op[op_str].add((d.input_placements, d.output_placements))
     fn_by_op: dict[str, set[ComboKey]] = defaultdict(set)
     for d in stats.false_negatives:
         op_str = str(d.aten_op)
-        fn_by_op[op_str].add((d.input_placements, d.output_placement))
+        fn_by_op[op_str].add((d.input_placements, d.output_placements))
 
     all_ops = sorted(set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op))
     if len(all_ops) > 1:
@@ -1402,10 +1612,199 @@ def _discover_aten_op(
             tensors = extract_tensors_from_sample(sample)
             if not tensors or any(0 in t.shape for _, t in tensors):
                 continue
-            aten_op, _, _ = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
+            capture = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
+            aten_op = capture.best_match
             if aten_op is not None:
                 return aten_op
     return None
+
+
+def _check_ground_truth(
+    result: Any,
+) -> torch.Tensor | list[torch.Tensor] | None:
+    """Validate an op result is suitable as ground truth.
+
+    Returns the ground truth tensor(s) or None if the result should be skipped.
+    """
+    if isinstance(result, (list, tuple)):
+        if not all(isinstance(t, torch.Tensor) for t in result):
+            return None
+        gt = list(result)
+    elif isinstance(result, torch.Tensor):
+        gt = result
+    else:
+        return None
+
+    first_gt = gt[0] if isinstance(gt, list) else gt
+    if first_gt.numel() == 0:
+        return None
+    if (first_gt == 0).all():
+        return None
+    if first_gt.isnan().all():
+        return None
+    return gt
+
+
+def _validate_aten_op_for_sample(
+    aten_op: OpOverload,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
+    ground_truth: torch.Tensor | list[torch.Tensor],
+    world_size: int,
+    incorrect_only: bool,
+    verbose: bool,
+    sample_idx: int,
+    variant: str,
+    stats: ComparisonStats,
+    sample: SampleInput | None = None,
+) -> tuple[int, int]:
+    """Validate a single aten op with captured args against ground truth.
+
+    Shared logic used by both default (1:1) and allow_composite modes in
+    compare_operator. Returns (samples_counted, combinations_counted).
+    """
+    tensors = extract_tensors_from_args(captured_args, captured_kwargs)
+    if not tensors:
+        return 0, 0
+    if any(0 in t.shape for _, t in tensors):
+        return 0, 0
+
+    input_shapes = tuple(t.shape for _, t in tensors)
+    gt_list = ground_truth if isinstance(ground_truth, list) else [ground_truth]
+    output_shapes = tuple(tuple(gt.shape) for gt in gt_list)
+    n_outputs = len(gt_list)
+    first_gt = gt_list[0]
+
+    scalar_args = tuple(a for a in captured_args if not isinstance(a, torch.Tensor))
+    scalar_kwargs = {
+        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
+    }
+
+    mitigations = _prepare_aten_mitigations(aten_op, captured_args, captured_kwargs)
+
+    input_placement_options = [
+        get_1d_input_placements_for_tensor(t, include_partial=True) for _, t in tensors
+    ]
+    output_placement_options = get_1d_output_placements_for_tensor(first_gt)
+
+    dtensor_rules = _query_dtensor_rules(
+        aten_op,
+        tensors,
+        captured_args,
+        captured_kwargs,
+        input_shapes,
+        output_shapes,
+        world_size,
+        verbose,
+    )
+
+    ground_truth_valid: set[ComboKey] = set()
+    total_combinations = 0
+
+    tensor_device = tensors[0][1].device.type if tensors else "cpu"
+    with LocalTensorMode(frozenset(range(world_size))):
+        mesh = init_device_mesh(tensor_device, (world_size,))
+
+        if incorrect_only:
+            combinations_to_test = []
+            for combo_key in dtensor_rules:
+                input_plc_strs, output_plc_strs = combo_key
+                input_plcs_list: list[Placement] = []
+                all_valid = True
+                for s in input_plc_strs:
+                    p = parse_placement(s)
+                    if p is None:
+                        all_valid = False
+                        break
+                    input_plcs_list.append(p)
+                output_plcs_list: list[Placement] = []
+                for s in output_plc_strs:
+                    p = parse_placement(s)
+                    if p is None:
+                        all_valid = False
+                        break
+                    output_plcs_list.append(p)
+                if not all_valid:
+                    continue
+                combinations_to_test.append(
+                    (
+                        tuple(input_plcs_list),
+                        tuple(output_plcs_list),
+                        combo_key,
+                    )
+                )
+        else:
+            combinations_to_test = []
+            for input_placements in itertools.product(*input_placement_options):
+                if is_fully_replicated(input_placements):
+                    continue
+                for output_placement in output_placement_options:
+                    output_placements = tuple(
+                        output_placement for _ in range(n_outputs)
+                    )
+                    combo_key = (
+                        tuple(str(p) for p in input_placements),
+                        tuple(str(p) for p in output_placements),
+                    )
+                    combinations_to_test.append(
+                        (input_placements, output_placements, combo_key)
+                    )
+
+        untestable: set[ComboKey] = set()
+
+        for (
+            input_placements,
+            output_placements,
+            combo_key,
+        ) in combinations_to_test:
+            total_combinations += 1
+            is_valid = _validate_aten_with_mitigations(
+                aten_op,
+                captured_args,
+                captured_kwargs,
+                input_placements,
+                output_placements,
+                ground_truth,
+                world_size,
+                mesh,
+                mitigations,
+            )
+
+            if is_valid is None:
+                normalized_key = normalize_combo_key(
+                    combo_key, input_shapes, output_shapes
+                )
+                untestable.add(normalized_key)
+            elif is_valid:
+                normalized_key = normalize_combo_key(
+                    combo_key, input_shapes, output_shapes
+                )
+                if not is_fully_replicated(
+                    tuple(parse_placement(p) or Replicate() for p in normalized_key[0])
+                ):
+                    ground_truth_valid.add(normalized_key)
+
+    _compare_rules(
+        ground_truth_valid,
+        dtensor_rules,
+        input_shapes,
+        output_shapes,
+        sample_idx,
+        scalar_args,
+        scalar_kwargs,
+        aten_op,
+        variant,
+        stats,
+        sample,
+        untestable,
+    )
+
+    if verbose:
+        print(f"      Sample {sample_idx} [{aten_op}]: shapes={input_shapes}")
+        print(f"        Ground truth valid: {len(ground_truth_valid)}")
+        print(f"        DTensor rules: {len(dtensor_rules)}")
+
+    return 1, total_combinations
 
 
 def compare_operator(
@@ -1416,6 +1815,7 @@ def compare_operator(
     max_samples: int | None = None,
     verbose: bool = False,
     incorrect_only: bool = False,
+    allow_composite: bool = False,
 ) -> ComparisonStats:
     """
     Compare DTensor's sharding rules against ground truth for an operator.
@@ -1428,7 +1828,10 @@ def compare_operator(
         max_samples: Maximum number of samples to test per OpInfo
         verbose: Print detailed output
         incorrect_only: If True, only test DTensor's claimed rules for correctness.
-            Skips exhaustive search for missing rules (much faster).
+            Skips search for missing rules (much faster).
+        allow_composite: If True, validate each supported aten op individually for
+            samples that decompose into multiple aten calls. Default (False)
+            skips samples where the OpInfo doesn't map 1:1 to a single aten op.
     """
     if op_name in SKIP_OPS:
         return ComparisonStats()
@@ -1437,10 +1840,15 @@ def compare_operator(
 
     stats = ComparisonStats()
 
-    aten_op = _discover_aten_op(opinfos, device, dtype)
-    if aten_op is None or not _has_dtensor_support(aten_op):
-        stats.no_dtensor_support = True
-        return stats
+    if not allow_composite:
+        aten_op = _discover_aten_op(opinfos, device, dtype)
+        if aten_op is None or not _has_dtensor_support(aten_op):
+            if verbose:
+                print(f"  ATEN_OP_MAP: {op_name} -> {aten_op} [no_support]")
+            stats.no_dtensor_support = True
+            return stats
+        if verbose:
+            print(f"  ATEN_OP_MAP: {op_name} -> {aten_op} [supported]")
 
     total_samples = 0
     total_combinations = 0
@@ -1448,7 +1856,7 @@ def compare_operator(
 
     for opinfo in opinfos:
         variant = opinfo.variant_test_name
-        if variant:
+        if variant and verbose:
             print(f"\n  OpInfo variant: {variant}")
 
         op = opinfo.op
@@ -1456,181 +1864,98 @@ def compare_operator(
         try:
             samples = list(opinfo.sample_inputs(device, dtype))
         except Exception as e:
-            print(f"    Error generating samples: {e}")
+            if verbose:
+                print(f"    Error generating samples: {e}")
             continue
 
         if max_samples:
             samples = samples[:max_samples]
 
         for sample_idx, sample in enumerate(samples):
-            tensors = extract_tensors_from_sample(sample)
-
-            if len(tensors) == 0:
+            # Check that SampleInput has tensor inputs and no zero-sized tensors
+            sample_tensors = extract_tensors_from_sample(sample)
+            if len(sample_tensors) == 0:
                 skip_reasons["no tensor inputs"] += 1
                 continue
-
-            if any(0 in t.shape for _, t in tensors):
+            if any(0 in t.shape for _, t in sample_tensors):
                 skip_reasons["zero-sized tensor"] += 1
                 continue
 
-            total_samples += 1
-
-            try:
-                ground_truth_raw = _run_op_on_sample(op, sample)
-                if isinstance(ground_truth_raw, (list, tuple)):
-                    if not all(isinstance(t, torch.Tensor) for t in ground_truth_raw):
-                        total_samples -= 1
-                        skip_reasons["non-tensor output"] += 1
-                        continue
-                    ground_truth = list(ground_truth_raw)
-                elif isinstance(ground_truth_raw, torch.Tensor):
-                    ground_truth = ground_truth_raw
-                else:
-                    total_samples -= 1
-                    skip_reasons["non-tensor output"] += 1
-                    continue
-
-                # For skip checks, use the first tensor (or the only tensor)
-                first_gt = (
-                    ground_truth[0] if isinstance(ground_truth, list) else ground_truth
-                )
-                if first_gt.numel() > 0 and (first_gt == 0).all():
-                    total_samples -= 1
-                    skip_reasons["all-zero output"] += 1
-                    continue
-                if first_gt.numel() > 0 and first_gt.isnan().all():
-                    total_samples -= 1
-                    skip_reasons["all-NaN output"] += 1
-                    continue
-            except Exception:
-                skip_reasons["op raised exception"] += 1
+            # Capture all aten ops dispatched for this sample
+            capture = get_aten_op_for_sample(op, sample, opinfo.name)
+            if capture.best_match is None:
+                skip_reasons["no aten op captured"] += 1
                 continue
 
-            input_shapes = tuple(t.shape for _, t in tensors)
-            output_shape = tuple(first_gt.shape)
-
-            scalar_args = tuple(
-                a for a in sample.args if not isinstance(a, torch.Tensor)
-            )
-            scalar_kwargs = {
-                k: v
-                for k, v in sample.kwargs.items()
-                if not isinstance(v, torch.Tensor)
-            }
-
-            mitigations = _prepare_false_positive_mitigations(op, sample, tensors)
-
-            input_placement_options = [
-                get_1d_input_placements_for_tensor(t, include_partial=True)
-                for _, t in tensors
+            # Count supported aten ops in the capture
+            supported_ops = [
+                (func, args, kwargs, result)
+                for func, args, kwargs, result in capture.all_ops
+                if _has_dtensor_support(func)
             ]
-            output_placement_options = get_1d_output_placements_for_tensor(first_gt)
+            num_supported = len(supported_ops)
 
-            aten_op, captured_args, captured_kwargs = get_aten_op_for_sample(
-                op, sample, opinfo.name
-            )
+            if allow_composite:
+                # Validate each supported aten op individually
+                if num_supported == 0:
+                    skip_reasons["no supported aten ops"] += 1
+                    continue
 
-            dtensor_rules = _query_dtensor_rules(
-                aten_op,
-                tensors,
-                captured_args,
-                captured_kwargs,
-                input_shapes,
-                output_shape,
-                world_size,
-                verbose,
-            )
-
-            ground_truth_valid: set[ComboKey] = set()
-
-            tensor_device = tensors[0][1].device.type if tensors else "cpu"
-            with LocalTensorMode(frozenset(range(world_size))):
-                mesh = init_device_mesh(tensor_device, (world_size,))
-
-                if incorrect_only:
-                    combinations_to_test = []
-                    for combo_key in dtensor_rules:
-                        input_plc_strs, output_plc_str = combo_key
-                        input_plcs_list: list[Placement] = []
-                        all_valid = True
-                        for s in input_plc_strs:
-                            p = parse_placement(s)
-                            if p is None:
-                                all_valid = False
-                                break
-                            input_plcs_list.append(p)
-                        output_plc = parse_placement(output_plc_str)
-                        if not all_valid or output_plc is None:
-                            continue
-                        combinations_to_test.append(
-                            (tuple(input_plcs_list), output_plc, combo_key)
-                        )
-                else:
-                    combinations_to_test = []
-                    for input_placements in itertools.product(*input_placement_options):
-                        if is_fully_replicated(input_placements):
-                            continue
-                        for output_placement in output_placement_options:
-                            combo_key = (
-                                tuple(str(p) for p in input_placements),
-                                str(output_placement),
-                            )
-                            combinations_to_test.append(
-                                (input_placements, output_placement, combo_key)
-                            )
-
-                for (
-                    input_placements,
-                    output_placement,
-                    combo_key,
-                ) in combinations_to_test:
-                    total_combinations += 1
-                    is_valid = _validate_with_mitigations(
-                        op,
-                        sample,
-                        tensors,
-                        input_placements,
-                        output_placement,
-                        ground_truth,
+                for func, args, kwargs, result in supported_ops:
+                    gt = _check_ground_truth(result)
+                    if gt is None:
+                        skip_reasons["non-tensor/degenerate aten output"] += 1
+                        continue
+                    n_samples, n_combos = _validate_aten_op_for_sample(
+                        func,
+                        args,
+                        kwargs,
+                        gt,
                         world_size,
-                        mesh,
-                        mitigations,
+                        incorrect_only,
+                        verbose,
+                        sample_idx,
+                        variant,
+                        stats,
+                        sample,
                     )
+                    total_samples += n_samples
+                    total_combinations += n_combos
+            else:
+                # Default: only validate samples with a single supported aten op
+                if num_supported != 1:
+                    skip_reasons["non-1:1 aten mapping"] += 1
+                    continue
 
-                    if is_valid:
-                        normalized_key = normalize_combo_key(
-                            combo_key, input_shapes, output_shape
-                        )
-                        if not is_fully_replicated(
-                            tuple(
-                                parse_placement(p) or Replicate()
-                                for p in normalized_key[0]
-                            )
-                        ):
-                            ground_truth_valid.add(normalized_key)
+                func, args, kwargs, result = supported_ops[0]
+                gt = _check_ground_truth(result)
+                if gt is None:
+                    skip_reasons["non-tensor/degenerate aten output"] += 1
+                    continue
 
-            _compare_rules(
-                ground_truth_valid,
-                dtensor_rules,
-                input_shapes,
-                output_shape,
-                sample_idx,
-                scalar_args,
-                scalar_kwargs,
-                aten_op,
-                variant,
-                stats,
-                sample,
-            )
-
-            if verbose:
-                print(f"      Sample {sample_idx}: shapes={input_shapes}")
-                print(f"        Ground truth valid: {len(ground_truth_valid)}")
-                print(f"        DTensor rules: {len(dtensor_rules)}")
+                n_samples, n_combos = _validate_aten_op_for_sample(
+                    func,
+                    args,
+                    kwargs,
+                    gt,
+                    world_size,
+                    incorrect_only,
+                    verbose,
+                    sample_idx,
+                    variant,
+                    stats,
+                    sample,
+                )
+                total_samples += n_samples
+                total_combinations += n_combos
 
     stats.total_samples = total_samples
     stats.total_combinations = total_combinations
     stats.skip_reasons = dict(skip_reasons)
+
+    # In allow_composite mode, check DTensor support after processing
+    if allow_composite and total_samples == 0 and not skip_reasons:
+        stats.no_dtensor_support = True
 
     return stats
 
@@ -1777,6 +2102,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Only test DTensor's claimed rules (faster, skips missing detection)",
     )
+    parser.add_argument(
+        "--allow-composite",
+        action="store_true",
+        help="Validate each supported aten op individually for decomposed ops "
+        "(default skips non-1:1 aten mappings)",
+    )
     parser.add_argument("--device", default="cuda", help="Device to use")
     parser.add_argument("--dtype", default="float32", help="Dtype to use")
     parser.add_argument(
@@ -1835,6 +2166,10 @@ if __name__ == "__main__":
         # Preamble
         display_names = [_format_op_name(n) for n in op_names]
         print(f"Testing ops: {', '.join(display_names)}")
+        if args.allow_composite:
+            print(
+                "Mode: allow-composite (validates each aten op in decomposed samples)"
+            )
         if args.incorrect_only:
             print("Mode: incorrect-only (fast)")
         print(f"Device: {args.device}, Dtype: {dtype}, World size: {args.world_size}")
@@ -1859,7 +2194,9 @@ if __name__ == "__main__":
                     dtype,
                     args.world_size,
                     args.max_samples,
+                    verbose=True,
                     incorrect_only=args.incorrect_only,
+                    allow_composite=args.allow_composite,
                 )
                 elapsed = time.time() - op_start
 
@@ -1928,11 +2265,11 @@ if __name__ == "__main__":
 
             for name, stats, elapsed in formatted_results:
                 fp_rules = {
-                    (d.input_placements, d.output_placement)
+                    (d.input_placements, d.output_placements)
                     for d in stats.false_positives
                 }
                 fn_rules = {
-                    (d.input_placements, d.output_placement)
+                    (d.input_placements, d.output_placements)
                     for d in stats.false_negatives
                 }
                 n_fp = len(fp_rules)
