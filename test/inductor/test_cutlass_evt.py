@@ -382,7 +382,7 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
+    @skipCUDAIf(not (IS_SM90 or IS_SM100), "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
         from torch._inductor.codegen.cutlass.utils import cutlass_arch
@@ -444,7 +444,7 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
+    @skipCUDAIf(not (IS_SM90 or IS_SM100), "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
         from torch._inductor.codegen.cutlass.utils import cutlass_arch
@@ -509,7 +509,7 @@ def fn(accum, bias):
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater or SM120OrLater, "need sm_90 or sm_100")
+    @skipCUDAIf(not (IS_SM90 or IS_SM100), "need sm_90 or sm_100")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code, _ = trace(
