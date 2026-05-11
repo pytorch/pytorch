@@ -285,6 +285,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
 
+    if config.dedup_reduce_scatters:
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
+            dedup_fsdp_reduce_scatter
+        )
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
@@ -393,23 +400,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 )
             )
-
-    # Foreach mm: after overlap scheduling, unwrap control_deps(mm)
-    # that don't depend on collectives, then batch the unwrapped mm
-    # ops into _foreach_mm. Enables cascading pointwise fusion.
-    if config.aten_distributed_optimizations.foreach_mm:
-        from torch._inductor.fx_passes.foreach_mm_post_sched import (
-            foreach_mm_post_scheduling_pass,
-        )
-        from torch._inductor.fx_passes.horizontal_fusion import foreach_mm_pass
-
-        GraphTransformObserver(gm, "foreach_mm_unwrap").apply_graph_pass(
-            lambda graph: foreach_mm_post_scheduling_pass(graph.owning_module)  # type: ignore[arg-type]
-        )
-
-        GraphTransformObserver(gm, "foreach_mm_batch").apply_graph_pass(
-            lambda graph: foreach_mm_pass(graph.owning_module)  # type: ignore[arg-type]
-        )
 
     if config.aten_distributed_optimizations.enable_low_contention_collectives:
         from torch._inductor.fx_passes.low_contention_collectives import (
@@ -1921,6 +1911,12 @@ class ConstructorMoverPass:
                 continue
 
             if node.kwargs.get("device") != torch.device("cpu"):
+                continue
+
+            if (
+                torch._inductor.config.fallback_random
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
                 continue
 
             constructors.append(node)
