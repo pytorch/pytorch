@@ -869,6 +869,187 @@ class AutogradFunctionApply(HigherOrderOperator):
 autograd_function_apply = AutogradFunctionApply()
 
 
+_lazy_autograd_function_backward_registry: dict[int, Callable[..., Any]] = {}
+
+
+def register_lazy_autograd_function_backward(backward_fn: Callable[..., Any]) -> int:
+    backward_id = id(backward_fn)
+    _lazy_autograd_function_backward_registry[backward_id] = backward_fn
+    return backward_id
+
+
+def _call_lazy_compiled(fn: Callable[..., Any], *args: Any) -> Any:
+    with torch._dynamo.config.patch(
+        error_on_nested_fx_trace=False,
+        force_compile_during_fx_trace=True,
+    ):
+        return torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )(*args)
+
+
+def _as_tuple(x: Any) -> tuple[Any, ...]:
+    if isinstance(x, tuple):
+        return x
+    return (x,)
+
+
+def _select_non_differentiable_outputs(
+    output: Any, non_differentiable_idx: list[int]
+) -> list[Any]:
+    if not non_differentiable_idx:
+        return []
+    flat_output = _as_tuple(output)
+    return [x for i, x in enumerate(flat_output) if i in non_differentiable_idx]
+
+
+def _normalize_lazy_backward_result(
+    result: Any,
+    user_arg_index_by_fwd_arg: list[int | None],
+    fwd_arg_index_by_user_arg: list[int | None],
+    num_user_args: int,
+) -> tuple[Any, ...]:
+    if isinstance(result, tuple):
+        user_grads = result
+    elif isinstance(result, list):
+        user_grads = tuple(result)
+    else:
+        user_grads = (result,)
+
+    if len(user_grads) < num_user_args:
+        missing_user_arg_indices = range(len(user_grads), num_user_args)
+        if any(
+            fwd_arg_index_by_user_arg[user_arg_idx] is not None
+            for user_arg_idx in missing_user_arg_indices
+        ):
+            raise RuntimeError(
+                "function LazyDynamoAutogradFunctionBackward returned an incorrect "
+                f"number of gradients (expected at least {num_user_args}, "
+                f"got {len(user_grads)})"
+            )
+        user_grads = (*user_grads, *((None,) * (num_user_args - len(user_grads))))
+    extra_grads = user_grads[num_user_args:]
+    if any(grad is not None for grad in extra_grads):
+        raise RuntimeError(
+            "function LazyDynamoAutogradFunctionBackward returned a gradient "
+            "for an input that does not exist"
+        )
+
+    return tuple(
+        None if user_arg_idx is None else user_grads[user_arg_idx]
+        for user_arg_idx in user_arg_index_by_fwd_arg
+    )
+
+
+def _needs_input_grad_from_fwd_args(
+    args: tuple[Any, ...],
+    fwd_arg_index_by_user_arg: list[int | None],
+) -> tuple[bool, ...]:
+    return tuple(
+        False
+        if fwd_arg_idx is None
+        else isinstance(args[fwd_arg_idx], torch.Tensor)
+        and bool(args[fwd_arg_idx].requires_grad)
+        for fwd_arg_idx in fwd_arg_index_by_user_arg
+    )
+
+
+def _remap_lazy_grad_outputs(
+    grad_outputs: tuple[Any, ...],
+    grad_output_index_by_backward_arg: list[int | None],
+) -> tuple[Any, ...]:
+    return tuple(
+        None if grad_idx is None else grad_outputs[grad_idx]
+        for grad_idx in grad_output_index_by_backward_arg
+    )
+
+
+def lazy_autograd_function_apply(
+    fwd: torch.fx.GraphModule,
+    backward_id: int,
+    *fwd_args: Any,
+    **fwd_kwargs: Any,
+) -> Any:
+    backward_fn = _lazy_autograd_function_backward_registry[backward_id]
+    non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
+    saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
+    num_saved_tensors = fwd_kwargs["num_saved_tensors"]
+    ctx_tensor_attr_names = fwd_kwargs["ctx_tensor_attr_names"]
+    ctx_constant_attrs = fwd_kwargs["ctx_constant_attrs"]
+    user_arg_index_by_fwd_arg = fwd_kwargs["user_arg_index_by_fwd_arg"]
+    fwd_arg_index_by_user_arg = fwd_kwargs["fwd_arg_index_by_user_arg"]
+    grad_output_index_by_backward_arg = fwd_kwargs["grad_output_index_by_backward_arg"]
+    num_user_args = len(fwd_arg_index_by_user_arg)
+
+    class LazyDynamoAutogradFunction(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, *args: Any) -> Any:
+            output, ctx_payload = torch.fx.Interpreter(fwd).run(*args)
+            ctx_payload = tuple(ctx_payload)
+            saved_tensors = ctx_payload[:num_saved_tensors]
+            tensor_attrs = ctx_payload[num_saved_tensors:]
+
+            if saved_tensors:
+                ctx.save_for_backward(*saved_tensors)
+            for name, value in zip(ctx_tensor_attr_names, tensor_attrs):
+                setattr(ctx, name, value)
+            for name, value in ctx_constant_attrs:
+                setattr(ctx, name, value)
+
+            ctx.needs_input_grad = _needs_input_grad_from_fwd_args(
+                args,
+                fwd_arg_index_by_user_arg,
+            )
+
+            non_differentiable_output = _select_non_differentiable_outputs(
+                output,
+                non_differentiable_idx,
+            )
+            if non_differentiable_output:
+                ctx.mark_non_differentiable(*non_differentiable_output)
+
+            from torch.fx.experimental.proxy_tensor import _get_proxies
+
+            for idx, value in enumerate(ctx_payload):
+                if idx not in saved_for_backward_idx:
+                    for proxy in _get_proxies(value):
+                        proxy.node.meta["saved_tensor_with_no_vc_check"] = True
+
+            return output
+
+        @staticmethod
+        def backward(ctx: Any, *grad_outputs: Any) -> Any:
+            saved_tensors = ctx.saved_tensors
+            backward_grad_outputs = _remap_lazy_grad_outputs(
+                grad_outputs,
+                grad_output_index_by_backward_arg,
+            )
+
+            def backward_with_saved_tensors(
+                saved_tensors: Sequence[torch.Tensor],
+                *grad_outputs: Any,
+            ) -> Any:
+                wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
+                return backward_fn(wrapped_ctx, *grad_outputs)
+
+            result = _call_lazy_compiled(
+                backward_with_saved_tensors,
+                saved_tensors,
+                *backward_grad_outputs,
+            )
+            return _normalize_lazy_backward_result(
+                result,
+                user_arg_index_by_fwd_arg,
+                fwd_arg_index_by_user_arg,
+                num_user_args,
+            )
+
+    LazyDynamoAutogradFunction.__name__ = "LazyDynamoAutogradFunction"
+    return LazyDynamoAutogradFunction.apply(*fwd_args)
+
+
 class DynamoAutogradFunctionTraceHelper:
     @staticmethod
     def fwd_trace_helper(orig_fwd: Callable[_P, Any]) -> Callable[_P, Any]:

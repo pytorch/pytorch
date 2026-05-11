@@ -4760,6 +4760,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_forward_graph(tx, ctx, fwd_tracer, args, kwargs)
         )
 
+        if torch._dynamo.config.lazy_compile_autograd_function:
+            return self.call_lazy_backward_function(
+                tx,
+                ctx,
+                fwd_tracer,
+                args,
+                fwd_out,
+                fwd_graph,
+                fwd_freevars,
+                fwd_graph_output_vts,
+            )
+
         bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
             self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
         )
@@ -4949,6 +4961,295 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 )
 
         return fwd_fn, fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts
+
+    def _autograd_function_output_items(
+        self, fwd_out: VariableTracker
+    ) -> list[VariableTracker]:
+        if isinstance(fwd_out, variables.BaseListVariable):
+            return list(fwd_out.items)
+        return [fwd_out]
+
+    def _autograd_function_non_differentiable_idx(
+        self,
+        ctx: "AutogradFunctionContextVariable",
+        fwd_out: VariableTracker,
+    ) -> list[int]:
+        non_differentiable_idx = []
+        if ctx.non_differentiable is None:
+            return non_differentiable_idx
+
+        non_differentiable_set = set(ctx.non_differentiable)
+        for i, x in enumerate(self._autograd_function_output_items(fwd_out)):
+            if x.is_tensor() and x.as_proxy() in non_differentiable_set:
+                non_differentiable_idx.append(i)
+        return non_differentiable_idx
+
+    def _lazy_autograd_function_payload_node(
+        self,
+        fwd_tracer: "SubgraphTracer",
+        fwd_freevars: dict[Proxy, Proxy],
+        value: VariableTracker,
+    ) -> Any:
+        if not value.is_tensor() and not isinstance(value, SymNodeVariable):
+            try:
+                return value.as_python_constant()
+            except NotImplementedError as exc:
+                unimplemented(
+                    gb_type="lazy_autograd_function_unsupported_ctx_payload",
+                    context=f"autograd.Function ctx value: {value}",
+                    explanation="The prototype lazy autograd.Function backward path "
+                    "only supports Tensor and constant values in ctx payloads.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=exc,
+                )
+
+        proxy = value.as_proxy()
+        fwd_tracer.maybe_lift_tracked_freevar_to_input(proxy)
+        inner_proxy = fwd_freevars.get(
+            proxy,
+            fwd_tracer.lifted_freevars.get(proxy, proxy),
+        )
+        return inner_proxy.node
+
+    def _lazy_autograd_function_ctx_payload(
+        self,
+        tx: "InstructionTranslator",
+        ctx: "AutogradFunctionContextVariable",
+        fwd_tracer: "SubgraphTracer",
+        fwd_freevars: dict[Proxy, Proxy],
+    ) -> tuple[list[Any], int, list[int], list[str], list[tuple[str, Any]]]:
+        payload_nodes: list[Any] = []
+        saved_for_backward_idx: list[int] = []
+
+        if ctx.saved_tensors is not None:
+            for value in ctx.saved_tensors.tensors:
+                payload_nodes.append(
+                    self._lazy_autograd_function_payload_node(
+                        fwd_tracer,
+                        fwd_freevars,
+                        value,
+                    )
+                )
+                saved_for_backward_idx.append(len(payload_nodes) - 1)
+
+        num_saved_tensors = len(payload_nodes)
+        ctx_tensor_attr_names: list[str] = []
+        ctx_constant_attrs: list[tuple[str, Any]] = []
+
+        for name, value in tx.output.side_effects.store_attr_mutations.get(
+            ctx, {}
+        ).items():
+            if name in {"_materialize_non_diff_grads", "needs_input_grad"}:
+                unimplemented(
+                    gb_type="lazy_autograd_function_unsupported_ctx_attr_mutation",
+                    context=f"autograd.Function ctx attribute: {name}",
+                    explanation="The prototype lazy autograd.Function backward "
+                    "path does not support this ctx attribute mutation.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            if value.is_tensor() or isinstance(value, SymNodeVariable):
+                ctx_tensor_attr_names.append(name)
+                payload_nodes.append(
+                    self._lazy_autograd_function_payload_node(
+                        fwd_tracer,
+                        fwd_freevars,
+                        value,
+                    )
+                )
+                continue
+
+            try:
+                constant_value = value.as_python_constant()
+            except NotImplementedError as exc:
+                unimplemented(
+                    gb_type="lazy_autograd_function_unsupported_ctx_attr_value",
+                    context=f"autograd.Function ctx attribute: {name}={value}",
+                    explanation="The prototype lazy autograd.Function backward "
+                    "path only supports Tensor and constant ctx attributes.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=exc,
+                )
+            ctx_constant_attrs.append((name, constant_value))
+
+        return (
+            payload_nodes,
+            num_saved_tensors,
+            saved_for_backward_idx,
+            ctx_tensor_attr_names,
+            ctx_constant_attrs,
+        )
+
+    def _rewrite_lazy_autograd_function_forward_graph_output(
+        self,
+        fwd_graph: torch.fx.Graph,
+        ctx_payload_nodes: list[Any],
+    ) -> None:
+        for node in fwd_graph.find_nodes(op="output"):
+            fwd_output_nodes = node.args[0]
+            fwd_graph.erase_node(node)
+            break
+        else:
+            raise AssertionError("Expected forward graph to have an output node")
+
+        fwd_graph.output((fwd_output_nodes, tuple(ctx_payload_nodes)))
+        fwd_graph.lint()
+
+    def _lazy_autograd_function_input_metadata(
+        self,
+        args: Sequence[VariableTracker],
+        fwd_freevars: dict[Proxy, Proxy],
+    ) -> tuple[list[int | None], list[int | None]]:
+        fwd_arg_proxies = list(fwd_freevars.keys())
+        fwd_proxy_to_index = {proxy: i for i, proxy in enumerate(fwd_arg_proxies)}
+        user_arg_index_by_fwd_arg: list[int | None] = [None] * len(fwd_arg_proxies)
+        fwd_arg_index_by_user_arg: list[int | None] = []
+        seen_user_tensor_proxies: set[Proxy] = set()
+
+        for user_arg_idx, arg in enumerate(args):
+            if not arg.is_tensor():
+                fwd_arg_index_by_user_arg.append(None)
+                continue
+
+            proxy = arg.as_proxy()
+            if proxy in seen_user_tensor_proxies:
+                unimplemented(
+                    gb_type="lazy_autograd_function_duplicate_tensor_arg",
+                    context=f"autograd.Function args: {args}",
+                    explanation="The prototype lazy autograd.Function backward "
+                    "path does not support passing the same Tensor as multiple "
+                    "user-visible autograd.Function inputs.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            seen_user_tensor_proxies.add(proxy)
+
+            fwd_arg_idx = fwd_proxy_to_index.get(proxy)
+            if fwd_arg_idx is None:
+                raise AssertionError(
+                    "Expected tensor autograd.Function input to be lifted into "
+                    "the forward graph"
+                )
+            fwd_arg_index_by_user_arg.append(fwd_arg_idx)
+            user_arg_index_by_fwd_arg[fwd_arg_idx] = user_arg_idx
+
+        return user_arg_index_by_fwd_arg, fwd_arg_index_by_user_arg
+
+    def _lazy_autograd_function_grad_output_metadata(
+        self,
+        fwd_out: VariableTracker,
+    ) -> list[int | None]:
+        grad_output_index_by_backward_arg: list[int | None] = []
+        flat_grad_idx = 0
+
+        for output in self._autograd_function_output_items(fwd_out):
+            if output.is_tensor():
+                grad_output_index_by_backward_arg.append(flat_grad_idx)
+                flat_grad_idx += 1
+                continue
+
+            tensor_count = 0
+
+            def count_tensor(vt: VariableTracker) -> None:
+                nonlocal tensor_count
+                if vt.is_tensor():
+                    tensor_count += 1
+
+            VariableTracker.visit(count_tensor, output)
+            grad_output_index_by_backward_arg.append(None)
+            flat_grad_idx += tensor_count
+
+        return grad_output_index_by_backward_arg
+
+    def call_lazy_backward_function(
+        self,
+        tx: "InstructionTranslator",
+        ctx: "AutogradFunctionContextVariable",
+        fwd_tracer: "SubgraphTracer",
+        args: Sequence[VariableTracker],
+        fwd_out: VariableTracker,
+        fwd_graph: torch.fx.Graph,
+        fwd_freevars: dict[Proxy, Proxy],
+        fwd_graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
+    ) -> VariableTracker:
+        from torch._functorch.autograd_function import (
+            lazy_autograd_function_apply,
+            register_lazy_autograd_function_backward,
+        )
+
+        (
+            ctx_payload_nodes,
+            num_saved_tensors,
+            saved_for_backward_idx,
+            ctx_tensor_attr_names,
+            ctx_constant_attrs,
+        ) = self._lazy_autograd_function_ctx_payload(
+            tx,
+            ctx,
+            fwd_tracer,
+            fwd_freevars,
+        )
+        self._rewrite_lazy_autograd_function_forward_graph_output(
+            fwd_graph,
+            ctx_payload_nodes,
+        )
+
+        fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
+        fwd_name = tx.output.install_subgraph(
+            "fwd_body",
+            torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
+        )
+        fwd_node = make_attr(tx, fwd_name)
+
+        backward_id = register_lazy_autograd_function_backward(self.bwd_fn)
+        user_arg_index_by_fwd_arg, fwd_arg_index_by_user_arg = (
+            self._lazy_autograd_function_input_metadata(args, fwd_freevars)
+        )
+        non_differentiable_idx = self._autograd_function_non_differentiable_idx(
+            ctx,
+            fwd_out,
+        )
+        grad_output_index_by_backward_arg = (
+            self._lazy_autograd_function_grad_output_metadata(fwd_out)
+        )
+
+        p_args = (
+            fwd_node,
+            backward_id,
+            *list(fwd_freevars.keys()),
+        )
+        kwargs_for_fn = {
+            "non_differentiable_idx": non_differentiable_idx,
+            "saved_for_backward_idx": saved_for_backward_idx,
+            "num_saved_tensors": num_saved_tensors,
+            "ctx_tensor_attr_names": ctx_tensor_attr_names,
+            "ctx_constant_attrs": ctx_constant_attrs,
+            "user_arg_index_by_fwd_arg": user_arg_index_by_fwd_arg,
+            "fwd_arg_index_by_user_arg": fwd_arg_index_by_user_arg,
+            "grad_output_index_by_backward_arg": grad_output_index_by_backward_arg,
+        }
+
+        with enable_python_dispatcher():
+            with tx.output.fake_mode:
+                fwd_freevars_args = [_get_fake_value(arg) for arg in fwd_freevars]
+                example_value = lazy_autograd_function_apply(
+                    tx.output.nn_modules[fwd_node.node.name],
+                    backward_id,
+                    *fwd_freevars_args,
+                    **kwargs_for_fn,
+                )
+
+        flat_variable = add_call_function(
+            tx,
+            lazy_autograd_function_apply,
+            p_args,
+            kwargs_for_fn,
+            example_value,
+        )
+        # type: ignore[arg-type]
+        overwrite_tensor_vt_proxy(fwd_graph_output_vts, flat_variable)
+        # type: ignore[arg-type]
+        overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
+        return fwd_out
 
     def trace_backward_graph(
         self,

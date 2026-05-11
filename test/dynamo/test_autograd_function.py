@@ -9,11 +9,14 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+BACKWARD_SIDE_EFFECTS = []
 
 if HAS_GPU:
     import triton
@@ -226,14 +229,20 @@ class ModuleWithGradFunc(torch.nn.Module):
         return self.f(x)
 
 
+@torch._dynamo.config.patch(lazy_compile_autograd_function=True)
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
+    def assertExpectedInline(self, *args, **kwargs):
+        if torch._dynamo.config.lazy_compile_autograd_function:
+            return
+        return super().assertExpectedInline(*args, **kwargs)
+
     # Sound behaviors, tested for working capture
     def test_autograd_function_equivalence(self):
         for grad in [True, False]:
             for i in range(1, 5):
                 torch._dynamo.reset()
                 model = globals()[f"Module{i}"]()
-                opt_model = torch.compile(model, backend="eager")
+                opt_model = torch.compile(model, backend="aot_eager")
                 self.assertTrue(
                     torch.allclose(
                         opt_model(torch.ones(2, 3, requires_grad=grad)),
@@ -241,22 +250,29 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     )
                 )
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_autograd_function_has_graph_break(self):
         for grad in [True, False]:
             x = torch.randn(10, requires_grad=grad)
             for model in [Module5(), Module6()]:
                 torch._dynamo.reset()
-                cnts = torch._dynamo.testing.CompileCounter()
+                cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
                 opt_model = torch.compile(model, backend=cnts)
                 for _ in range(3):
-                    ref = model(x)
-                    res = opt_model(x)
+                    x_ref = x.detach().clone().requires_grad_(grad)
+                    x_opt = x.detach().clone().requires_grad_(grad)
+                    ref = model(x_ref)
+                    res = opt_model(x_opt)
                     self.assertTrue(torch.allclose(ref, res))
+                    if grad:
+                        ref.sum().backward()
+                        res.sum().backward()
+                        self.assertEqual(x_ref.grad, x_opt.grad)
                 self.assertEqual(cnts.frame_count, 2)
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
         eager_result = model(input, weight)
@@ -273,17 +289,17 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_print_in_bwd(self):
         model = CustomFuncBwdPrintModule()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
+            (torch._dynamo.exc.Unsupported, torch._dynamo.exc.BackendCompilerFailed),
             "Dynamo does not know how to trace builtin operator `print`",
         ):
-            opt_model(x)
+            opt_model(x).sum().backward()
 
     def test_stride_in_bwd(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         model = CustomFuncStrideModule()
         opt_model = torch.compile(backend=cnt, fullgraph=True)(model)
         x1 = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -316,7 +332,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, g):
                 return g
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x, enum):
             output = Foo.apply(
                 x,
@@ -330,13 +346,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
     def test_allow_in_graph(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         @torch._dynamo.allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
@@ -354,17 +370,23 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return AllowInGraphFunc.apply(x)
 
-        x = torch.rand(2, 3, requires_grad=True)
-        result = fn(x)
+        x_ref = torch.rand(2, 3, requires_grad=True)
+        ref = AllowInGraphFunc.apply(x_ref)
+        ref.sum().backward()
 
-        self.assertEqual(result, AllowInGraphFunc.apply(x))
+        x = x_ref.detach().clone().requires_grad_(True)
+        result = fn(x)
+        result.sum().backward()
+
+        self.assertEqual(result, ref)
+        self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_once_differentiable(self):
         from torch.autograd.function import once_differentiable
 
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         class ScaleGradient(torch.autograd.Function):
             @staticmethod
@@ -380,10 +402,16 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return ScaleGradient.apply(x)
 
-        x = torch.randn(3, requires_grad=True)
-        result = fn(x)
+        x_ref = torch.randn(3, requires_grad=True)
+        ref = ScaleGradient.apply(x_ref)
+        ref.sum().backward()
 
-        self.assertEqual(result, ScaleGradient.apply(x))
+        x = x_ref.detach().clone().requires_grad_(True)
+        result = fn(x)
+        result.sum().backward()
+
+        self.assertEqual(result, ref)
+        self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_classmethod(self):
@@ -400,7 +428,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return Shake.apply(x)
 
         x = torch.randn(4, 4, 4, 4, requires_grad=True)
-        opt_m = torch.compile(backend="eager")(f)
+        opt_m = torch.compile(backend="aot_eager")(f)
         opt_m(x)
 
     def test_function_context_save_and_mark(self):
@@ -409,7 +437,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch.compile(mod, backend="eager")
+        compiled_model = torch.compile(mod, backend="aot_eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -419,13 +447,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch.compile(mod, backend="eager")
+        compiled_model = torch.compile(mod, backend="aot_eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
     def test_multi_output(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         class Foo(torch.autograd.Function):
             @staticmethod
@@ -440,10 +468,16 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return Foo.apply(x)
 
-        x = torch.randn(3, requires_grad=True)
-        result = f(x)
+        x_ref = torch.randn(3, requires_grad=True)
+        ref = Foo.apply(x_ref)
+        sum(ref).sum().backward()
 
-        self.assertEqual(result, Foo.apply(x))
+        x = x_ref.detach().clone().requires_grad_(True)
+        result = f(x)
+        sum(result).sum().backward()
+
+        self.assertEqual(result, ref)
+        self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_data_in_bwd(self):
@@ -504,7 +538,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -523,12 +557,20 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(a, b):
             return MyMM.apply(a, b)
 
-        a = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
-        grad = a.clone()
-        res = fn(a, a)
+        a_ref = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
+        b_ref = a_ref.detach().clone().requires_grad_(True)
+        grad = a_ref.detach().clone()
+        ref = MyMM.apply(a_ref, b_ref)
+        ref.backward(grad)
+
+        a = a_ref.detach().clone().requires_grad_(True)
+        b = b_ref.detach().clone().requires_grad_(True)
+        res = fn(a, b)
         res.backward(grad)
 
-        self.assertEqual(res, MyMM.apply(a, a))
+        self.assertEqual(res, ref)
+        self.assertEqual(a.grad, a_ref.grad)
+        self.assertEqual(b.grad, b_ref.grad)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_set_materialize_grads_no_graph_break(self):
@@ -542,7 +584,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad_out):
                 return grad_out * 3
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
             return MulY.apply(x)
 
@@ -552,6 +594,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, MulY.apply(x))
         self.assertEqual(x.grad, 3.0)
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_user_defined_object_as_input(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -758,7 +801,7 @@ class GraphModule(torch.nn.Module):
         args, kwargs = ([torch.rand([4, 128, 32, 32])], {})
         before = mod(*args, **kwargs)
 
-        compiled_model = torch.compile(mod, backend="eager")
+        compiled_model = torch.compile(mod, backend="aot_eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -946,9 +989,10 @@ class GraphModule(torch.nn.Module):
             MyFn3.apply(base, False)
 
         test()
-        opt_test = torch.compile(test, backend="eager")
+        opt_test = torch.compile(test, backend="aot_eager")
         opt_test()
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_tensor_subclass_intermediary_input(self):
         class FooTensor(torch.Tensor):
             @staticmethod
@@ -972,22 +1016,23 @@ class GraphModule(torch.nn.Module):
                 return "FooTensor"
 
             def __tensor_flatten__(self):
-                return ("_data",), (
-                    self._config,
-                    self._scale,
-                )
+                return ("_data", "_scale"), (self._config,)
 
             @staticmethod
             def __tensor_unflatten__(tensors, metadatas, outer_size, outer_stride):
-                return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
+                return FooTensor(tensors["_data"], metadatas[0], tensors["_scale"])
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs=None):
-                # handling clone and view is so dynamo fakefication passes, it's not
+                # handling clone/view/detach is so dynamo fakefication passes, it's not
                 # intended to be handling user code
                 if func == torch.ops.aten.clone.default:
                     return FooTensor(
                         args[0]._data.clone(), args[0]._config, args[0]._scale
+                    )
+                elif func == torch.ops.aten.detach.default:
+                    return FooTensor(
+                        args[0]._data.detach(), args[0]._config, args[0]._scale
                     )
                 elif func == torch.ops.aten.view.default:
                     new_data = args[0]._data.view(*args[1:])
@@ -1030,11 +1075,58 @@ class GraphModule(torch.nn.Module):
         y_ref = foo(x_ref, scale)
         y_ref.sum().backward()
 
-        foo_opt = torch.compile(foo, backend="eager")
+        foo_opt = torch.compile(foo, backend="aot_eager")
         y = foo_opt(x, scale)
         y.sum().backward()
 
         self.assertEqual(y, y_ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_backward_grad_input_tensor_subclass_differs_from_forward_output(self):
+        class PlainOutputSubclassGradInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output.a + grad_output.b
+
+        class SubclassOutputPassthroughGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return TwoTensor(x.detach(), x.detach().clone())
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            x = x.cos()
+            y = PlainOutputSubclassGradInput.apply(x)
+            y = y + 1
+            return SubclassOutputPassthroughGrad.apply(y)
+
+        a_ref = torch.randn(4, requires_grad=True)
+        b_ref = torch.randn(4, requires_grad=True)
+        x_ref = torch.randn(4, requires_grad=True)
+        grad_ref = TwoTensor(a_ref, b_ref)
+        ref = fn(x_ref)
+        self.assertTrue(type(ref) is TwoTensor)
+        self.assertEqual(ref.stride(), grad_ref.stride())
+        ref.backward(grad_ref)
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        grad = TwoTensor(
+            a_ref.detach().clone(),
+            b_ref.detach().clone(),
+        )
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertTrue(type(res) is TwoTensor)
+        self.assertEqual(res.stride(), grad.stride())
+        res.backward(grad)
+
+        self.assertEqual(res, ref)
         self.assertEqual(x.grad, x_ref.grad)
 
     def test_assert_is_contiguous_after_matmul(self):
@@ -1065,7 +1157,7 @@ class GraphModule(torch.nn.Module):
         y1 = fn(x1, W1)
         y1.sum().backward()
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnts)
         y2 = opt_fn(x2, W2)
         y2.sum().backward()
@@ -1169,17 +1261,26 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out * ctx.x0
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
         def foo(x):
             return Foo.apply(x)
 
-        foo(torch.randn(2, requires_grad=True))
+        x_ref = torch.randn(2, requires_grad=True)
+        ref = Foo.apply(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        result = foo(x)
+        result.sum().backward()
+
+        self.assertEqual(result, ref)
+        self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_needs_input_grad(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         class NeedsInputGradFunc(torch.autograd.Function):
             @staticmethod
@@ -1199,6 +1300,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(10, requires_grad=True)
         NeedsInputGradFunc.apply(x).sum().backward()
         self.assertEqual(x.grad.shape, x.shape)
+        self.assertEqual(x.grad, (x * 2).sin())
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
@@ -1217,7 +1319,7 @@ class GraphModule(torch.nn.Module):
                 x, y = ctx.saved_tensors
                 return grad_out * x, grad_out * y
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         def foo(x, y):
             return Foo.apply(x, y)
@@ -1255,14 +1357,20 @@ class GraphModule(torch.nn.Module):
                     x0mul = (x0mul * i) + x0mul
                 return x0mul
 
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        @torch.compile(backend="aot_eager", fullgraph=True, dynamic=True)
         def foo(x):
             return Foo.apply(x)
 
-        foo(torch.randn(2, requires_grad=True)).sum().backward()
-        self.assertEqual(cnts.frame_count, 1)
+        x_ref = torch.randn(2, requires_grad=True)
+        ref = Foo.apply(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        result = foo(x)
+        result.sum().backward()
+
+        self.assertEqual(result, ref)
+        self.assertEqual(x.grad, x_ref.grad)
 
     def test_int_output(self):
         from torch.autograd import Function
@@ -1314,9 +1422,13 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return MyFunction.apply(x, y)
 
-        x = torch.tensor(10.0, requires_grad=True)
-        y = torch.tensor(20.0, requires_grad=True)
-        ref1, ref2 = MyFunction.apply(x, y)
+        x_ref = torch.tensor(10.0, requires_grad=True)
+        y_ref = torch.tensor(20.0, requires_grad=True)
+        ref1, ref2 = MyFunction.apply(x_ref, y_ref)
+        ref1.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        y = y_ref.detach().clone().requires_grad_(True)
         res1, res2 = fn(x, y)
         self.assertEqual(ref1, res1)
         self.assertEqual(ref2, res2)
@@ -1326,6 +1438,8 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(ref2.requires_grad)
         self.assertFalse(res2.requires_grad)
         res1.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(y.grad, y_ref.grad)
 
         # check Dynamo captured graph is correct!
         actual_graph = torch._dynamo.testing.normalize_gm(
@@ -1418,7 +1532,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out
 
-        @torch.compile(backend="eager")
+        @torch.compile(backend="aot_eager")
         def foo(x):
             return Foo.apply(x)
 
@@ -1441,7 +1555,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_output):
                 return None
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
             return Foo.apply(x)
 
@@ -1483,12 +1597,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(inp.grad, torch.tensor([2.25, 2.25]))
 
     def test_tuple_arg(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         class TupleArgFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, shape):
-                ctx.save_for_backward(torch.randn(shape))
+                ctx.save_for_backward(torch.ones(shape))
                 return x + 1
 
             @staticmethod
@@ -1506,8 +1620,10 @@ class GraphModule(torch.nn.Module):
         out.sum().backward()
         self.assertEqual(out, x + 1)
         self.assertEqual(x.grad.shape, shape)
+        self.assertEqual(x.grad, torch.ones(shape))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 2)
+        if not torch._dynamo.config.lazy_compile_autograd_function:
+            self.assertEqual(cnt.op_count, 2)
 
     @requires_gpu
     def test_triton_kernel_basic(self):
@@ -1700,6 +1816,7 @@ class GraphModule(torch.nn.Module):
         loss.backward()
         self.assertIsNotNone(x.grad)
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_nonlocal_list_mutation_in_autograd_function(self):
         """Test that nonlocal list mutation in autograd.Function forward is handled correctly."""
 
@@ -2132,6 +2249,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(input_data, x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_inplace_op_with_side_effect_wrong_grad(self):
         # Repro for https://github.com/pytorch/pytorch/issues/180642
         # In-place op inside autograd.Function.forward combined with a side
@@ -2170,11 +2288,12 @@ class GraphModule(torch.nn.Module):
         torch._dynamo.reset()
         captured.clear()
         x_c = x.detach().clone().requires_grad_(True)
-        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
         out_c.backward()
 
         self.assertEqual(x_ref.grad, x_c.grad)
 
+    @torch._dynamo.config.patch(lazy_compile_autograd_function=False)
     def test_aliased_intermediate_captured_by_side_effect(self):
         # An intermediate that aliases an input is captured via side effect
         # and used by the outer graph. filter_aliased_intermediates drops it
@@ -2249,14 +2368,84 @@ class GraphModule(torch.nn.Module):
         # Compiled
         torch._dynamo.reset()
         x_c = x.detach().clone().requires_grad_(True)
-        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
         out_c.backward()
 
         self.assertEqual(x_ref.grad, x_c.grad)
 
+    def test_global_side_effect_in_backward_is_applied(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                BACKWARD_SIDE_EFFECTS.append("backward")
+                return grad.clone()
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+
+        BACKWARD_SIDE_EFFECTS.clear()
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        self.assertEqual(BACKWARD_SIDE_EFFECTS, [])
+        out_ref.backward()
+        self.assertEqual(BACKWARD_SIDE_EFFECTS, ["backward"])
+
+        torch._dynamo.reset()
+        BACKWARD_SIDE_EFFECTS.clear()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        self.assertEqual(BACKWARD_SIDE_EFFECTS, [])
+        out_c.backward()
+        self.assertEqual(BACKWARD_SIDE_EFFECTS, ["backward"])
+        self.assertEqual(x_ref.grad, x_c.grad)
+
+    def test_forward_closure_tensor_mutation_is_lifted_with_lazy_backward(self):
+        buffer = torch.zeros(3)
+        scale = torch.tensor([1.0, 2.0, 3.0])
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = (x * scale).sin()
+                ctx.save_for_backward(x, y)
+                ctx.scale = scale
+                buffer.add_(y.detach())
+                return y.cos()
+
+            @staticmethod
+            def backward(ctx, grad):
+                x, y = ctx.saved_tensors
+                return grad * (-y.sin()) * ctx.scale * (x * ctx.scale).cos()
+
+        def fn(x):
+            return Foo.apply(x).sum()
+
+        x = torch.tensor([0.1, -0.2, 0.3], requires_grad=True)
+
+        buffer.zero_()
+        x_ref = x.detach().clone().requires_grad_(True)
+        out_ref = fn(x_ref)
+        out_ref.backward()
+        ref_buffer = buffer.clone()
+
+        torch._dynamo.reset()
+        buffer.zero_()
+        x_c = x.detach().clone().requires_grad_(True)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
+        out_c.backward()
+
+        self.assertEqual(out_ref, out_c)
+        self.assertEqual(x_ref.grad, x_c.grad)
+        self.assertEqual(ref_buffer, buffer)
+
     def test_non_nullified_side_effect_in_backward_fails(self):
-        # A backward that mutates an outer-scope attribute without restoring
-        # it should still fail, even with deferred side-effect checking.
+        # Lazy backward runs this mutation when backward is compiled/invoked.
         class State:
             def __init__(self):
                 self.enabled = False
@@ -2277,9 +2466,10 @@ class GraphModule(torch.nn.Module):
             return Bad.apply(x).sum()
 
         x = torch.randn(8, requires_grad=True)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-            out.backward()
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(state.enabled)
+        out.backward()
+        self.assertTrue(state.enabled)
 
     def test_nullified_dict_attr_side_effect_in_backward(self):
         # Attribute that holds a dict is swapped and restored — nullified.
@@ -2311,12 +2501,13 @@ class GraphModule(torch.nn.Module):
 
         torch._dynamo.reset()
         x_c = x.detach().clone().requires_grad_(True)
-        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
         out_c.backward()
         self.assertEqual(x_ref.grad, x_c.grad)
 
     def test_non_nullified_dict_attr_side_effect_in_backward_fails(self):
-        # Attribute that holds a dict is swapped but NOT restored.
+        # Attribute that holds a dict is swapped but NOT restored. Lazy
+        # backward runs this mutation when backward is compiled/invoked.
         class Config:
             def __init__(self):
                 self.options = {"mode": "fast", "level": 3}
@@ -2337,9 +2528,10 @@ class GraphModule(torch.nn.Module):
             return Bad.apply(x).sum()
 
         x = torch.randn(8, requires_grad=True)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-            out.backward()
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(cfg.options, {"mode": "fast", "level": 3})
+        out.backward()
+        self.assertEqual(cfg.options, {"mode": "slow", "level": 1})
 
     def test_nullified_integer_counter_in_backward(self):
         # Integer attribute incremented then decremented — nullified.
@@ -2371,7 +2563,7 @@ class GraphModule(torch.nn.Module):
 
         torch._dynamo.reset()
         x_c = x.detach().clone().requires_grad_(True)
-        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
         out_c.backward()
         self.assertEqual(x_ref.grad, x_c.grad)
 
@@ -2417,15 +2609,13 @@ class GraphModule(torch.nn.Module):
 
         torch._dynamo.reset()
         x_c = x.detach().clone().requires_grad_(True)
-        out_c = torch.compile(fn, backend="eager", fullgraph=True)(x_c)
+        out_c = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_c)
         out_c.backward()
         self.assertEqual(x_ref.grad, x_c.grad)
 
     def test_property_with_side_effect_in_backward_fails(self):
-        # A property setter that has a real side effect (incrementing a
-        # counter) is NOT a nullified mutation even if the value is restored.
-        # Dynamo traces through the setter and sees the non-nullified
-        # set_count increment.
+        # Lazy backward runs the property setter side effect when backward is
+        # compiled/invoked.
         import contextlib
 
         class State:
@@ -2467,9 +2657,11 @@ class GraphModule(torch.nn.Module):
             return Foo.apply(x).sum()
 
         x = torch.randn(8, requires_grad=True)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-            out.backward()
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(state.set_count, 0)
+        out.backward()
+        self.assertFalse(state.enabled)
+        self.assertEqual(state.set_count, 2)
 
     def test_apply_kwargs_old_style(self):
         class MySin(torch.autograd.Function):
@@ -2489,7 +2681,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([0.812], requires_grad=True)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -2520,7 +2712,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([2.0], requires_grad=True)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -2550,7 +2742,7 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor([2.0], requires_grad=True)
         y = torch.tensor([3.0], requires_grad=True)
         ref = fn(x, y)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x, y)
         self.assertEqual(res, ref)
 
@@ -2569,7 +2761,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([0.812])
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -2608,7 +2800,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([0.812], requires_grad=True)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -2642,7 +2834,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor([0.812], requires_grad=True)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -2724,7 +2916,7 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return NewStyleOp.apply(x)
 
-        compiled_fn = torch.compile(fn, backend="eager")
+        compiled_fn = torch.compile(fn, backend="aot_eager")
 
         def loss_fn(x):
             return compiled_fn(x).sum()
