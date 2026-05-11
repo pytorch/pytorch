@@ -121,10 +121,6 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: contextvars.ContextVar[
-    Mapping[OpOverload, Callable[..., Any]]
-] = contextvars.ContextVar("CURRENT_DECOMPOSITION_TABLE")
-
 CONSTANT_NUMEL_LIMIT = 1
 
 T = TypeVar("T")
@@ -165,12 +161,11 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
 def decompose(
     decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
 ) -> Generator[Mapping[OpOverload, Callable[..., Any]], None, None]:
-    table = decomposition_table or {}
-    token = CURRENT_DECOMPOSITION_TABLE.set(table)
-    try:
+    mode = get_proxy_mode()
+    if mode is None:
+        raise AssertionError("Expected proxy mode to be set")
+    with mode.enable_decompositions(decomposition_table) as table:
         yield table
-    finally:
-        CURRENT_DECOMPOSITION_TABLE.reset(token)
 
 
 # ensure we cannot collide with other properties
@@ -1856,22 +1851,69 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             torch._functorch.predispatch._vmap_increment_nesting,
             torch._functorch.predispatch._vmap_decrement_nesting,
             torch._functorch.vmap.lazy_load_decompositions,
+            torch._functorch.predispatch._make_dual,
+            torch._functorch.predispatch._unpack_dual,
+            torch._functorch.predispatch._jvp_increment_nesting,
+            torch._functorch.predispatch._jvp_decrement_nesting,
+            torch._functorch.predispatch._unwrap_for_grad,
+            torch._functorch.predispatch._enter_dual_level,
+            torch._functorch.predispatch._exit_dual_level,
         ]:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
                 func,
                 proxies,
-                {},
+                kwargs,
             )
             res = func(*args, **kwargs)
-            track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            # When JVP transforms are active, snapshot_fake calls detach
+            # which goes through C++ functorch dispatch keys, potentially
+            # re-wrapping the result as a grad tracking tensor.
+            # Temporarily disable functorch transforms during tracking to
+            # prevent this corruption of meta["val"].
+            if func in _jvp_predispatch_functions:
+                with torch._C._DisableFuncTorch():
+                    track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
+            else:
+                track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
             return res
         return func(*args, **kwargs)
 
 
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
+)
+
+
+# JVP predispatch functions need special handling during tracing:
+# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
+_jvp_predispatch_functions = frozenset(
+    {
+        torch._functorch.predispatch._make_dual,
+        torch._functorch.predispatch._unpack_dual,
+        torch._functorch.predispatch._jvp_increment_nesting,
+        torch._functorch.predispatch._jvp_decrement_nesting,
+        torch._functorch.predispatch._unwrap_for_grad,
+        torch._functorch.predispatch._enter_dual_level,
+        torch._functorch.predispatch._exit_dual_level,
+    }
+)
+
+# These JVP predispatch wrappers manage transform nesting/level state
+# and must survive FX dead code elimination even with zero output users.
+# Registered here rather than in predispatch.py to avoid circular imports
+# (predispatch.py loads before torch.fx during torch.autograd init).
+from torch.fx.node import _side_effectful_functions
+
+
+_side_effectful_functions.update(
+    {
+        torch._functorch.predispatch._jvp_increment_nesting,
+        torch._functorch.predispatch._jvp_decrement_nesting,
+        torch._functorch.predispatch._enter_dual_level,
+        torch._functorch.predispatch._exit_dual_level,
+    }
 )
 
 
@@ -1888,6 +1930,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         pre_dispatch: bool = False,
         _allow_fake_constant: bool = False,
         _error_on_data_dependent_ops: bool = True,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None = None,
     ) -> None:
         dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
@@ -1903,6 +1946,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[ProxyTorchDispatchMode | None] = []
+        self.decomposition_table: Mapping[OpOverload, Callable[..., Any]] = (
+            decomposition_table or {}
+        )
+        self._decomposition_table_stack: list[
+            Mapping[OpOverload, Callable[..., Any]]
+        ] = []
         self.decomp_layers: int = 0
         # See invoke_subgraph
         self._invoke_subgraph_names: set[str] = set()
@@ -1953,6 +2002,19 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def is_infra_mode(cls) -> bool:
         return True
+
+    @contextmanager
+    def enable_decompositions(
+        self,
+        decomposition_table: Mapping[OpOverload, Callable[..., Any]] | None,
+    ) -> Generator[Mapping[OpOverload, Callable[..., Any]], None, None]:
+        table = decomposition_table or {}
+        self._decomposition_table_stack.append(self.decomposition_table)
+        self.decomposition_table = table
+        try:
+            yield table
+        finally:
+            self.decomposition_table = self._decomposition_table_stack.pop()
 
     def __sym_dispatch__(
         self,
@@ -2060,7 +2122,11 @@ class DecompositionInterpreter(fx.Interpreter):
         self.tracer = _GraphAppendingTracerEx(self.new_graph)
         # Blegh
         self.decomposition_table = decomposition_table or {}
-        self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
+        self.mode = ProxyTorchDispatchMode(
+            self.tracer,
+            tracing_mode="real",
+            decomposition_table=self.decomposition_table,
+        )
 
     # pyrefly: ignore [bad-override]
     def placeholder(
@@ -2110,7 +2176,7 @@ class DecompositionInterpreter(fx.Interpreter):
     def run(self, *args: object, **kwargs: object) -> object:
         # Should enter the mode at least once for being able to restore it later
         # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
-        with decompose(self.decomposition_table), self.mode:
+        with self.mode:
             return super().run(*args, **kwargs)  # type: ignore[arg-type]
 
 
@@ -2687,6 +2753,7 @@ class _MakefxTracer:
         self.proxy_mode = ProxyTorchDispatchMode(
             fx_tracer,
             self.tracing_mode,
+            decomposition_table=self.decomposition_table,
             pre_dispatch=self.pre_dispatch,
             _allow_fake_constant=self._allow_fake_constant,
             _error_on_data_dependent_ops=self._error_on_data_dependent_ops,
@@ -2813,7 +2880,6 @@ class _MakefxTracer:
             ProxyTorchDispatchMode, self.proxy_mode
         )
         with ExitStack() as stack:
-            stack.enter_context(decompose(self.decomposition_table))
             if self.fake_tensor_mode:
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
@@ -3027,7 +3093,7 @@ def maybe_handle_decomp(
 ) -> object:
     from torch._inductor.compiler_bisector import CompilerBisector
 
-    decomp_table = CURRENT_DECOMPOSITION_TABLE.get({})
+    decomp_table = proxy_mode.decomposition_table
     if op in decomp_table:
         if CompilerBisector.disable_subsystem(
             "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
