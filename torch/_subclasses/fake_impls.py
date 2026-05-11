@@ -656,11 +656,96 @@ def _view_has_unbacked_input(
     )
 
 
+def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
+    """
+    Smarter heuristic: collect candidate (x, y) pairs whose runtime hints
+    match (so they *could* be equal), then test whether substituting them
+    into the view's numel equation makes the equation symbolically zero.
+    Only commit the equalities (adds the real Eq guards via bool(x == y)
+    which triggers set_replacement) if the substitution actually solves
+    the view validity check.
+
+    This avoids polluting the shape env with spurious guards from probing.
+
+    Returns True if at least one equality was committed.
+
+    Conservative: only considers SymInts that appear as a top-level dim of
+    the input or target (skipping the -1 marker), and skips already-equal
+    pairs, and skips unbacked symbols.
+    """
+    import operator
+    from functools import reduce
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    def _atomic_syms(dims) -> list[torch.SymInt]:
+        """Keep only SymInts whose expr is a single bare *backed* symbol."""
+        out: list[torch.SymInt] = []
+        for s in dims:
+            if not isinstance(s, torch.SymInt):
+                continue
+            expr = s.node.expr
+            free = expr.free_symbols
+            if len(free) != 1 or expr not in free:
+                continue
+            if free_unbacked_symbols(expr):
+                continue
+            out.append(s)
+        return out
+
+    import sympy
+
+    a_syms = _atomic_syms(a.size())
+    target_syms = _atomic_syms(shape)
+    if not a_syms or not target_syms:
+        return False
+
+    # 1) Collect candidate equalities: (x, y) pairs whose hints match.
+    #    Build a sympy substitution map.
+    subs: dict[sympy.Expr, sympy.Expr] = {}
+    candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
+    for x in a_syms:
+        for y in target_syms:
+            x_expr = x.node.expr
+            y_expr = y.node.expr
+            if x_expr == y_expr:
+                continue  # already same symbol
+            if x.node.hint != y.node.hint:
+                continue  # hints disagree, not a candidate
+            # Substitute y -> x (canonicalise on the input-side symbol).
+            if y_expr in subs and subs[y_expr] == x_expr:
+                continue
+            subs[y_expr] = x_expr
+            candidates.append((x, y))
+
+    if not subs:
+        return False
+
+    # 2) Symbolic test: does the substitution make the view's numel match?
+    def _expr_of(s):
+        return s.node.expr if isinstance(s, torch.SymInt) else s
+
+    try:
+        a_numel = reduce(operator.mul, (_expr_of(s) for s in a.size()), 1)
+        shape_numel = reduce(operator.mul, (_expr_of(s) for s in shape), 1)
+        diff = sympy.simplify((a_numel - shape_numel).subs(subs))
+        if diff != 0:
+            return False
+    except Exception:
+        return False
+
+    # 3) Commit the equalities for real (adds Eq guards, triggers set_replacement).
+    for x, y in candidates:
+        torch._check(x == y)
+    return True
+
+
 def _view_unbacked_meta(
     a: torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
     allow_copy: bool = False,
+    tried_duck_specialize: bool = False,
 ) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
@@ -724,6 +809,26 @@ def _view_unbacked_meta(
         torch.fx.experimental._config.backed_size_oblivious
         or _view_has_unbacked_input(a, shape)
     ):
+        # Heuristic: before falling through to the specializing recursion
+        # (which often emits Eq(s, 1) via eval_eager), try to discover
+        # cross-symbol equalities between input and target shape symbols.
+        # If a pair (x, y) is True at the runtime hint, the shape env will
+        # record Eq(x, y) and set_replacement unifies them — letting the
+        # size-oblivious view path succeed without specialization on x==1.
+        # But with potential duck specializations which are more general.
+        if (
+            torch.fx.experimental._config.unify_view_symbols_unbacked_meta
+            and not tried_duck_specialize
+            and try_duck_specialization_first(a, shape)
+        ):
+            return _view_unbacked_meta(
+                a,
+                shape,
+                size_oblivious_enabled=True,
+                allow_copy=allow_copy,
+                tried_duck_specialize=True,
+            )
+
         return _view_unbacked_meta(
             a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
         )

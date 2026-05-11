@@ -99,6 +99,15 @@ meta_nonzero_assume_all_nonzero = False
 # Currently an experimental option for export.
 backed_size_oblivious = False
 
+# When True, _view_unbacked_meta will try to discover and add cross-symbol
+# equalities (Eq(x, y)) before falling through to the specializing recursion
+# that emits Eq(s, 1) via eval_eager. Useful for two-export pipelines where
+# the equality info from a torch._check in the source model is consumed by
+# set_replacement during the first export and lost from the resulting
+# GraphModule, so the second export needs a way to rediscover the equality
+# automatically. Defaults to False (current behavior).
+unify_view_symbols_unbacked_meta = False
+
 # Skip dtype check in meta registrations. Only used for systems that does its own dtype checking.
 skip_dtype_check_in_meta_registrations = False
 
