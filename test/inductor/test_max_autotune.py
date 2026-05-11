@@ -38,12 +38,13 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.triton_template.registry import (
-    override_template_heuristics,
-)
+from torch._inductor.heuristics.registry import override_template_heuristics
 from torch._inductor.heuristics.triton_template.triton import (
+    BlackwellGPUGemmConfig,
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
@@ -67,21 +68,6 @@ from torch._inductor.select_algorithm import (
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
-)
-from torch._inductor.heuristics.triton_template.registry import override_template_heuristics
-from torch._inductor.heuristics.triton_template.triton import (
-    BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
-    CUDAMMTemplateConfigHeuristic,
-    CUDAPersistentTMATemplateConfigHeuristic,
-    GemmConfig,
-    get_shared_memory_checker_opts,
-    ROCmMMTemplateConfigHeuristic,
-    XPUMMTemplateConfigHeuristic,
-    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -2178,7 +2164,7 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.heuristics.triton_template.registry import (
+        from torch._inductor.heuristics.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
@@ -2652,7 +2638,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.heuristics.triton_template.registry.get_template_heuristic"
+            "torch._inductor.heuristics.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;

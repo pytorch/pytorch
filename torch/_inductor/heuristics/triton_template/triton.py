@@ -11,6 +11,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor.heuristics.registry import register_template_heuristic
 from torch._inductor.heuristics.triton_template.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
@@ -40,7 +41,6 @@ from ...utils import (
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
