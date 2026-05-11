@@ -48,8 +48,10 @@ The torch.special module, modeled after SciPy's [special](https://docs.scipy.org
 .. autofunction:: log_softmax
 .. autofunction:: logit
 .. autofunction:: logsumexp
+.. autofunction:: modified_bessel_i
 .. autofunction:: modified_bessel_i0
 .. autofunction:: modified_bessel_i1
+.. autofunction:: modified_bessel_k
 .. autofunction:: modified_bessel_k0
 .. autofunction:: modified_bessel_k1
 .. autofunction:: multigammaln
