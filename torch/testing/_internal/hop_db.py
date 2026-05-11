@@ -20,6 +20,7 @@ from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
+from torch._higher_order_ops.register_hook import register_hook_op
 
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
@@ -393,6 +394,20 @@ def simple_invoke_quant_packed(x):
     return invoke_quant_packed(fn, x)[0] * 2.0
 
 
+def sample_inputs_register_hook(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=True
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+
+def simple_register_hook(x):
+    def hook(grad):
+        return grad * 2
+
+    return register_hook_op(x, hook)
+
+
 def sample_inputs_inline_asm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -666,6 +681,32 @@ hop_db = [
                 not torch.distributed.is_available(), "requires distributed build"
             ),
         ],
+    ),
+    OpInfo(
+        name="register_hook",
+        variant_test_name="simple",
+        op=simple_register_hook,
+        sample_inputs_func=sample_inputs_register_hook,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCompiledAutogradOpInfo",
+                "test_hops_in_bwd",
+            ),
+        ),
     ),
     OpInfo(
         name="inline_asm_elementwise",
