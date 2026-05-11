@@ -63,9 +63,10 @@ class FusionScore:
 
     def __lt__(self, other):
         """
-        node_type_score keeps same-kind node fusions ahead of mixed-kind fusions
-        unless the memory_score differs too much. Dependent cross-rnumel
-        reduction fusions are ranked below ordinary mixed-kind fusions.
+        node_type_score orders same-kind fusions above mixed-kind fusions unless
+        the memory_score differs too much. Dependent reductions with different
+        reduction sizes use -1 so nested candidates rank below ordinary
+        mixed-kind fusions.
 
         buffer_overlap_score is prioritized below memory_score so that
         strict global memory savings (exact dep matches) are preferred
@@ -684,12 +685,13 @@ class InductorChoices:
             node1.is_reduction() == node2.is_reduction() and memory_score > 0
         )
         if (
-            node1.is_reduction()
+            config.triton.nested_reduction
+            and node1.is_reduction()
             and node2.is_reduction()
             and node1.get_operation_names() & node2.ancestors
         ):
             # Mix-order reductions are sibling reductions. Only dependent
-            # cross-rnumel reductions get the lower nested score here.
+            # cross-reduction-size reductions get the lower nested score here.
             _, (_, rnumel1) = node1.group
             _, (_, rnumel2) = node2.group
             if not V.graph.sizevars.statically_known_equals(rnumel1, rnumel2):
