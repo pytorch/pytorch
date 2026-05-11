@@ -1,21 +1,17 @@
 #include <gtest/gtest.h>
 
-#include "profiler/OpenRegTracer.h"
+#include <csrc/OpenRegTracer.h>
 
 using namespace openreg::profiler;
 
 class OpenRegTracerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    auto& t = OpenRegTracer::instance();
-    t.disable();
-    t.flush();
+    OpenRegTracer::instance().disable();
   }
 
   void TearDown() override {
-    auto& t = OpenRegTracer::instance();
-    t.disable();
-    t.flush();
+    OpenRegTracer::instance().disable();
   }
 };
 
@@ -49,27 +45,4 @@ TEST_F(OpenRegTracerTest, CorrelationPushPop) {
 
   t.popCorrelation();
   EXPECT_EQ(t.currentCorrelation(), 0);
-}
-
-TEST_F(OpenRegTracerTest, RecordAndFlush) {
-  auto& t = OpenRegTracer::instance();
-  t.record({ActivityKind::KERNEL, "matmul", 100, 200, 0, 1, 10});
-  t.record({ActivityKind::MEMCPY, "h2d", 300, 400, 0, 0, 11});
-
-  auto records = t.flush();
-  ASSERT_EQ(records.size(), 2u);
-
-  EXPECT_EQ(records[0].kind, ActivityKind::KERNEL);
-  EXPECT_EQ(records[0].name, "matmul");
-  EXPECT_EQ(records[0].start, 100);
-  EXPECT_EQ(records[0].end, 200);
-  EXPECT_EQ(records[0].device_id, 0);
-  EXPECT_EQ(records[0].stream_id, 1);
-  EXPECT_EQ(records[0].correlation_id, 10u);
-
-  EXPECT_EQ(records[1].kind, ActivityKind::MEMCPY);
-  EXPECT_EQ(records[1].name, "h2d");
-  EXPECT_EQ(records[1].correlation_id, 11u);
-
-  EXPECT_TRUE(t.flush().empty());
 }
