@@ -261,7 +261,12 @@ def get_pw_red_splits(
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
 ) -> tuple[VarsAndRanges, VarsAndRanges] | None:
-    if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+    # nb: use statically_known_equals here to mimic scheduler.
+    # TODO : store type of split/broadcast on fused node itself,
+    # instead of re-deriving it.
+    if n.is_reduction() or V.graph.sizevars.statically_known_equals(
+        sympy_product(n._body.sizes[0]), pointwise_numel
+    ):
         # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
@@ -322,7 +327,7 @@ class NodeSplitGetter:
                 continue
 
             # if we can't split the pw ranges into a (pw, red) split,
-            # dont add as a split option, but do make sure we check that this size
+            # don't add as a split option, but do make sure we check that this size
             # is splittable
             maybe_splits = get_pw_red_splits(
                 n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
@@ -786,7 +791,7 @@ def analyze_memory_coalescing(
                 continue
 
             # TODO - if a var is in the middle, such as [n0, n1, n2]
-            # n1 can can be split beyond range
+            # n1 can be split beyond range
 
             MIN_TILING_BLOCK = 8
             if not all(

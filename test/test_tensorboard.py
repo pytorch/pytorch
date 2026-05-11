@@ -283,10 +283,6 @@ recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
 class TestTensorBoardWriter(BaseTestCase):
-    @unittest.skipIf(
-        sys.version_info >= (3, 13),
-        "numpy failure, likely caused by old tensorboard version",
-    )
     def test_writer(self):
         with self.createSummaryWriter() as writer:
             sample_rate = 44100
@@ -783,13 +779,13 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
         self.assertTrue(
             all(plt.fignum_exists(figure.number) is True for figure in figures)
-        )  # noqa: F812
+        )
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != "3.3.0":
             self.assertTrue(
                 all(plt.fignum_exists(figure.number) is False for figure in figures)
-            )  # noqa: F812
+            )
         else:
             print(
                 "Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163"

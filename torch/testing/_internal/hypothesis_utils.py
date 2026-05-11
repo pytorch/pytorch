@@ -242,7 +242,7 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     if enforced_zp is not None:
         zp = enforced_zp
     # Permute to model quantization along an axis
-    axis = int(np.random.randint(0, X.ndim, 1))
+    axis = int(np.random.randint(0, X.ndim))
     permute_axes = np.arange(X.ndim)
     permute_axes[0] = axis
     permute_axes[axis] = 0
