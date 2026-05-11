@@ -167,6 +167,26 @@ def export(
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
 
+    def _check_batch_invariant_marks(items: Any) -> bool:
+        if isinstance(items, torch.Tensor):
+            return bool(getattr(items, "_dynamo_batch_invariant_dims", None))
+        if isinstance(items, (list, tuple)):
+            return any(_check_batch_invariant_marks(it) for it in items)
+        if isinstance(items, dict):
+            return any(_check_batch_invariant_marks(v) for v in items.values())
+        return False
+
+    if _check_batch_invariant_marks(args) or (
+        kwargs is not None and _check_batch_invariant_marks(kwargs)
+    ):
+        import warnings
+        warnings.warn(
+            "torch.export does not preserve mark_batch_invariant: the "
+            "exported graph carries no batch-invariance guarantee. Use "
+            "torch.compile if batch invariance is required.",
+            stacklevel=2,
+        )
+
     try:
         return _export(
             mod,
