@@ -1,12 +1,14 @@
-# Dynamo CPython Mirroring
+# Dynamo CPython Protocol Mirroring
 
 This is orientation material for agents and reviewers working on Dynamo support
-for Python object semantics, especially new `tp_*`, `nb_*`, `sq_*`, and `mp_*`
-slots.
+for Python object semantics, especially `tp_*`, `nb_*`, `sq_*`, and `mp_*`
+protocol behavior.
 
-The goal is not to make Dynamo a second CPython runtime. The goal is to make the
-parts of Dynamo that model Python object behavior follow CPython's structure
-closely enough that fixes are systematic, auditable, and reusable across types.
+The goal is to close CPython protocol gaps in a systematic way. The goal is not
+to build a second CPython runtime inside Dynamo, and not to introduce a full
+`TypeVariableTracker` / `PyTypeObject` model. We use CPython's algorithms as
+the semantic reference, then express them with Dynamo's existing
+`VariableTracker` machinery.
 
 ## Why this exists
 
@@ -16,93 +18,78 @@ graph breaks, but it creates a fragmented model:
 
 - one CPython algorithm is reimplemented differently across multiple trackers;
 - a builtin type can support one operation but miss a closely related one;
-- Python-level types get custom trackers to work around missing object-model
-  primitives;
+- parallel protocol systems can diverge, such as internal equality/hash helpers
+  versus user-visible dunder dispatch;
+- Python-level constructs can get custom trackers to work around missing object
+  protocol primitives;
 - agents and reviewers cannot easily tell whether a change fixes the model or
   only patches the latest symptom.
 
 For users, these all show up as graph breaks, confusing exception behavior, or
 surprising gaps between eager Python and `torch.compile`.
 
-The direction is to move from "implementation by accident" toward an explicit
-mirror of CPython's object protocol.
+The direction is to move from "implementation by accident" toward shared,
+auditable implementations of CPython object protocol algorithms.
 
-## CPython model to mirror
+## Current approach
 
-In CPython, every object starts with a pointer to its type:
+The active design is lightweight:
 
-```c
-typedef struct _object {
-    Py_ssize_t ob_refcnt;
-    PyTypeObject *ob_type;
-} PyObject;
+- put each cross-type CPython protocol algorithm in a shared free function,
+  usually in `torch/_dynamo/variables/object_protocol.py`;
+- give `VariableTracker` a base hook method for the per-type operation;
+- let individual `VariableTracker` subclasses override only the hook body for
+  the type-specific behavior;
+- route bytecode handlers, builtin handlers, and `call_method` compatibility
+  paths through the shared generic function;
+- use CPython slot detection where Dynamo needs to know whether a type actually
+  has a slot.
+
+For example, a generic operation should look like this shape:
+
+```python
+def generic_operation(tx, obj, *args):
+    obj_type = maybe_get_python_type(obj)
+    if type_implements_relevant_slot(obj_type):
+        return obj.relevant_slot_impl(tx, *args)
+    raise_observed_exception(TypeError, tx, args=[...])
 ```
 
-The type object, `PyTypeObject`, carries the behavior:
+The exact structure differs by protocol, but the split is the same:
 
-- core slots such as `tp_call`, `tp_getattro`, `tp_setattro`, `tp_hash`,
-  `tp_iter`, `tp_iternext`, and `tp_richcompare`;
-- number slots under `tp_as_number`, such as `nb_bool`, `nb_index`, `nb_int`,
-  and binary arithmetic slots;
-- sequence slots under `tp_as_sequence`, such as `sq_length`, `sq_item`, and
-  `sq_contains`;
-- mapping slots under `tp_as_mapping`, such as `mp_length` and
-  `mp_subscript`;
-- descriptor slots such as `tp_descr_get` and `tp_descr_set`;
-- type metadata such as MRO, base type, type dict, flags, and dict offset.
+- `generic_*` function: CPython dispatch order, fallback order, and user-visible
+  exception behavior;
+- base `VariableTracker` hook: default behavior for absent or unsupported
+  operations;
+- subclass hook override: the actual behavior for list, dict, tensor,
+  user-defined object, constant, etc.
 
-The important design point is that behavior is dispatched through the object's
-type. Dynamo should preserve that shape even when the implementation is still
-expressed as `VariableTracker` methods.
+This keeps the CPython algorithm in one place without moving all behavior into a
+separate type object abstraction.
 
-## Current Dynamo shape
+## What we are not doing
 
-Dynamo is in a transitional state. The long-term direction is a clearer
-separation between instance payload and type behavior, but much of today's code
-still uses methods on `VariableTracker` subclasses.
+Earlier designs explored a more literal mirror of CPython's machinery, with a
+dedicated type tracker carrying slot tables, MRO, type dict, descriptor slots,
+and type flags. That was too much machinery for the benefit it provided.
 
-The current CPython-oriented pieces are:
+Do not add or assume:
 
-- `torch/_dynamo/variables/object_protocol.py`: shared implementations of
-  CPython-style generic operations, such as `generic_len`, `generic_bool`,
-  `vt_getitem`, `generic_getiter`, `generic_iternext`, and number dispatch;
-- `torch/_dynamo/variables/base.py`: base `VariableTracker` hooks such as
-  `tp_iter_impl`, `tp_iternext_impl`, `mp_subscript_impl`, `sq_item_impl`,
-  `sq_contains`, and `nb_*_impl`;
-- `torch/csrc/dynamo/init.cpp`: exposes CPython slot detection via
-  `get_type_slots`, `has_slot`, and the `PySequenceSlots`, `PyMappingSlots`,
-  `PyNumberSlots`, and `PyTypeSlots` enums;
-- `test/dynamo/test_tp_slots.py`: tests that slot detection matches the
-  CPython-level expectations Dynamo depends on;
-- `test/dynamo/cpython/3_13/`: adapted CPython tests that validate this work
-  against broad Python behavior, not just local reproductions.
+- a new `TypeVariableTracker` as the main abstraction for this effort;
+- an `ob_type_vt` pointer on every `VariableTracker`;
+- full Dynamo-side copies of `PyTypeObject` slot tables;
+- a large migration that moves all behavior out of `VariableTracker`
+  subclasses before there is a concrete protocol gap to fix;
+- CPython implementation details that do not affect Dynamo tracing semantics,
+  such as refcounting, allocation, deallocation, GC traversal, exact C struct
+  layout, or type version tags.
 
-When adding a new slot, fit into this structure before adding a one-off branch.
+The useful part of CPython to mirror is the protocol algorithm and dispatch
+order, not the full runtime representation.
 
-## Long-term design direction
+## CPython model to use as reference
 
-The eventual shape is:
-
-- `VariableTracker` instances primarily carry object payload: list items, dict
-  entries, tensor proxy, wrapped Python value, source, and mutation state.
-- Type behavior lives in a CPython-like type description: slot table, MRO,
-  type dict, descriptor behavior, and type flags.
-- Generic algorithms live once and dispatch through slots.
-- Type-specific implementations are small slot bodies.
-- Dynamo-specific behavior, such as bytecode reconstruction and FX proxy
-  representation, remains on Dynamo abstractions. It does not need a CPython
-  counterpart.
-
-This does not require mirroring irrelevant CPython slots such as memory
-management, GC traversal, refcounting, or deallocation. It also does not require
-copying CPython's exact C data structures. Mirroring the dispatch shape is the
-important part.
-
-## Implementation principles
-
-Use CPython as the spec.
-
-Start from the CPython entry point for the operation. Examples:
+When implementing a protocol, start from the CPython entry point:
 
 - `PyObject_GetItem` for `obj[key]`;
 - `PyObject_GetIter` for `iter(obj)`;
@@ -114,19 +101,59 @@ Start from the CPython entry point for the operation. Examples:
 - `PyObject_GenericGetAttr` and `PyObject_GenericSetAttr` for attribute access;
 - `binary_op1` / `binary_op` in `abstract.c` for binary operators.
 
+CPython uses slots such as `tp_iter`, `tp_hash`, `nb_bool`, `sq_contains`, and
+`mp_subscript` to select behavior. In Dynamo, these slots usually map to:
+
+- a slot-detection helper in `object_protocol.py`, backed by
+  `torch._C._dynamo.get_type_slots` when needed;
+- a base hook on `VariableTracker`, such as `tp_iter_impl`,
+  `tp_iternext_impl`, `mp_subscript_impl`, `sq_item_impl`, `sq_contains`,
+  `nb_index_impl`, `nb_int_impl`, `nb_float_impl`, or `hash_impl`;
+- per-type overrides on the relevant `VariableTracker` subclasses.
+
+## Current local anchors
+
+- `torch/_dynamo/variables/object_protocol.py`: shared CPython-style object
+  protocol operations, including `generic_len`, `generic_bool`, `vt_getitem`,
+  `generic_getiter`, `generic_iternext`, binary op helpers, `generic_hash`, and
+  `generic_contains`.
+- `torch/_dynamo/variables/base.py`: base `VariableTracker` hooks for protocol
+  bodies.
+- `torch/_dynamo/variables/user_defined.py`: user-defined object, class,
+  descriptor, MRO, and attribute behavior. Some of this should move toward
+  shared generic helpers over time.
+- `torch/_dynamo/variables/builtin.py`: legacy builtin dispatch paths that
+  should gradually shrink as protocol helpers grow.
+- `torch/csrc/dynamo/init.cpp`: CPython slot detection exported from the C
+  extension.
+- `test/dynamo/test_tp_slots.py`: slot-detection tests.
+- `test/dynamo/test_getitem.py`, `test/dynamo/test_nb_bool.py`,
+  `test/dynamo/test_nb_index.py`, `test/dynamo/test_nb_float.py`,
+  `test/dynamo/test_nb_int.py`, `test/dynamo/test_tp_hash.py`, and
+  `test/dynamo/test_contains_protocol.py`: examples of protocol-focused tests.
+- `test/dynamo/cpython/3_13/`: broad CPython behavior tests adapted for Dynamo.
+
+## Implementation principles
+
+Use CPython as the semantic spec.
+
+Read the CPython function for the operation and mirror its observable behavior:
+slot selection, fallback order, `NotImplemented` handling, subclass priority,
+and exception type/message when those are user-visible.
+
 Model the generic algorithm once.
 
 If an operation is a CPython object protocol operation, it usually belongs in
-`object_protocol.py` or another shared object-protocol helper. The shared code
-should decide which slot applies and what CPython does when the slot is absent.
-Per-type `VariableTracker` code should implement the slot body.
+`object_protocol.py` or a nearby shared protocol helper. Per-type
+`VariableTracker` code should implement the slot body, not duplicate the slot
+selection algorithm.
 
 Separate "slot absent" from "slot present but not implemented in Dynamo".
 
 If CPython would say the operation is invalid for the type, raise the observed
 Python exception with CPython-like wording. If CPython says the type has the
-slot but Dynamo has no implementation for that slot body yet, use an
-`unimplemented` graph break that names the missing slot and points at a
+slot but Dynamo has no implementation for that slot body yet, use
+`unimplemented()` with a message that names the missing slot and points at a
 supportable Dynamo gap.
 
 Do not add a special tracker for a Python-level construct when a CPython
@@ -139,9 +166,8 @@ hashing, iteration, or getitem.
 
 Avoid large `isinstance` cascades for semantic dispatch.
 
-Dispatch should be driven by the object's Python type and the relevant slot.
 Some `isinstance` checks are still necessary in the transitional code, but a new
-slot implementation should not spread the operation across unrelated
+protocol implementation should not spread the same operation across unrelated
 `BuiltinVariable`, `UserDefinedObjectVariable`, and container-specific branches.
 
 Respect subclass behavior.
@@ -172,7 +198,7 @@ Guards, sources, side effects, mutation tracking, bytecode reconstruction, and
 FX proxy construction are Dynamo mechanisms. They should be integrated with the
 CPython-shaped semantics, but they are not themselves CPython slots.
 
-## Adding a new slot
+## Adding a protocol or slot
 
 Use this workflow for new protocol support.
 
@@ -182,59 +208,57 @@ Use this workflow for new protocol support.
    relevant CPython function in a comment or PR description when it clarifies
    the implementation.
 
-2. Check slot detection.
+2. Check whether a shared generic function already exists.
 
-   If Dynamo needs to know whether a type implements the slot, make sure
+   If it exists, route the new case through it. If it does not exist, add a
+   generic helper before adding per-type bodies.
+
+3. Check slot detection.
+
+   If Dynamo needs to know whether a Python type implements the slot, make sure
    `torch/csrc/dynamo/init.cpp` exposes the bit and add coverage in
    `test/dynamo/test_tp_slots.py`.
 
-3. Add or update the generic algorithm.
+4. Add or update the base `VariableTracker` hook.
 
-   Put cross-type dispatch in `object_protocol.py` or the nearest existing
-   shared protocol helper. This layer should encode CPython fallback order and
-   exception behavior.
+   Use a clear hook name matching the protocol, such as `*_impl`. The base
+   method should make the absent-slot versus unsupported-slot distinction clear.
 
-4. Add the base `VariableTracker` hook.
-
-   If the slot needs a per-type body, add a clearly named `*_impl` method to
-   `VariableTracker`. The base method should either raise the CPython exception
-   for an absent slot or graph break for a present slot that Dynamo has not
-   implemented.
-
-5. Implement the per-type slot bodies.
+5. Implement per-type hook bodies.
 
    Keep these local and narrow. For example, list indexing belongs with list
    behavior, dict lookup with dict behavior, tensor behavior with tensor
-   behavior. The per-type body should not duplicate the generic slot selection
-   algorithm.
+   behavior. The per-type body should not duplicate the generic dispatch order.
 
 6. Route existing call sites through the generic operation.
 
-   Builtins and bytecode handlers should call the generic protocol helper
-   rather than hand-rolling the same dunder lookup. Temporary compatibility
-   paths in `call_method` are acceptable during migration, but new behavior
-   should move toward slot dispatch.
+   Builtins, bytecode handlers, and dunder-string paths in `call_method` should
+   call the shared protocol helper where possible. Compatibility paths are
+   acceptable during migration, but new behavior should move toward the generic
+   helper.
 
 7. Test the behavior as a protocol, not only as a reproducer.
 
    Cover builtin types, user-defined classes, subclasses of builtin types,
-   missing-slot errors, and any fallback behavior CPython defines. Prefer
+   missing-slot errors, and CPython-defined fallback behavior. Prefer
    `fullgraph=True` when the test is meant to prove there is no graph break.
 
 ## Review checklist
 
-Reviewers should ask these questions before accepting a slot-related change.
+Reviewers should ask these questions before accepting a protocol-related
+change.
 
 - Does the PR name the CPython operation or slot it is mirroring?
-- Is the operation implemented through a shared protocol path rather than a
-  local spot fix?
+- Is the CPython algorithm implemented through a shared generic path rather
+  than a local spot fix?
+- Does the per-type code implement only the hook body?
 - Does slot detection match CPython for the relevant builtin types and
   subclasses?
 - Are "slot absent" and "slot present but unsupported by Dynamo" handled
   differently?
 - Do exceptions and messages match CPython where users can observe them?
-- Are descriptors, MRO lookup, subclass priority, reflected operations, and
-  fallback behavior considered when relevant?
+- Are descriptors, MRO lookup, subclass priority, reflected operations,
+  `NotImplemented`, and fallback behavior considered when relevant?
 - Does the change reduce or avoid `VariableTracker` overreach for Python-level
   constructs?
 - Are guards and side effects installed at the point where Dynamo relies on a
@@ -244,34 +268,5 @@ Reviewers should ask these questions before accepting a slot-related change.
 - If the PR adds an unavoidable special case, does it explain why the CPython
   primitive cannot be modeled yet?
 
-## What not to mirror
-
-Do not spend Dynamo complexity on CPython implementation details that do not
-affect tracing semantics:
-
-- refcounting and object lifetime slots;
-- allocation and deallocation slots;
-- GC traversal slots;
-- exact C struct layout;
-- CPython's internal cache/version-tag machinery when Dynamo guards already
-  cover the invariant.
-
-The aim is a predictable semantic model, not a byte-for-byte copy of CPython.
-
-## Useful local anchors
-
-- `torch/_dynamo/variables/object_protocol.py`: generic CPython-style object
-  protocol operations.
-- `torch/_dynamo/variables/base.py`: base slot hooks on `VariableTracker`.
-- `torch/_dynamo/variables/user_defined.py`: user-defined object, class,
-  descriptor, MRO, and attribute behavior.
-- `torch/_dynamo/variables/builtin.py`: many legacy builtin dispatch paths that
-  should gradually shrink as protocol helpers grow.
-- `torch/_dynamo/side_effects.py`: mutation replay and reconstruction, which
-  should become more type-driven over time.
-- `torch/csrc/dynamo/init.cpp`: slot detection exported from the C extension.
-- `test/dynamo/test_tp_slots.py`: slot-detection tests.
-- `test/dynamo/test_getitem.py`, `test/dynamo/test_nb_bool.py`,
-  `test/dynamo/test_nb_index.py`, `test/dynamo/test_tp_hash.py`: examples of
-  protocol-focused tests.
-- `test/dynamo/cpython/3_13/`: broad CPython behavior tests adapted for Dynamo.
+The best slot PRs make the next nearby slot easier to implement. They should
+leave the protocol surface more centralized than they found it.
