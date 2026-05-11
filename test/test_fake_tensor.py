@@ -388,6 +388,17 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_compare_tensor_meta_unbacked_numel(self):
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            _constrain_range_for_size(u0, min=0)
+            a = torch.empty(u0, 16, device="cpu")
+            b = torch.empty(u0, 16, device="cpu")
+        prims.utils.compare_tensor_meta(a, b, check_strides=True)
+
     def test_batch_tensor(self):
         x = torch.rand((3, 4, 5))
         b = _add_batch_dim(x, 0, 0)
