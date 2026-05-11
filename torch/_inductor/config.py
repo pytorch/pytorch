@@ -1236,9 +1236,9 @@ class aten_distributed_optimizations:
     bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
-    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
-    # as atomic units with memory-bound runtime estimates.
-    enable_fusion_regions: bool | None = None
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) have their
+    # I/O costs corrected to exclude intermediates that inductor will not materialize.
+    enable_fusion_regions: bool = True
 
     # Post-scheduling foreach_mm: after overlap scheduling, unwrap
     # control_deps(mm) that don't depend on collectives, then batch
