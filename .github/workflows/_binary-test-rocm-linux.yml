@@ -42,7 +42,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 240
+        default: 420
 
 permissions:
   id-token: write
