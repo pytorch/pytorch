@@ -4600,6 +4600,8 @@ def build_checkpoint_variable(**options: Any) -> Any:
     activation_checkpoint_op: torch._ops.HigherOrderOperator = (
         higher_order_ops.tag_activation_checkpoint
     )
+    if torch._dynamo.config.lazy_compile_activation_checkpoint:
+        activation_checkpoint_op = higher_order_ops.lazy_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 

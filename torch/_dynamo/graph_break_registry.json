@@ -2256,6 +2256,16 @@
       "Hints": []
     }
   ],
+  "GB1338": [
+    {
+      "Gb_type": "lazy_activation_checkpoint_function",
+      "Context": "checkpoint function: {args[0]}",
+      "Explanation": "The prototype lazy activation checkpoint path only supports checkpointing Python functions that can be guarded as constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6276": [
     {
       "Gb_type": "Comprehension analysis failed: No END_FOR",

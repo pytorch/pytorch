@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import contextlib
+import contextvars
 import inspect
 import itertools
 import logging
@@ -21,6 +23,7 @@ from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.types import _dtype
 from torch.utils._debug_mode import DebugMode
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -440,6 +443,156 @@ class TagActivationCheckpoint(HigherOrderOperator):
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()
+
+
+_lazy_activation_checkpoint_function_registry: dict[int, Callable[..., Any]] = {}
+_lazy_activation_checkpoint_recomputing = contextvars.ContextVar(
+    "lazy_activation_checkpoint_recomputing",
+    default=False,
+)
+
+
+def register_lazy_activation_checkpoint_function(function: Callable[..., Any]) -> int:
+    function_id = id(function)
+    _lazy_activation_checkpoint_function_registry[function_id] = function
+    return function_id
+
+
+def _call_lazy_compiled_checkpoint_function(
+    function: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    import torch._dynamo.config
+
+    with torch._dynamo.config.patch(
+        error_on_nested_fx_trace=False,
+        force_compile_during_fx_trace=True,
+    ):
+        return torch.compile(function, backend="eager", fullgraph=True)(*args, **kwargs)
+
+
+class _CompositeTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls) -> bool:
+        return True
+
+    def __init__(self, *contexts: contextlib.AbstractContextManager) -> None:
+        self.contexts = contexts
+        self.stack: contextlib.ExitStack | None = None
+
+    def __enter__(self) -> Any:
+        self.stack = contextlib.ExitStack()
+        for context in self.contexts:
+            self.stack.enter_context(context)
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        mode_result = super().__exit__(exc_type, exc_val, exc_tb)
+        if self.stack is None:
+            raise AssertionError("context stack was not initialized")
+        context_result = self.stack.__exit__(exc_type, exc_val, exc_tb)
+        self.stack = None
+        return bool(mode_result or context_result)
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+        return func(*args, **kwargs)
+
+
+class _RecomputeTorchDispatchMode(_CompositeTorchDispatchMode):
+    def __enter__(self) -> Any:
+        self.token = _lazy_activation_checkpoint_recomputing.set(True)
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        try:
+            return super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            _lazy_activation_checkpoint_recomputing.reset(self.token)
+
+
+def _ensure_checkpoint_compile_context(context, *, recompute: bool = False):
+    if recompute:
+        return _RecomputeTorchDispatchMode(context)
+    if isinstance(context, TorchDispatchMode):
+        return context
+    return _CompositeTorchDispatchMode(context)
+
+
+def lazy_activation_checkpoint_impl(
+    gmod: GraphModule,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    import torch.fx.traceback as fx_traceback
+    from torch.fx import Interpreter
+    from torch.utils.checkpoint import checkpoint
+
+    checkpoint_arg_count = kwargs.pop("_checkpoint_arg_count")
+    function_id = kwargs.pop("_function_id")
+    pos_arg_count = kwargs.pop("_pos_arg_count")
+    function_kwarg_names = kwargs.pop("_function_kwarg_names")
+    checkpoint_args = args[:checkpoint_arg_count]
+    captured_args = args[checkpoint_arg_count:]
+    function = _lazy_activation_checkpoint_function_registry[function_id]
+
+    if "_checkpoint_context_fn" in gmod.meta:
+        user_context_fn = gmod.meta["_checkpoint_context_fn"]
+        unique_graph_id = next(uid)
+
+        def context_fn():
+            forward_context, recompute_context = user_context_fn()
+            forward_context = _ensure_checkpoint_compile_context(forward_context)
+            forward_context.ac_graph_id = unique_graph_id
+            return (
+                forward_context,
+                _ensure_checkpoint_compile_context(recompute_context, recompute=True),
+            )
+
+        kwargs["context_fn"] = context_fn
+
+    kwargs["use_reentrant"] = False
+
+    def run_with_interpreter(*args):
+        if _lazy_activation_checkpoint_recomputing.get():
+            recompute_kwargs = dict(
+                zip(
+                    function_kwarg_names,
+                    args[pos_arg_count:checkpoint_arg_count],
+                )
+            )
+            return _call_lazy_compiled_checkpoint_function(
+                function,
+                *args[:pos_arg_count],
+                **recompute_kwargs,
+            )
+        return Interpreter(gmod).run(*args, *captured_args)
+
+    with fx_traceback.preserve_node_meta():
+        return checkpoint(run_with_interpreter, *checkpoint_args, **kwargs)
+
+
+class LazyActivationCheckpoint(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("lazy_activation_checkpoint", cacheable=False)
+
+    def __call__(
+        self,
+        gmod: GraphModule,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        dispatch_key_set = torch._ops._compute_keyset(
+            args, kwargs, self.non_fallthrough_keys
+        )
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+        if dispatch_key == torch._C.DispatchKey.PreDispatch:
+            # pyrefly: ignore [missing-attribute]
+            return super().__call__(gmod, *args, **kwargs)
+
+        return lazy_activation_checkpoint_impl(gmod, *args, **kwargs)
+
+
+lazy_activation_checkpoint = LazyActivationCheckpoint()
 
 
 def _always_prefer_recompute(ctx, op, *args, **kwargs):
