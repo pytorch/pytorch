@@ -11,7 +11,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.heuristics.template.triton_addmm import AddMMConfigMixin
+from .triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
