@@ -52,12 +52,14 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
     TEST_XPU,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -971,7 +973,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
             ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
@@ -988,7 +989,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
             ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
@@ -1005,7 +1005,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
             torch.distributed.all_gather_into_tensor(
@@ -1036,7 +1035,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_list(self):
         def func(inp, out, *, pg):
             torch.distributed.all_gather(
@@ -1063,7 +1061,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
@@ -1097,7 +1094,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
             torch.distributed.reduce_scatter_tensor(
@@ -1281,7 +1277,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         input = torch.ones(2, device=self.device)
         compiled(input)
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_support_collective_op_with_async_op_False(self):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
@@ -1356,7 +1351,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
             ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
@@ -1373,7 +1367,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_allgather_coalesced(self):
         def func(inp, *, tag, ranks, group_size):
             ar = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(
@@ -1427,7 +1420,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_all_gather_coalesced(self):
@@ -1475,7 +1467,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(out, correct):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_reduce_scatter_coalesced(self):
@@ -1523,7 +1514,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         if not same(out, correct):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_peak_memory(self):
         """
@@ -1645,12 +1635,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
             return y, ag_0_out, ag_1_out, ag_2_out, ag_3_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_2 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_3 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_2 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_3 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
         correct = func(*inputs, **self.get_world_trs())
 
@@ -1709,7 +1699,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 torch.ops.c10d_functional.wait_tensor(ag_2_out),
             )
 
-        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        inputs = [torch.ones(64, device=device_type) for _ in range(3)]
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
@@ -1815,10 +1805,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return y, rs_0_out.to(torch.float32), rs_1_out.to(torch.float32)
 
         for f in [func, func2]:
-            x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-            w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-            rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-            rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+            x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+            w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+            rs_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+            rs_1 = torch.ones(384, 256, device=self.device, dtype=torch.float32)
             inputs = [x, w, rs_0, rs_1]
             f(*inputs, **self.get_world_trs())
 
@@ -1878,10 +1868,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         f = func
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ar_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ar_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ar_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ar_1 = torch.ones(384, 256, device=self.device, dtype=torch.float32)
         inputs = [x, w, ar_0, ar_1]
         f(*inputs, **self.get_world_trs())
 
@@ -1936,10 +1926,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, ag_0_out, ag_1_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.bfloat16)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device=self.device, dtype=torch.bfloat16)
+        ag_1 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1]
         correct = func(*inputs, **self.get_world_trs())
 
@@ -2171,7 +2161,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 4)
 
-    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
         """
@@ -2261,7 +2250,6 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        device_type = torch.accelerator.current_accelerator().type
         return torch.device(f"{device_type}:{self.rank}")
 
     def _init_process_group(self) -> None:
@@ -2552,9 +2540,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_idx(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2676,9 +2664,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2799,9 +2787,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2917,9 +2905,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -3097,9 +3085,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_schedule_overlap_benchmark(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
+        backend = torch.distributed.get_default_backend_for_device(self.device)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -3231,9 +3220,12 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         correctly with overlap scheduling.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
+        backend = c10d.get_default_backend_for_device(
+            torch.accelerator.current_accelerator().type
+        )
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"

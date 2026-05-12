@@ -505,16 +505,11 @@ class TestAllGatherViewOptimization(TestCase):
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-
-# Adding support for HCCL backend
-# To add a different backend
-# add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
-# And then set the BACKEND variable appropriately.
-if TEST_HPU:
-    BACKEND = dist.Backend.HCCL
-elif TEST_XPU:
-    BACKEND = dist.Backend.XCCL
+BACKEND = (
+    dist.Backend.default_device_backend_map[DEVICE]
+    if torch.accelerator.is_available()
+    else dist.Backend.GLOO
+)
 
 
 # allows you to check for multiple accelerator irrespective of device type

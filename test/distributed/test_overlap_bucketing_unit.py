@@ -116,7 +116,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1124,7 +1124,7 @@ class TestCrossPGOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
         # Create two separate process groups for cross-PG testing
         cls.pg1 = dist.new_group(ranks=[0, 1])
@@ -1298,7 +1298,7 @@ class TestFusibleNodeOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1471,7 +1471,7 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=16, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -1735,9 +1735,9 @@ class TestForeachGroupsUnit(InductorTestCase):
             _pre_bucket_all_gather,
         )
 
-        t1 = torch.randn(10, device="cuda")
-        t2 = torch.randn(20, device="cuda", dtype=torch.float16)
-        t3 = torch.randn(10, device="cuda")
+        t1 = torch.randn(10, device=device_type)
+        t2 = torch.randn(20, device=device_type, dtype=torch.float16)
+        t3 = torch.randn(10, device=device_type)
         ag_ins = [t1, t2, t3]
         out_dtypes = [torch.float32, torch.float16, torch.float32]
         out_dtype_ints = [_ALL_DTYPES.index(d) for d in out_dtypes]
@@ -2008,7 +2008,7 @@ class TestCoalescedCollectiveOverlap(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=8, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -2167,7 +2167,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):
@@ -2253,7 +2253,7 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=64, store=store)
-        cls.device = "cuda"
+        cls.device = device_type
 
     @classmethod
     def tearDownClass(cls):

@@ -34,6 +34,10 @@ device_type = get_devtype().type
 
 
 class TestFakePG(TestCase):
+    device_type = (
+        torch.accelerator.current_accelerator().type if HAS_ACCELERATOR else "cpu"
+    )
+
     def tearDown(self):
         super().tearDown()
         try:
@@ -83,7 +87,7 @@ class TestFakePG(TestCase):
     def test_construct_fsdp(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        FSDP(nn.Linear(2, 3, device=device_type))
+        FSDP(nn.Linear(2, 3, device=self.device_type))
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
