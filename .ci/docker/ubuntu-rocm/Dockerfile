@@ -118,7 +118,11 @@ COPY ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
 
-# Include BUILD_ENVIRONMENT environment variable in image
+# Install rocm-origami
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
+RUN bash -c 'source common_utils.sh && conda_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 

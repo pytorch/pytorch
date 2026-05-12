@@ -2205,18 +2205,16 @@ class TensorVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1135 (PyNumber_Subtract)
-        from .builder import wrap_fx_proxy
-
-        if not (
-            isinstance(other, TensorVariable) or _is_sym_arith_operand(other)
-        ):
+        if not _is_sym_arith_operand(other):
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
-        proxy = tx.output.create_proxy(
-            "call_function", operator.sub, *proxy_args_kwargs(args, {})
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.sub, *proxy_args_kwargs(args, {})
+            ),
+            sym_num=None,
         )
-        # Tensor dominates: Tensor-Tensor, Tensor-SymNode, Tensor-scalar -> Tensor.
-        return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
