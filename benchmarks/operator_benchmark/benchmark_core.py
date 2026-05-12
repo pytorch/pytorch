@@ -7,6 +7,7 @@ import os
 import platform
 import timeit
 from collections import namedtuple
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -38,6 +39,13 @@ TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 BENCHMARK_TESTER = []
 
 SKIP_OP_LISTS = ["weight_norm_sparsifier_step"]
+
+
+def _rocm_cpu_profiler_ctx():
+    """ROCm-only: CPU profiler context around timed regions (temporary workaround for https://github.com/pytorch/pytorch/issues/182719)."""
+    if torch.version.hip is not None:
+        return torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU])
+    return nullcontext()
 
 
 def _register_test(*test_metainfo):
@@ -371,16 +379,17 @@ class BenchmarkRunner:
             )
             return forward_time
         # Stable timing with Timer
-        timer = Timer(
-            stmt="func(iters, print_per_iter, cuda_sync)",
-            globals={
-                "func": func,
-                "iters": iters,
-                "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
-            },
-        )
-        result = timer.adaptive_autorange(min_run_time=0.0001)
+        with _rocm_cpu_profiler_ctx():
+            timer = Timer(
+                stmt="func(iters, print_per_iter, cuda_sync)",
+                globals={
+                    "func": func,
+                    "iters": iters,
+                    "print_per_iter": print_per_iter,
+                    "cuda_sync": cuda_sync,
+                },
+            )
+            result = timer.adaptive_autorange(min_run_time=0.0001)
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
@@ -391,16 +400,17 @@ class BenchmarkRunner:
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=cuda_sync)
         test_case._output_mean()
 
-        timer = Timer(
-            stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
-            globals={
-                "test_case": test_case,
-                "iters": iters,
-                "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
-            },
-        )
-        result = timer.adaptive_autorange(min_run_time=0.0001)
+        with _rocm_cpu_profiler_ctx():
+            timer = Timer(
+                stmt="test_case.run_backward(iters, print_per_iter, cuda_sync)",
+                globals={
+                    "test_case": test_case,
+                    "iters": iters,
+                    "print_per_iter": print_per_iter,
+                    "cuda_sync": cuda_sync,
+                },
+            )
+            result = timer.adaptive_autorange(min_run_time=0.0001)
         return result.median * iters
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
