@@ -4515,6 +4515,92 @@ class TupleGetterVariable(VariableTracker):
         )
 
 
+class BoundInstanceMethodVariable(VariableTracker):
+    """Bound method produced by PyInstanceMethod_Type."""
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: Any,
+        obj: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+        self.obj = obj
+
+    def __repr__(self) -> str:
+        return f"BoundInstanceMethodVariable({self.descriptor.__name__}, {self.obj})"
+
+    def python_type(self) -> type:
+        return types.MethodType
+
+    def as_python_constant(self) -> types.MethodType:
+        obj = self.obj.as_python_constant()
+        return self.descriptor.__get__(obj, type(obj))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "__self__":
+            return self.obj
+        if name == "__func__":
+            func_source = AttrSource(self.source, "__func__") if self.source else None
+            return VariableTracker.build(tx, self.descriptor.__func__, func_source)
+        if name == "__name__":
+            return variables.ConstantVariable.create(self.descriptor.__name__)
+        return super().var_getattr(tx, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        func_source = AttrSource(self.source, "__func__") if self.source else None
+        func_var = VariableTracker.build(
+            tx, self.descriptor.__func__, func_source, realize=True
+        )
+        if isinstance(func_var, SkipFunctionVariable):
+            qualname = getattr(
+                self.descriptor.__func__, "__qualname__", self.descriptor.__name__
+            )
+            module_name = getattr(
+                self.descriptor.__func__, "__module__", "<unknown module>"
+            )
+            from ..trace_rules import get_skip_reason
+
+            reason = get_skip_reason(self.descriptor.__func__)
+            explanation = (
+                f"Dynamo does not know how to trace the builtin `{module_name}.{qualname}.` "
+                f"This function is either a Python builtin (e.g. _warnings.warn) "
+                f"or a third-party C/C++ Python extension (perhaps created with pybind)."
+            )
+            hints = [
+                "If it is a Python builtin, please file an issue on GitHub "
+                "so the PyTorch team can add support for it and see the next "
+                "case for a workaround.",
+                "If it is a third-party C/C++ Python extension, please "
+                "either wrap it into a PyTorch-understood custom operator "
+                "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details) or, if it is traceable, use "
+                "`torch.compiler.allow_in_graph`.",
+            ]
+            unimplemented(
+                gb_type="Attempted to call function marked as skipped",
+                context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
+                explanation=explanation,
+                hints=hints,
+            )
+        return func_var.call_function(tx, [self.obj, *args], kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.obj)
+        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+
+
 class InstanceMethodVariable(VariableTracker):
     """C-level instance method descriptor (PyInstanceMethod_Type).
 
@@ -4563,6 +4649,7 @@ class InstanceMethodVariable(VariableTracker):
         if obj is None:
             func_source = AttrSource(self.source, "__func__") if self.source else None
             return VariableTracker.build(tx, self.descriptor.__func__, func_source)
-        return BoundBuiltinMethodVariable(
-            self.descriptor.__func__, obj, source=self.source
+        bound_source = (
+            AttrSource(obj.source, self.descriptor.__name__) if obj.source else None
         )
+        return BoundInstanceMethodVariable(self.descriptor, obj, source=bound_source)
