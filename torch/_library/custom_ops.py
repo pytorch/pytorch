@@ -58,7 +58,7 @@ if not hasattr(_C, "_custom_op_fast_path_check"):
             _C._dispatch_tls_local_include_set().raw_repr() & ~_NORMAL_TLS_INCLUDE_RAW
         ) != 0:
             return None
-        if torch.is_autocast_enabled() or torch.is_autocast_cpu_enabled():
+        if torch.is_autocast_enabled("cuda") or torch.is_autocast_enabled("cpu"):
             return None
         first_device = None
         any_requires_grad = False
@@ -870,8 +870,8 @@ class CustomOpDef:
             if fn is None:
                 return _FAST_PATH_FALLBACK
 
-            _fast_dispatch_tls_fn.fn = fn
             keyset = _keyset_for_device(device_type)
+            _fast_dispatch_tls_fn.fn = fn
             try:
                 with _ops._enable_fast_dispatch(op, chain):
                     return autograd_impl(keyset, *args)
