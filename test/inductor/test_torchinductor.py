@@ -132,11 +132,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    FxCompileMode,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
