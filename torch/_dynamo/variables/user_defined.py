@@ -571,7 +571,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source=self.source and AttrSource(self.source, "__dict__"),
             )
         if name == "__mro__":
-            attr_source = self.source and TypeMROSource(self.source)
+            if meta_attr is type.__dict__["__mro__"]:
+                attr_source = self.source and TypeMROSource(self.source)
+            else:
+                attr_source = source
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
         # __name__, __qualname__, __doc__, __module__, __bases__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
@@ -708,7 +711,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
         # instancemethod_descr_get with obj=NULL returns __func__.
-        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L160
+        # https://github.com/python/cpython/blob/3.13/Objects/classobject.c#L453-L460
         if torch._C._dynamo.utils.is_instancemethod(cls_attr):  # type: ignore[attr-defined]
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
@@ -2963,7 +2966,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # instancemethod_descr_get binds __func__ to obj via PyMethod_New.
-        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L168
+        # https://github.com/python/cpython/blob/3.13/Objects/classobject.c#L453-L460
         if torch._C._dynamo.utils.is_instancemethod(type_attr):  # type: ignore[attr-defined]
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
