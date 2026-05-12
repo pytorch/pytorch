@@ -1556,8 +1556,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles. Incompatible with cpp_wrapper.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
-# When True, complex_memory_overlap always reports True
-always_complex_memory_overlap_TESTING_ONLY: bool = False
+# When True, all compiled graphs report a cudagraph fail reason. Used by tests
+# that need to exercise the cudagraph-skip path.
+force_disable_cudagraph_TESTING_ONLY: bool = False
 
 # enable linear binary folding
 enable_linear_binary_folding = (
@@ -1651,7 +1652,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )  # type: ignore[assignment]
+    )
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2735,7 +2736,7 @@ _cache_config_ignore_prefix: list[str] = [
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
-    "always_complex_memory_overlap_TESTING_ONLY",
+    "force_disable_cudagraph_TESTING_ONLY",
     # timing affects cache structure, not cache content
     "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
