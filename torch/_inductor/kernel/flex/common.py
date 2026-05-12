@@ -5,7 +5,7 @@ import math
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -18,7 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
 else:
-    _IntLike = Union[int, sympy.Expr]
+    _IntLike = int | sympy.Expr
 
 
 from ...ir import (
@@ -46,7 +46,7 @@ from ...select_algorithm import realize_inputs
 from ...utils import load_template
 
 
-SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
@@ -96,7 +96,7 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
 def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
-) -> list[Optional[ComputedBuffer]]:
+) -> list[ComputedBuffer | None]:
     subgraph_buffer = (
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
@@ -134,7 +134,7 @@ def build_subgraph_module_buffer(
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
+    def convert_output_node_to_buffer(output_buffer) -> ComputedBuffer | None:
         if output_buffer is None:
             return None
         if isinstance(output_buffer, ComputedBuffer):
@@ -168,16 +168,68 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
-def maybe_realize(args: list[Optional[IRNode]]):
+def maybe_realize(args: list[IRNode | None]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
     return tree_map(
         lambda x: (
-            realize_inputs(x)
-            if x is not None and not isinstance(x, sympy.Symbol)
-            else x
+            realize_inputs(x) if x is not None and not isinstance(x, sympy.Expr) else x
         ),
         args,
     )
+
+
+def realize_captures_for_cutedsl(buffers):
+    """Realize captured buffers for CuteDSL, preserving views and plain inputs.
+
+    Unlike maybe_realize (used by the Triton path), CuteDSL needs physical
+    tensors passed at runtime. Pointwise/computed captures must be materialized
+    into a fresh buffer whose layout matches the logical shape the subgraph
+    indexes. ReinterpretView captures use unique synthetic inputs so aliased
+    views keep distinct call-site size/stride/offset metadata while the kernel
+    indexes each captured view argument from offset zero.
+
+    Realized captures are registered on V.graph so the CuteDSL template can
+    resolve view nodes without explicit plumbing from callers.
+    """
+    from ...ir import ExternKernel, FixedLayout, InputBuffer, ReinterpretView
+
+    view_captures: dict[str, ReinterpretView] = {}
+
+    def _realize(x):
+        if x is None or isinstance(x, sympy.Expr):
+            return x
+        realized = ExternKernel.realize_input(x)
+        if isinstance(realized, ReinterpretView):
+            layout = realized.get_layout()
+            capture_index = len(V.graph._cutedsl_capture_nodes) + len(view_captures)
+            name = V.graph.qualify_name(f"cutedsl_capture{capture_index}")
+            view_captures[name] = realized
+            # Give each captured view a logical input name so aliasing views do
+            # not collapse to their shared base buffer.
+            return InputBuffer(
+                name=name,
+                layout=FixedLayout(
+                    layout.device,
+                    layout.dtype,
+                    layout.size,
+                    layout.stride,
+                    is_pinned=layout.is_pinned,
+                ),
+            )
+        if isinstance(realized, InputBuffer):
+            return realized
+        return ExternKernel.copy_input(realized)
+
+    buffers = tree_map(_realize, buffers)
+    freeze_irnodes(buffers)
+
+    for buf in tree_map_only(IRNode, lambda x: x, buffers) if buffers else []:
+        if isinstance(buf, IRNode) and (name := buf.maybe_get_name()):
+            V.graph._cutedsl_capture_nodes[name] = buf
+    # Keep the original view nodes for call-site reinterpret_tensor emission.
+    V.graph._cutedsl_capture_nodes.update(view_captures)
+
+    return buffers
 
 
 def freeze_irnodes(tree: Any) -> Any:
@@ -200,7 +252,7 @@ def create_placeholder(
     name: str,
     dtype: torch.dtype,
     device: torch.device,
-    size: Optional[list[int]] = None,
+    size: list[int] | None = None,
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
@@ -268,7 +320,7 @@ def infer_dense_strides(
 
 def create_indices_fake(x) -> torch.Tensor:
     """Create a fake indices that is used for autotuning."""
-    size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+    size = V.graph.sizevars.optimization_hints(x.get_size())
     indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
     indices = indices.expand(size).contiguous()
     return indices
@@ -290,8 +342,10 @@ def create_num_blocks_fake_generator(sparse_indices):
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
-        size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+        num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
+            sparse_indices.shape[-1]
+        )
+        size = V.graph.sizevars.optimization_hints(x.get_size())
         return torch.full(
             size,
             num_blocks_for_autotuning,

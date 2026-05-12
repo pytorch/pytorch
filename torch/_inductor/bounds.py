@@ -2,7 +2,7 @@ import logging
 import operator
 from collections.abc import Callable
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any
 
 import sympy
 from sympy import Expr
@@ -36,7 +36,7 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
-        def upper_bound(v: Union[Expr, int]) -> int:
+        def upper_bound(v: Expr | int) -> int:
             return bound_sympy(v).upper if isinstance(v, Expr) else v
 
         self.loop_body = loop_body
@@ -165,7 +165,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     @staticmethod
     def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
         # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
+        return ValueRanges(sympy.false, sympy.true)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
@@ -195,10 +195,11 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         return cls.to_dtype(index, dtype)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def to_dtype(
         x: Any,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> ValueRanges[Any]:
         x = ValueRanges.wrap(x)
@@ -237,10 +238,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def square(x: Any) -> ValueRanges[Any]:
         return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def neg(x: Any) -> ValueRanges[Any]:
         return ValueRanges.decreasing_map(x, operator.neg)
 

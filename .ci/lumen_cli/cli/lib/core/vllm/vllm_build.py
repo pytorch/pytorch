@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import logging
 import os
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
@@ -235,7 +236,7 @@ class VllmBuildRunner(BaseRunner):
         abs_path = get_path(path, resolve=True)
         return abs_path
 
-    def _get_torch_wheel_path_arg(self, torch_whl_dir: Optional[Path]) -> str:
+    def _get_torch_wheel_path_arg(self, torch_whl_dir: Path | None) -> str:
         if not torch_whl_dir:
             return ""
         return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"

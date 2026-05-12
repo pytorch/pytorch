@@ -182,10 +182,9 @@ def _is_input_arg_dtype_supported_by_backend(
     """Check if the configured qconfig for the argument
     is supported by the backend or not
     """
-    if isinstance(arg, (list, tuple)):  # noqa: UP038
+    if isinstance(arg, (list, tuple)):
         return all(
             _is_input_arg_dtype_supported_by_backend(
-                # pyrefly: ignore [bad-argument-type]
                 a,
                 node,
                 qconfig,
@@ -397,7 +396,7 @@ def _qat_swap_modules(
 def _add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: set[str]):
     if isinstance(matched_node_pattern, Node):
         s.add(matched_node_pattern.name)
-    elif isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
+    elif isinstance(matched_node_pattern, (list, tuple)):
         for maybe_node in matched_node_pattern:
             _add_matched_node_name_to_set(maybe_node, s)
 
@@ -447,7 +446,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     """Sets the target_dtype_info for each node in matched_node_pattern
     Note: processed_nodes is used to ensure we only process each node once
     """
-    if isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
+    if isinstance(matched_node_pattern, (list, tuple)):
         for node_pattern in matched_node_pattern:
             _set_target_dtype_info_for_matched_node_pattern(
                 node_pattern,
@@ -735,12 +734,11 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     """
     # for ops such as torch.cat([x0, x1]),
     # traverse through the list
-    if isinstance(arg, (list, tuple)):  # noqa: UP038
+    if isinstance(arg, (list, tuple)):
         new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
-                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -1157,10 +1155,9 @@ def _maybe_insert_observers_before_graph_output(
                 return observer_node
             else:
                 return maybe_node
-        elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
+        elif isinstance(maybe_node, (list, tuple)):
             results = [
                 _recursive_maybe_replace_node_with_obs(
-                    # pyrefly: ignore [bad-argument-type]
                     inner_node,
                     model,
                     named_modules,
@@ -1250,7 +1247,7 @@ def propagate_dtypes_for_known_nodes(
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
-                if isinstance(arg, (tuple, list)):  # noqa: UP038
+                if isinstance(arg, (tuple, list)):
                     arg_list = list(arg)
                 else:
                     arg_list = [arg]
@@ -1285,7 +1282,7 @@ def _maybe_make_input_output_share_observers(
     first_arg = None
     # find the first non-Tensor arg
     for i in range(len(node.args)):
-        if isinstance(node.args[i], (Node, list, tuple)):  # noqa: UP038
+        if isinstance(node.args[i], (Node, list, tuple)):
             first_arg = node.args[i]
             break
 
@@ -1293,7 +1290,7 @@ def _maybe_make_input_output_share_observers(
     if first_arg is None:
         return False
 
-    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
+    if isinstance(first_arg, (list, tuple)):
         first_arg_arg = first_arg[0]
     elif isinstance(first_arg, Node):
         first_arg_arg = first_arg
@@ -1332,21 +1329,25 @@ def _maybe_make_input_output_share_observers(
         raise AssertionError("target_to_use must be a string")
     obs_mod_to_use = named_modules[target_to_use]
 
-    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
+    if isinstance(first_arg, (list, tuple)):
         # set all other input observer nodes to use that module
         for input_idx, input_arg in enumerate(first_arg):
             if input_idx == 0:
                 continue
             iteration_guard = 0
+            # pyrefly: ignore [bad-argument-type]
             while not _is_activation_post_process_node(input_arg, named_modules):
                 # failed to trace back since no input arg for the current node
+                # pyrefly: ignore [missing-attribute]
                 if len(input_arg.args) < 1:
                     return False
+                # pyrefly: ignore [bad-index, unsupported-operation]
                 input_arg = input_arg.args[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
                     raise AssertionError("Unable to find observer of previous node")
 
+            # pyrefly: ignore [missing-attribute]
             parent_name, name = _parent_name(input_arg.target)
             setattr(named_modules[parent_name], name, obs_mod_to_use)
 

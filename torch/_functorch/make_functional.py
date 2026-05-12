@@ -78,6 +78,7 @@ def _extract_members(
     names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
+    # pyrefly: ignore [implicit-any]
     memo = {}
     accessor = NamedMemberAccessor(mod)
     for name, p in all_named_members:
@@ -89,7 +90,7 @@ def _extract_members(
     if len(unique_named_members) == 0:
         names, params = (), ()
     else:
-        names, params = zip(*unique_named_members)  # type: ignore[assignment]
+        names, params = zip(*unique_named_members)
     return params, names, names_map
 
 
@@ -591,7 +592,7 @@ def functional_init(
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]  # type: ignore[misc]
+        num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
@@ -639,7 +640,7 @@ def functional_init_with_buffers(
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]  # type: ignore[misc]
+        num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC

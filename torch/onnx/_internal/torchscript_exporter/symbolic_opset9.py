@@ -1473,7 +1473,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # so the values in indices are in [0, N x C x D1 x ... x Dn).
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
-        # This will result in a tensor of indices in which each index will have it's own value.
+        # This will result in a tensor of indices in which each index will have its own value.
         # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
@@ -2403,7 +2403,6 @@ def _convolution_mode(
         "group_i": groups,
     }
 
-    # pyrefly: ignore [bad-argument-type]
     n = g.op("Conv", *args, **kwargs)
 
     if (
@@ -3076,6 +3075,7 @@ def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
     x2_l2 = symbolic_helper._reducesum_helper(
         g, mul(g, x2, x2), axes_i=[dim], keepdims_i=0
     )
+    # pyrefly: ignore [no-matching-overload]
     div_tens = max(
         g, sqrt(g, mul(g, x1_l2, x2_l2)), g.op("Constant", value_t=torch.tensor([eps]))
     )
@@ -6319,7 +6319,9 @@ def prim_min(g: jit_utils.GraphContext, self, other=None):
     if not other:
         if symbolic_helper._is_packed_list(self):
             self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        # pyrefly: ignore [no-matching-overload]
         return min(g, self)
+    # pyrefly: ignore [no-matching-overload]
     return min(g, self, other)
 
 

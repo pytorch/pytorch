@@ -38,8 +38,8 @@ def _prepare_convolution_fusion_create(
     dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[Sequence[int]] = None,
-    quantize_args: Optional[list["TensorBox"]] = None,
+    output_padding: Sequence[int] | None = None,
+    quantize_args: list["TensorBox"] | None = None,
     other: Optional["TensorBox"] = None,
 ):
     """
@@ -117,8 +117,8 @@ def _prepare_convolution_fusion_create(
         bias.realize()
     with V.graph.fake_mode:
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        x_fake = ir_node_to_tensor(x)
+        weight_fake = ir_node_to_tensor(weight)
         dims = len(x_fake.size()) - 2
         assert 0 < len(padding) <= dims
         assert 0 < len(dilation) <= dims
@@ -230,7 +230,7 @@ def _prepare_linear_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    quantize_args: Optional[list["TensorBox"]] = None,
+    quantize_args: list["TensorBox"] | None = None,
     other: Optional["TensorBox"] = None,
     binary_sum: bool = False,
 ):
@@ -333,7 +333,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         attr,
-        scalars: Optional[list[Any]],
+        scalars: list[Any] | None,
         algorithm,
     ):
         (
@@ -395,10 +395,10 @@ class ConvolutionBinary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: Optional[float],
-        unary_attr: Optional[str],
-        unary_scalars: Optional[list[Any]],
-        unary_algorithm: Optional[str],
+        binary_alpha: float | None,
+        unary_attr: str | None,
+        unary_scalars: list[Any] | None,
+        unary_algorithm: str | None,
     ):
         (
             inputs,
@@ -473,10 +473,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: Optional[float],
-        unary_attr: Optional[str],
-        unary_scalars: Optional[list[Any]],
-        unary_algorithm: Optional[str],
+        binary_alpha: float | None,
+        unary_attr: str | None,
+        unary_scalars: list[Any] | None,
+        unary_algorithm: str | None,
     ):
         (
             inputs,
@@ -498,7 +498,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -543,7 +543,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups_: int,
         attr,
-        scalars: Optional[list[Any]],
+        scalars: list[Any] | None,
         algorithm,
     ):
         transposed = True
@@ -654,7 +654,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups,
             transposed,
             output_padding,
-            [x_scale, x_zero_point, w_scale, w_zero_point],  # type: ignore[list-item]
+            [x_scale, x_zero_point, w_scale, w_zero_point],
         )
         # swap padding and stride to align with functional conv arg order
         if bias is None:

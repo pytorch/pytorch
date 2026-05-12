@@ -486,10 +486,12 @@ def vmapify_autograd_function(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
             if not hasattr(ctx, "_pt_input_shapes"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_input_shapes = {}
             ctx._pt_input_shapes.update({key: input_shapes})
 
             if not hasattr(ctx, "_pt_saved_tensors_bdims_stack"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_saved_tensors_bdims_stack = {}
             ctx._pt_saved_tensors_bdims_stack.update(
                 {key: (wrapped_ctx._pt_saved_tensors_bdims)}
@@ -504,6 +506,7 @@ def vmapify_autograd_function(
         )(inputs, outputs)
 
         if not hasattr(ctx, "_pt_out_dims"):
+            # pyrefly: ignore [implicit-any]
             ctx._pt_out_dims = {}
         ctx._pt_out_dims.update({key: out_dims})
 
@@ -819,8 +822,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore [bad-override]
-            def forward(ctx: Any, *args: Any) -> Any:
+            def forward(*args: Any, **kwargs: Any) -> Any:
                 nonlocal saved_values
 
                 # The Interpreter here is required to propagate metadata
@@ -839,6 +841,10 @@ class AutogradFunctionApply(HigherOrderOperator):
                         for proxy in _get_proxies(t):
                             proxy.node.meta["saved_tensor_with_no_vc_check"] = True
 
+                return output
+
+            @staticmethod
+            def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
                     non_differentiable_output = []
@@ -846,8 +852,6 @@ class AutogradFunctionApply(HigherOrderOperator):
                         if i in non_differentiable_idx:
                             non_differentiable_output.append(x)
                     ctx.mark_non_differentiable(*non_differentiable_output)
-
-                return output
 
             @staticmethod
             def backward(ctx: Any, *grad: Any) -> Any:

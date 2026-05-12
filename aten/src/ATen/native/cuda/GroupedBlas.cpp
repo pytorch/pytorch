@@ -13,7 +13,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -22,7 +22,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
@@ -37,6 +37,7 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -61,14 +62,36 @@
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
 namespace {
+
+bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+#ifdef USE_ROCM
+  static const std::vector<std::string> archs = {
+    "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 60500
+    "gfx950"
+#endif
+};
+  return at::detail::getCUDAHooks().isGPUArch(archs);
+#else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  if (sm90_only || sm100_only) {
+    return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
+  } else {
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+  }
+#endif
+}
 
 // 2d-2d and 2d-3d
 // scaling=MXFP8
@@ -110,10 +133,10 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         scale_b,
         offs.value(),
         out);
+    return out;
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_MSLK");
 #endif
-    return out;
 }
 
 // 2d-2d and 2d-3d cases
@@ -130,7 +153,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
           const bool use_fast_accum,
           Tensor& out) {
   TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
 
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
@@ -147,6 +170,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
 // 2d-2d and 2d-3d cases
 // scaling=rowwise
 // only being called for rocm
+#ifdef USE_ROCM
 Tensor&
 _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& mat_a,
@@ -155,8 +179,15 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& scale_b,
       const std::optional<Tensor>& offs,
       Tensor& out) {
-  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  bool is_gfx942 = at::detail::getCUDAHooks().isGPUArch({"gfx942"});
+
+  if (is_gfx942) {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_b to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  } else {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  }
 
 #if defined(USE_MSLK) && defined(USE_ROCM)
   mslk::gemm::f8f8bf16_rowwise_grouped_mm(
@@ -167,12 +198,13 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       scale_b,
       offs,
       out);
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_MSLK on ROCM")
 #endif
-  return out;
 
 }
+#endif // USE_ROCM
 
 // Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
 Tensor&
@@ -260,11 +292,11 @@ _f4_f4_bf16_grouped_mm_mslk(
       out,
       combined_global_scale
   );
+
+  return out;
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_MSLK, and only for CUDA")
 #endif
-
-  return out;
 }
 
 void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
@@ -679,20 +711,19 @@ std::optional<c10::ScalarType> out_dtype) {
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  bool use_fast_path = false;
-  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
-    use_fast_path = true;
-  }
-#endif //USE_ROCM_CK_GEMM
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-  if (use_fast_path) {
+#if defined(USE_ROCM_CK_GEMM)
+  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
+#else
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+#endif //USE_ROCM_CK_GEMM
 #endif //ifndef USE_ROCM
   return out;
 }

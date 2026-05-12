@@ -200,9 +200,9 @@ def create_debug_info_from_selected_models(
         asset = model_info["asset"]
         hash = model_info["md5_hash"]
 
-        # pyrefly: ignore [missing-attribute]
         asset_info = model_dict["asset_info"].setdefault(asset, {})
 
+        # pyrefly: ignore [missing-attribute]
         asset_info.setdefault("md5_hash", []).append(hash)
 
     # Will later be used in gen_oplist to generate the model/version/asset checking

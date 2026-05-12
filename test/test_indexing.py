@@ -31,6 +31,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
     all_types_complex_float8_and,
+    highest_precision_float,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -914,6 +915,11 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "too many indices"):
             windowed_data = t[indices[:31]]
 
+    def test_index_tensor_empty_indices(self, device):
+        t = torch.tensor([1.0], device=device)
+        with self.assertRaisesRegex(IndexError, "at least one index must be provided"):
+            torch.ops.aten.index.Tensor(t, [])
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
@@ -1211,7 +1217,7 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
-        dtype = torch.float if device.startswith("mps") else torch.double
+        dtype = highest_precision_float(device)
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
@@ -1811,17 +1817,20 @@ class TestIndexing(TestCase):
 
     @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS  # Unimplemented for MPS device
+    @dtypesIfMPS(
+        torch.half, torch.bfloat16, torch.float32, torch.int32, torch.int16, torch.int8
+    )
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
         include_selfs = [True, False]
+        noncontig_opts = [True, False]
         amin_init = float("inf") if dtype.is_floating_point else torch.iinfo(dtype).max
         amax_init = -float("inf") if dtype.is_floating_point else torch.iinfo(dtype).min
         reduction_init = {"prod": 1, "mean": 0, "amin": amin_init, "amax": amax_init}
 
         for dest_noncontig, src_noncontig, index_noncontig in product(
-            [True, False], repeat=3
+            noncontig_opts, repeat=3
         ):
             for idx_dtype, include_self in product(index_dtypes, include_selfs):
                 for dim in range(len(size)):
@@ -1879,7 +1888,16 @@ class TestIndexing(TestCase):
                             expected.div_(counts, rounding_mode="floor")
                     expected = expected.transpose(0, dim)
 
-                    self.assertEqual(dest, expected)
+                    # MPS uses atomics for index_reduce which causes
+                    # non-deterministic rounding for low-precision types
+                    kwargs = {}
+                    if (
+                        "mps" in device
+                        and dtype in [torch.bfloat16, torch.float16]
+                        and reduce in ["mean", "prod"]
+                    ):
+                        kwargs = {"atol": 0.02, "rtol": 0.1}
+                    self.assertEqual(dest, expected, **kwargs)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
@@ -1969,7 +1987,8 @@ class TestIndexing(TestCase):
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert dim >= 0 and dim < 3
+        if not (dim >= 0 and dim < 3):
+            raise AssertionError(f"dim must be in [0, 3), got {dim}")
         a = [5, 4, 3]
         a[dim] = 2000
         x = torch.zeros(a, device=device)

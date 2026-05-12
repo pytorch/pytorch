@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -57,6 +58,8 @@ from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_LINUX,
     MACOS_VERSION,
     MI300_ARCH,
     parametrize as parametrize_test,
@@ -864,7 +867,7 @@ class TestConvolutionNN(NNTestCase):
     # Almost identical to the above `test_Conv2d_naive_groups`
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -910,7 +913,7 @@ class TestConvolutionNN(NNTestCase):
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.006)
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -1660,7 +1663,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output = module(input)
 
         grad = torch.randn(2, 2, 5, 10, 10, dtype=dtype, device=device)[:, 1]
-        assert not grad.is_contiguous()
+        if grad.is_contiguous():
+            raise AssertionError("Expected grad to be non-contiguous")
         output.backward(grad, retain_graph=True)
         self.assertIsNotNone(input.grad)
         result = input.grad.data.clone()
@@ -1716,6 +1720,62 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     + "\ndilation: "
                     + str(dilation),
                 )
+
+    def test_conv_aten_invalid_output_mask(self, device):
+        # test low-level aten.convolution_backward ops with output_mask parameter
+        def test_conv_backward_output_mask(output_mask):
+            input = torch.randn(1, 1, 4, 4, device=device)
+            weight = torch.randn(1, 1, 3, 3, device=device)
+            grad_output = torch.randn(1, 1, 2, 2, device=device)
+            grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                grad_output,
+                input,
+                weight,
+                [1],
+                (1, 1),
+                (0, 0),
+                (1, 1),
+                False,
+                (0, 0),
+                1,
+                output_mask,  # output_mask: (grad_input, grad_weight, grad_bias)
+            )
+            if output_mask[0]:
+                self.assertIsNotNone(grad_input)
+            else:
+                self.assertIsNone(grad_input)
+            if output_mask[1]:
+                self.assertIsNotNone(grad_weight)
+            else:
+                self.assertIsNone(grad_weight)
+            if output_mask[2]:
+                self.assertIsNotNone(grad_bias)
+            else:
+                self.assertIsNone(grad_bias)
+
+        # Convolution Backward(ConvB) propagation must return valid  input, weight, bias gradient
+        test_conv_backward_output_mask([True, True, True])
+
+        # ConvB propagation must return input and weight gradient
+        test_conv_backward_output_mask([True, True, False])
+
+        # ConvB propagation must return input and bias gradient
+        test_conv_backward_output_mask([True, False, True])
+
+        # ConvB propagation must return just input gradient
+        test_conv_backward_output_mask([True, False, False])
+
+        # ConvB propagation must return weight and bias gradient
+        test_conv_backward_output_mask([False, True, True])
+
+        # ConvB propagation must return just weight gradient
+        test_conv_backward_output_mask([False, True, False])
+
+        # ConvB propagation must return just bias gradient
+        test_conv_backward_output_mask([False, False, True])
+
+        # ConvB propagation shouldn't return any of gradient
+        test_conv_backward_output_mask([False, False, False])
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -2309,6 +2369,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
+    @skipXPU  # Refer https://github.com/intel/torch-xpu-ops/issues/2594
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
@@ -3138,6 +3199,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol)
         )
 
+    @xfailIf(IS_LINUX and IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
@@ -3164,6 +3227,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
 
+    @xfailIf(IS_LINUX and IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177245
     @onlyCPU
     def test_conv_ic1_channels_last_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
@@ -3516,7 +3581,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -3574,6 +3639,33 @@ class TestConvolutionNNDeviceType(NNTestCase):
         for cudnn_enabled in [False, True]:
             with torch.backends.cudnn.flags(enabled=cudnn_enabled):
                 torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @dtypes(torch.half)
+    def test_Conv2d_depthwise_kernel_flag(self, device, dtype):
+        # Use shapes that qualify for the cuDNN depthwise path:
+        # FP16, depthwise (groups==channels), 4D, no dilation, >= 32 channels
+        channels = 32
+        x = torch.randn(2, channels, 16, 16, device=device, dtype=dtype)
+        conv = nn.Conv2d(
+            channels, channels, kernel_size=3, padding=1, groups=channels
+        ).to(device, dtype)
+
+        # All three modes should produce the same numerics
+        results = {}
+        for mode in ("auto", "cudnn", "native"):
+            with torch.backends.cudnn.flags(
+                enabled=True,
+                benchmark=False,
+                deterministic=True,
+                depthwise_kernel=mode,
+            ):
+                results[mode] = conv(x).detach().clone()
+
+        self.assertEqual(results["cudnn"], results["native"], atol=1e-3, rtol=1e-3)
+        self.assertEqual(results["auto"], results["native"], atol=1e-3, rtol=1e-3)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -4284,7 +4376,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":

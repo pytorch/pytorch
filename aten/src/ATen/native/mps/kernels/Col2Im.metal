@@ -14,6 +14,7 @@ kernel void col2im_kernel(
     constant uint2& dilation_hw [[buffer(8)]],
     constant uint2& col_hw [[buffer(9)]],
     constant uint& im_batch_stride [[buffer(10)]],
+    constant uint2& col_inner_strides [[buffer(11)]],
     uint3 gid [[thread_position_in_grid]]) {
   const uint output_height = im_hw.x;
   const uint output_width = im_hw.y;
@@ -50,6 +51,8 @@ kernel void col2im_kernel(
 
   float accumulator = 0.0;
   uint col_batch_offset = batch_idx * col_batch_stride;
+  uint col_channel_stride = col_inner_strides.x;
+  uint col_spatial_stride = col_inner_strides.y;
 
   for (uint h_col = h_col_start; h_col < h_col_end; h_col++) {
     for (uint w_col = w_col_start; w_col < w_col_end; w_col++) {
@@ -60,11 +63,10 @@ kernel void col2im_kernel(
         h_k /= dilation_h;
         w_k /= dilation_w;
         if (h_k < kernel_h && w_k < kernel_w) {
+          uint dim1_idx = c_im * kernel_h * kernel_w + h_k * kernel_w + w_k;
+          uint dim2_idx = h_col * width_col + w_col;
           uint col_index =
-              (((c_im * kernel_h + h_k) * kernel_w + w_k) * height_col +
-               h_col) *
-                  width_col +
-              w_col;
+              dim1_idx * col_channel_stride + dim2_idx * col_spatial_stride;
           accumulator +=
               static_cast<float>(data_col[col_batch_offset + col_index]);
         }
@@ -91,6 +93,7 @@ kernel void col2im_kernel(
       constant uint2& dilation_hw [[buffer(8)]],              \
       constant uint2& col_hw [[buffer(9)]],                   \
       constant uint& im_batch_stride [[buffer(10)]],          \
+      constant uint2& col_inner_strides [[buffer(11)]],       \
       uint3 gid [[thread_position_in_grid]]);
 
 INSTANTIATE_COL2IM(bool);
