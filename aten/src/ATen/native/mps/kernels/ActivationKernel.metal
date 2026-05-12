@@ -227,3 +227,75 @@ struct silu_backward_functor {
 REGISTER_BINARY_OP(silu_backward, float, float);
 REGISTER_BINARY_OP(silu_backward, half, half);
 REGISTER_BINARY_OP(silu_backward, bfloat, bfloat);
+
+template <typename T>
+static inline float gelu_dispatch_tanh(float x) {
+  if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
+    return ::metal::tanh(x);
+  } else {
+    return ::metal::fast::tanh(x);
+  }
+}
+
+struct gelu_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    const float xf = float(x);
+    return static_cast<T>(
+        0.5f * xf * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F)));
+  }
+};
+
+struct gelu_tanh_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    const float xf = float(x);
+    constexpr float kBeta = M_SQRT2_F * M_2_SQRTPI_F * 0.5f;
+    constexpr float kKappa = 0.044715f;
+    const float inner = kBeta * (xf + kKappa * xf * xf * xf);
+    return static_cast<T>(0.5f * xf * (1.0f + gelu_dispatch_tanh<T>(inner)));
+  }
+};
+
+REGISTER_UNARY_OP(gelu, float, float);
+REGISTER_UNARY_OP(gelu, half, half);
+REGISTER_UNARY_OP(gelu, bfloat, bfloat);
+
+REGISTER_UNARY_OP(gelu_tanh, float, float);
+REGISTER_UNARY_OP(gelu_tanh, half, half);
+REGISTER_UNARY_OP(gelu_tanh, bfloat, bfloat);
+
+struct gelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad, const T self) {
+    const float xf = float(self);
+    constexpr float kPdfCoeff = M_2_SQRTPI_F * M_SQRT1_2_F * 0.5f;
+    const float cdf = 0.5f * (1.0f + ::c10::metal::erf(xf * M_SQRT1_2_F));
+    const float pdf = kPdfCoeff * ::metal::exp(-0.5f * xf * xf);
+    return static_cast<T>(float(grad) * (cdf + xf * pdf));
+  }
+};
+
+struct gelu_tanh_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad, const T self) {
+    const float xf = float(self);
+    constexpr float kBeta = M_SQRT2_F * M_2_SQRTPI_F * 0.5f;
+    constexpr float kKappa = 0.044715f;
+    const float x_sq = xf * xf;
+    const float inner = kBeta * (xf + kKappa * xf * x_sq);
+    const float th = gelu_dispatch_tanh<T>(inner);
+    const float dth = 1.0f - th * th;
+    const float dinner = kBeta * (1.0f + 3.0f * kKappa * x_sq);
+    const float dgelu = 0.5f * (1.0f + th) + 0.5f * xf * dth * dinner;
+    return static_cast<T>(float(grad) * dgelu);
+  }
+};
+
+REGISTER_BINARY_OP(gelu_backward, float, float);
+REGISTER_BINARY_OP(gelu_backward, half, half);
+REGISTER_BINARY_OP(gelu_backward, bfloat, bfloat);
+
+REGISTER_BINARY_OP(gelu_tanh_backward, float, float);
+REGISTER_BINARY_OP(gelu_tanh_backward, half, half);
+REGISTER_BINARY_OP(gelu_tanh_backward, bfloat, bfloat);
