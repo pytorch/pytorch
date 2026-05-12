@@ -209,7 +209,8 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
         backend = lookup_backend(value_str)
 
         # Register the backend so its reset() is called during torch._dynamo.reset()
-        assert backend is not None, "Invalid override backend: " + value_str
+        if backend is None:
+            raise AssertionError("Invalid override backend: " + value_str)
         cached_backends.setdefault(id(backend), backend)
         self._backend_names[id(backend)] = value_str
         return backend
@@ -447,7 +448,7 @@ def get_inductor_config_override_for_compile_id(
     return _get_override_for_compile_id(
         compile_id,
         config_str,
-        _create_inductor_config_router,  # type: ignore[arg-type]
+        _create_inductor_config_router,
         "inductor config",
     )
 
@@ -464,7 +465,7 @@ def get_dynamo_config_override_for_compile_id(
     return _get_override_for_compile_id(
         compile_id,
         config_str,
-        _create_dynamo_config_router,  # type: ignore[arg-type]
+        _create_dynamo_config_router,
         "dynamo config",
     )
 

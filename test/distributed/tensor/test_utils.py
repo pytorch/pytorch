@@ -1755,6 +1755,9 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
         # target_placements with an a2a collective op.
         test_cases = [
             ((3,), (4, 4), (SS(0, 2),), 0, (S(1),), 1, 0),
+            # Regression: num_chunks > first_chunk_size causes empty ranks
+            # that need padding (6 rows, sf=2 -> first_chunk=3, but 8 ranks)
+            ((8,), (6, 8), (SS(0, 2),), 0, (S(1),), 1, 0),
             ((3, 3), (274, 71), (S(0), SS(0, 2)), 0, (S(0), S(1)), 1, 1),
             (
                 (3, 3, 5),

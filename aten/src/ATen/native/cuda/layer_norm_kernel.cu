@@ -26,18 +26,16 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
+#ifdef USE_ROCM
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 
 namespace at::native {
 
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-#ifdef USE_ROCM
-// C10_WARP_SIZE is not constexpr for host code.
-#define kWarpSize C10_WARP_SIZE
-#else
-constexpr unsigned int kWarpSize = C10_WARP_SIZE;
-#endif
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -67,7 +65,7 @@ __global__ void RowwiseMomentsCUDAKernel(
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
-          type val_shared[C10_WARP_SIZE];
+          type val_shared[C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -138,11 +136,15 @@ WelfordDataLN cuWelfordOnlineSum(
   if constexpr (!rms_norm){
     U delta = val - curr_sum.mean;
     U new_count = curr_sum.count + 1.f;
-//Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-    U new_mean = curr_sum.mean + delta * __builtin_amdgcn_rcpf(new_count);
+    // TODO: should this use __fdividef?
+    auto fn_rcp_mul = [](auto a, auto b) {return a * (1.0f / b);};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
+    //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
+    U new_mean =  curr_sum.mean +  (__builtin_amdgcn_processor_is("gfx90a") ? fn_rcp_mul(delta, new_count)
+                           : delta * __builtin_amdgcn_rcpf(new_count));
 #else
-    U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
+    //proper division is slow, this is less accurate but noticeably faster:
+    U new_mean = curr_sum.mean + fn_rcp_mul(delta, new_count);
 #endif
     return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
   } else{
@@ -161,11 +163,13 @@ WelfordDataLN cuWelfordCombine(
     U count = dataA.count + dataB.count;
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
+      // TODO: should this use __fdividef?
+      auto fn_rcp = [](auto a) {return 1.0f / a;};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-      auto coef = __builtin_amdgcn_rcpf(count);
+      auto coef = __builtin_amdgcn_processor_is("gfx90a") ? fn_rcp(count): __builtin_amdgcn_rcpf(count);
 #else
-      auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+      auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
       auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
@@ -258,14 +262,15 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
-    const T * block_row = X + i1 * N;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
+    const T * block_row = X + row_offset;
     WelfordDataLN wd = compute_stats<T, rms_norm>(block_row, N, s_data);
 
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
     const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
     const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
-    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + row_offset);
 
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
@@ -363,6 +368,7 @@ __device__ __inline__ void compute_gI(
   const int N,
   T_ACC * buf){
     const auto i1 = blockIdx.x;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC mean_val = 0;
     if constexpr (!rms_norm){
       mean_val = mean[i1];
@@ -371,9 +377,9 @@ __device__ __inline__ void compute_gI(
     T_ACC stats_x1{0}, stats_x2{0};
     constexpr int unroll = 4;
     auto l = unroll * threadIdx.x;
-    const T * X_i = X + i1 * N;
-    const T * dY_i = dY + i1 * N;
-    T * dX_i = dX + i1 * N;
+    const T * X_i = X + row_offset;
+    const T * dY_i = dY + row_offset;
+    T * dX_i = dX + row_offset;
     //vectorized reads don't improve perf, so use regular unrolling
 
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
@@ -472,14 +478,15 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
 
   const auto bIdx = blockIdx.x;
+  const int64_t row_offset = static_cast<int64_t>(bIdx) * static_cast<int64_t>(N);
   T_ACC mean_val = 0;
   if constexpr (!rms_norm){
     mean_val = mean[bIdx];
   }
   const T_ACC rstd_val = rstd[bIdx];
-  const T* X_i = X + bIdx * N;
-  const T* dY_i = dY + bIdx * N;
-  T* dX_i = dX + bIdx * N;
+  const T* X_i = X + row_offset;
+  const T* dY_i = dY + row_offset;
+  T* dX_i = dX + row_offset;
 
   using vec_t = aligned_vector<T, vec_size>;
   const vec_t* const X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
@@ -662,7 +669,7 @@ blockReduceGammaBetaBackwardsHelper(
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
   int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
 
-    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (kWarpSize - 1);
+    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (C10_WARP_SIZE - 1);
     int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
     T_ACC warp_mean = 0, warp_rstd = 0;
     if (lane_id < rows_per_thread_y && mean_index + lane_id < M) {
@@ -695,9 +702,9 @@ blockReduceGammaBetaBackwardsHelper(
 
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
-      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, kWarpSize);
+      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, C10_WARP_SIZE);
       if constexpr (!rms_norm){
-        T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
+        T_ACC mean_reg = WARP_SHFL(warp_mean, i, C10_WARP_SIZE);
         dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
         db_sum += dY_regs[i];
       } else{
@@ -775,7 +782,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
     T* __restrict__ db) {
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
-  static_assert(rows_per_thread_y <= kWarpSize);
+  static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -818,7 +825,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
   } else {
     // The caller requested a full reduction so we must reduce across
     // warps using shared memory and warp shuffles.
-    static_assert(rows_per_thread_y <= C10_WARP_SIZE);
+    static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
     T_ACC* s_dg;
@@ -834,8 +841,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Load transposed so that a warp holds an entire column
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
-    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-    constexpr int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
+    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE_LOWER_BOUND == 0);
+    const int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
     int warp_id = thread_id / C10_WARP_SIZE;
     int lane_id = thread_id & (C10_WARP_SIZE - 1);
@@ -848,8 +855,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
       #pragma unroll
       for (unsigned delta = block_dim_y >> 1; delta >= 1; delta >>= 1) {
-        reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
-        reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, C10_WARP_SIZE);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, C10_WARP_SIZE);
       }
       // Reduce is done. Now write it out to global memory.
       int64_t out_index = ((int64_t)blockIdx.x) * block_dim_x + i;
@@ -1202,7 +1209,7 @@ void cuLoadWriteStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T curr_input = static_cast<T>(input[load_idx]);
@@ -1249,7 +1256,7 @@ void cuLoadAddStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
@@ -1405,6 +1412,7 @@ void cuComputeGradInput(
     T* grad_input)
 {
   for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
     T_ACC c_mean = 0;
@@ -1412,8 +1420,8 @@ void cuComputeGradInput(
       c_mean = mean[i1];
     }
     const T_ACC c_rstd = rstd[i1];
-    const T* k_input = input + i1*N;
-    const T* k_dout = dout + i1*N;
+    const T* k_input = input + row_offset;
+    const T* k_dout = dout + row_offset;
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (gamma != NULL) {
@@ -1491,7 +1499,7 @@ void cuComputeGradInput(
     // all threads now have the two sums over l
     T_ACC fH = (T_ACC)N;
     T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
-    T* k_grad_input = grad_input + i1*N;
+    T* k_grad_input = grad_input + row_offset;
     if (gamma != NULL) {
       for (int l = thrx;  l < N;  l+=numx) {
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);

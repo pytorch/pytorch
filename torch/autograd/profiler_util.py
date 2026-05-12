@@ -558,9 +558,11 @@ class EventMetadata(NamedTuple):
     shared_memory: int | None
     grid: list[int] | None
     block: list[int] | None
+    priority: int | None
     blocks_per_sm: float | None
     warps_per_sm: float | None
-    occupancy: float | None
+    occupancy: dict[str, Any] | None
+    est_occupancy_pct: float | None
     queued: int | None
     graph_id: int | None
     graph_node_id: int | None
@@ -589,10 +591,6 @@ class EventMetadata(NamedTuple):
     is_async: bool | None
 
 
-def _to_int_list(v: str) -> list[int]:
-    return json.loads(v)
-
-
 def _to_str(v: str) -> str:
     return v.strip('"')
 
@@ -605,11 +603,13 @@ def _to_bool(v: str) -> bool:
 _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "registers per thread": ("registers_per_thread", int),
     "shared memory": ("shared_memory", int),
-    "grid": ("grid", _to_int_list),
-    "block": ("block", _to_int_list),
+    "grid": ("grid", json.loads),  # list[int]
+    "block": ("block", json.loads),  # list[int]
+    "priority": ("priority", int),
     "blocks per SM": ("blocks_per_sm", float),
     "warps per SM": ("warps_per_sm", float),
-    "est. achieved occupancy %": ("occupancy", float),
+    "est. achieved occupancy %": ("est_occupancy_pct", float),
+    "occupancy": ("occupancy", json.loads),  # dict[str, Any]
     "queued": ("queued", int),
     "graph id": ("graph_id", int),
     "graph node id": ("graph_node_id", int),
@@ -674,7 +674,10 @@ class FunctionEvent(FormattedTimesMixin):
         count (int): Number of times this event was called (usually 1).
         cpu_children (List[FunctionEvent]): Direct CPU child operations.
         cpu_parent (FunctionEvent): Direct CPU parent operation.
-        input_shapes (Tuple[int, ...]): Shapes of input tensors (requires record_shapes=true).
+        input_shapes (List[List[int]]): Shapes of input tensors (requires record_shapes=True).
+            For plain tensor inputs, each entry is a list of dimensions (e.g. ``[16, 16]``).
+            TensorList inputs are represented as an empty list ``[]``; use
+            ``structured_input_shapes`` to get per-element shapes for TensorList inputs.
         concrete_inputs (List[Any]): Concrete input values (requires record_shapes=true).
         kwinputs (Dict[str, Any]): Keyword arguments (requires record_shapes=true).
         stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
@@ -691,8 +694,15 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
-        metadata_json (str): Additional metadata in JSON format.
+        metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional metadata in structured format.
+        structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
+            but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
+            TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
+            Matches the ``"Input Dims"`` field in the Chrome trace JSON.
+        structured_input_strides (List[List[int] | List[List[int]]]): Strides of input
+            tensors in the same format as ``structured_input_shapes`` (requires
+            record_shapes=True).
 
     Properties:
         cpu_time_total (float): Total CPU time in microseconds.
@@ -748,6 +758,12 @@ class FunctionEvent(FormattedTimesMixin):
         external_id=0,
         linked_correlation_id=0,
         extra_meta=None,
+        structured_input_shapes=None,
+        structured_input_strides=None,
+        input_dtypes=None,
+        python_id=-1,
+        python_parent_id=-1,
+        python_module_id=-1,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -791,7 +807,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
-        self.metadata_json = metadata_json
+        self._metadata_json = metadata_json
         self.flow_id: int | None = flow_id
         self.flow_type: int | None = flow_type
         self.flow_start: bool | None = flow_start
@@ -800,6 +816,15 @@ class FunctionEvent(FormattedTimesMixin):
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_shapes: list = structured_input_shapes
+        # pyrefly: ignore [bad-assignment]
+        self.structured_input_strides: list = structured_input_strides
+        # pyrefly: ignore [bad-assignment]
+        self.input_dtypes: list[str] = input_dtypes
+        self.python_id: int = python_id
+        self.python_parent_id: int = python_parent_id
+        self.python_module_id: int = python_module_id
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:
@@ -852,6 +877,14 @@ class FunctionEvent(FormattedTimesMixin):
         return self.device_memory_usage - sum(
             child.device_memory_usage for child in self.cpu_children
         )
+
+    @property
+    @deprecated(
+        "`metadata_json` is deprecated. Use `event_metadata` instead.",
+        category=FutureWarning,
+    )
+    def metadata_json(self):
+        return self._metadata_json
 
     @property
     @deprecated(

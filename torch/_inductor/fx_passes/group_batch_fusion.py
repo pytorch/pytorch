@@ -15,7 +15,9 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunctionVarArgs,
+    CallMethodVarArgs,
     get_arg_value,
+    MatchResult,
     stable_topological_sort,
 )
 from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
@@ -137,12 +139,12 @@ def decompose_stack(graph: torch.fx.GraphModule, input_tensors: list[Any]) -> An
             aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
         )
         unsqueezed_inputs.append(unsqueezed_input)
-        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)  # type: ignore[assignment]
+        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)
         unsqueezed_inputs_meta.append(unsqueezed_input.meta["val"])
     stacked_inputs = graph.call_function(  # type: ignore[operator]
         aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
-    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)  # type: ignore[assignment]
+    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)
     return stacked_inputs
 
 
@@ -231,7 +233,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             batch_biases.append(bias)  # type: ignore[possibly-undefined]
             batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
             batch_weights_meta.append(weight.meta)  # type: ignore[possibly-undefined, union-attr]
-            if bias is not None:  # type: ignore[possibly-undefined]
+            if bias is not None:
                 batch_biases_meta.append(bias.meta)  # type: ignore[possibly-undefined, union-attr]
             else:
                 batch_biases_meta.append(None)
@@ -273,7 +275,7 @@ class PostGradBatchLinearFusion(BatchFusion):
                         )
                         broadcast_bias.meta["val"] = aten.broadcast_to(
                             batch_biases_meta[i]["val"], broadcast_shape
-                        )  # type: ignore[assignment]
+                        )
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -621,7 +623,7 @@ class PreGradBatchLinearFusion(BatchFusion):
         return getitem_node.args[0]
 
     def match(self, node: torch.fx.Node):
-        if CallFunctionVarArgs(torch.nn.functional.linear).match(
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
@@ -1057,7 +1059,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
-        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+        if self._match_op(node) and is_node_meta_valid(node):
             # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
@@ -1070,6 +1072,9 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         else:
             group_key = None
         return group_key
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(self.op).match(node)
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_nodes = []
@@ -1133,6 +1138,11 @@ class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchDetachPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.detach, **kwargs)
+
+    def _match_op(self, node: torch.fx.Node) -> MatchResult:
+        return CallFunctionVarArgs(torch.detach).match(node) or CallMethodVarArgs(
+            "detach"
+        ).match(node)
 
 
 @register_fusion("batch_nan_to_num")
@@ -1435,7 +1445,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
 
     for i, rule in enumerate(fusions):
         with GraphTransformObserver(
-            graph.owning_module,
+            graph.owning_module,  # pyrefly: ignore[bad-argument-type]
             f"group_batch_fusion_{i}",
         ):
             apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]

@@ -744,7 +744,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Needed for passing this type as an opaque object input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",
             {},
         )
 
@@ -1224,12 +1224,18 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
             # Determine if padding is needed:
             # - remainder > 0 means one chunk has partial size
-            # - (split_factor - num_full_first_chunks - (1 if remainder else 0)) > 0 means empty chunks
+            # - empty first-level chunks means some ranks get nothing at each level
+            # - first_chunk_size % num_chunks != 0 means uneven second-level split
+            #   (e.g., 6 rows, sf=2, 8 ranks: first_chunk=3, but only 3 of 8 ranks
+            #   get data per first-level chunk, so ranks 3-7 have size-0 tensors)
             has_partial_chunk = remainder > 0
             num_empty_chunks = (
                 split_factor - num_full_first_chunks - (1 if has_partial_chunk else 0)
             )
-            needs_padding_on_dim = has_partial_chunk or num_empty_chunks > 0
+            has_uneven_second_level = first_chunk_size % num_chunks != 0
+            needs_padding_on_dim = (
+                has_partial_chunk or num_empty_chunks > 0 or has_uneven_second_level
+            )
 
             # Second level: each first-level chunk is split into num_chunks pieces
             # Calculate the per-rank chunk size after both levels of splitting
@@ -1773,7 +1779,7 @@ class _MaskPartial(Partial):
         Needed for passing this type as an input to a custom op.
         """
         return (
-            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",
             {},
         )
 
