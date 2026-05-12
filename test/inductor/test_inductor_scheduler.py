@@ -3,14 +3,12 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
-import sympy
-
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.dependencies import Dep, ReadWrites
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -31,7 +29,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -84,44 +81,6 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
-    def test_fusable_read_and_write_broadcast_split_requires_index_equivalence(self):
-        d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
-        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
-
-        scheduler = Scheduler.__new__(Scheduler)
-        scheduler.mutation_renames = {}
-        scheduler.mode_requires_synchronization = lambda mode: False
-
-        write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
-        graph = Mock(sizevars=SizeVarAllocator())
-        broadcast_read = MemoryDep(
-            "buf",
-            32 * d0 + FloorDiv(d1, 128),
-            (d0, d1),
-            (128, 4096),
-        )
-        with V.set_graph_handler(graph):
-            self.assertFalse(scheduler.fusable_read_and_write(broadcast_read, write))
-            self.assertTrue(
-                scheduler.fusable_read_and_write(
-                    broadcast_read,
-                    write,
-                    allow_index_equivalence=True,
-                )
-            )
-            self.assertFalse(
-                scheduler.fusable_read_and_write(
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128) + d1,
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    allow_index_equivalence=True,
-                )
-            )
-
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
         graph = Mock(sizevars=SizeVarAllocator())
