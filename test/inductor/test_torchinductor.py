@@ -5415,6 +5415,72 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @expectedFailureCodegenDynamic
+    def test_conv2d_backward_mixed_memory_format_1x1(self):
+        # With 1x1 spatial dims, contiguous strides (C,1,1,1) differ from
+        # channels-last strides (C,1,C,C) but both satisfy is_contiguous()
+        # and is_contiguous(channels_last). XPU is sensitive to actual stride
+        # values in convolution_backward.
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [0],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, False],
+            )
+
+        N, C_in, C_out = 2, 64, 128
+        self.common(
+            fn,
+            (
+                torch.randn([N, C_out, 1, 1]),
+                torch.randn([N, C_in, 1, 1]),
+                torch.randn([C_out, C_in, 1, 1]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
+        )
+
+    def test_conv2d_backward_mixed_memory_format(self):
+        # Mixed-format scenario with larger spatial dims where channels-last
+        # and contiguous strides are unambiguously different.
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [256],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+
+        # The layout constraint forces all inputs to channels-last which may
+        # cause the backend to pick a different algorithm with slightly
+        # different accumulation order.
+        atol, rtol = (1e-4, 1e-4) if self.device == "xpu" else (None, None)
+        self.common(
+            fn,
+            (
+                torch.randn([4, 256, 14, 14]),
+                torch.randn([4, 128, 14, 14]),
+                torch.randn([256, 128, 3, 3]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
+            atol=atol,
+            rtol=rtol,
+        )
+
     @parametrize(
         "use_block_ptr",
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],

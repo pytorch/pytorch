@@ -40,6 +40,7 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
+    make_channels_last_strides_for,
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -3177,6 +3178,70 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+def convolution_backward_xpu_constraint(fx_node, *args, **kwargs):
+    """Normalise mixed channels-last/contiguous 4-D inputs for XPU correctness.
+
+    Inductor's forward graph may convert conv weights to channels-last while the
+    saved input retains contiguous strides. The XPU backend produces incorrect
+    gradients when it receives this mixed format — particularly with 1×1 spatial
+    dims where contiguous strides (C,1,1,1) differ from channels-last (C,1,C,C)
+    despite both satisfying is_contiguous() and is_contiguous(channels_last).
+
+    We detect the mixed case by comparing actual strides against canonical
+    channels-last strides, then normalise non-CL 4-D inputs to explicit
+    channels-last strides. Only applied when tensors are on XPU.
+    """
+    args, kwargs = constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+    # Only apply XPU-specific normalisation when tensors are on XPU.
+    is_xpu = False
+    for fx_arg in fx_node.args:
+        if isinstance(fx_arg, torch.fx.Node):
+            meta_val = fx_arg.meta.get("val")
+            if meta_val is not None and hasattr(meta_val, "device"):
+                if meta_val.device.type == "xpu":
+                    is_xpu = True
+                    break
+    if not is_xpu:
+        return args, kwargs
+
+    # Collect the actual strides of all 4-D tensor inputs and compare against
+    # canonical channels-last strides. A "mixed" scenario is one where at least
+    # one tensor has CL strides and at least one does not.
+    has_cl = False
+    has_non_cl = False
+    for arg, fx_arg in zip(args, fx_node.args):
+        if not _is_tensor_irnode(arg):
+            continue
+        meta_val = fx_arg.meta.get("val")
+        if meta_val is None or meta_val.dim() != 4:
+            continue
+        cl_strides = make_channels_last_strides_for(meta_val.shape)
+        if tuple(meta_val.stride()) == tuple(cl_strides):
+            has_cl = True
+        else:
+            has_non_cl = True
+        if has_cl and has_non_cl:
+            break
+
+    if has_cl and has_non_cl:
+        # Use require_exact_strides rather than require_channels_last because
+        # the IR's stride-order check treats size-1 dimensions as don't-care,
+        # but the XPU backend relies on the actual stride values.
+        new_args = []
+        for arg, fx_arg in zip(args, fx_node.args):
+            if _is_tensor_irnode(arg):
+                meta_val = fx_arg.meta.get("val")
+                if meta_val is not None and meta_val.dim() == 4:
+                    cl_strides = make_channels_last_strides_for(meta_val.shape)
+                    if tuple(meta_val.stride()) != tuple(cl_strides):
+                        arg = ir.ExternKernel.require_exact_strides(arg, cl_strides)
+            new_args.append(arg)
+        args = tuple(new_args)
+
+    return args, kwargs
+
+
 def constrain_to_fx_strides_if_fallback_random(fx_node, *args, **kwargs):
     if not config.fallback_random:
         return args, kwargs
@@ -3405,7 +3470,12 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+_conv_bwd_constraint = (
+    convolution_backward_xpu_constraint
+    if torch.xpu._is_compiled()
+    else constrain_to_fx_strides
+)
+make_fallback(aten.convolution_backward, _conv_bwd_constraint)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.miopen_rnn, require_dense)
