@@ -2901,19 +2901,29 @@ class FusedNestedReductions(FusedSchedulerNode):
             for _, domain in pointwise_domains
         ):
             return False
-        allow_parent_full_index_equivalence = any(
-            domain is NestedReduction.PointwiseDomain.PARENT_FULL
-            for _, domain in pointwise_domains
+        index_equivalent_dep_names: OrderedSet[str] = OrderedSet()
+        node2_buf_names = OrderedSet(
+            self.scheduler.mutation_renames.get(name, name)
+            for name in self.node2.get_buffer_names()
         )
-        # Parent-full consumers may read the grouped reduction output through
-        # a broadcasted or loop-reordered view. Let the normal vertical fusion
-        # path match those equivalent accesses while preserving its other
-        # dependency checks.
+        for sn, domain in pointwise_domains:
+            if domain is not NestedReduction.PointwiseDomain.PARENT_FULL:
+                continue
+            reads = (
+                self.scheduler.mutation_renames.get(dep.name, dep.name)
+                for dep in sn.read_writes.reads
+            )
+            index_equivalent_dep_names.update(
+                dep_name for dep_name in reads if dep_name in node2_buf_names
+            )
+        # Parent-full consumers may read grouped-stage outputs through
+        # broadcasted parent-tile views. Relax matching only for those named
+        # producer outputs; all other deps use normal vertical legality.
         return self.scheduler.can_fuse(
             self.node2,
             other,
             can_reorder=can_reorder,
-            allow_index_equivalence=allow_parent_full_index_equivalence,
+            index_equivalent_dep_names=index_equivalent_dep_names,
         )
 
     def fuse_with(self, other: BaseSchedulerNode) -> FusedNestedReductions:
@@ -6889,24 +6899,44 @@ class Scheduler:
         else:
             return None
 
+    def _producer_output_names_read_by_consumer(
+        self, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
+    ) -> OrderedSet[str]:
+        producer_buf_names = OrderedSet(
+            self.mutation_renames.get(name, name)
+            for name in producer.get_buffer_names()
+        )
+        return OrderedSet(
+            name
+            for dep in consumer.read_writes.reads
+            if (name := self.mutation_renames.get(dep.name, dep.name))
+            in producer_buf_names
+        )
+
     def can_fuse(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
-        allow_index_equivalence: bool = False,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
     ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
 
-        ``allow_index_equivalence`` is for fused-node hooks that have already
-        checked their own loop-domain remapping. It lets vertical dependency
-        matching accept normalized equivalent reads in addition to exact reads.
+        ``index_equivalent_dep_names`` is for nested-reduction paths that have
+        already checked their own loop-domain remapping. It lets vertical
+        dependency matching accept normalized equivalent reads for only those
+        named producer outputs in addition to exact reads.
         """
         if node1 is node2:
             return False
+        if index_equivalent_dep_names is not None:
+            index_equivalent_dep_names = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in index_equivalent_dep_names
+            )
 
         # Prevent fusion across stream boundaries
         if self._has_multi_stream_nodes():
@@ -7097,14 +7127,16 @@ class Scheduler:
         del device2
 
         nested_reduction_candidate = NestedReduction.is_candidate(node1, node2)
-        score_allows_index_equivalence = (
-            allow_index_equivalence or nested_reduction_candidate
-        )
+        score_index_equivalent_dep_names = index_equivalent_dep_names
+        if score_index_equivalent_dep_names is None and nested_reduction_candidate:
+            score_index_equivalent_dep_names = (
+                self._producer_output_names_read_by_consumer(node1, node2)
+            )
         shared_data_score = self.score_fusion_memory(
             node1,
             node2,
             allow_mix_order_reduction=allow_mix_order_reduction,
-            allow_index_equivalence=score_allows_index_equivalence,
+            index_equivalent_dep_names=score_index_equivalent_dep_names,
         )
         assert isinstance(shared_data_score, int)
 
@@ -7127,7 +7159,7 @@ class Scheduler:
             shared_data_score = self.score_fusion_memory(
                 node1,
                 node2,
-                allow_index_equivalence=score_allows_index_equivalence,
+                index_equivalent_dep_names=score_index_equivalent_dep_names,
             )
             assert isinstance(shared_data_score, int)
 
@@ -7157,12 +7189,19 @@ class Scheduler:
             nested_reduction_can_fuse = (
                 nested_reduction_candidate and NestedReduction.can_fuse(node1, node2)
             )
+            vertical_index_equivalent_dep_names = index_equivalent_dep_names
+            if (
+                vertical_index_equivalent_dep_names is None
+                and nested_reduction_can_fuse
+            ):
+                vertical_index_equivalent_dep_names = (
+                    self._producer_output_names_read_by_consumer(node1, node2)
+                )
             return (
                 self.can_fuse_vertical(
                     node1,
                     node2,
-                    allow_index_equivalence=allow_index_equivalence
-                    or nested_reduction_can_fuse,
+                    index_equivalent_dep_names=vertical_index_equivalent_dep_names,
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
@@ -7177,7 +7216,7 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         *,
-        allow_index_equivalence: bool = False,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
     ) -> bool:
         """
         Check if it is legal to fuse a consumer (node2) into a producer (node1).
@@ -7186,8 +7225,9 @@ class Scheduler:
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
 
-        ``allow_index_equivalence`` relaxes the write/read match only; the
-        remaining intermediate-dependency checks still run normally.
+        ``index_equivalent_dep_names`` relaxes write/read matching only for
+        named producer outputs; the remaining intermediate-dependency checks
+        still run normally.
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -7202,15 +7242,17 @@ class Scheduler:
         for cd in node1.read_writes.writes:
             if not isinstance(cd, MemoryDep) and not isinstance(cd, StarDep):
                 continue
-            remaining = remaining_deps_by_name.get(
-                self.mutation_renames.get(cd.name, cd.name)
-            )
+            write_name = self.mutation_renames.get(cd.name, cd.name)
+            remaining = remaining_deps_by_name.get(write_name)
             if remaining:
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
                         rd.rename(self.mutation_renames),
                         cd,
-                        allow_index_equivalence=allow_index_equivalence,
+                        allow_index_equivalence=(
+                            index_equivalent_dep_names is not None
+                            and write_name in index_equivalent_dep_names
+                        ),
                     ):
                         remaining.remove(rd)  # noqa: B909
                     elif isinstance(cd, StarDep) and (
@@ -7301,9 +7343,12 @@ class Scheduler:
     ) -> bool:
         """Return whether a producer write can satisfy a consumer read.
 
-        By default this accepts exact matches. ``allow_index_equivalence``
-        additionally accepts access-equivalent forms used by nested full-res
-        pointwise nodes, such as a broadcasted read or a pure loop-order change.
+        The default path accepts exact matches, plus the existing
+        loop-ordering-normalized exact match when that config is enabled.
+        ``allow_index_equivalence`` only runs after those checks fail. It keeps
+        the producer write dense and injective, then accepts conservative
+        consumer-side equivalent reads such as broadcasts or normalized
+        loop-order changes.
         """
         if isinstance(read, MemoryDep):
             if (
@@ -7347,20 +7392,10 @@ class Scheduler:
 
             if not allow_index_equivalence:
                 return False
-            if not (
-                OrderedSet(original_write.var_names)
-                <= original_write.index.free_symbols
-            ):
-                return False
-            if not (
-                original_write.normalize().is_contiguous()
-                or original_write.normalize_with_stride_order().is_contiguous()
-            ):
-                return False
 
-            return self.deps_match_normalized(
+            return self._fusable_read_after_index_equivalence(
                 original_read, original_write
-            ) or self._fusable_read_after_broadcast(original_read, original_write)
+            )
         elif isinstance(read, StarDep):
             if (
                 read.mode == write.mode
@@ -7369,6 +7404,21 @@ class Scheduler:
             ):
                 return True
         return False
+
+    def _fusable_read_after_index_equivalence(
+        self, read: MemoryDep, write: MemoryDep
+    ) -> bool:
+        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+            return False
+        if not (
+            write.normalize().is_contiguous()
+            or write.normalize_with_stride_order().is_contiguous()
+        ):
+            return False
+
+        return self.deps_match_normalized(
+            read, write
+        ) or self._fusable_read_after_broadcast(read, write)
 
     @staticmethod
     def _fusable_read_after_broadcast(read: MemoryDep, write: MemoryDep) -> bool:
@@ -7489,7 +7539,7 @@ class Scheduler:
         producer: BaseSchedulerNode,
         consumer: BaseSchedulerNode,
         count_bytes: bool = True,
-        allow_index_equivalence: bool = False,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
     ) -> int:
         """Score vertical producer-output deps missed by exact dep scoring.
 
@@ -7506,13 +7556,17 @@ class Scheduler:
         for write in producer.read_writes.writes:
             if not isinstance(write, MemoryDep):
                 continue
+            write_name = self.mutation_renames.get(write.name, write.name)
             for i, read in enumerate(reads):
                 if i in matched_reads:
                     continue
                 if self.fusable_read_and_write(
-                    read,
+                    read.rename(self.mutation_renames),
                     write,
-                    allow_index_equivalence=allow_index_equivalence,
+                    allow_index_equivalence=(
+                        index_equivalent_dep_names is not None
+                        and write_name in index_equivalent_dep_names
+                    ),
                 ):
                     matched_reads.add(i)
                     score += max(
@@ -7530,7 +7584,7 @@ class Scheduler:
         count_bytes: bool = ...,
         return_is_mix_order_reduction: Literal[False] = ...,
         allow_mix_order_reduction: bool = ...,
-        allow_index_equivalence: bool = ...,
+        index_equivalent_dep_names: OrderedSet[str] | None = ...,
     ) -> int: ...
 
     @overload
@@ -7541,7 +7595,7 @@ class Scheduler:
         count_bytes: bool = ...,
         return_is_mix_order_reduction: Literal[True] = ...,
         allow_mix_order_reduction: bool = ...,
-        allow_index_equivalence: bool = ...,
+        index_equivalent_dep_names: OrderedSet[str] | None = ...,
     ) -> tuple[int, int, bool]: ...
 
     def score_fusion_memory(
@@ -7551,7 +7605,7 @@ class Scheduler:
         count_bytes: bool = True,
         return_is_mix_order_reduction: bool = False,
         allow_mix_order_reduction: bool = True,
-        allow_index_equivalence: bool = False,
+        index_equivalent_dep_names: OrderedSet[str] | None = None,
     ) -> int | tuple[int, int, bool]:
         """
         The first term in our fusion score that estimates number of saved
@@ -7563,14 +7617,19 @@ class Scheduler:
         Scoring strategy:
         1. If nodes share exact memory deps (same buffer + same indexing), return
            the sum of shared dep sizes (original behavior).
-        2. If exact scoring misses a legal vertical producer/consumer dep,
-           score the matching write/read pair.
+        2. If exact scoring misses a named producer output that vertical
+           legality may match by index equivalence, score that write/read pair.
         3. If no dependency score remains, check for same-buffer reads with
            different indexing (e.g., split operations reading different slices).
            - Give bonus if nodes read from exactly the same set of buffers
            - Score based on overlap ratio: common_buffer_size / total_read_size
            - High overlap (>50%) suggests good cache locality benefit from fusion
         """
+        if index_equivalent_dep_names is not None:
+            index_equivalent_dep_names = OrderedSet(
+                self.mutation_renames.get(name, name)
+                for name in index_equivalent_dep_names
+            )
 
         def _construct_return_value(
             score, buffer_overlap_score, is_mix_order_reduction
@@ -7634,16 +7693,12 @@ class Scheduler:
         if score:
             return _construct_return_value(score, 0, False)
 
-        allow_relaxed_dep_scoring = (
-            allow_index_equivalence
-            or NestedReduction.is_candidate(orig_node1, orig_node2)
-        )
-        if score == 0 and allow_relaxed_dep_scoring:
+        if score == 0 and index_equivalent_dep_names:
             score = self._score_fusion_memory_by_fusable_read_write(
                 orig_node1,
                 orig_node2,
                 count_bytes,
-                allow_index_equivalence=allow_relaxed_dep_scoring,
+                index_equivalent_dep_names=index_equivalent_dep_names,
             )
 
         # This is a horizontal/common-read locality heuristic, not a
