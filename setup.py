@@ -1014,6 +1014,17 @@ class clean(Command):
         _clean()
 
 
+class BinaryDistribution(Distribution):
+    # torch._C is built by CMake (torch/CMakeLists.txt), so setuptools has
+    # no ext_modules. Force the wheel to be tagged as a binary distribution
+    # so bdist_wheel uses the binary layout (only files listed via
+    # package_data / data_files are packaged) rather than the purelib
+    # layout, which would dump the entire build/lib/ tree -- including
+    # CMake's test artifacts -- into the wheel at site-packages root.
+    def has_ext_modules(self) -> bool:
+        return True
+
+
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
     try:
         return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
@@ -1160,6 +1171,12 @@ def main() -> None:
 
     torch_package_data = [
         "py.typed",
+        # torch._C is built by CMake (torch/CMakeLists.txt) and installed
+        # into torch/.  Pick up the SOABI-tagged shared module here so
+        # setuptools includes it in the wheel.
+        "_C*.so",
+        "_C*.pyd",
+        "_C*.dylib",
         "bin/*",
         "bin/**/*",
         "test/*",
@@ -1266,6 +1283,7 @@ def main() -> None:
     setup(
         name=TORCH_PACKAGE_NAME,
         version=TORCH_VERSION,
+        distclass=BinaryDistribution,
         ext_modules=ext_modules,
         cmdclass=cmdclass,
         packages=packages,
