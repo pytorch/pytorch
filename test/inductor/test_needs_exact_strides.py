@@ -1,9 +1,6 @@
 # Owner(s): ["module: inductor"]
 
-import contextlib
-
 import torch
-import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
@@ -18,10 +15,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 
+
 if HAS_GPU_AND_TRITON:
     import triton
     import triton.language as tl
-
 
     @triton.jit
     def _fill_kernel(
@@ -121,16 +118,10 @@ class TestNeedsExactStrides(InductorTestCase):
                 if not called:
                     raise AssertionError
 
-    @parametrize(
-        "mode",
-        [
-            "triton_kernel_wrapper_functional",
-            "auto_functionalized",
-            "auto_functionalized_v2",
-        ],
-    )
     @parametrize("n", [64, 128, 256])
-    def test_dynamic_size_one_leading_dim_view(self, mode, n):
+    def test_dynamic_size_one_leading_dim_view_triton_kernel_wrapper_functional(
+        self, n
+    ):
         device = torch.accelerator.current_accelerator()
         inner = 8
 
@@ -146,50 +137,19 @@ class TestNeedsExactStrides(InductorTestCase):
                 (inner * aligned_num_tokens, 1, aligned_num_tokens),
             )
 
-            if mode == "triton_kernel_wrapper_functional":
-                _fill_kernel[(num_tokens,)](
-                    buf,
-                    num_tokens,
-                    stride_t=buf.stride(1),
-                    stride_i=buf.stride(2),
-                    INNER=inner,
-                )
-            else:
-                torch.ops.mylib.fill_view.default(buf)
+            _fill_kernel[(num_tokens,)](
+                buf,
+                num_tokens,
+                stride_t=buf.stride(1),
+                stride_i=buf.stride(2),
+                INNER=inner,
+            )
 
             return buf
 
-        patch = inductor_config.patch(
-            enable_auto_functionalized_v2=(mode == "auto_functionalized_v2")
-        )
-        lib_ctx = contextlib.nullcontext()
-        if mode != "triton_kernel_wrapper_functional":
-            lib_ctx = torch.library._scoped_library("mylib", "FRAGMENT")
-
-        with patch, lib_ctx as lib:
-            if lib is not None:
-                lib.define(
-                    "fill_view(Tensor(a!) x) -> ()",
-                    tags=[
-                        torch.Tag.pt2_compliant_tag,
-                        torch._C.Tag.needs_exact_strides,
-                    ],
-                )
-
-                @torch.library.impl(
-                    "mylib::fill_view",
-                    "CompositeExplicitAutograd",
-                    lib=lib,
-                )
-                @torch._dynamo.disable
-                def fill_view_impl(x):
-                    x.fill_(1.0)
-
-            compiled = torch.compile(
-                fn, backend="inductor", fullgraph=True, dynamic=True
-            )
-            x = torch.randn(n, inner, device=device)
-            self.assertEqual(compiled(x.clone()), fn(x.clone()))
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        x = torch.randn(n, inner, device=device)
+        self.assertEqual(compiled(x.clone()), fn(x.clone()))
 
 
 instantiate_parametrized_tests(TestNeedsExactStrides)

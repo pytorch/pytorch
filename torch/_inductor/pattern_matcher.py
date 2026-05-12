@@ -291,6 +291,19 @@ class Match:
             else contextlib.nullcontext()
         )
 
+        def should_propagate_eager_input_vals(nodes: list[torch.fx.Node]) -> bool:
+            if len(nodes) != 1:
+                return False
+            node = nodes[0]
+            if "eager_input_vals" not in node.meta:
+                return False
+            return node.target in OrderedSet(
+                [
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ]
+            )
+
         # pyrefly: ignore [bad-context-manager]
         with context:
             if trace_fn is None:
@@ -298,24 +311,71 @@ class Match:
                     fwd_only, run_functional_passes=run_functional_passes
                 )
 
-            example_vals = torch.fx.map_arg(
-                args,
-                lambda arg: arg.meta["val"]
-                if "val" in arg.meta
-                else arg.meta["example_value"],
-            )
-            fake_mode = torch._dynamo.utils.detect_fake_mode(example_vals)
-            if fake_mode is not None:
+            if should_propagate_eager_input_vals(self.nodes):
+                # Our strategy is:
+                # 1) trace out the graph with eager_input_vals (which have accurate eager-mode metadata)
+                # 2) trace out the graph with vals (which have the accurate Inductor metadata)
+                # 3) Propagate the eager_input_vals from the first graph to the second.
+                # 4) Use the second graph as the replacement graph.
 
-                def _convert_to_fake_mode(it):
-                    if isinstance(it, FakeTensor) and fake_mode is not None:
-                        return fake_mode.from_tensor(it)
-                    return it
+                # Construct a map of node -> FakeTensor val in eager_input_vals
+                node_to_val = {}
 
-                example_vals = torch.fx.node.map_aggregate(
-                    example_vals, _convert_to_fake_mode
+                fake_args, fake_kwargs = self.nodes[0].meta["eager_input_vals"]
+                fake_kwargs = {**fake_kwargs}
+                match_args, match_kwargs = tuple(self.args), self.kwargs
+
+                def record(node: torch.fx.Node, val: Any) -> None:
+                    if isinstance(node, torch.fx.Node):
+                        node_to_val[node] = val
+
+                torch.utils._pytree.tree_map(
+                    record, (match_args, match_kwargs), (fake_args, fake_kwargs)
                 )
-            replacement = trace_fn(replacement_fn, example_vals)
+                # map args to their FakeTensor val in eager_input_vals
+                example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
+
+                # first graph
+                graph_with_eager_vals = trace_fn(replacement_fn, example_vals)
+
+                # second graph
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                # pyrefly: ignore [bad-argument-type]
+                replacement = trace_fn(graph_with_eager_vals, example_vals)
+
+                # propagate metadata from first graph to second
+                # NB: This assertion might not be true in general, but it is true for
+                # the auto_functionalized use cases we have
+                assert len(graph_with_eager_vals.graph.nodes) == len(
+                    replacement.graph.nodes
+                )
+                for old_node, new_node in zip(
+                    graph_with_eager_vals.graph.nodes, replacement.graph.nodes
+                ):
+                    if "eager_input_vals" in old_node.meta:
+                        new_node.meta["eager_input_vals"] = old_node.meta[
+                            "eager_input_vals"
+                        ]
+
+            else:
+                example_vals = torch.fx.map_arg(
+                    args,
+                    lambda arg: arg.meta["val"]
+                    if "val" in arg.meta
+                    else arg.meta["example_value"],
+                )
+                fake_mode = torch._dynamo.utils.detect_fake_mode(example_vals)
+                if fake_mode is not None:
+
+                    def _convert_to_fake_mode(it):
+                        if isinstance(it, FakeTensor) and fake_mode is not None:
+                            return fake_mode.from_tensor(it)
+                        return it
+
+                    example_vals = torch.fx.node.map_aggregate(
+                        example_vals, _convert_to_fake_mode
+                    )
+                replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(

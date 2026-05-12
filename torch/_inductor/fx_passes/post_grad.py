@@ -15,7 +15,6 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._higher_order_ops.schema import HopSchema
 from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
@@ -1311,37 +1310,6 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
-def _bind_schema_eager_input_vals(schema, eager_kwargs):
-    eager_args = []
-    bound_kwargs = {}
-    for arg in schema.arguments:
-        if arg.name not in eager_kwargs:
-            raise AssertionError(f"arg {arg.name} not in eager kwargs: {eager_kwargs}")
-        if arg.kwarg_only:
-            bound_kwargs[arg.name] = eager_kwargs[arg.name]
-        else:
-            eager_args.append(eager_kwargs[arg.name])
-
-    return tuple(eager_args), bound_kwargs
-
-
-def _bind_hop_eager_input_vals(schema: HopSchema, eager_kwargs):
-    eager_args, bound_kwargs = _bind_schema_eager_input_vals(schema, eager_kwargs)
-    if schema.tree_spec is None:
-        if len(eager_args) + len(bound_kwargs) != len(schema.arguments):
-            raise AssertionError(
-                f"Expected {len(schema.arguments)} total args, "
-                f"got {len(eager_args)} + {len(bound_kwargs)}"
-            )
-        return eager_args, bound_kwargs
-    if len(eager_args) != len(schema.arguments) or len(bound_kwargs) != 0:
-        raise AssertionError(
-            f"Expected {len(schema.arguments)} eager_args and 0 bound_kwargs, "
-            f"got {len(eager_args)} and {len(bound_kwargs)}"
-        )
-    return pytree.tree_unflatten(eager_args, schema.tree_spec)
-
-
 def _get_single_replacement_node(
     replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
 ) -> torch.fx.Node:
@@ -1367,97 +1335,12 @@ def _propagate_triton_eager_input_vals(
     mutation_eager_kwargs = {
         key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
     }
+    # The dense decomposition introduces clones plus the mutation HOP, but only
+    # the mutation HOP should receive the eager-mode tensor metadata.
     mutation_node = _get_single_replacement_node(
         replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
     )
     mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
-
-
-def _propagate_auto_functionalized_eager_input_vals(
-    replacement_nodes: Sequence[torch.fx.Node],
-    hop_node: torch.fx.Node,
-) -> None:
-    eager_input_vals = hop_node.meta.get("eager_input_vals")
-    if eager_input_vals is None:
-        return
-
-    mutable_op = hop_node.args[0]
-    _, eager_kwargs = eager_input_vals
-    op_node = _get_single_replacement_node(replacement_nodes, mutable_op)
-    op_node.meta["eager_input_vals"] = _bind_schema_eager_input_vals(
-        mutable_op._schema, eager_kwargs
-    )
-
-
-def _propagate_auto_functionalized_v2_eager_input_vals(
-    replacement_nodes: Sequence[torch.fx.Node],
-    hop_node: torch.fx.Node,
-) -> None:
-    from torch._higher_order_ops.auto_functionalize import (
-        _generate_new_op_kwargs_from_bases,
-    )
-    from torch._higher_order_ops.utils import HopInstance
-
-    eager_input_vals = hop_node.meta.get("eager_input_vals")
-    if eager_input_vals is None:
-        return
-
-    gm = hop_node.graph.owning_module
-
-    def resolve(value: Any, eager_value: Any) -> Any:
-        if eager_value is not None:
-            return eager_value
-        if isinstance(value, torch.fx.Node):
-            if value.op == "get_attr" and "val" not in value.meta:
-                assert gm is not None
-                return getattr(gm, value.target)  # type: ignore[arg-type]
-            if "val" in value.meta:
-                return value.meta["val"]
-            return value.meta["example_value"]
-        return value
-
-    mutable_op = hop_node.args[0]
-    _, eager_kwargs = eager_input_vals
-    eager_kwargs = pytree.tree_map(resolve, dict(hop_node.kwargs), dict(eager_kwargs))
-    all_bases = eager_kwargs.pop("_all_bases", [])
-
-    if isinstance(mutable_op, torch._ops.OpOverload):
-        schema = mutable_op._schema
-    else:
-        op_schema = eager_kwargs.pop("_op_schema")
-        schema = pytree.tree_unflatten([], op_schema).schema
-        assert isinstance(schema, HopSchema)
-
-    is_out = isinstance(
-        mutable_op, torch._ops.OpOverload
-    ) and torch._library.utils.is_out(mutable_op)
-    op_eager_kwargs, _ = _generate_new_op_kwargs_from_bases(
-        schema,
-        eager_kwargs,
-        all_bases,
-        (),
-        is_out,
-    )
-
-    if isinstance(mutable_op, torch._ops.OpOverload):
-        op_node = _get_single_replacement_node(replacement_nodes, mutable_op)
-        op_node.meta["eager_input_vals"] = _bind_schema_eager_input_vals(
-            schema, op_eager_kwargs
-        )
-    else:
-        op_nodes = [
-            node
-            for node in replacement_nodes
-            if node.op == "call_function"
-            and isinstance(node.target, HopInstance)
-            and node.target._op is mutable_op
-            and node.target._schema == schema
-        ]
-        if len(op_nodes) != 1:
-            raise AssertionError("Expected exactly one replacement node for hop")
-        op_nodes[0].meta["eager_input_vals"] = _bind_hop_eager_input_vals(
-            schema, op_eager_kwargs
-        )
 
 
 def decompose_triton_kernel_wrapper_functional(graph):
@@ -1526,9 +1409,8 @@ def decompose_auto_functionalized(graph):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        hop_node = match.nodes[0]
         only_clone_these_tensors = tuple(
-            hop_node.meta.get("only_clone_these_tensors", [])
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -1543,10 +1425,7 @@ def decompose_auto_functionalized(graph):
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_auto_functionalized_eager_input_vals(replacement_nodes, hop_node)
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
@@ -1558,9 +1437,8 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        hop_node = match.nodes[0]
         only_clone_these_bases = tuple(
-            hop_node.meta.get("only_clone_these_tensors", [])
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
@@ -1593,12 +1471,7 @@ def decompose_auto_functionalized(graph):
             )
 
         # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_auto_functionalized_v2_eager_input_vals(
-            replacement_nodes, hop_node
-        )
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 
