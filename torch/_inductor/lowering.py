@@ -7155,8 +7155,14 @@ def div_prim(a, b):
 
     # Disable CPU optimization to avoid precision issues.
     # see https://github.com/pytorch/pytorch/issues/157959
-    if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
-        # Replace divide by constant with multiply by reciprocal
+    if (
+        (divisor := get_constant_value(b)) is not None
+        and a.get_device().type != "cpu"
+        and not config.eager_numerics.division_rounding
+    ):
+        # Replace divide by constant with multiply by reciprocal.
+        # Skipped when division_rounding is enabled so the division
+        # flows through to tl.div_rn in codegen.
 
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
@@ -7411,7 +7417,9 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         idx_dtype = torch.int32
     else:
         idx_dtype = torch.int16
-    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(idx_dtype).max):
+    if not V.graph.sizevars.guard_or_false(
+        sympy.Lt(dim_size, torch.iinfo(idx_dtype).max)
+    ):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     indices = iota(
