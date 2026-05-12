@@ -5109,28 +5109,153 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ vh
 
-# Returns a noncontiguous (tensor with the same shape and values as t
-# The noncontiguous tensor is constructed such that elements in the innermost
-#   dimension are separated by zeros or (whenever possible) nans
-# TODO: consider more complicated noncontiguity schemes
-def noncontiguous_like(t):
+class NoncontiguousType(Enum):
+    UNIFORM_SCALE = 'uniform_scale'  # Default: uniform stride scaling by 2x
+    CHANNELS_LAST = 'channels_last'  # NHWC (4D) or NDHWC (5D) memory format
+    TRANSPOSED = 'transposed'        # Swapped dimensions
+    SLICED = 'sliced'                # Sliced with step along spatial dims
+    CHANNELS_LAST_SLICED = 'channels_last_sliced'  # Combined channels_last + sliced
+    PERMUTED = 'permuted'            # Arbitrary dimension reordering
+
+# Returns a noncontiguous tensor with the same shape and values as t, using the specified layout format
+def noncontiguous_like(t, format=NoncontiguousType.UNIFORM_SCALE):
+    # Returns a noncontiguous tensor with uniform 2x stride scaling via padding with unused values
+    def noncontiguous_uniform_scale_like(t):
+        # Choose a "weird" value that won't be accessed
+        if t.dtype.is_floating_point or t.dtype.is_complex:
+            value = math.nan
+        elif t.dtype == torch.bool:
+            value = True
+        else:
+            value = 12
+
+        result = t.new_empty(t.shape + (2,))
+        result[..., 0] = value
+        result[..., 1] = t.detach()
+        result = result[..., 1]
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # Returns a channels last (NHWC/NDHWC) tensor with same shape and values as t (4D/5D only)
+    def noncontiguous_channels_last_like(t):
+        # Channels last is only defined for 4D and 5D tensors
+        if t.ndim == 4:
+            result = t.detach().contiguous(memory_format=torch.channels_last)
+        elif t.ndim == 5:
+            result = t.detach().contiguous(memory_format=torch.channels_last_3d)
+        else:
+            # For other dimensions, return as-is
+            return t
+
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # Returns transposed tensor via transpose-clone-inverse_transpose pattern to create non-contiguous strides
+    def noncontiguous_transposed_like(t):
+        # Short-circuits if t doesn't have at least 2 dimensions
+        if t.ndim < 2:
+            return t
+
+        # Transpose last two dims, clone to materialize, then transpose back
+        result = t.detach().transpose(-2, -1).clone().transpose(-2, -1)
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # Returns sliced tensor via expand-fill-slice pattern to create non-contiguous strides
+    def noncontiguous_sliced_like(t, step=2):
+        # Short-circuits if t doesn't have at least 2 dimensions
+        if t.ndim < 2:
+            return t
+
+        # Determine which dimensions to slice
+        if t.ndim == 4:
+            slice_dims = [2, 3]  # H and W
+        elif t.ndim == 5:
+            slice_dims = [2, 3, 4]  # D, H, and W
+        else:
+            slice_dims = [-2, -1]  # Last 2 dims
+
+        # Create expanded shape with gaps
+        expanded_shape = list(t.shape)
+        for dim in slice_dims:
+            expanded_shape[dim] = t.shape[dim] * step
+
+        # Create result tensor with padding
+        result = t.new_empty(expanded_shape)
+        if t.dtype.is_floating_point or t.dtype.is_complex:
+            result.fill_(float('nan'))
+        else:
+            result.fill_(0)
+
+        # Build slice to insert values at step intervals
+        insert_slices = [slice(None)] * t.ndim
+        for dim in slice_dims:
+            insert_slices[dim] = slice(None, None, step)
+
+        # Copy values into the strided positions
+        result[tuple(insert_slices)].copy_(t)
+
+        # Return the strided view
+        result = result[tuple(insert_slices)]
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # Returns tensor with both channels last format and sliced spatial dimensions (4D/5D only)
+    def noncontiguous_channels_last_sliced_like(t, step=2):
+        # Short-circuits if t is not 4D or 5D
+        if t.ndim not in (4, 5):
+            return t
+
+        # First convert to channels last
+        result = noncontiguous_channels_last_like(t)
+
+        # Then slice spatial dimensions
+        result = noncontiguous_sliced_like(result, step=step)
+
+        return result
+
+    # Returns permuted tensor via permute-clone-inverse_permute pattern to create non-contiguous strides
+    def noncontiguous_permuted_like(t, dims=None):
+        # Default: reverse all dimensions
+        if dims is None:
+            dims = tuple(range(t.ndim - 1, -1, -1))
+
+        # Validate dims
+        if len(dims) != t.ndim:
+            return t
+
+        # Compute inverse permutation to restore original order
+        inverse_dims = [0] * t.ndim
+        for i, d in enumerate(dims):
+            inverse_dims[d] = i
+
+        # Permute, clone to materialize, then permute back to restore shape
+        result = t.detach().permute(dims).clone().permute(inverse_dims)
+        result.requires_grad_(t.requires_grad)
+        return result
+
     # Short-circuits if t is already noncontiguous
     if not t.is_contiguous():
         return t
 
-    # Choose a "weird" value that won't be accessed
-    if t.dtype.is_floating_point or t.dtype.is_complex:
-        value = math.nan
-    elif t.dtype == torch.bool:
-        value = True
+    if format == NoncontiguousType.UNIFORM_SCALE:
+        return noncontiguous_uniform_scale_like(t)
+    elif format == NoncontiguousType.CHANNELS_LAST:
+        result = noncontiguous_channels_last_like(t)
+    elif format == NoncontiguousType.TRANSPOSED:
+        result = noncontiguous_transposed_like(t)
+    elif format == NoncontiguousType.SLICED:
+        result = noncontiguous_sliced_like(t)
+    elif format == NoncontiguousType.CHANNELS_LAST_SLICED:
+        result = noncontiguous_channels_last_sliced_like(t)
+    elif format == NoncontiguousType.PERMUTED:
+        result = noncontiguous_permuted_like(t)
     else:
-        value = 12
+        raise ValueError(f"Unknown NoncontiguousType: {format}")
 
-    result = t.new_empty(t.shape + (2,))
-    result[..., 0] = value
-    result[..., 1] = t.detach()
-    result = result[..., 1]
-    result.requires_grad_(t.requires_grad)
+    # In case of no-op fall back to uniform_scale to guarantee a noncontiguous result.
+    if result.is_contiguous():
+        return noncontiguous_uniform_scale_like(t)
     return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)

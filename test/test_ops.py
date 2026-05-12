@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
+    NoncontiguousType,
     parametrize,
     run_tests,
     set_default_dtype,
@@ -831,8 +832,20 @@ class TestCommon(TestCase):
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
+    @parametrize(
+        "format",
+        [
+            NoncontiguousType.UNIFORM_SCALE,
+            NoncontiguousType.CHANNELS_LAST,
+            NoncontiguousType.TRANSPOSED,
+            NoncontiguousType.SLICED,
+            NoncontiguousType.CHANNELS_LAST_SLICED,
+            NoncontiguousType.PERMUTED,
+        ],
+        name_fn=lambda format: format.value,
+    )
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
-    def test_noncontiguous_samples(self, device, dtype, op):
+    def test_noncontiguous_samples(self, device, dtype, op, format):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
@@ -841,7 +854,7 @@ class TestCommon(TestCase):
                 sample_input.args,
                 sample_input.kwargs,
             )
-            noncontig_sample = sample_input.noncontiguous()
+            noncontig_sample = sample_input.noncontiguous(format=format)
             n_inp, n_args, n_kwargs = (
                 noncontig_sample.input,
                 noncontig_sample.args,
