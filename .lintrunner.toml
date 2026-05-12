@@ -1598,7 +1598,7 @@ include_patterns = [
     'test/**/*.py',
 ]
 exclude_patterns = [
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'test/torch_np/numpy_test/**',
     'third_party/**',
