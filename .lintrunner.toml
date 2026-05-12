@@ -1790,6 +1790,9 @@ command = [
 include_patterns = [
    'torch/_dynamo/**',
 ]
+exclude_patterns = [
+   'torch/_dynamo/**/*.md',
+]
 is_formatter = false
 
 [[linter]]
