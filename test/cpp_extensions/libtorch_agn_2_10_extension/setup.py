@@ -63,6 +63,7 @@ def get_extension():
         extra_compile_args["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
+            "-DTORCH_TARGET_VERSION=0x020a000000000000",
             "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
         ]
         extension = CUDAExtension

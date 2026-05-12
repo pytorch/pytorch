@@ -3,7 +3,7 @@ import math
 
 
 try:
-    import halide as hl  # type: ignore[import-untyped, import-not-found]
+    import halide as hl
 except ImportError:
     hl = None
 
