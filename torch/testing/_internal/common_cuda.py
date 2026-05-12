@@ -473,9 +473,17 @@ def xfailIfSM89PreCUDA13(func):
     return func
 
 def xfailIfSM100OrLater(func):
+    # SMxxx LazyVals are derived from torch.cuda.get_device_capability(), which
+    # on ROCm reports the gfx-arch major version (e.g. (11, 0) for gfx1100). That
+    # makes SM100OrLater spuriously true on AMD gfx10/11/12, so guard with
+    # TEST_WITH_ROCM to keep the xfail NVIDIA-only.
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM120OrLater(func):
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM12X(func):
