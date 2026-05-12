@@ -507,6 +507,13 @@ class SideEffects:
             (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
         )
 
+    def has_pending_generic_mutation_of_attr(
+        self, item: VariableTracker, name: str
+    ) -> bool:
+        return self.has_pending_mutation_of_attr(
+            item, name, (AttrMutationKind.GENERIC_SETATTR,)
+        )
+
     def has_pending_slot_mutation_of_attr(
         self, item: VariableTracker, name: str
     ) -> bool:

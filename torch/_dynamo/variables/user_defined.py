@@ -2371,6 +2371,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx.output.side_effects.store_slot_attr(self, name_str, value)
                 return variables.ConstantVariable.create(None)
 
+            if isinstance(descriptor, types.GetSetDescriptorType):
+                tx.output.side_effects.store_generic_attr(self, name_str, value)
+                return variables.ConstantVariable.create(None)
+
             setter = inspect.getattr_static(type(descriptor), "__set__", None)
             deleter = inspect.getattr_static(type(descriptor), "__delete__", None)
             desc_var = VariableTracker.build(tx, descriptor, desc_source)
@@ -2941,6 +2945,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
         if isinstance(type_attr, types.GetSetDescriptorType):
+            if tx.output.side_effects.has_pending_generic_mutation_of_attr(self, name):
+                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                if isinstance(result, variables.DeletedVariable):
+                    raise_observed_exception(
+                        AttributeError,
+                        tx,
+                        args=[
+                            f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                        ],
+                    )
+                return result
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
             return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
