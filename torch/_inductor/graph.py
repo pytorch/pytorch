@@ -1009,16 +1009,13 @@ class GraphLowering(torch.fx.Interpreter):
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
 
-    @functools.cached_property
+    @property
     def is_dual_wrapper_mode(self) -> bool:
         """True when generating dual-wrapper-mode C++ for both JIT and AOTI.
 
         Dual-wrapper mode emits a JIT pass that drives Triton autotune/compile
         alongside the AOTI output, so it is needed iff at least one device in
-        the graph uses the Triton backend. CPU graphs with the default
-        cpu_backend="cpp" produce no Triton kernels and must use pure-AOTI
-        codegen; CPU graphs with cpu_backend="triton" still need
-        dual-wrapper mode.
+        the graph uses the Triton backend.
         """
         if not self.aot_mode or config.triton.autotune_at_compile_time:
             return False
