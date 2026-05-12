@@ -12,35 +12,23 @@
     :toctree: generated
     :nosignatures:
 
-    rename_privateuse1_backend
-    generate_methods_for_privateuse1_backend
     get_cpp_backtrace
     set_module
     swap_tensors
 ```
 
 # torch.utils.backend_registration
-
 ```{eval-rst}
 .. currentmodule:: torch.utils.backend_registration
 ```
 
 ```{eval-rst}
-.. autofunction:: generate_methods_for_privateuse1_backend
-```
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-```{eval-rst}
-.. autofunction:: rename_privateuse1_backend
-```
-
-# torch.utils.cpp_backtrace
-
-```{eval-rst}
-.. currentmodule:: torch.utils.cpp_backtrace
-```
-
-```{eval-rst}
-.. autofunction:: get_cpp_backtrace
+    generate_methods_for_privateuse1_backend
+    rename_privateuse1_backend
 ```
 
 # torch.utils.hooks
