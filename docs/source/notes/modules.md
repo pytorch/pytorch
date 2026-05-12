@@ -372,7 +372,7 @@ print('evaluation mode output: {}'.format(m(x)))
 ```
 Training neural networks can often be tricky. For more information, check out:
 
-- Using Optimizers: [https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html](https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html)
+- Using Optimizers: [https://docs.pytorch.org/tutorials/beginner/pytorch_with_examples.html](https://docs.pytorch.org/tutorials/beginner/pytorch_with_examples.html)
 - Neural network training: [https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html](https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html)
 - Introduction to autograd: [https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html](https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html)
 
@@ -571,11 +571,7 @@ in these areas for your custom module by conforming to the convention demonstrat
   the module.
 - Only use initialization functions (i.e. functions from {mod}`torch.nn.init`) on parameters and buffers within the
   module's constructor. Note that this is only required to use {func}`~torch.nn.utils.skip_init`; see
-  [this page](https://pytorch.org/tutorials/prototype/skip_param_init.html#updating-modules-to-support-skipping-initialization) for an explanation.
-
-For more information, check out:
-
-- Skipping module parameter initialization: [https://pytorch.org/tutorials/prototype/skip_param_init.html](https://pytorch.org/tutorials/prototype/skip_param_init.html)
+  [this page](https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.skip_init.html) for an explanation.
 
 ## Module Hooks
 
@@ -724,5 +720,5 @@ further allows for custom constraints to be defined.
 The [FX](https://pytorch.org/docs/stable/fx.html) component of PyTorch provides a flexible way to transform
 modules by operating directly on module computation graphs. This can be used to programmatically generate or
 manipulate modules for a broad array of use cases. To explore FX, check out these examples of using FX for
-[convolution + batch norm fusion](https://pytorch.org/tutorials/intermediate/fx_conv_bn_fuser.html) and
+[convolution + batch norm fusion](https://docs.pytorch.org/tutorials/intermediate/torch_compile_conv_bn_fuser.html) and
 [CPU performance analysis](https://pytorch.org/tutorials/intermediate/fx_profiling_tutorial.html).
