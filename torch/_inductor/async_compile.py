@@ -237,7 +237,7 @@ def _get_compile_threads_for_memory(desired: int) -> int:
         return min_threads
 
     scale = (available_frac - half_threshold) / (threshold - half_threshold)
-    return max(min_threads, int(desired * scale))
+    return max(min_threads, round(desired * scale))
 
 
 @clear_on_fresh_cache
