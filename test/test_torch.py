@@ -6154,6 +6154,86 @@ class TestTorchDeviceType(TestCase):
                         check_equal(torch.tensor(True), x, y)
                         check_equal(torch.tensor(True), y, x)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_fill_barebones_unsigned(self, device, dtype):
+        # FillKernel.cu dispatches over barebones unsigned via
+        # AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES) but the fill OpInfo
+        # does not enumerate them. Cover that dispatch directly.
+        for shape in ((5,), (4, 5), (2, 3, 4)):
+            t = torch.empty(shape, dtype=dtype, device=device).fill_(7)
+            self.assertEqual(t.cpu(), torch.full(shape, 7, dtype=dtype))
+
+        # Non-contiguous tensor (every other row of a larger allocation).
+        big = torch.empty((8, 5), dtype=dtype, device=device)
+        nc = big[::2]
+        nc.fill_(11)
+        self.assertEqual(nc.cpu(), torch.full((4, 5), 11, dtype=dtype))
+
+        # Boundary fill value: max of each dtype.
+        max_val = torch.iinfo(dtype).max
+        t = torch.empty(8, dtype=dtype, device=device).fill_(max_val)
+        self.assertEqual(t.cpu().tolist(), [max_val] * 8)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_where_barebones_unsigned(self, device, dtype):
+        # The barebones unsigned dtypes are excluded from the broader
+        # test_where_scalar_handcrafted_values because torch.result_type
+        # does not support promoting them. Cover the same-dtype path
+        # for where() against a CPU reference here.
+        for shape in ((5,), (1, 5), (4, 5)):
+            a = make_tensor(shape, dtype=dtype, device=device)
+            b = make_tensor(shape, dtype=dtype, device=device)
+            cond = torch.randint(0, 2, shape, dtype=torch.bool, device=device)
+            out = torch.where(cond, a, b)
+            expected = torch.where(cond.cpu(), a.cpu(), b.cpu()).to(device)
+            self.assertEqual(out, expected)
+
+        # Non-contiguous inputs.
+        big = make_tensor((8, 10), dtype=dtype, device=device)
+        a = big[::2]
+        b = big[1::2]
+        cond = torch.randint(0, 2, a.shape, dtype=torch.bool, device=device)
+        out = torch.where(cond, a, b)
+        expected = torch.where(cond.cpu(), a.cpu(), b.cpu()).to(device)
+        self.assertEqual(out, expected)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_eq_ne_barebones_unsigned(self, device, dtype):
+        # The eq/ne kernels dispatch over uint16/uint32/uint64 via
+        # AT_DISPATCH_V2(... AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)),
+        # but the standard test_torch.py comparison sweeps don't list
+        # those dtypes. Cover the same-dtype path here.
+        for shape in ((5,), (4, 5), (2, 3, 4)):
+            a = make_tensor(shape, dtype=dtype, device=device)
+            b = a.clone()
+            # Differ exactly one element so eq/ne both have True and False
+            # to report. Compute the perturbed value on the CPU to avoid
+            # invoking integer arithmetic ufuncs on the barebones types.
+            old = int(a.view(-1)[0].item())
+            new = (old + 1) % max(2, torch.iinfo(dtype).max)
+            b.view(-1)[0] = new
+            self.assertEqual(torch.eq(a, b), (a.cpu() == b.cpu()).to(device))
+            self.assertEqual(torch.ne(a, b), (a.cpu() != b.cpu()).to(device))
+            self.assertEqual(torch.eq(a, a), torch.ones_like(a, dtype=torch.bool))
+            self.assertEqual(torch.ne(a, a), torch.zeros_like(a, dtype=torch.bool))
+
+        # Non-contiguous: every-other-row slice.
+        big = make_tensor((8, 4), dtype=dtype, device=device)
+        a = big[::2]
+        b = big[1::2]
+        self.assertEqual(torch.eq(a, b), (a.cpu() == b.cpu()).to(device))
+        self.assertEqual(torch.ne(a, b), (a.cpu() != b.cpu()).to(device))
+
+        # Boundary value: max-int comparison.
+        max_val = torch.iinfo(dtype).max
+        a = torch.tensor([0, max_val, max_val - 1], dtype=dtype, device=device)
+        b = torch.tensor([0, max_val, max_val], dtype=dtype, device=device)
+        self.assertEqual(torch.eq(a, b).tolist(), [True, True, False])
+        self.assertEqual(torch.ne(a, b).tolist(), [False, False, True])
+
 
     @skipIfTorchInductor("FIXME")
     def test_hook_remove(self, device):
@@ -6218,17 +6298,18 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
+    @dtypes(*all_types_and_complex_and(
+        torch.bool, torch.half, torch.bfloat16, torch.complex32,
+        torch.uint16, torch.uint32, torch.uint64))
     def test_copy_(self, device, dtype):
         def can_cast(src_dtype, dst_dtype):
             # torch.can_cast(torch.int16, torch.uint8) returns True
             # which isn't actually safe-cast.
             # This function returns False in this case.
-            def is_unsigned_int(dtype):
-                return dtype is torch.uint8
+            unsigned = {torch.uint8, torch.uint16, torch.uint32, torch.uint64}
 
-            if is_unsigned_int(dst_dtype):
-                return is_unsigned_int(src_dtype)
+            if dst_dtype in unsigned:
+                return src_dtype in unsigned
             return torch.can_cast(src_dtype, dst_dtype)
 
         def make_tensor_wrapper(shape, dtype):
@@ -6239,7 +6320,9 @@ class TestTorchDeviceType(TestCase):
             return torch.randn(shape, device=device, dtype=dtype)
 
         t = make_tensor_wrapper((50,), dtype)
-        src_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32)
+        src_dtypes = all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32,
+            torch.uint16, torch.uint32, torch.uint64)
         for src_dtype in src_dtypes:
             src = make_tensor_wrapper((50,), dtype=src_dtype)
             t.copy_(src)

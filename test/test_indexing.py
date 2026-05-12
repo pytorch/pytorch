@@ -2220,6 +2220,16 @@ class TestIndexing(TestCase):
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
     @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfCUDA(
+        *all_types_complex_float8_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
     @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):

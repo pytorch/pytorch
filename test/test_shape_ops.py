@@ -406,6 +406,17 @@ class TestShapeOps(TestCase):
             torch.clamp(X)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfCUDA(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.chalf,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
