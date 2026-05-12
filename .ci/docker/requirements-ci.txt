@@ -111,10 +111,10 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-ninja==1.11.1.4
+ninja==1.13.0
 #Description: build system. Used in some tests. Used in build to generate build
 #time tracing information
-#Pinned versions: 1.11.1.4
+#Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
