@@ -39,12 +39,12 @@ NSArray<NSNumber*>* IntArrayToNSArray(IntArrayRef arr) {
 } // anonymous namespace
 
 Tensor _fft_c2r_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  auto out = at::empty({}, self.options().dtype(c10::toRealValueType(self.scalar_type())));
+  auto out = at::empty({0}, self.options().dtype(c10::toRealValueType(self.scalar_type())));
   return _fft_c2r_mps_out(self, dim, normalization, last_dim_size, out);
 }
 
 Tensor _fft_r2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  auto out = at::empty({}, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  auto out = at::empty({0}, self.options().dtype(c10::toComplexType(self.scalar_type())));
   return _fft_r2c_mps_out(self, dim, normalization, onesided, out);
 }
 

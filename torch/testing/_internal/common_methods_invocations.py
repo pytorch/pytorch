@@ -14907,8 +14907,6 @@ op_db: list[OpInfo] = [
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
-                       # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
                        # input.device=mps:0 and out.device=cpu.
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
@@ -21839,8 +21837,6 @@ op_db: list[OpInfo] = [
                        # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
                        # of dtype torch.float32 into an out= with dtype torch.long
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                       # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                        # NotImplementedError: The operator 'aten::logit_' is not currently implemented for the MPS device
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
                    ),
