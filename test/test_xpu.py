@@ -706,6 +706,24 @@ print(torch.xpu.is_initialized())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_is_shared(self):
+        t = torch.randn(5, 5, device="xpu")
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory(self):
+        t = torch.randn(5, 5, device="xpu")
+        result = t.share_memory_()
+        self.assertIs(result, t)
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory_nested(self):
+        a = torch.randn(3, 4, device="xpu")
+        b = torch.randn(5, 4, device="xpu")
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+        self.assertTrue(nt.is_shared())
+
     def test_out_of_memory(self):
         if self.expandable_segments:
             self.skipTest("Skipping OOM test for expandable segments allocator.")
