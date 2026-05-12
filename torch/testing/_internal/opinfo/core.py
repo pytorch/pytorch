@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     is_iterable_of_tensors,
     noncontiguous_like,
+    NoncontiguousType,
     OPINFO_SAMPLE_INPUT_INDEX,
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
@@ -320,10 +321,10 @@ class SampleInput:
 
         return self.transform(to_numpy)
 
-    def noncontiguous(self):
+    def noncontiguous(self, format=NoncontiguousType.UNIFORM_SCALE):
         def to_noncontiguous(t):
             if isinstance(t, torch.Tensor):
-                return noncontiguous_like(t)
+                return noncontiguous_like(t, format=format)
             elif isinstance(t, torch.dtype):
                 return t
 
