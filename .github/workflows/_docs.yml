@@ -207,7 +207,7 @@ jobs:
 
       - name: Install awscli
         if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' }}
-        run: pip install awscli
+        run: pip install awscli==1.45.6
 
       - name: Upload Python Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
@@ -348,7 +348,7 @@ jobs:
 
       - name: Install awscli
         if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' }}
-        run: pip install awscli
+        run: pip install awscli==1.45.6
 
       - name: Upload Python Docs Preview
         if: ${{ steps.aws-creds.outcome == 'success' && github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
@@ -398,7 +398,7 @@ jobs:
         if: ${{ steps.aws-creds.outcome == 'success' && !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         run: |
           # Unlike EC2 runners, the OSDC container doesn't have aws CLI pre-installed
-          pip install awscli==1.29.40
+          pip install awscli==1.45.6==1.29.40
           aws s3 cp cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
           echo "C++ docs preview available at:"
           echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
