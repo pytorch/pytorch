@@ -4438,7 +4438,7 @@ class CommonTemplate:
         t1 = torch.arange(6, dtype=torch.float, device=self.device).view(1, 2, 3)
         t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(1, 3, 3)
 
-        msg = "expected scalar type .* but found .*"
+        msg = "expected scalar type .* but found .*|Expected arguments of same type but got"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
         with self.assertRaisesRegex(RuntimeError, msg):
