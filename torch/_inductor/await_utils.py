@@ -5,7 +5,7 @@ from asyncio import AbstractEventLoop, Future
 from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import Any, Optional, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -72,16 +72,16 @@ def get_loop(
             stack.enter_context(_restore_loop(loop=loop))
             loop = stack.enter_context(_new_loop(loop.get_task_factory()))  # type: ignore[arg-type]
         elif loop.is_closed():
-            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
+            loop = stack.enter_context(_new_loop())
         elif always_create_new_loop:
             stack.enter_context(_restore_loop(loop=loop))
-            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
+            loop = stack.enter_context(_new_loop())
         yield loop
 
 
 @contextmanager
 def _new_loop(
-    task_factory: Optional[TaskFactoryType] = None,
+    task_factory: TaskFactoryType | None = None,
 ) -> Iterator[asyncio.AbstractEventLoop]:
     loop = asyncio.new_event_loop()
     tasks = _patch_loop(loop)
@@ -133,12 +133,12 @@ def _cancel_all_tasks(
 def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[type-arg]
     tasks: weakref.WeakSet[Future] = weakref.WeakSet()  # type: ignore[type-arg]
 
-    task_factories: list[Optional[TaskFactoryType]] = [None]
+    task_factories: list[TaskFactoryType | None] = [None]
 
-    def _set_task_factory(factory: Optional[TaskFactoryType]) -> None:
+    def _set_task_factory(factory: TaskFactoryType | None) -> None:
         task_factories[0] = factory
 
-    def _get_task_factory() -> Optional[TaskFactoryType]:
+    def _get_task_factory() -> TaskFactoryType | None:
         return task_factories[0]
 
     def _safe_task_factory(
@@ -146,7 +146,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         coro: TCoro,  # type: ignore[type-arg]
         *,
         context: Context | None = None,
-    ) -> asyncio.Future:  # type: ignore[valid-type, type-arg]
+    ) -> asyncio.Future:
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
@@ -169,7 +169,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         return task
 
     # pyre-ignore[6]
-    loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign, arg-type]
+    loop.set_task_factory(_safe_task_factory)
     # pyre-ignore[8]
     loop.set_task_factory = _set_task_factory  # type: ignore[method-assign, assignment]
     # pyre-ignore[8]

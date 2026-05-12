@@ -865,7 +865,8 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            assert p.grad is None, "zero_grad defaults to setting grads to None"
+            if p.grad is not None:
+                raise AssertionError("zero_grad defaults to setting grads to None")
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
@@ -1551,7 +1552,7 @@ except RuntimeError as e:
                         self.assertIn(
                             "C++ CapturedTraceback:",
                             error_message,
-                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
+                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",
                         )
                     self.assertRegex(
                         error_message,
@@ -1561,7 +1562,7 @@ except RuntimeError as e:
                     self.assertNotIn(
                         "C++ CapturedTraceback:",
                         error_message,
-                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",  # noqa: B950
+                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
 
 

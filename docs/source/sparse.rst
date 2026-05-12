@@ -309,6 +309,18 @@ You can accelerate the linear layers in your model if the weights are already se
     >>> linear = nn.Linear(64, 64).half().cuda()
     >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight.masked_fill(~mask, 0)))
 
+.. autofunction:: torch.sparse.semi_structured.to_sparse_semi_structured
+
+.. currentmodule:: torch.sparse.semi_structured
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    SparseSemiStructuredTensorCUSPARSELT
+    SparseSemiStructuredTensorCUTLASS
+
+.. currentmodule:: torch
 
 .. _sparse-coo-docs:
 

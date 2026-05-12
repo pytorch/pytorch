@@ -2,7 +2,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from functools import lru_cache
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch.fx.graph
 
@@ -50,7 +50,7 @@ class CustomGraphPass(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom pass implementation. Return None
         to skip inductor code caching entirely.
@@ -82,16 +82,29 @@ class CustomGraphModulePass(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom pass implementation. Return None
         to skip inductor code caching entirely.
         """
 
 
-CustomGraphPassType: TypeAlias = Optional[
-    Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
-]
+class CustomInferenceAwareGraphPass(CustomGraphPass):
+    """
+    Implement this interface for custom inference aware Graph passes.
+
+    """
+
+    @abstractmethod
+    def __call__(self, graph: torch.fx.graph.Graph, is_inference: bool) -> None:
+        """
+        Implementation of the custom pass.
+        """
+
+
+CustomGraphPassType: TypeAlias = (
+    CustomGraphPass | Callable[[torch.fx.graph.Graph], None] | None
+)
 
 
 @lru_cache(1)
@@ -152,14 +165,14 @@ class CustomPartitionerFn(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom partitioner implementation.
         Return None to skip inductor code caching entirely.
         """
 
 
-CustomPartitionerFnType: TypeAlias = Optional[CustomPartitionerFn]
+CustomPartitionerFnType: TypeAlias = CustomPartitionerFn | None
 
 
 class CustomRuntimeEstimator(ABC):
@@ -206,7 +219,7 @@ class CustomRuntimeEstimator(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom runtime estimator implementation.
         Return None to skip AOTAutograd caching entirely.
@@ -265,7 +278,7 @@ class CustomKnapsackSolver(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Optional[Any]:
+    def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom knapsack solver implementation.
         Return None to skip AOTAutograd caching entirely.

@@ -92,7 +92,7 @@ level). Note that users can still use {func}`torch.fx.symbolic_trace` as a
 preprocessing step before `torch.export`.
 
 Compared to {func}`torch.jit.script`, `torch.export` does not capture Python
-control flow or data structures, unless using explicit {ref}`control flow operators <cond>`,
+control flow or data structures, unless using explicit {ref}`control flow operators <higher_order_ops>`,
 but it supports more Python language features due to its comprehensive coverage
 over Python bytecodes. The resulting graphs are simpler and only have straight
 line control flow, except for explicit control flow operators.
@@ -629,8 +629,8 @@ Graph breaks can also be encountered on data-dependent control flow (`if
 x.shape[0] > 2`) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support {ref}`torch.cond <cond>`
-to express if-else like control flow (more coming soon!).
+special control flow operators. Currently, we support {ref}`higher order operators <higher_order_ops>`
+to express control flow patterns like conditionals, mapping, scanning, and looping.
 
 You can also refer to this
 [tutorial](https://docs.pytorch.org/tutorials/intermediate/torch_export_tutorial.html#data-dependent-errors)
@@ -660,7 +660,7 @@ export/ir_spec
 export/pt2_archive
 export/draft_export
 export/joint_with_descriptors
-../../cond
+../../higher_order_ops/index
 ../../generated/exportdb/index
 torch.compiler_aot_inductor
 torch.compiler_ir

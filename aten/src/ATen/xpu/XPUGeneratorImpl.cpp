@@ -97,7 +97,7 @@ void XPUGeneratorState::increase(uint64_t increment) {
 }
 
 // State can be used by multiple graph
-void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorState::register_graph(xpu::XPUGraphImpl* graph) {
   // Ensures that the RNG state is not currently being captured.
   at::xpu::assertNotCapturing(
       "Cannot register the state during capturing stage.");
@@ -113,7 +113,7 @@ void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
   }
 }
 
-void XPUGeneratorState::unregister_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorState::unregister_graph(xpu::XPUGraphImpl* graph) {
   TORCH_CHECK(
       registered_graphs_.find(graph) != registered_graphs_.end(),
       "The graph should be registered to the state");
@@ -245,6 +245,20 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   this->set_philox_offset_per_thread(philox_offset);
 }
 
+void XPUGeneratorImpl::graphsafe_set_state(
+    const c10::intrusive_ptr<GeneratorImpl>& gen) {
+  c10::intrusive_ptr<XPUGeneratorImpl> xpu_gen =
+      dynamic_intrusive_pointer_cast<XPUGeneratorImpl>(gen);
+  TORCH_CHECK(xpu_gen, "Expected a XPU Generator");
+  state_ = xpu_gen->state_;
+}
+
+c10::intrusive_ptr<c10::GeneratorImpl> XPUGeneratorImpl::graphsafe_get_state()
+    const {
+  auto gen = make_intrusive<XPUGeneratorImpl>(device().index(), state_);
+  return gen;
+}
+
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
   if (C10_LIKELY(
@@ -266,12 +280,12 @@ uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
   }
 }
 
-void XPUGeneratorImpl::register_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorImpl::register_graph(xpu::XPUGraphImpl* graph) {
   graph->register_generator_state(state_);
   state_->register_graph(graph);
 }
 
-void XPUGeneratorImpl::unregister_graph(xpu::XPUGraph* graph) {
+void XPUGeneratorImpl::unregister_graph(xpu::XPUGraphImpl* graph) {
   state_->unregister_graph(graph);
 }
 

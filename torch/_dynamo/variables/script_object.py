@@ -18,22 +18,25 @@ The module ensures that TorchScript objects are handled safely during tracing
 by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
+import enum
 import functools
 import inspect
 import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_member_type,
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
+    should_hoist,
 )
 from torch.fx.proxy import Proxy
 
@@ -87,6 +90,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
+        if isinstance(value, type) and issubclass(value, enum.Enum):
+            raise AssertionError(
+                f"Enum class {value} should use UserDefinedClassVariable, "
+                "not OpaqueObjectClassVariable"
+            )
         super().__init__(**kwargs)
         self.value = value
 
@@ -99,8 +107,26 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        # OpaqueObjectClassVariable wraps the CLASS, not an instance.
+        # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
+        return hash(self.value), False
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: "VariableTracker",
+        reverse: bool = False,
+    ) -> "VariableTracker":
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        # pyrefly: ignore[bad-argument-count]
+        result = type(self.value).__or__(self.value, other_val)
+        if result is NotImplemented:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(tx, result)
 
     def as_proxy(self) -> Any:
         return self.value
@@ -127,12 +153,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         elif isinstance(obj, property):
             obj = obj.__get__(None, self.value)  # pyrefly: ignore[no-matching-overload]
         elif hasattr(obj, "__get__"):
-            # Check for pybind11 static properties (common in PyTorch C++ bindings)
-            # Reference: https://github.com/python/mypy/blob/131f9d92da58294bb2f273425e8778bd7d5b861f/mypy/stubgenc.py#L590
-            type_name = type(obj).__name__
-            if type_name == "pybind11_static_property":
-                obj = obj.__get__(None, self.value)
+            if not isinstance(type(obj).__dict__.get("__get__"), types.FunctionType):
+                # C-level descriptors are safe to resolve dynamically.
+                obj = getattr(self.value, name)
             else:
+                type_name = type(obj).__name__
                 unimplemented(
                     gb_type="Unsupported descriptor on opaque class",
                     context=f"class={self.value}, attr={name}, descriptor={type_name}",
@@ -144,7 +169,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 )
 
         if ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            return VariableTracker.build(tx, obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
@@ -158,8 +183,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # disallow creating reference-type opaque objects in the middle of the
         # program
         if is_opaque_reference_type(self.value):
-            # Skip __init__ to prevent dynamo from tracing it during resume
-            skip_code(self.value.__init__.__code__)
+            # Skip __init__ to prevent dynamo from tracing it during resume.
+            # C extension types (e.g. torch._C.Generator) have wrapper_descriptor
+            # __init__ without __code__, so guard the skip_code call.
+            if hasattr(self.value.__init__, "__code__"):
+                skip_code(self.value.__init__.__code__)
 
             unimplemented(
                 gb_type="An opaque object was created in the middle of the program.",
@@ -176,17 +204,36 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
-            {ConstantVariable(k): v for k, v in kwargs.items()}
+            {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
+        if should_hoist(self.value):
+            with tx.output.tracing_context.guards_context.skip_guard_install():
+                constant_args = var_args.as_python_constant()
+                constant_kwargs = var_kwargs.as_python_constant()
+        else:
+            constant_args = var_args.as_python_constant()
+            constant_kwargs = var_kwargs.as_python_constant()
         opaque_obj = self.value(  # pyrefly: ignore[not-callable]
-            *(var_args.as_python_constant()),
-            **(var_kwargs.as_python_constant()),
-        )
-        fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
-            tx.output.fake_mode, opaque_obj
+            *constant_args, **constant_kwargs
         )
 
-        return TorchScriptObjectVariable.create(opaque_obj, fake_script_obj)
+        # Capture sources from the VT args so subgraph reuse can apply
+        # source replacement to resolve new ctor arg values on stamp-out.
+        ctor_arg_sources = tuple(getattr(a, "source", None) for a in args)
+
+        if is_opaque_value_type(type(opaque_obj)):
+            fake_script_obj = opaque_obj
+        else:
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                tx.output.fake_mode, opaque_obj
+            )
+
+        return TorchScriptObjectVariable.create(
+            opaque_obj,
+            fake_script_obj,
+            (constant_args, constant_kwargs),
+            ctor_arg_sources=ctor_arg_sources,
+        )
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
@@ -194,23 +241,92 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
-        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
+        return (
+            issubclass(user_cls, torch.ScriptObject)
+            or is_opaque_type(user_cls)
+            or issubclass(user_cls, FakeScriptObject)
+        )
 
     @staticmethod
-    def create(proxy: Proxy, value: Any, **options: Any) -> "TorchScriptObjectVariable":
-        return TorchScriptObjectVariable(proxy, value, **options)
+    def create(
+        proxy: Proxy,
+        value: Any,
+        ctor_args_kwargs: Any = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        **options: Any,
+    ) -> "TorchScriptObjectVariable":
+        if isinstance(value, enum.Enum):
+            raise AssertionError(
+                f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
+            )
+        out = TorchScriptObjectVariable(
+            proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
+        )
+        if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            tx.output.current_tracer.record_proxyable_vt(out)
+        return out
 
     def __init__(
-        self, proxy: Proxy, value: Any, source: Optional[Source] = None, **kwargs: Any
+        self,
+        proxy: Proxy,
+        value: Any,
+        ctor_args_kwargs: Any = None,
+        source: Source | None = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
         self.proxy = proxy
         if isinstance(self.proxy, torch.fx.Proxy):
             self.proxy.node.meta["example_value"] = value
         self.source = source
+        # If the OpaqueObject is sourceless, then this is
+        # the constant (args, kwargs) that Dynamo used to construct it.
+        self.ctor_args_kwargs = ctor_args_kwargs
+        # Sources of the constructor args, used by subgraph reuse to
+        # resolve new values via source replacement on stamp-out.
+        self.ctor_arg_sources = ctor_arg_sources
 
     def as_proxy(self) -> Proxy:
+        if not isinstance(self.proxy, torch.fx.Proxy):
+            # If we have a hoisted value type, then lazily lift it to be a graph
+            # input when as_proxy() is called.
+            if not is_opaque_value_type(type(self.proxy)):
+                raise AssertionError(
+                    f"Expected opaque value type, got {type(self.proxy)}"
+                )
+            if should_hoist(type(self.proxy)):
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+                # if any kwargs (synthetic_graph_input doesn't support them yet)
+                # not a graph break because hard error more explicit here
+                # (and opaque objects are really just used for compile)
+                if self.ctor_args_kwargs[1]:
+                    raise RuntimeError(
+                        "NYI: hoisted opaque objects that accept kwargs, please pass as args"
+                    )
+                hoisted_vt = tx.output.synthetic_graph_input(
+                    type(self.proxy),
+                    self.ctor_args_kwargs[0],
+                    ctor_arg_sources=self.ctor_arg_sources,
+                )
+                self.proxy = hoisted_vt.as_proxy()
+
         return self.proxy
+
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -220,31 +336,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
-        if hasattr(self.value, "script_class_name") and is_opaque_type(
-            self.value.script_class_name
-        ):
-            real_obj = self.value.real_obj  # pyrefly: ignore[missing-attribute]
-
-            member_type = get_member_type(
-                type(real_obj),
-                name,
-            )
-            if member_type is None:
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior
-                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                    raise_observed_exception(AttributeError, tx)
-
-                unimplemented(
-                    gb_type="Attempted to access unregistered member on an OpaqueObject",
-                    context=f"value={real_obj}, attr={name}",
-                    explanation=f"Member '{name}' is not registered for this opaque object type.",
-                    hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
-                    ],
-                )
+        real_obj = self.as_python_constant()
+        real_obj_type = type(real_obj)
+        if is_opaque_type(real_obj_type):
+            member_type = get_member_type(real_obj_type, name)
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
@@ -270,6 +365,26 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     )
                 return super().var_getattr(tx, name)
 
+            elif is_opaque_value_type(real_obj_type):
+                return super().var_getattr(tx, name)
+
+            elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
+                # Special case: __bool__ and __len__ are used for truthiness checks.
+                # If they're not registered and the real object doesn't have them,
+                # raise ObservedAttributeError so the caller can fall back to
+                # treating the object as truthy (Python default behavior
+                raise_observed_exception(AttributeError, tx)
+
+            else:
+                unimplemented(
+                    gb_type="Attempted to access unregistered member on an OpaqueObject",
+                    context=f"value={real_obj}, attr={name}",
+                    explanation=f"Member '{name}' is not registered for this opaque object type.",
+                    hints=[
+                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                    ],
+                )
+
         method = getattr(self.value, name, None)
         if method is None:
             unimplemented(
@@ -292,7 +407,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 ],
             )
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "TorchScriptObjectVariable requires a source for var_getattr"
+            )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
@@ -300,9 +418,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             method_name=name,
         )
 
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslator",
+        key: "VariableTracker",
+    ) -> "VariableTracker":
+        # Call call_method directly on this class to avoid the __getitem__ →
+        # mp_subscript_impl loop in VariableTracker.call_method.
+        return TorchScriptObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through var_getattr then call_function instead of call_method.
-    #
+
     # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -316,43 +443,19 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        if hasattr(self.value, "script_class_name") and is_opaque_type(
-            self.value.script_class_name
-        ):
-            real_obj = self.value.real_obj  # pyrefly: ignore[missing-attribute]
-            value_type = type(real_obj)
+        real_obj = self.as_python_constant()
+        real_obj_type = type(real_obj)
+        if is_opaque_type(real_obj_type):
+            member_type = get_member_type(real_obj_type, name)
 
-            member_type = get_member_type(
-                value_type,
-                name,
-            )
-            if member_type is None:
-                unimplemented(
-                    gb_type="Attempted to access unregistered member on an OpaqueObject",
-                    context=f"value={real_obj}, attr={name}",
-                    explanation=f"Member '{name}' is not registered for this opaque object type.",
-                    hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
-                    ],
-                )
-
-            if member_type == MemberType.INLINED:
-                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-
-                proxy = tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    args=(self.proxy, *proxy_args),
-                    kwargs=proxy_kwargs,
-                )
-
-                return wrap_fx_proxy(tx=tx, proxy=proxy)
-
-            elif member_type == MemberType.USE_REAL:
-                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+            if member_type == MemberType.USE_REAL:
+                if (
+                    inspect.getattr_static(real_obj_type, "__getattr__", None)
+                    is not None
+                ):
                     unimplemented(
                         gb_type="Opaque object with custom __getattr__ not supported",
-                        context=f"{value_type.__name__} with custom __getattr__",
+                        context=f"{real_obj_type.__name__} with custom __getattr__",
                         explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
                         hints=[],
                     )
@@ -374,7 +477,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 ):
                     unimplemented(
                         gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
-                        context=f"Opaque object type: {value_type}. Method name: '{name}'",
+                        context=f"Opaque object type: {real_obj_type}. Method name: '{name}'",
                         explanation=(
                             "To properly guard reference-type opaque objects, "
                             "we must lift them as inputs to the graph. In order "
@@ -383,18 +486,34 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         ),
                         hints=[
                             f"Register member '{name}' with MemberType.INLINED in "
-                            "register_opaque_type({value_type}, members=...).",
+                            f"register_opaque_type({real_obj_type}, members=...).",
                         ],
                     )
 
                 return VariableTracker.build(tx, constant_val)
 
+            elif member_type == MemberType.INLINED or is_opaque_value_type(
+                real_obj_type
+            ):
+                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+                proxy = tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=(self.proxy, *proxy_args),
+                    kwargs=proxy_kwargs,
+                )
+
+                return wrap_fx_proxy(tx=tx, proxy=proxy)
+
             else:
                 unimplemented(
-                    gb_type="Unsupported member type on OpaqueObject",
-                    context=f"value={real_obj}, attr={name}, member_type={member_type}",
-                    explanation=f"Member type '{member_type}' is not supported for this operation.",
-                    hints=[],
+                    gb_type="Attempted to access unregistered member on an OpaqueObject",
+                    context=f"value={real_obj}, attr={name}",
+                    explanation=f"Member '{name}' is not registered for this opaque object type.",
+                    hints=[
+                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                    ],
                 )
 
         unimplemented(
@@ -410,13 +529,29 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         )
 
     def as_python_constant(self) -> Any:
-        if is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
-        ):
-            return self.value.real_obj  # pyrefly: ignore[missing-attribute]
+        if isinstance(self.value, FakeScriptObject):
+            return self.value.real_obj
+        elif is_opaque_value_type(type(self.value)):
+            return self.value
+        elif isinstance(self.value, torch.ScriptObject):
+            return self.value
         return super().as_python_constant()
 
-    def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
-        )
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        real_obj = self.as_python_constant()
+        try:
+            return hash(real_obj), False
+        except TypeError:
+            raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
+        real_self = self.as_python_constant()
+        real_other = other.as_python_constant()
+        return real_self == real_other
+
+    def get_real_value(self) -> Any:
+        return self.as_python_constant()

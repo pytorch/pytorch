@@ -93,11 +93,28 @@ class ComplexTensor(Tensor):
     def im(self) -> Tensor:
         return self._im
 
+    @property
+    def real(self) -> Tensor:  # type: ignore[bad-override]
+        return self.re
+
+    @real.setter
+    def real(self, value: Tensor) -> None:
+        self.re[...] = value
+
+    @property
+    def imag(self) -> Tensor:  # type: ignore[bad-override]
+        return self.im
+
+    @imag.setter
+    def imag(self, value: Tensor) -> None:
+        self.im[...] = value
+
     @classmethod
     def __torch_dispatch__(  # type: ignore[bad-override]
         cls,
         func: OpOverload,
         types: tuple[type, ...],
+        # pyrefly: ignore [implicit-any]
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:

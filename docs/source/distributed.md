@@ -18,6 +18,66 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.api
+```
+
+```{eval-rst}
+.. autofunction:: get_env_variable_or_raise
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.distributed
+```
+
+```{eval-rst}
+.. autofunction:: get_free_port
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.log_level
+```
+
+```{eval-rst}
+.. autofunction:: get_log_level
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.logging
+```
+
+```{eval-rst}
+.. autofunction:: get_logger
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: register_rendezvous_handler
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters_or_parameter_groups
+```
+
+```{eval-rst}
+.. autofunction:: get_params_to_average
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed
+```
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
@@ -151,77 +211,6 @@ For a full list of NCCL environment variables, please refer to
 You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
-
-### Copy Engine Collectives
-
-:::{note}
-Copy Engine Collectives require NCCL 2.28 or later, and GPUs with peer-to-peer (P2P) access.
-:::
-
-Copy Engine (CE) Collectives are an optimization for NCCL collective operations that offload
-data movement to the GPU's copy engines (DMA engines) instead of using CUDA streaming
-multiprocessors (SMs). This frees up SMs for compute work, enabling better overlap of
-communication and computation during distributed training.
-
-To use CE collectives, you need to:
-
-1. Configure the NCCL process group with the zero-CTA policy
-2. Set up symmetric memory with the NCCL backend
-3. Allocate tensors using symmetric memory
-4. Register the tensors with symmetric memory via rendezvous
-
-Once set up, standard collective functions like {func}`all_gather_into_tensor` and
-{func}`all_to_all_single` will automatically use the copy engines when operating
-on symmetric memory tensors.
-
-**Example**
-
-```
-import torch
-import torch.distributed as dist
-import torch.distributed._symmetric_memory as symm_mem
-
-# Initialize process group with zero-CTA policy for CE collectives
-opts = dist.ProcessGroupNCCL.Options()
-opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
-device = torch.device("cuda", rank)
-dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
-
-# Set up symmetric memory with NCCL backend
-symm_mem.set_backend("NCCL")
-group_name = dist.group.WORLD.group_name
-
-# Allocate tensors using symmetric memory
-numel = 1024 * 1024
-inp = symm_mem.empty(numel, device=device)
-out = symm_mem.empty(numel * world_size, device=device)
-
-# Register tensors for symmetric memory operations
-symm_mem.rendezvous(inp, group=group_name)
-symm_mem.rendezvous(out, group=group_name)
-
-# Perform collective operation using copy engines
-# This now runs on DMA engines instead of SMs
-work = dist.all_gather_into_tensor(out, inp, async_op=True)
-work.wait()
-```
-
-**Benefits**
-
-- **SM offloading**: Communication runs on copy engines, leaving SMs free for computation
-- **Better overlap**: Enables more efficient computation/communication overlap
-- **Transparent API**: Uses the same collective API, just with symmetric memory tensors
-
-**Requirements and Limitations**
-
-- NCCL version 2.28 or later
-- GPUs must have peer-to-peer (P2P) access enabled
-- Tensors must be allocated using {func}`torch.distributed._symmetric_memory` and rendezvoused
-- The NCCL process group must be configured with `NCCL_CTA_POLICY_ZERO` or the
-environment variable `NCCL_CTA_POLICY` be set to 2
-- As of NCCL 2.28, CE collectives cannot run with the default stream, so you
-would need to use the `async_op=True` flag to activate the internal stream of
-`ProcessGroupNCCL` or create a side stream yourself
 
 (distributed-basics)=
 
@@ -414,11 +403,27 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_config
+```
+
+```{eval-rst}
 .. autofunction:: get_rank
 ```
 
 ```{eval-rst}
 .. autofunction:: get_world_size
+```
+
+```{eval-rst}
+.. autofunction:: get_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: get_node_local_rank
+```
+
+```{eval-rst}
+.. autofunction:: get_pg_count
 ```
 
 ## Shutdown
@@ -480,6 +485,14 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```{eval-rst}
 .. autofunction:: get_process_group_ranks
 
+```
+
+```{eval-rst}
+.. autofunction:: split_group
+```
+
+```{eval-rst}
+.. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
 ## DeviceMesh
@@ -604,6 +617,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: all_reduce_coalesced
+```
+
+```{eval-rst}
 .. autofunction:: reduce
 ```
 
@@ -617,6 +634,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: all_gather_object
+```
+
+```{eval-rst}
+.. autofunction:: all_gather_coalesced
 ```
 
 ```{eval-rst}
@@ -734,6 +755,33 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
+
+## Optimization with Symmetric Memory
+
+### Copy Engine Collectives
+
+When NCCL collective operations are performed on symmetric memory tensors with
+the zero-CTA policy, data movement is offloaded to the GPU's copy engines (DMA
+engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
+SMs for compute work, enabling better overlap of communication and computation.
+
+For setup instructions, requirements, and examples, see
+[Copy Engine Collectives](copy-engine-collectives) in the Symmetric Memory documentation.
+
+### Higher-Precision Reduction
+
+When NCCL collectives such as ``reduce_scatter`` and ``all_reduce`` operate on
+symmetric memory tensors, NCCL's symmetric kernel implementation automatically
+performs internal reduction with higher precision (e.g., BF16/FP16 in → FP32
+accumulate → BF16/FP16 out). This improves numerical accuracy without any code
+changes to the collective call.
+
+For details on scope, supported domains, and version requirements, see
+[Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
+
 ## Multi-GPU collective functions
 
 :::{warning}
@@ -806,6 +854,85 @@ the new backend.
 The support of third-party backend is experimental and subject to change.
 :::
 
+## TorchComms backend
+
+[TorchComms](https://github.com/meta-pytorch/torchcomms) is an optional
+communication backend for ``torch.distributed``. When enabled, it
+overrides the normal backend instantiation in {func}`init_process_group`
+so that all process groups are created through TorchComms instead of
+the built-in ``ProcessGroup`` implementations.
+
+:::{note}
+TorchComms is experimental and must be installed separately.
+The ``torchcomms`` package must be importable for the flags below to
+take effect.
+:::
+
+### Enabling TorchComms
+
+Set the ``TORCH_DISTRIBUTED_USE_TORCHCOMMS`` environment variable
+before calling {func}`init_process_group`:
+
+```bash
+export TORCH_DISTRIBUTED_USE_TORCHCOMMS=1
+```
+
+Or set the config flag programmatically:
+
+```python
+import torch.distributed.config as dist_config
+
+dist_config.use_torchcomms = True
+```
+
+The ``backend`` argument to {func}`init_process_group` (e.g. ``"nccl"``,
+``"gloo"``) is still respected -- it is forwarded to TorchComms, which
+selects the corresponding vendor plugin. No other application code
+changes are required; all ``torch.distributed`` collective APIs continue
+to work as before.
+
+### Behavior when enabled
+
+When TorchComms is enabled, {func}`init_process_group` changes its
+backend instantiation path for every device/backend pair in the process
+group (except the ``fake`` backend, which is always handled natively):
+
+1. A TorchComms communicator is created via ``torchcomms.new_comm()``
+   using the requested backend string and device.
+2. The communicator is wrapped in a ``_BackendWrapper`` that implements
+   the ``c10d::Backend`` C++ interface, making it a drop-in replacement
+   for the native ``ProcessGroup`` backends.
+3. A ``FlightRecorderHook`` is automatically registered on the
+   communicator. The hook respects the ``TORCH_FR_BUFFER_SIZE`` and
+   ``TORCH_NCCL_TRACE_BUFFER_SIZE`` environment variables for
+   configuring the trace buffer size.
+4. {func}`destroy_process_group` calls ``finalize()`` on TorchComms
+   communicators during cleanup.
+5. {func}`split_group` creates sub-communicators through TorchComms'
+   native splitting rather than constructing a new process group from
+   scratch.
+
+### Eager initialization
+
+TorchComms communicators are eagerly initialized during
+{func}`init_process_group` and only support a single backend device per
+group. The ``device_id`` argument must be specified at initialization
+time:
+
+```python
+dist.init_process_group(backend="nccl", device_id=torch.device("cuda", local_rank))
+```
+
+### Point-to-point operation concurrency
+
+Each TorchComms process group maps 1:1 to a single underlying
+communicator. Point-to-point operations (``send``/``recv``) issued on
+the same group and stream are **not guaranteed to run concurrently**.
+Code that relies on concurrent point-to-point operations must either:
+
+- Use the batched P2P APIs ({func}`batch_isend_irecv`), or
+- Issue the operations on separate groups or communicators.
+
 (distributed-launch)=
 
 ## Launch utility
@@ -816,7 +943,22 @@ multiple processes per node for distributed training.
 
 ```{eval-rst}
 .. automodule:: torch.distributed.launch
+```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.launch
+```
+
+```{eval-rst}
+.. autofunction:: launch
+```
+
+```{eval-rst}
+.. autofunction:: main
+```
+
+```{eval-rst}
+.. autofunction:: parse_args
 ```
 
 ## Spawn utility
@@ -1288,6 +1430,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.collective_utils
+
+.. autofunction:: torch.distributed.collective_utils.all_gather_object_enforce_type
 ```
 
 ```{eval-rst}
@@ -1436,6 +1580,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.launcher.api
+
+.. autofunction:: torch.distributed.launcher.api.launch_agent
 ```
 
 ```{eval-rst}
