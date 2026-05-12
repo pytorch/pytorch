@@ -47,6 +47,16 @@ if not hasattr(_C, "_custom_op_fast_path_check"):
     def _custom_op_fast_path_check(args):
         """Pure-Python fallback for the C++ fast-path eligibility check.
 
+        Eligible when all of:
+        - No TorchFunctionMode active
+        - No TorchDispatchMode active (dispatch stack empty)
+        - TLS dispatch include set ⊆ {BackendSelect, ADInplaceOrView}
+        - No autocast (CUDA or CPU)
+        - Every tensor arg is exactly torch.Tensor (no subclasses)
+        - No nested, sparse, or quantized tensors
+        - All tensor args on the same device
+        - At least one tensor arg present
+
         Returns (device_type_str, any_requires_grad) or None."""
         from torch.overrides import _is_torch_function_mode_enabled
 
