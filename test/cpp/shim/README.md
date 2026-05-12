@@ -5,9 +5,9 @@ All shim functions expected to be used by a custom extension library should be t
 Some C shims are not so directly called, for example C shims that are meant for lower level usage (e.g., binding to rust).
 This directory is intended for tests that require finer grained testing than what can be provided with the end to end tests.
 
-Having a simple binary to test the lower level shims also makes it easy to run the tests in valgrind;
+To replicate how CI runs valgrind against the tests in this directory use:
 ```
-valgrind ./build/bin/test_shim
+./test/cpp/shim/run_test.sh ./build/bin/
 ```
 
 Tests relying only on the headeronly parts should go into `aoti_abi_check` instead.
