@@ -8,6 +8,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
+from ..ir import TensorBox
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -35,8 +36,6 @@ from .mm_common import load_kernel_template
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
@@ -598,6 +597,13 @@ def convolution(
     else:
         bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
         assert bias is not None
+
+        # Generic views need a layout-backed buffer before freeze_layout().
+        if isinstance(bias.data, ir.BaseView) and not isinstance(
+            bias.data, ir.ReinterpretView
+        ):
+            bias = TensorBox(ir.ExternKernel.require_contiguous(bias))
+
         args = [x, weight, bias]
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())

@@ -1046,6 +1046,19 @@ class CPUReproTests(TestCase):
                 (x,),
             )
 
+    def test_conv2d_view_bias_torch_compile(self):
+        def fn(x):
+            b = x.to(torch.bool).float()
+            return F.conv2d(b, b, b.flatten(), stride=1, padding=0)
+
+        x = torch.full((1, 1, 1, 1), 3.5)
+        eager = fn(x)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        actual = compiled(x)
+
+        torch.testing.assert_close(actual, eager)
+
     def test_acosh_with_negative_large_input(self):
         # https://github.com/pytorch/pytorch/issues/118267.
 
