@@ -30,6 +30,7 @@ import functools
 import inspect
 import logging
 import math
+import os
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
@@ -243,6 +244,16 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
 
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
+
+
+@functools.cache
+def _is_tensorify_enabled() -> bool:
+    from torch._utils_internal import justknobs_check
+
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
+
 
 dispatch_key_set_functions = {
     torch._C._dispatch_keys,
@@ -2108,14 +2119,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
+        @register(
+            torch.accelerator.current_stream,
+            torch.cuda.current_stream,
+            torch.xpu.current_stream,
+        )
         def handle_current_stream(
             self,
             tx: "InstructionTranslator",
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
-            from .streams import CudaStreamVariable
+            from .streams import _get_stream_variable_cls
 
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
@@ -2135,10 +2150,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     device = None
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
-                if self.value is torch.cuda.current_stream and not isinstance(
-                    stream_var, CudaStreamVariable
+                stream_variable_cls = _get_stream_variable_cls(self.value)
+                if stream_variable_cls is not None and not isinstance(
+                    stream_var, stream_variable_cls
                 ):
-                    stream_var = CudaStreamVariable(
+                    stream_var = stream_variable_cls(
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
@@ -2935,6 +2951,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and self.value.__name__ in bin_ops
             and any_symints_or_symfloats
             and all_ints_or_floats
+            and not _is_tensorify_enabled()
         ):
             msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
