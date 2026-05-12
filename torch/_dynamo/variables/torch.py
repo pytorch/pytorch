@@ -74,6 +74,7 @@ from ..source import (
     SyntheticLocalSource,
 )
 from ..utils import (
+    check_args_peekable_as_constant,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -505,7 +506,25 @@ class BaseTorchVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        dunder = "__ror__" if reverse else "__or__"
+        return self._nb_binop_impl(tx, other, "__or__", "__ror__", reverse)
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return self._nb_binop_impl(tx, other, "__sub__", "__rsub__", reverse)
+
+    def _nb_binop_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        forward: str,
+        reverse_dunder: str,
+        reverse: bool,
+    ) -> VariableTracker:
+        dunder = reverse_dunder if reverse else forward
         method = getattr(type(self.value), dunder, None)
         if method is None:
             return VariableTracker.build(tx, NotImplemented)
@@ -1333,12 +1352,50 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_has_torch_function(
             self, tx: "InstructionTranslator", *args: VariableTracker
         ) -> ConstantVariable:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                tf_state.skip_next = False
+                return VariableTracker.build(tx, False)
             elems = (
                 args[0].unpack_var_sequence(tx)
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch._C._skip_one_hop_torch_function)
+        def handle_skip_one_hop_torch_function(
+            self,
+            tx: "InstructionTranslator",
+            func: VariableTracker,
+            types: VariableTracker,
+            args: VariableTracker,
+            kwargs: VariableTracker,
+        ) -> VariableTracker:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                from torch._dynamo.exc import raise_observed_exception
+
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=[
+                        "you cannot skip two levels of __torch_function__, "
+                        "you need to run one level of __torch_function__ "
+                        "before being able to skip again."
+                    ],
+                )
+            tf_state.skip_next = True
+            tx.skip_one_hop_torch_function_depth += 1
+            try:
+                return func.call_function(
+                    tx,
+                    args.unpack_var_sequence(tx),
+                    kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
+                )
+            finally:
+                tx.skip_one_hop_torch_function_depth -= 1
+                tf_state.skip_next = False
 
         @register(
             *dict.fromkeys(  # remove duplicates
@@ -2862,6 +2919,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import SymNodeVariable
         from .builder import wrap_fx_proxy
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a
+                for a in args
+            ]
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
@@ -2872,8 +2936,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
 
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        if self.can_constant_fold_through() and (
+            check_unspec_or_constant_args(args, kwargs)
+            or check_args_peekable_as_constant(args, kwargs)
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
@@ -2884,6 +2949,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
+            from .base import AsPythonConstantNotImplementedError
+
             try:
                 return VariableTracker.build(
                     tx,
@@ -2892,6 +2959,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     ),
                 )
+            except AsPythonConstantNotImplementedError:
+                pass
             except (OverflowError, TypeError, ValueError) as exc:
                 raise_observed_exception(
                     type(exc),
