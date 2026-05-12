@@ -13,6 +13,7 @@
 
     StreamContext
     can_device_access_peer
+    clock_rate
     current_device
     current_stream
     device
@@ -29,11 +30,13 @@
     is_bf16_supported
     is_initialized
     is_tf32_supported
+    power_draw
     set_device
     set_stream
     stream
     synchronize
     temperature
+    utilization
 ```
 
 ## Random Number Generator
