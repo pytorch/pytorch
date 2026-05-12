@@ -3,6 +3,7 @@
 import copy
 import gc
 import inspect
+import logging
 import os
 import runpy
 import sys
@@ -67,6 +68,8 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+log = logging.getLogger(__name__)
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -337,6 +340,13 @@ class DeviceTypeTestBase(TestCase):
     # in the future.
     op_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
 
+    # An optional mechanism to limit which ops generate test variants.
+    # When set, only ops whose full_name is in this collection will generate tests.
+    # This is useful for less mature backends that only implement a few operators.
+    # Keys are OpInfo.full_name (e.g. "add", "mul", "linalg.norm").
+    # If None (default), all ops in the @ops decorator's op_list generate variants.
+    op_allowlist = None  # type: Optional[Collection[str]]
+
     # An optional skip mechanism built upon instantiate_device_type_tests(),
     # designed to facilitate skipping either an entire class or specific test cases
     # within a class.
@@ -346,7 +356,7 @@ class DeviceTypeTestBase(TestCase):
     #       "TestClassA": ["test_a", "test_b"],   # Selective: Skips specific
     #       "TestClassB": "*",                    # Global: Skips the entire class
     #   }
-    test_exclusions: ClassVar[dict[str, Collection[str]]]
+    test_exclusions: ClassVar[dict[str, Collection[str]] | None] = None
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -407,6 +417,23 @@ class DeviceTypeTestBase(TestCase):
         return []
 
     @classmethod
+    def _apply_op_allowlist(cls, ops):
+        """Filters ops.op_list to only include ops declared in op_allowlist.
+
+        If op_allowlist is None (default), no filtering is applied.
+        If op_allowlist is set, only ops whose full_name is in the collection
+        will generate test variants.
+
+        Args:
+            ops: The ops decorator instance whose op_list will be filtered.
+        """
+        if cls.op_allowlist is None:
+            return
+
+        supported_set = set(cls.op_allowlist)
+        ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
+
+    @classmethod
     def _init_and_get_primary_device(cls):
         try:
             return cls.get_primary_device()
@@ -456,6 +483,26 @@ class DeviceTypeTestBase(TestCase):
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
+
+    @classmethod
+    def set_test_configs(
+        cls,
+        *,
+        op_overrides=None,
+        op_allowlist=None,
+        test_exclusions=None,
+    ):
+        """
+        Sets or resets the test configuration fields.
+
+        WARNING: This method is designed to perform a FULL replacement of the
+        current configuration. Calling this method without any arguments will
+        act as a "reset", clearing all stored configurations back to their
+        default `None` state.
+        """
+        cls.op_overrides = op_overrides
+        cls.op_allowlist = op_allowlist
+        cls.test_exclusions = test_exclusions
 
     # Creates device-specific tests.
     @classmethod
@@ -1151,6 +1198,9 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        # Order matters: op_allowlist filters first, then op_overrides adds decorators
+        # This ensures op_overrides only applies to ops that passed the op_allowlist filter
+        device_cls._apply_op_allowlist(self)
         device_cls._apply_op_overrides(self)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
@@ -1271,9 +1321,13 @@ class ops(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print(f"Failed to instantiate {test_name} for op {op.name}!")
+                    log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
         if op is check_exhausted_iterator:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
             raise ValueError(
                 "An empty op_list was passed to @ops. "
                 "Note that this may result from reuse of a generator."
@@ -1407,7 +1461,7 @@ def _has_sufficient_memory(device, size):
     if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device_type != "cpu":
+    if device_type not in ["cpu", "mps"]:
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
@@ -1759,6 +1813,19 @@ def onlyPRIVATEUSE1(fn):
         reason = f"Skip as torch has no module of {device_type}"
         return unittest.skip(reason)(fn)
     return onlyOn(device_type)(fn)
+
+
+def onlyAccelerator(fn):
+    """Skip test if not running on an accelerator device (i.e., skip on CPU and meta)."""
+
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type in ("cpu", "meta"):
+            reason = "onlyAccelerator: doesn't run on CPU or meta devices"
+            raise unittest.SkipTest(reason)
+        return fn(self, *args, **kwargs)
+
+    return only_fn
 
 
 def onlyCUDAAndPRIVATEUSE1(fn):

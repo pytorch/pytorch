@@ -165,7 +165,8 @@ def impl_MATCH_CLASS(
 
 
 def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
-    assert isinstance(obj, Mapping)
+    if not isinstance(obj, Mapping):
+        raise AssertionError(f"Expected a Mapping, got {type(obj)}")
     if all(key in obj for key in keys):
         return tuple(obj[key] for key in keys)
     else:
@@ -174,12 +175,22 @@ def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | 
 
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
+    # CPython: PySequence_Contains → _PySequence_IterSearch → PyObject_GetIter
+    # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
-        # use __iter__ if __contains__ is not available
         for x in b:
             if x == a:
                 return True
         return False
+    if hasattr(b, "__getitem__"):
+        i = 0
+        while True:
+            try:
+                if b.__getitem__(i) == a:
+                    return True
+                i += 1
+            except IndexError:
+                return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
@@ -557,7 +568,7 @@ def predicate(obj: object) -> bool:
 
 def cmp_eq(a: object, b: object) -> bool:
     # Note that the commented `is` check should ideally be removed. This is a
-    # CPython optimization that skips the __eq__ checks it the obj id's are
+    # CPython optimization that skips the __eq__ checks if the obj id's are
     # same. But, these lines adds many `is` nodes in the Fx graph for
     # SymNodeVariable. For now, we can just skip this check. This is STILL
     # correct because one of the __eq__ checks will pass later, just could be
