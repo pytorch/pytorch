@@ -542,6 +542,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
+        # Maps generated CSE names back to their original index expressions so
+        # vector-load analysis can reason about the source indexing semantics.
         self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
@@ -617,11 +619,13 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         all indices are static, emit a single-element fragment; otherwise size
         the value fragment to match the dynamic index lanes.
         """
-        first_index_fragment = next(
+        dynamic_index_fragment = next(
             (idx for idx in idx_vars if not idx.is_static_int), None
         )
+        # Dynamic index fragments all carry the same vector-lane shape, so one
+        # representative fragment is enough to size the loaded value fragment.
         val_frag = self.kernel.cse.newvar(dtype=var_dtype)
-        if first_index_fragment is None:
+        if dynamic_index_fragment is None:
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
             )
@@ -632,7 +636,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         self.kernel.body.writeline(
             f"{val_frag} = cute.make_rmem_tensor("
-            f"cute.size({first_index_fragment.code}.shape), {cute_dtype})"
+            f"cute.size({dynamic_index_fragment.code}.shape), {cute_dtype})"
         )
         vector_dim = self._vector_load_dim(len(idx_vars))
         if self._can_emit_contiguous_dim_load(idx_vars, buffer, var_dtype, vector_dim):
@@ -683,15 +687,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
 
     def _vector_load_vec_size(self) -> int:
-        value = self.fixed_inputs.get(
-            "vector_load_vec_size", self.fixed_inputs.get("score_mod_vec_size", 1)
-        )
+        value = self.fixed_inputs.get("vector_load_vec_size", 1)
         return int(1 if value is None else value)
 
-    def _vector_load_index_symbol(self) -> sympy.Symbol:
-        return sympy_index_symbol(
-            str(self.fixed_inputs.get("vector_load_index", "kv_idx"))
-        )
+    def _vector_load_index_symbol(self) -> sympy.Symbol | None:
+        value = self.fixed_inputs.get("vector_load_index")
+        return None if value is None else sympy_index_symbol(str(value))
 
     def _vector_load_dim(self, ndim: int) -> int:
         dim = int(self.fixed_inputs.get("vector_load_dim", ndim - 1))
@@ -801,17 +802,23 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         semantic_expr = self._semantic_index_expr(expr)
         vector_index = self._vector_load_index_symbol()
-        lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
-            semantic_expr, vector_index, self._vector_load_vec_size()
-        )
-        raw_contiguous_width = lane_contiguity.contiguous_width
-        contiguous_width = self._aligned_contiguous_width(
-            semantic_expr,
-            vector_index,
-            raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
-        )
-        is_lane_uniform = self._is_lane_uniform_expr(semantic_expr, vector_index)
-        is_contiguous = lane_contiguity.stride == 1 and contiguous_width is not None
+        vector_size = self._vector_load_vec_size()
+        if vector_index is None or vector_size <= 1:
+            is_lane_uniform = False
+            is_contiguous = False
+            contiguous_width = None
+        else:
+            lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
+                semantic_expr, vector_index, vector_size
+            )
+            raw_contiguous_width = lane_contiguity.contiguous_width
+            contiguous_width = self._aligned_contiguous_width(
+                semantic_expr,
+                vector_index,
+                raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
+            )
+            is_lane_uniform = self._is_lane_uniform_expr(semantic_expr, vector_index)
+            is_contiguous = lane_contiguity.stride == 1 and contiguous_width is not None
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_fragment({self.kernel.kexpr(expr)}, {cute_dtype})"
@@ -837,7 +844,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return None
 
     def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
-        """Recover the original score_mod index meaning from generated CSE names."""
+        """Recover the original index meaning from generated CSE names."""
         replacements: dict[sympy.Symbol, sympy.Expr] = dict(
             self._semantic_index_replacements
         )
@@ -856,6 +863,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _is_lane_uniform_expr(
         self, expr: sympy.Expr, vector_index: sympy.Symbol
     ) -> bool:
+        """Return true when expr depends only on non-vectorized indices."""
         allowed_symbols = OrderedSet(
             sympy_index_symbol(source_expr)
             for source_expr in self.kernel.cse._cache
