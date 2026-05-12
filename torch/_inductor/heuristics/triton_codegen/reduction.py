@@ -510,7 +510,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         target = last_power_of_2(triton_meta["device"].multi_processor_count)
         split = max(1, min((rnumel, target // xnumel, TRITON_MAX_RSPLIT)))
-        if inductor_meta["persistent_reduction"]:
+        if inductor_meta.get("persistent_reduction", False):
             configs = self.get_persistent_configs(
                 size_hints={"x": xnumel, "r0_": rnumel // split},
                 reduction_hint=reduction_hint,
@@ -674,7 +674,7 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 # ------------------------------------------------------------------
 
 
-@register_codegen_heuristic("reduction", "xpu", register=torch.xpu.is_available())
+@register_codegen_heuristic("reduction", "xpu", register=torch.xpu._is_compiled())
 class XPUReductionHeuristic(ReductionHeuristic):
     """Reduction configs for XPU devices."""
 

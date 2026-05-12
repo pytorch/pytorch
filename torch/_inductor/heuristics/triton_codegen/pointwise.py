@@ -190,7 +190,7 @@ class ROCmPointwiseHeuristic(PointwiseHeuristic):
 # ----------------------------------------------------------------------
 
 
-@register_codegen_heuristic("pointwise", "xpu", register=torch.xpu.is_available())
+@register_codegen_heuristic("pointwise", "xpu", register=torch.xpu._is_compiled())
 class XPUPointwiseHeuristic(PointwiseHeuristic):
     """Pointwise configs for XPU devices."""
 

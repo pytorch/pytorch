@@ -187,7 +187,6 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        import types
 
         triton_meta = {"device": torch.device(GPU_TYPE)}
         inductor_meta_common = {"autotune_pointwise": False}
