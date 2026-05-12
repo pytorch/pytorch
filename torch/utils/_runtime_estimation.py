@@ -74,7 +74,25 @@ _CREATE_OPS = OrderedSet(
 _IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 
-def flops_to_ns(flops: float | int, dtype: "torch.dtype") -> float:
+def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-untyped-def]
+    if isinstance(value, torch.Tensor):
+        return value.device
+
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            device = _get_device_from_value(item)
+            if device is not None:
+                return device
+
+    if isinstance(value, dict):
+        for item in value.values():
+            device = _get_device_from_value(item)
+            if device is not None:
+                return device
+
+    return None
+
+def flops_to_ns(flops: float | int, dtype: "torch.dtype",  device: torch.device | None = None) -> float:
     """Convert a FLOPs count to estimated nanoseconds on the current GPU.
 
     Uses 75% of theoretical peak and converts FLOPs to MACs (divide by 2).
@@ -83,7 +101,8 @@ def flops_to_ns(flops: float | int, dtype: "torch.dtype") -> float:
     if device_tflops is None or device_tflops == 0:
         return 0.0
 
-    peak_gpu_flops = device_tflops * 1e15
+    peak_gpu_flops = device_tflops * 1e12
+
 
     if peak_gpu_flops == 0:
         return 0.0
@@ -121,7 +140,9 @@ def get_compute_time(
         if node_meta is not None:
             extra_kwargs["_node_meta"] = node_meta
         flop_count = flop_count_func(*args, **kwargs, out_val=out, **extra_kwargs)
-        return flops_to_ns(flop_count, dtype)
+
+        device = _get_device_from_value(out)
+        return flops_to_ns(flop_count, dtype, device=device)
     return 0.0
 
 
