@@ -666,7 +666,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         strides = buffer.get_stride()
         score_mod_vec_size = self._score_mod_vec_size()
         return (
-            V.graph.sizevars.statically_known_equals(strides[-1], 1)
+            score_mod_vec_size > 1
+            and V.graph.sizevars.statically_known_equals(strides[-1], 1)
             and idx_vars[-1].contiguous_width is not None
             and idx_vars[-1].contiguous_width >= score_mod_vec_size
             and V.graph.sizevars.statically_known_multiple_of(
@@ -776,7 +777,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         semantic_expr = self._semantic_index_expr(expr)
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
-            semantic_expr, sympy_index_symbol("kv_idx"), 8
+            semantic_expr, sympy_index_symbol("kv_idx"), self._score_mod_vec_size()
         )
         raw_contiguous_width = lane_contiguity.contiguous_width
         contiguous_width = self._aligned_contiguous_width(

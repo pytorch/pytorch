@@ -81,7 +81,7 @@ def _select_aux_score_mod_vec_size(
         node for node in graph_module.graph.nodes if node.op == "placeholder"
     ]
     if len(placeholders) < 5:
-        return 8
+        return 1
 
     capture_to_buffer = dict(zip(placeholders[5:], score_mod_other_buffers))
     selected_vec_size = 8
