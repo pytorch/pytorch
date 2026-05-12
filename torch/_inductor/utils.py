@@ -455,6 +455,29 @@ def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.E
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
+def flatten_index(
+    indices: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
+) -> sympy.Expr:
+    """Row-major flatten: per-dimension indices -> flat index."""
+    assert len(indices) == len(sizes)
+    flat = sympy.S.Zero
+    for index, size in zip(indices, sizes):
+        flat = flat * size + index
+    return flat
+
+
+def decompose_index(
+    index: sympy.Expr,
+    sizes: Sequence[sympy.Expr],
+) -> list[sympy.Expr]:
+    """Row-major decomposition: flat index -> per-dimension indices."""
+    return [
+        ModularIndexing(index, sympy_product(sizes[i + 1 :]), size)
+        for i, size in enumerate(sizes)
+    ]
+
+
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
@@ -1148,6 +1171,10 @@ def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:
 
 def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
+
+
+def prefix_is_pointwise(prefix: str) -> bool:
+    return prefix[0] in ("x", "y", "z")
 
 
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
@@ -3833,6 +3860,13 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.tpu_backend
     else:
         return config.cuda_backend
+
+
+def device_supports_fp64(device: torch.device | None) -> bool:
+    """Check if the given device supports float64."""
+    if device is not None and device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
