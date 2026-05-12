@@ -59,6 +59,7 @@ class _ZesDeviceInfo:
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
+    engine_handle: c_void_p | None = None
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
@@ -1052,6 +1053,121 @@ def power_draw(device: Device = None) -> float:
     return (power_energy.energy - energy_start) / dt
 
 
+def _get_zes_engine_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU engine group handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.engine_handle`` so that
+    repeated calls skip group enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.engine_handle is not None:
+        return info.engine_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # Enumerate all engine groups under this device handle.
+    # For tiled dGPUs each sub-device's group are under the root handle.
+    engine_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None),
+        "Can't get Level Zero Sysman engine group count.",
+    )
+    if engine_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman engine groups found.")
+    engine_handles = (pyzes.zes_engine_handle_t * engine_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumEngineGroups(
+            device_handle, byref(engine_count), engine_handles
+        ),
+        "Can't get Level Zero Sysman engine group handles.",
+    )
+
+    # Select the GPU engine group matching this device:
+    #   - Tiled dGPU (subdevice_id set): use the per-tile engine group
+    #     whose subdeviceId matches.
+    #   - Non-tiled: use the root-level (non-subdevice) engine group.
+    # Raises RuntimeError if no matching engine group is found.
+    engine_handle = None
+    for eng_handle in engine_handles:
+        eng_props = pyzes.zes_engine_properties_t()
+        eng_props.stype = pyzes.ZES_STRUCTURE_TYPE_ENGINE_PROPERTIES
+        _zes_check(
+            pyzes.zesEngineGetProperties(eng_handle, byref(eng_props)),
+            "Can't get Level Zero Sysman engine properties.",
+        )
+        if eng_props.type != pyzes.ZES_ENGINE_GROUP_ALL:
+            continue
+        if subdevice_id is not None:
+            # Tiled dGPU: match the per-tile engine group for this sub-device.
+            if eng_props.onSubdevice and eng_props.subdeviceId == subdevice_id:
+                engine_handle = eng_handle
+                break
+        else:
+            # Non-tiled or root device: pick the root-level engine group.
+            if not eng_props.onSubdevice:
+                engine_handle = eng_handle
+                break
+
+    if engine_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU engine handle found.")
+    info.engine_handle = engine_handle
+    return engine_handle
+
+
+def utilization(device: Device = None) -> float:
+    r"""Return the GPU utilization as a percentage.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU utilization information.
+    """
+    engine_handle = _get_zes_engine_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    engine_stats = pyzes.zes_engine_stats_t()
+    rc = pyzes.zesEngineGetActivity(engine_handle, byref(engine_stats))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU utilization querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            f"Can't get Level Zero Sysman GPU engine activity (rc={rc})."
+        )
+    active_start = engine_stats.activeTime
+    timestamp_start = engine_stats.timestamp
+    _zes_check(
+        pyzes.zesEngineGetActivity(engine_handle, byref(engine_stats)),
+        "Can't get Level Zero Sysman GPU engine activity.",
+    )
+    # activeTime and timestamp are monotonic counters in microseconds.
+    dt = engine_stats.timestamp - timestamp_start
+    if dt == 0:
+        return 0.0
+    return (engine_stats.activeTime - active_start) / dt * 100
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -1147,4 +1263,5 @@ __all__ = [
     "streams",
     "synchronize",
     "temperature",
+    "utilization",
 ]
