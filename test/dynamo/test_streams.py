@@ -2270,6 +2270,105 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(actual_default, default_s.cuda_stream)
 
 
+class TestStreamsAcrossGraphBreak(torch._dynamo.test_case.TestCase):
+    """A ``Stream`` local that is bound before a graph break and reused
+    afterwards (e.g. ``cur = torch.cuda.current_stream()`` before, then
+    ``cur.wait_event(evt)`` after) must survive the break.  Dynamo's
+    graph-break recovery code in ``symbolic_convert.py`` iterates over
+    ``locals_ctx_args`` and calls ``ctx.reconstruct_type(cg)`` on every
+    local that is a :class:`ContextWrappingVariable`.
+    :class:`StreamVariable` inherits from
+    :class:`StreamContextVariable` (the ``with torch.cuda.stream(s):``
+    context manager), which inherits from
+    :class:`FxTracebackAnnotateVariable`; the latter's
+    ``reconstruct_type`` raises ``Unsupported`` ("torch.fx.traceback.annotate
+    escaped from compiled region"), turning the otherwise-resumable
+    break into an ungraceful one.  The result is that the post-break
+    portion of the function is dropped from the captured graph and
+    silently falls back to eager -- including any
+    ``Stream.wait_event(event)`` calls that were supposed to be in the
+    graph.  The downstream effect is the same as the
+    proxy-mode-emission bug: missing cross-stream synchronisation,
+    potential ``cudaErrorStreamCaptureInvalidated`` under CUDA Graph
+    capture.
+    """
+
+    @requires_cuda
+    def test_stream_local_reused_after_graph_break(self) -> None:
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        captured: list[torch.fx.GraphModule] = []
+
+        def _fw_compiler(gm, example_inputs):
+            del example_inputs
+            captured.append(gm)
+            return gm
+
+        def _capturing_backend(gm, example_inputs):
+            return aot_module_simplified(gm, example_inputs, fw_compiler=_fw_compiler)
+
+        def _fn(x):
+            evt = torch.cuda.Event()
+            cur = torch.cuda.current_stream()
+            evt.record(cur)
+            torch._dynamo.graph_break()
+            # `cur` is reused across the break — this is the trigger.
+            cur.wait_event(evt)
+            # pyrefly: ignore [missing-attribute]
+            return torch.sigmoid(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(_fn, backend=_capturing_backend, fullgraph=False)
+        # pyrefly: ignore [missing-attribute]
+        compiled(torch.randn(8, device="cuda"))
+        torch.cuda.synchronize()
+
+        record_op = torch.ops.streams.record_event.default
+        wait_op = torch.ops.streams.wait_event.default
+
+        # Count record_event nodes across all captured forward graphs,
+        # including any nested under control_deps subgraphs.
+        def _count_op(graph_module, target):
+            total = 0
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target is target:
+                    total += 1
+            for _name, sub in graph_module.named_children():
+                if isinstance(sub, torch.fx.GraphModule):
+                    total += _count_op(sub, target)
+            return total
+
+        total_record = sum(_count_op(gm, record_op) for gm in captured)
+        total_wait = sum(_count_op(gm, wait_op) for gm in captured)
+        total_sigmoid = sum(
+            sum(
+                1
+                for node in gm.graph.nodes
+                if node.op == "call_function"
+                and node.target is torch.ops.aten.sigmoid.default
+            )
+            for gm in captured
+        )
+
+        graphs = "\n\n".join(str(gm.graph) for gm in captured)
+        self.assertEqual(
+            total_record,
+            1,
+            f"expected 1 streams.record_event in captured graphs:\n{graphs}",
+        )
+        self.assertEqual(
+            total_wait,
+            1,
+            f"expected 1 streams.wait_event in captured graphs:\n{graphs}",
+        )
+        self.assertEqual(
+            total_sigmoid,
+            1,
+            f"expected 1 aten.sigmoid in captured graphs (post-break body "
+            f"was dropped):\n{graphs}",
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

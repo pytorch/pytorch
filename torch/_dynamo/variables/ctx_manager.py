@@ -75,6 +75,21 @@ class ContextWrappingVariable(VariableTracker):
         self.target_values = target_values
         self.initial_values = initial_values
 
+    def is_active_ctx_manager_local(self) -> bool:
+        """Whether dynamo's graph-break recovery should track this
+        variable as an inactive-context-manager local (i.e. emit code
+        that replaces the local with the ctx-manager class so the
+        resume function can re-decorate / re-enter it).
+
+        Subclasses that are syntactically a :class:`ContextWrappingVariable`
+        but semantically just a value (e.g. :class:`StreamVariable` --
+        a stream object that *can* be used in a ``with`` block but
+        usually isn't) should override this to return ``False`` so the
+        local survives across breaks via plain value reconstruction
+        instead.
+        """
+        return True
+
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         if hasattr(self, "_call_func"):
             self._call_func(tx, self.target_values)

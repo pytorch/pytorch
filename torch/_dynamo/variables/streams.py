@@ -558,6 +558,19 @@ class StreamVariable(StreamContextVariable):
             name = codegen.tx.output.install_global_by_id(prefix, self.value)
             codegen.append_output(codegen.create_load_global(name, add=True))
 
+    def is_active_ctx_manager_local(self) -> bool:
+        # A plain ``cur = torch.cuda.current_stream()`` local is a
+        # stream value, not a context manager, even though
+        # :class:`StreamVariable` inherits from
+        # :class:`StreamContextVariable` (which models the
+        # ``with torch.cuda.stream(s):`` ctx manager).  Tell dynamo's
+        # graph-break recovery to keep this local as an ordinary value
+        # rather than try to ``reconstruct_type`` it -- otherwise it
+        # lands in :meth:`FxTracebackAnnotateVariable.reconstruct_type`
+        # which bails ungracefully with "torch.fx.traceback.annotate
+        # escaped from compiled region", dropping the post-break code.
+        return False
+
     def get_stream(self) -> "StreamVariable":
         return self
 

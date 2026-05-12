@@ -1856,7 +1856,10 @@ class OutputGraph(OutputGraphCommon):
                         "variable should never be NULL in Python < 3.12"
                     )
             meta.locals_names[k] = len(meta.locals_names)
-            if isinstance(v, ContextWrappingVariable):
+            if (
+                isinstance(v, ContextWrappingVariable)
+                and v.is_active_ctx_manager_local()
+            ):
                 target_values = (
                     () if v.target_values is None else tuple(v.target_values)
                 )
