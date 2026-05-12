@@ -2414,27 +2414,26 @@ class TestHierarchicalIndex(InductorTestCase):
 
         flash_vs_triton(q, k, v, score_mod=score_mod_4d)
 
-        compiled_fn = torch.compile(flex_attention)
-        _, code = run_and_get_code(
-            compiled_fn,
-            q,
-            k,
-            v,
-            score_mod=score_mod_4d,
-            kernel_options={"BACKEND": "FLASH"},
-        )
+        with torch._inductor.config.patch(force_disable_caches=True):
+            with force_flex_flash_score_mod_vec_size(8):
+                torch._dynamo.reset()
+                _, code = run_and_get_code(
+                    torch.compile(flex_attention),
+                    q,
+                    k,
+                    v,
+                    score_mod=score_mod_4d,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
         code_str = "\n".join(code)
 
-        for expected_pattern in (
-            "cute.local_tile(in_ptr4",
-            "tmp5[0], tmp6[0], tmp7[0]",
-            "cute.autovec_copy",
-        ):
-            self.assertIn(
-                expected_pattern,
-                code_str,
-                f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
-            )
+        self.assertIn("score_mod.__vec_size__ = 8", code_str)
+        self.assertIn("cute.autovec_copy", code_str)
+        self.assertRegex(
+            code_str,
+            r"cute\.local_tile\(in_ptr4, \(1, 1, 1, cute\.size\([^)]*\.shape\)\), "
+            r"\([^,]+\[0\], [^,]+\[0\], [^,]+\[0\], [^)]* // cute\.size\([^)]*\.shape\)\)\)",
+        )
 
 
 if __name__ == "__main__":
