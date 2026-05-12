@@ -129,6 +129,10 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             def retrieve_const_key(key: VariableTracker) -> Any:
+                from ..utils import specialize_symnode
+
+                # Unwrap LazyVariableTracker to get the underlying variable
+                key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
                 elif key.is_python_constant():
@@ -322,7 +326,8 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4189-L4216
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("CountIteratorVariable must be mutable for next()")
         old_item = self.item
         tx.output.side_effects.mutation(self)
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
@@ -363,7 +368,9 @@ class ZipVariable(IteratorVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(iterable, variables.TupleVariable)
+        if not isinstance(iterable, variables.TupleVariable):
+            raise AssertionError(f"Expected a tuple of iterables, got {type(iterable)}")
+        # can be list[Variable] or VariableTracker (with next_variable implemented)
         self.iterable = iterable
         self.strict = strict
 
@@ -372,7 +379,8 @@ class ZipVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2906-L2994
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("ZipVariable must be mutable for next()")
         tuplesize = len(self.iterable.items)
 
         if tuplesize == 0:
@@ -446,7 +454,10 @@ class MapVariable(IteratorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.fn = fn
-        assert isinstance(iterables, variables.TupleVariable)
+        if not isinstance(iterables, variables.TupleVariable):
+            raise AssertionError(
+                f"Expected a tuple of iterables, got {type(iterables)}"
+            )
         self.iterable = iterables
         self.strict = strict
 
@@ -458,7 +469,8 @@ class MapVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("MapVariable must be mutable for next()")
 
         tuplesize = len(self.iterable.items)
 
@@ -498,9 +510,10 @@ class MapVariable(IteratorVariable):
         )
         codegen(variables.TupleVariable([self.fn, *self.iterable.items]))
         if self.strict:
-            assert sys.version_info >= (3, 14), (
-                "Unexpected bug: map(strict=True) requires Python 3.14+"
-            )
+            if sys.version_info < (3, 14):
+                raise AssertionError(
+                    "Unexpected bug: map(strict=True) requires Python 3.14+"
+                )
             codegen.extend_output(
                 [
                     codegen.create_load_const("strict"),
@@ -577,7 +590,10 @@ class DictViewIterator(IteratorVariable):
         elif self.view_type == "values":
             self._iter = iter(items.values())  # type: ignore[bad-assignment]
         else:
-            assert self.view_type == "items"
+            if self.view_type != "items":
+                raise AssertionError(
+                    f"Expected view_type 'items', got {self.view_type!r}"
+                )
             self._iter = iter(items.items())  # type: ignore[bad-assignment]
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
