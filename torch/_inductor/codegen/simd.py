@@ -2463,9 +2463,7 @@ class SIMDScheduling(BaseScheduling):
             scheduler.NestedReduction._classify_nested_pointwise_nodes(
                 outer_node,
                 grouped_node,
-                node.grouped_reduction,
-                grouped_numel,
-                grouped_rnumel,
+                node.domain_context,
             )
         )
         assert nested_pointwise_domains is not None
