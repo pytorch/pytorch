@@ -326,8 +326,29 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
   auto x_data_type = is_fp8
       ? dnnl::memory::data_type::f8_e4m3
       : dnnl::memory::data_type::u8;
-  auto w_desc = ideep::matmul_forward::expected_weights_desc(
+  dnnl::memory::desc w_desc;
+
+#if defined(__aarch64__)
+  // We construct the pd with f32 dst dtype to trigger optimized blocked layout
+  auto engine = ideep::engine::cpu_engine();
+  auto weights_dims = wei.get_dims();
+  auto ndims = weights_dims.size();
+  auto x_dims = weights_dims;
+  // M is input_shape[ndims-2] if available, otherwise default to 1.
+  x_dims[ndims-2] = input_dims.size() > 0 && input_dims.size() == ndims ? input_dims[ndims-2] : 1;
+  x_dims[ndims - 1] = weights_dims[ndims - 2];
+  auto y_dims = (ndims == 3) ? ideep::dims({x_dims[0], x_dims[1], weights_dims[2]})
+                               : ideep::dims({x_dims[0], weights_dims[1]});
+  auto tag = (ndims == 3) ? dnnl::memory::format_tag::abc : dnnl::memory::format_tag::ab;
+  auto src_md = dnnl::memory::desc(x_dims, x_data_type, tag);
+  auto wei_md = dnnl::memory::desc(weights_dims, w_data_type, dnnl::memory::format_tag::any);
+  auto dst_md = dnnl::memory::desc(y_dims, dnnl::memory::data_type::f32, tag);
+  auto pd = dnnl::matmul::primitive_desc(engine, src_md, wei_md, dst_md, op_attr);
+  w_desc = pd.weights_desc();
+#else
+  w_desc = ideep::matmul_forward::expected_weights_desc(
       wei.get_dims(), input_dims, w_data_type, x_data_type, op_attr);
+#endif
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
   auto packed_weight = at::native::new_with_itensor_mkldnn(
