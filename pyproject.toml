@@ -108,7 +108,7 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "BSD-3-Clause"
+license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT"
 license-files = [
     "LICENSE",
     "third_party/**/LICENSE",
