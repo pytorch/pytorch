@@ -402,6 +402,17 @@ class TestSlotsAttrAssignment(TestCase):
         self.assertEqual(compiled_obj.x, 2)
         self.assertEqual(compiled_obj.__dict__["y"], 3)
 
+    def test_dunder_dict_assignment_updates_attribute_lookup(self):
+        class Foo:
+            __slots__ = ("__dict__",)
+
+        def fn(t):
+            obj = Foo()
+            obj.__dict__ = {"y": 2}
+            return t + obj.y + obj.__dict__["y"]
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
     def test_slot_assignment_no_recompile_same_type(self):
         # Calling compiled fn repeatedly with the same slotted object type
         # must not trigger recompilation

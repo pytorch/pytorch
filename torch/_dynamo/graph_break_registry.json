@@ -2217,6 +2217,16 @@
       ]
     }
   ],
+  "GB7637": [
+    {
+      "Gb_type": "non-string key in object __dict__",
+      "Context": "key={key_value}",
+      "Explanation": "Dynamo expects object __dict__ keys to be strings.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",

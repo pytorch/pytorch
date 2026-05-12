@@ -2372,6 +2372,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.ConstantVariable.create(None)
 
             if isinstance(descriptor, types.GetSetDescriptorType):
+                if name_str == "__dict__":
+                    self.dict_vt = None
                 tx.output.side_effects.store_generic_attr(self, name_str, value)
                 return variables.ConstantVariable.create(None)
 
@@ -2801,6 +2803,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if not isinstance(result, variables.DeletedVariable):
                 return result
+            skip_instance_dict = True
+        elif tx.output.side_effects.has_pending_generic_mutation_of_attr(
+            self, "__dict__"
+        ):
+            dict_vt = self.get_dict_vt(tx)
+            if dict_vt.contains(name):
+                return dict_vt.getitem(name)
             skip_instance_dict = True
         if (
             not skip_instance_dict
