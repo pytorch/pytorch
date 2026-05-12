@@ -232,7 +232,9 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+#ifndef XNNPACK_NO_CODE_CACHE
       nullptr,                                                        // xnn_caches_t
+#endif
       nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   } else {
@@ -262,7 +264,9 @@ ContextConv2D create(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
+#ifndef XNNPACK_NO_CODE_CACHE
       nullptr,                                                        // xnn_caches_t
+#endif
       nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   }
@@ -353,7 +357,9 @@ Tensor run(
       output.data_ptr<float>());                             // output
   } else {
     size_t workspace_size = SIZE_MAX;
+#ifndef XNNPACK_NO_CODE_CACHE
     size_t workspace_alignment = SIZE_MAX;
+#endif
 
     setup_status = xnn_reshape_convolution2d_nhwc_f32(
       context.op.get(),
@@ -361,7 +367,9 @@ Tensor run(
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       &workspace_size,                                       // workspace_size
+#ifndef XNNPACK_NO_CODE_CACHE
       &workspace_alignment,                                  // workspace_alignment
+#endif
       nullptr,                                               // output_height_out
       nullptr,                                               // output_width_out
       caffe2::pthreadpool_());

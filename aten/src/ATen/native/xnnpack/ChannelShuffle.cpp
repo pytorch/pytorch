@@ -11,6 +11,10 @@ bool use_channel_shuffle(
     const int64_t groups) {
   using namespace internal;
 
+#ifdef XNNPACK_NO_CODE_CACHE
+  // channel_shuffle was removed from XNNPACK upstream.
+  return false;
+#else
   // Here are the list of conditions required for this code path to be taken:
   // * Input must be 4D CPU float tensor with no gradients and
   //   and all dimensions must be positive.
@@ -30,8 +34,10 @@ bool use_channel_shuffle(
       groups > 1 &&
       (0 == input.size(Layout::Activation4D::channels) % groups) &&
       true;
+#endif
 }
 
+#ifndef XNNPACK_NO_CODE_CACHE
 Tensor channel_shuffle(
     const Tensor& input,
     const int64_t groups) {
@@ -107,6 +113,13 @@ Tensor channel_shuffle(
 
   return output_padded_contig_nhwc.contiguous(input.suggest_memory_format());
 }
+#else
+Tensor channel_shuffle(
+    const Tensor& input,
+    const int64_t groups) {
+  TORCH_CHECK(false, "XNNPACK channel_shuffle not available in this build");
+}
+#endif
 
 } // namespace at::native::xnnpack
 
