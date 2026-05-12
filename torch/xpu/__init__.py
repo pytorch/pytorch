@@ -58,6 +58,7 @@ class _ZesDeviceInfo:
     is_integrated: bool = False
     temperature_handle: c_void_p | None = None
     frequency_handle: c_void_p | None = None
+    power_handle: c_void_p | None = None
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
@@ -962,6 +963,95 @@ def clock_rate(device: Device = None) -> float:
     return freq_state.actual
 
 
+def _get_zes_power_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU power domain handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.power_handle`` so that
+    repeated calls skip domain enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.power_handle is not None:
+        return info.power_handle
+
+    device_handle = info.device_handle
+
+    # Enumerate all power domains under this device handle.
+    # For tiled dGPUs each sub-device's domains are under the root handle.
+    power_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumPowerDomains(device_handle, byref(power_count), None),
+        "Can't get Level Zero Sysman power domains count.",
+    )
+    if power_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman power domains found.")
+    power_handles = (pyzes.zes_pwr_handle_t * power_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumPowerDomains(
+            device_handle, byref(power_count), power_handles
+        ),
+        "Can't get Level Zero Sysman power domain handles.",
+    )
+
+    # TODO: pyzes lacks zesPowerGetProperties, so we cannot filter by
+    # subdevice or domain type. We assume index 0 (ZES_POWER_DOMAIN_CARD)
+    # is the GPU card power domain.
+    power_handle = power_handles[0]
+    info.power_handle = power_handle
+    return power_handle
+
+
+def power_draw(device: Device = None) -> float:
+    r"""Return the GPU power draw in watts.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU power information.
+    """
+    power_handle = _get_zes_power_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    power_energy = pyzes.zes_power_energy_counter_t()
+    rc = pyzes.zesPowerGetEnergyCounter(power_handle, byref(power_energy))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU power draw querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU power draw (rc={rc}).")
+    timestamp_start = power_energy.timestamp
+    energy_start = power_energy.energy
+    _zes_check(
+        pyzes.zesPowerGetEnergyCounter(power_handle, byref(power_energy)),
+        "Can't get Level Zero Sysman GPU power energy counter.",
+    )
+    # energy is in microjoules, timestamp is in microseconds (per L0 Sysman spec).
+    # microjoules / microseconds = watts, so the micro factors cancel.
+    dt = power_energy.timestamp - timestamp_start
+    if dt == 0:
+        return 0.0
+    return (power_energy.energy - energy_start) / dt
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -1042,6 +1132,7 @@ __all__ = [
     "memory_stats",
     "memory_stats_as_nested_dict",
     "MemPool",
+    "power_draw",
     "use_mem_pool",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
