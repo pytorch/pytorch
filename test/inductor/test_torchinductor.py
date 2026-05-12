@@ -18539,6 +18539,30 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_sort_dynamic(self):
+            def fn(a):
+                return torch.sort(a, dim=-1, stable=True)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        def test_median_dynamic(self):
+            def fn(a):
+                return torch.median(a, dim=1)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 

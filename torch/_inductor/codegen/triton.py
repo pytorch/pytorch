@@ -6859,7 +6859,7 @@ class TritonScheduling(SIMDScheduling):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
             # Cannot use persistent reduction with unknown dynamic rnumel
             assert not kernel_kwargs.get("override_persistent_reduction")
             kernel_kwargs["override_persistent_reduction"] = False
