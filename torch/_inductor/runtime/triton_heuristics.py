@@ -1134,10 +1134,8 @@ class CachingAutotuner(KernelInterface):
     def _validate_launcher_args(self, launcher, args, kernel_name="triton kernel"):
         """
         Validate that the number of arguments matches the launcher signature.
-        
         Prevents confusing error messages when argument count mismatch causes
         positional arguments to overwrite keyword arguments like 'stream'.
-        
         See: https://github.com/pytorch/pytorch/issues/146018
         """
         try:
@@ -1145,7 +1143,6 @@ class CachingAutotuner(KernelInterface):
             # co_argcount includes all parameters, subtract 1 for 'stream'
             expected_args = launcher.__code__.co_argcount - 1
             actual_args = len(args)
-            
             if actual_args > expected_args:
                 raise TypeError(
                     f"Too many arguments for Triton kernel launcher '{kernel_name}': "
@@ -1206,13 +1203,13 @@ class CachingAutotuner(KernelInterface):
                     profiler_kwargs,
                 ):
                     try:
-                        self._validate_launcher_args(launcher, cloned_args, kernel_name)
                         launcher(
                             *cloned_args,
                             **cloned_kwargs,
                             stream=stream,
                         )
-                    except Exception:
+                    except Exception as e:  # noqa: F841
+                        self._validate_launcher_args(launcher, cloned_args, kernel_name)
                         log.error(
                             "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                             kernel_name,
@@ -1225,13 +1222,13 @@ class CachingAutotuner(KernelInterface):
 
             else:
                 try:
-                    self._validate_launcher_args(launcher, cloned_args, kernel_name)
                     launcher(
                         *cloned_args,
                         **cloned_kwargs,
                         stream=stream,
                     )
-                except Exception:
+                except Exception as e:  # noqa: F841
+                    self._validate_launcher_args(launcher, cloned_args, kernel_name)
                     log.error(
                         "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                         kernel_name,
