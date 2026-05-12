@@ -496,7 +496,8 @@ class NestedReduction:
     - layernorm + block amax: amax over groups of G after layer_norm
     """
 
-    MAX_GROUP_SIZE = 512
+    MAX_INNER_R_GROUP_SIZE = 512
+    MAX_NON_INNER_GROUP_SIZE = 128
 
     @staticmethod
     def _is_dependent_reduction_pair(
@@ -519,29 +520,39 @@ class NestedReduction:
             and _is_gpu_triton_backend(outer_node, grouped_node)
         )
 
+    @classmethod
+    def is_candidate(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        """Cheap filter for dependent reductions with different reduction sizes."""
+        if not cls._is_enabled_for(
+            node1, node2
+        ) or not cls._is_dependent_reduction_pair(node1, node2):
+            return False
+        _, (_, rnumel1) = node1.group
+        _, (_, rnumel2) = node2.group
+        return not V.graph.sizevars.statically_known_equals(rnumel1, rnumel2)
+
     class PointwiseDomain(enum.Enum):
         """
         Where a pointwise node runs in the nested pipeline.
 
-        The grouped reduction has three meaningful domains: its reduced output,
-        its own full body before the local reduction, and the outer reduction's
-        parent tile after broadcast-back.
+        The local reduction stage has three meaningful domains: its reduced
+        output, its input before reducing the local lane, and the outer
+        reduction's parent tile after broadcast-back.
         """
 
-        # Grouped reduction output, e.g. [B, D // G].
+        # Local reduction output, e.g. [B, D // G].
         REDUCED = enum.auto()
-        # Grouped reduction body before reducing the local group, e.g. [B, D // G, G].
-        GROUPED_FULL = enum.auto()
+        # Input domain before reducing the local group, e.g. [B, D // G, G].
+        LOCAL_REDUCTION_INPUT = enum.auto()
         # Outer reduction tile after broadcast-back, e.g. [B, D].
         PARENT_FULL = enum.auto()
 
     class GroupedAxis(enum.Enum):
         R = enum.auto()
         X = enum.auto()
-        UNKNOWN = enum.auto()
 
     @classmethod
-    def _get_grouped_reduction_info(
+    def _get_grouped_reduction_and_size(
         cls, grouped_node: BaseSchedulerNode, grouped_rnumel: sympy.Expr
     ) -> tuple[SchedulerNode, sympy.Integer] | None:
         """Validate the candidate as a single simple grouped reduction."""
@@ -556,10 +567,12 @@ class NestedReduction:
         ):
             return None
         iter_ranges, reduce_ranges = reduction.get_ranges()
-        # Nested codegen has x/r range trees only: the grouped output may be
-        # flattened or 2D, and the local group must map to one Triton reduce
-        # axis. Higher-rank mappings need explicit coordinate handling.
-        if len(iter_ranges) > 2 or len(reduce_ranges) != 1:
+        # The original tensor may be higher-rank, but scheduler ranges are
+        # already collapsed into loop trees. Nested codegen maps the grouped
+        # reduction as either [outer_x, r_groups, G] or [x_groups, outer_r, G].
+        # A singleton non-reduced tree may be squeezed out; additional trees
+        # need explicit axis provenance and are rejected here.
+        if len(iter_ranges) not in (1, 2) or len(reduce_ranges) != 1:
             return None
         # Single-value reductions are lowered by reshape + tl.<op>(..., axis).
         # Tuple/stateful reductions such as argmax and Welford need the normal
@@ -589,9 +602,15 @@ class NestedReduction:
         grouped_rnumel: sympy.Expr,
         parent_full_domain: Sequence[sympy.Expr],
     ) -> bool:
-        """Classify pointwise nodes by pipeline stage and check their domain."""
+        """Classify pointwise nodes by nested stage and validate their ranges.
+
+        Each pointwise node must run either on the grouped reduction output,
+        on the grouped reduction's full local-group domain, or on the outer
+        reduction's full parent domain, based on its producer/consumer
+        relationship to the grouped reduction.
+        """
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
-        grouped_full_domain = (*iter_ranges, *reduce_ranges)
+        local_reduction_domain = (*iter_ranges, *reduce_ranges)
         pointwise_domains = cls._classify_nested_pointwise_nodes(
             outer_node,
             grouped_node,
@@ -609,7 +628,7 @@ class NestedReduction:
                 grouped_reduction,
                 grouped_numel,
                 grouped_rnumel,
-                grouped_full_domain=grouped_full_domain,
+                local_reduction_domain=local_reduction_domain,
                 parent_full_domain=parent_full_domain,
             ):
                 return False
@@ -624,20 +643,25 @@ class NestedReduction:
         grouped_numel: sympy.Expr,
         grouped_rnumel: sympy.Expr,
     ) -> list[tuple[BaseSchedulerNode, PointwiseDomain]] | None:
-        pointwise_domains: list[
+        outer_pointwise_domains: list[
             tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]
         ] = []
-        outer_reduction_names = OrderedSet[str]()
+        # Use ancestor names to find pointwise subnodes inside the outer fused
+        # node that consume an outer reduction result.
+        outer_reduction_names: OrderedSet[str] = OrderedSet()
         for sn in outer_node.get_nodes():
             if sn.is_reduction():
                 outer_reduction_names |= sn.get_operation_names()
 
         # Full-resolution consumers already fused into the outer reduction feed
-        # the grouped reduction, so they must run in the grouped-full domain.
+        # the local reduction, so they run in that input domain.
         for sn in outer_node.get_nodes():
-            if sn.is_reduction() or not (outer_reduction_names & sn.ancestors):
+            if sn.is_reduction():
                 continue
-            pointwise_domains.append((sn, cls.PointwiseDomain.GROUPED_FULL))
+            if outer_reduction_names & sn.ancestors:
+                outer_pointwise_domains.append(
+                    (sn, cls.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+                )
 
         grouped_pointwise_domains = cls._classify_grouped_pointwise_nodes(
             grouped_reduction,
@@ -647,8 +671,7 @@ class NestedReduction:
         )
         if grouped_pointwise_domains is None:
             return None
-        pointwise_domains.extend(grouped_pointwise_domains)
-        return pointwise_domains
+        return [*outer_pointwise_domains, *grouped_pointwise_domains]
 
     @classmethod
     def _classify_grouped_pointwise_nodes(
@@ -658,45 +681,42 @@ class NestedReduction:
         grouped_numel: sympy.Expr,
         grouped_rnumel: sympy.Expr,
     ) -> list[tuple[BaseSchedulerNode, PointwiseDomain]] | None:
-        pointwise_domains = []
+        """Classify pointwise nodes relative to the grouped reduction.
+
+        A node must be on exactly one side of the grouped reduction: either a
+        producer feeding its local-group body, or a consumer of its reduced
+        output. Its numel then determines whether it runs at reduced,
+        grouped-full, or parent-full resolution.
+        """
+        reduction_names = grouped_reduction.get_operation_names()
+        full_numel = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
+        pointwise_domains: list[
+            tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]
+        ] = []
         for sn in nodes:
             if sn.is_reduction():
                 continue
-            domain = cls._pointwise_node_grouped_domain(
-                sn, grouped_reduction, grouped_numel, grouped_rnumel
+
+            sn_names = sn.get_operation_names()
+            is_producer = bool(sn_names & grouped_reduction.ancestors)
+            is_consumer = bool(reduction_names & sn.ancestors)
+            if is_producer == is_consumer:
+                return None
+
+            full_domain = (
+                cls.PointwiseDomain.LOCAL_REDUCTION_INPUT
+                if is_producer
+                else cls.PointwiseDomain.PARENT_FULL
             )
-            if domain is None:
+            _, (sn_numel, _) = sn.group
+            if V.graph.sizevars.statically_known_equals(sn_numel, grouped_numel):
+                domain = cls.PointwiseDomain.REDUCED
+            elif V.graph.sizevars.statically_known_equals(sn_numel, full_numel):
+                domain = full_domain
+            else:
                 return None
             pointwise_domains.append((sn, domain))
         return pointwise_domains
-
-    @classmethod
-    def _pointwise_node_grouped_domain(
-        cls,
-        sn: BaseSchedulerNode,
-        grouped_reduction: SchedulerNode,
-        grouped_numel: sympy.Expr,
-        grouped_rnumel: sympy.Expr,
-    ) -> PointwiseDomain | None:
-        reduction_names = grouped_reduction.get_operation_names()
-        sn_names = sn.get_operation_names()
-        is_producer = bool(sn_names & grouped_reduction.ancestors)
-        is_consumer = bool(reduction_names & sn.ancestors)
-        if is_producer == is_consumer:
-            return None
-
-        full_domain = (
-            cls.PointwiseDomain.GROUPED_FULL
-            if is_producer
-            else cls.PointwiseDomain.PARENT_FULL
-        )
-        _, (sn_numel, _) = sn.group
-        if V.graph.sizevars.statically_known_equals(sn_numel, grouped_numel):
-            return cls.PointwiseDomain.REDUCED
-        full_numel = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
-        if V.graph.sizevars.statically_known_equals(sn_numel, full_numel):
-            return full_domain
-        return None
 
     @classmethod
     def _pointwise_domain_is_compatible(
@@ -707,7 +727,7 @@ class NestedReduction:
         grouped_numel: sympy.Expr,
         grouped_rnumel: sympy.Expr,
         *,
-        grouped_full_domain: Sequence[sympy.Expr],
+        local_reduction_domain: Sequence[sympy.Expr],
         parent_full_domain: Sequence[sympy.Expr],
     ) -> bool:
         from .codegen.simd import SIMDKernel
@@ -717,9 +737,9 @@ class NestedReduction:
         if domain is cls.PointwiseDomain.REDUCED:
             expected_numel = grouped_numel
             expected_groups: Sequence[sympy.Expr] = tuple(iter_ranges)
-        elif domain is cls.PointwiseDomain.GROUPED_FULL:
+        elif domain is cls.PointwiseDomain.LOCAL_REDUCTION_INPUT:
             expected_numel = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
-            expected_groups = grouped_full_domain
+            expected_groups = local_reduction_domain
         else:
             assert domain is cls.PointwiseDomain.PARENT_FULL
             expected_numel = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
@@ -730,15 +750,6 @@ class NestedReduction:
             expected_groups, typing.cast(SchedulerNode, sn).get_ranges()
         )
 
-    @staticmethod
-    def _reduction_hint_conflicts_with_group_axis(
-        reduction_hint: ReductionHint, group_size_in_r: bool
-    ) -> bool:
-        """Check whether the min block would force the opposite reduction axis."""
-        return (reduction_hint is ReductionHint.OUTER and group_size_in_r) or (
-            reduction_hint is ReductionHint.INNER and not group_size_in_r
-        )
-
     @classmethod
     def _min_block_unprofitable_for_kernel(
         cls,
@@ -746,7 +757,8 @@ class NestedReduction:
         outer_numel: sympy.Expr,
         outer_rnumel: sympy.Expr,
         *,
-        group_size_in_r: bool,
+        grouped_axis: GroupedAxis,
+        group_size: int,
     ) -> bool:
         from torch._inductor.tiling_utils import analyze_memory_coalescing
 
@@ -759,31 +771,49 @@ class NestedReduction:
             if config.triton.coalesce_tiling_analysis
             else None
         )
+        node_schedule = list(outer_node.get_nodes())
         tiling = SIMDScheduling.select_tiling(
-            list(outer_node.get_nodes()),
+            node_schedule,
             outer_numel,
             outer_rnumel,
             coalesce_analysis,
         )
-        # The grouped reduction forces a minimum block on the split axis.
-        # Today that floor is only modeled for ordinary x/r0 kernels.
-        if OrderedSet(tiling) - OrderedSet(("x", "r0_")):
+        # TODO: fold richer profitability/coalescing policy into this guard.
+        # For now this is only a codegen capability check for the min block.
+        # The grouped reduction forces a minimum block on the split axis. Today
+        # that floor is only modeled for ordinary x/r0 kernels, where x is the
+        # outer pointwise axis and r0_ is the inner reduction axis.
+        if OrderedSet(tiling) != OrderedSet(("x", "r0_")):
             return True
-        for sn in outer_node.get_nodes():
-            if (
-                not isinstance(sn, SchedulerNode)
-                or not sn.is_reduction()
-                or not isinstance(sn.node, ComputedBuffer)
-            ):
-                continue
-            reduction_hint = getattr(sn.node.data, "reduction_hint", None)
-            if reduction_hint is None:
-                continue
-            if cls._reduction_hint_conflicts_with_group_axis(
-                reduction_hint, group_size_in_r
-            ):
-                return True
-        return ("r0_" if group_size_in_r else "x") not in tiling
+        if not (
+            V.graph.sizevars.statically_known_equals(tiling["x"], outer_numel)
+            and V.graph.sizevars.statically_known_equals(tiling["r0_"], outer_rnumel)
+        ):
+            return True
+        return group_size > cls._max_min_block_group_size(node_schedule, grouped_axis)
+
+    @classmethod
+    def _max_min_block_group_size(
+        cls,
+        node_schedule: Sequence[BaseSchedulerNode],
+        grouped_axis: GroupedAxis,
+    ) -> int:
+        from .codegen.simd_kernel_features import SIMDKernelFeatures
+
+        reduction_hints = [
+            SIMDKernelFeatures.reduction_hint(sn)
+            for sn in node_schedule
+            if isinstance(sn, SchedulerNode)
+            and sn.is_reduction()
+            and isinstance(sn.node, ComputedBuffer)
+        ]
+        if (
+            grouped_axis is cls.GroupedAxis.R
+            and reduction_hints
+            and all(hint is ReductionHint.INNER for hint in reduction_hints)
+        ):
+            return cls.MAX_INNER_R_GROUP_SIZE
+        return cls.MAX_NON_INNER_GROUP_SIZE
 
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
@@ -797,12 +827,12 @@ class NestedReduction:
 
         outer_node = node1
         grouped_node = node2
-        _, (outer_numel, outer_rnumel) = outer_node.group
-        _, (grouped_numel, grouped_rnumel) = grouped_node.group
-        outer_numel = typing.cast(sympy.Expr, outer_numel)
-        outer_rnumel = typing.cast(sympy.Expr, outer_rnumel)
-        grouped_numel = typing.cast(sympy.Expr, grouped_numel)
-        grouped_rnumel = typing.cast(sympy.Expr, grouped_rnumel)
+        outer_group: tuple[sympy.Expr, sympy.Expr]
+        grouped_group: tuple[sympy.Expr, sympy.Expr]
+        _, outer_group = outer_node.group  # pyrefly: ignore [bad-assignment]
+        _, grouped_group = grouped_node.group  # pyrefly: ignore [bad-assignment]
+        outer_numel, outer_rnumel = outer_group
+        grouped_numel, grouped_rnumel = grouped_group
         if V.graph.sizevars.statically_known_equals(outer_rnumel, grouped_rnumel):
             return False
 
@@ -810,7 +840,7 @@ class NestedReduction:
         # We specialize the grouped reduction on that block size, so it must
         # simplify to an exact static int. Multiple reductions in the grouped
         # candidate (e.g. amax AND sum from the same input) are not supported.
-        grouped_reduction_info = cls._get_grouped_reduction_info(
+        grouped_reduction_info = cls._get_grouped_reduction_and_size(
             grouped_node, grouped_rnumel
         )
         if grouped_reduction_info is None:
@@ -824,37 +854,24 @@ class NestedReduction:
         grouped_reduction, group_size = grouped_reduction_info
 
         grouped_axis = cls.get_grouped_axis(
-            outer_node,
             grouped_reduction,
             outer_numel,
             outer_rnumel,
             group_size,
         )
-        if grouped_axis is not cls.GroupedAxis.R:
+        if grouped_axis is None:
             return False
-        iter_ranges, _ = grouped_reduction.get_ranges()
-        if len(iter_ranges) == 2:
-            # Dynamic view guards often preserve the quotient dimension
-            # (D // G) rather than proving Mod(D, G) == 0 directly.
-            grouped_axis_groups = iter_ranges[1]
-            if not V.graph.sizevars.statically_known_equals(
-                FloorDiv(outer_rnumel, group_size), grouped_axis_groups
-            ):
-                return False
-        elif not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(outer_rnumel, group_size), 0
-        ):
+        if grouped_axis is cls.GroupedAxis.X:
             return False
         group_size_int = int(group_size)
-        if not (
-            1 <= group_size_int <= cls.MAX_GROUP_SIZE and is_power_of_2(group_size_int)
-        ):
+        if not (1 <= group_size_int and is_power_of_2(group_size_int)):
             return False
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
             outer_numel,
             outer_rnumel,
-            group_size_in_r=True,
+            grouped_axis=grouped_axis,
+            group_size=group_size_int,
         ):
             return False
         if not cls._pointwise_nodes_match_nested_domains(
@@ -872,106 +889,50 @@ class NestedReduction:
     @classmethod
     def get_grouped_axis(
         cls,
-        outer_node: BaseSchedulerNode,
         grouped_reduction: SchedulerNode,
         outer_numel: sympy.Expr,
         outer_rnumel: sympy.Expr,
         group_size: sympy.Expr,
-    ) -> GroupedAxis:
-        """Classify which parent axis is split by group_size.
-
-        If grouped output keeps the parent X as one range, that proves the
-        group splits R. Otherwise, use the reduction LoopBody to check whether
-        the grouped reduction variable maps to the outer reduction variable.
-        """
+    ) -> GroupedAxis | None:
+        """Return which parent axis is split by the grouped local reduction."""
         sizevars = V.graph.sizevars
-        iter_ranges, _ = grouped_reduction.get_ranges()
-
-        if len(iter_ranges) >= 2 and sizevars.statically_known_equals(
+        iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        if len(iter_ranges) != 2 or len(reduce_ranges) != 1:
+            if len(iter_ranges) == 1 and len(reduce_ranges) == 1:
+                if not sizevars.statically_known_equals(reduce_ranges[0], group_size):
+                    return None
+                # [R / G] reduce G: parent X is singleton, so the local group
+                # splits the parent R axis.
+                if sizevars.statically_known_equals(
+                    FloorDiv(outer_rnumel, group_size), iter_ranges[0]
+                ) and sizevars.statically_known_equals(outer_numel, 1):
+                    return cls.GroupedAxis.R
+                # [R] reduce G: parent X is exactly one local group and is
+                # reduced away, leaving the parent R axis as the only iterator.
+                if sizevars.statically_known_equals(
+                    FloorDiv(outer_numel, group_size), 1
+                ) and sizevars.statically_known_equals(iter_ranges[0], outer_rnumel):
+                    return cls.GroupedAxis.X
+            return None
+        if not sizevars.statically_known_equals(reduce_ranges[0], group_size):
+            return None
+        # 2D group-in-R form: [X, R / G] reduce G. Dynamic view guards often
+        # preserve the quotient dimension even when Mod(R, G) is not directly
+        # provable.
+        if sizevars.statically_known_equals(
             iter_ranges[0], outer_numel
+        ) and sizevars.statically_known_equals(
+            FloorDiv(outer_rnumel, group_size), iter_ranges[1]
         ):
             return cls.GroupedAxis.R
-
-        from_body = cls._get_grouped_axis_from_loop_body(outer_node, grouped_reduction)
-        if from_body is not cls.GroupedAxis.UNKNOWN:
-            return from_body
-
-        if sizevars.statically_known_true(
-            sympy.Ne(sympy.Mod(outer_numel, group_size), 0)
-        ) and sizevars.statically_known_equals(sympy.Mod(outer_rnumel, group_size), 0):
-            return cls.GroupedAxis.R
-        if sizevars.statically_known_true(
-            sympy.Ne(sympy.Mod(outer_rnumel, group_size), 0)
-        ) and sizevars.statically_known_equals(sympy.Mod(outer_numel, group_size), 0):
+        # 2D group-in-X form: [X / G, R] reduce G.
+        if sizevars.statically_known_equals(
+            iter_ranges[1], outer_rnumel
+        ) and sizevars.statically_known_equals(
+            FloorDiv(outer_numel, group_size), iter_ranges[0]
+        ):
             return cls.GroupedAxis.X
-        return cls.GroupedAxis.UNKNOWN
-
-    @classmethod
-    def _get_grouped_axis_from_loop_body(
-        cls, outer_node: BaseSchedulerNode, grouped_reduction: SchedulerNode
-    ) -> GroupedAxis:
-        """Use LoopBody iter/reduce vars to disambiguate equal-size axes."""
-        from torch._inductor.loop_body import MemoryUsageType
-
-        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
-        if len(outer_reductions) != 1:
-            return cls.GroupedAxis.UNKNOWN
-        outer_reduction = typing.cast(SchedulerNode, outer_reductions[0])
-        outer_body = getattr(outer_reduction, "_body", None)
-        grouped_body = getattr(grouped_reduction, "_body", None)
-        if outer_body is None or grouped_body is None:
-            return cls.GroupedAxis.UNKNOWN
-
-        outer_iter_ranges, outer_reduce_ranges = outer_reduction.get_ranges()
-        grouped_iter_ranges, grouped_reduce_ranges = grouped_reduction.get_ranges()
-        if len(outer_reduce_ranges) != 1 or len(grouped_reduce_ranges) != 1:
-            return cls.GroupedAxis.UNKNOWN
-
-        def load_exprs_by_name(body: LoopBody) -> dict[str, list[sympy.Expr]]:
-            result: dict[str, list[sympy.Expr]] = defaultdict(list)
-            for entry in body.memory_usage[MemoryUsageType.LOAD]:
-                if entry.buffer_name is not None:
-                    result[entry.buffer_name].append(
-                        body.indexing_exprs[entry.index_name]
-                    )
-            return result
-
-        if len(outer_body.reduce_vars) != 1 or len(grouped_body.reduce_vars) != 1:
-            return cls.GroupedAxis.UNKNOWN
-        if len(outer_body.iter_vars) != len(outer_iter_ranges) or len(
-            grouped_body.iter_vars
-        ) != len(grouped_iter_ranges):
-            return cls.GroupedAxis.UNKNOWN
-
-        outer_reads_by_name = load_exprs_by_name(outer_body)
-        result = cls.GroupedAxis.UNKNOWN
-        grouped_reduce_var = grouped_body.reduce_vars[-1]
-        for name, grouped_read_exprs in load_exprs_by_name(grouped_body).items():
-            outer_read_exprs = outer_reads_by_name.get(name)
-            if not outer_read_exprs:
-                continue
-            for grouped_read_expr in grouped_read_exprs:
-                grouped_coeff = grouped_read_expr.coeff(grouped_reduce_var)
-                if grouped_coeff == 0:
-                    continue
-                for outer_read_expr in outer_read_exprs:
-                    outer_reduce_var = outer_body.reduce_vars[-1]
-                    outer_reduce_coeff = outer_read_expr.coeff(outer_reduce_var)
-                    matches_reduction = grouped_coeff == outer_reduce_coeff
-                    matches_iter = any(
-                        grouped_coeff == outer_read_expr.coeff(var)
-                        for var in outer_body.iter_vars
-                    )
-                    if matches_reduction == matches_iter:
-                        continue
-                    candidate = (
-                        cls.GroupedAxis.R if matches_reduction else cls.GroupedAxis.X
-                    )
-
-                    if result is not cls.GroupedAxis.UNKNOWN and result != candidate:
-                        return cls.GroupedAxis.UNKNOWN
-                    result = candidate
-        return result
+        return None
 
 
 @dataclasses.dataclass
@@ -2871,7 +2832,7 @@ class FusedNestedReductions(FusedSchedulerNode):
         self.ancestors -= self.get_operation_names()
         grouped_node = node2
         _, (_, grouped_rnumel) = grouped_node.group
-        grouped_reduction_info = NestedReduction._get_grouped_reduction_info(
+        grouped_reduction_info = NestedReduction._get_grouped_reduction_and_size(
             grouped_node, grouped_rnumel
         )
         assert grouped_reduction_info is not None
@@ -2879,12 +2840,21 @@ class FusedNestedReductions(FusedSchedulerNode):
         self.grouped_reduction: SchedulerNode = grouped_reduction
         self.group_size: sympy.Integer = exact_group_size
         _, (outer_numel, outer_rnumel) = node1.group
+        grouped_axis = NestedReduction.get_grouped_axis(
+            grouped_reduction,
+            outer_numel,
+            outer_rnumel,
+            exact_group_size,
+        )
+        assert grouped_axis is not None
+        self.grouped_axis: NestedReduction.GroupedAxis = grouped_axis
+        self.group_size_in_r: bool = self.grouped_axis is NestedReduction.GroupedAxis.R
         self.parent_full_domain: tuple[sympy.Expr, sympy.Expr] = (
             outer_numel,
             outer_rnumel,
         )
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
-        self.grouped_full_domain: tuple[sympy.Expr, ...] = (
+        self.local_reduction_domain: tuple[sympy.Expr, ...] = (
             *iter_ranges,
             *reduce_ranges,
         )
@@ -2918,7 +2888,7 @@ class FusedNestedReductions(FusedSchedulerNode):
         # New prologue producers would need to be inserted before the grouped
         # reduction, but this path only appends downstream consumers.
         if any(
-            domain is NestedReduction.PointwiseDomain.GROUPED_FULL
+            domain is NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
             for _, domain in pointwise_domains
         ):
             return False
@@ -2929,16 +2899,25 @@ class FusedNestedReductions(FusedSchedulerNode):
                 self.grouped_reduction,
                 grouped_numel,
                 grouped_rnumel,
-                grouped_full_domain=self.grouped_full_domain,
+                local_reduction_domain=self.local_reduction_domain,
                 parent_full_domain=self.parent_full_domain,
             )
             for sn, domain in pointwise_domains
         ):
             return False
+        allow_parent_full_index_equivalence = any(
+            domain is NestedReduction.PointwiseDomain.PARENT_FULL
+            for _, domain in pointwise_domains
+        )
+        # Parent-full consumers may read the grouped reduction output through
+        # a broadcasted or loop-reordered view. Let the normal vertical fusion
+        # path match those equivalent accesses while preserving its other
+        # dependency checks.
         return self.scheduler.can_fuse(
             self.node2,
             other,
             can_reorder=can_reorder,
+            allow_index_equivalence=allow_parent_full_index_equivalence,
         )
 
     def fuse_with(self, other: BaseSchedulerNode) -> FusedNestedReductions:
@@ -6920,10 +6899,15 @@ class Scheduler:
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
+        allow_index_equivalence: bool = False,
     ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
+
+        ``allow_index_equivalence`` is for fused-node hooks that have already
+        checked their own loop-domain remapping. It lets vertical dependency
+        matching accept normalized equivalent reads in addition to exact reads.
         """
         if node1 is node2:
             return False
@@ -7116,10 +7100,15 @@ class Scheduler:
             return False
         del device2
 
+        nested_reduction_candidate = NestedReduction.is_candidate(node1, node2)
+        score_allows_index_equivalence = (
+            allow_index_equivalence or nested_reduction_candidate
+        )
         shared_data_score = self.score_fusion_memory(
             node1,
             node2,
             allow_mix_order_reduction=allow_mix_order_reduction,
+            allow_index_equivalence=score_allows_index_equivalence,
         )
         assert isinstance(shared_data_score, int)
 
@@ -7139,7 +7128,11 @@ class Scheduler:
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
-            shared_data_score = self.score_fusion_memory(node1, node2)
+            shared_data_score = self.score_fusion_memory(
+                node1,
+                node2,
+                allow_index_equivalence=score_allows_index_equivalence,
+            )
             assert isinstance(shared_data_score, int)
 
         if (
@@ -7166,11 +7159,13 @@ class Scheduler:
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             nested_reduction_can_fuse = (
-                NestedReduction._is_dependent_reduction_pair(node1, node2)
-                and NestedReduction.can_fuse(node1, node2)
+                nested_reduction_candidate and NestedReduction.can_fuse(node1, node2)
             )
-            can_fuse_vertical = nested_reduction_can_fuse or self.can_fuse_vertical(
-                node1, node2
+            can_fuse_vertical = self.can_fuse_vertical(
+                node1,
+                node2,
+                allow_index_equivalence=allow_index_equivalence
+                or nested_reduction_can_fuse,
             )
             return (
                 can_fuse_vertical
@@ -7183,7 +7178,11 @@ class Scheduler:
             ) and self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        *,
+        allow_index_equivalence: bool = False,
     ) -> bool:
         """
         Check if it is legal to fuse a consumer (node2) into a producer (node1).
@@ -7191,6 +7190,9 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        ``allow_index_equivalence`` relaxes the write/read match only; the
+        remaining intermediate-dependency checks still run normally.
         """
         node1_buf_names = node1.get_buffer_names()
         why = WhyNoFuse(node1, node2)
@@ -7211,13 +7213,15 @@ class Scheduler:
             if remaining:
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
-                        rd, cd
+                        rd,
+                        cd,
+                        allow_index_equivalence=allow_index_equivalence,
                     ):
                         remaining.remove(rd)  # noqa: B909
-                    elif isinstance(
-                        cd, StarDep
-                    ) and self.fusable_stardep_write_and_read_on_empty_tensor(
-                        rd, cd, node1.node
+                    elif isinstance(cd, StarDep) and (
+                        self.fusable_stardep_write_and_read_on_empty_tensor(
+                            rd, cd, node1.node
+                        )
                     ):
                         remaining.remove(rd)  # noqa: B909
 
@@ -7297,16 +7301,34 @@ class Scheduler:
         return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, and indirect indexing is not fusible.
-    def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
+    def fusable_read_and_write(
+        self, read: Dep, write: MemoryDep, *, allow_index_equivalence: bool = False
+    ) -> bool:
+        """Return whether a producer write can satisfy a consumer read.
+
+        By default this accepts exact matches plus the conservative
+        broadcast-split pattern below. ``allow_index_equivalence`` additionally
+        accepts access-equivalent forms used by nested full-res pointwise nodes,
+        such as a broadcasted read or a pure loop-order change.
+        """
         if isinstance(read, MemoryDep):
             read_name = self.mutation_renames.get(read.name, read.name)
+            write_name = self.mutation_renames.get(write.name, write.name)
 
             if (
-                read_name != write.name
+                read_name != write_name
                 or free_symbol_is_type(read.index, SymT.TMP)
                 or free_symbol_is_type(write.index, SymT.TMP)
             ):
                 return False
+
+            if read.name != read_name:
+                read = dataclasses.replace(read, name=read_name)
+            if write.name != write_name:
+                write = dataclasses.replace(write, name=write_name)
+
+            original_read = read
+            original_write = write
 
             if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
                 # Need merge loops if we do loop ordering after fusion since
@@ -7320,11 +7342,21 @@ class Scheduler:
             if self.mode_requires_synchronization(write.mode):
                 return False
 
-            return (
+            if (
                 read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size
-            ) or self._fusable_read_after_broadcast_split(read, write)
+            ):
+                return True
+
+            equivalent_index_matches = allow_index_equivalence and (
+                original_read.normalize_without_broadcast()
+                == original_write.normalize()
+                or self.deps_match_normalized(original_read, original_write)
+            )
+            return equivalent_index_matches or self._fusable_read_after_broadcast_split(
+                read, write
+            )
         elif isinstance(read, StarDep):
             read_name = self.mutation_renames.get(read.name, read.name)
             write_name = self.mutation_renames.get(write.name, write.name)
@@ -7337,9 +7369,7 @@ class Scheduler:
         return False
 
     @staticmethod
-    def _fusable_read_after_broadcast_split(
-        read: MemoryDep, write: MemoryDep
-    ) -> bool:
+    def _fusable_read_after_broadcast_split(read: MemoryDep, write: MemoryDep) -> bool:
         """Match a broadcast read by splitting larger read dims.
 
         The normal ``read.normalize() == write.normalize()`` path handles
@@ -7436,39 +7466,40 @@ class Scheduler:
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
 
-    def _score_fusion_memory_by_nested_reduction_deps(
+    def _score_fusion_memory_by_fusable_read_write(
         self,
-        outer_node: BaseSchedulerNode,
-        grouped_node: BaseSchedulerNode,
+        producer: BaseSchedulerNode,
+        consumer: BaseSchedulerNode,
         count_bytes: bool = True,
+        allow_index_equivalence: bool = False,
     ) -> int:
-        # TODO: replace this nested-only bridge with generic vertical
-        # normalized-dependency scoring once that can be done without skipping
-        # loop-reindex repairs for reduction->pointwise fusion.
-        if not (
-            NestedReduction._is_enabled_for(outer_node, grouped_node)
-            and NestedReduction._is_dependent_reduction_pair(outer_node, grouped_node)
-        ):
+        """Score vertical producer-output deps missed by exact dep scoring.
+
+        Exact scoring is set-intersection based, but vertical legality can also
+        accept normalized equivalent read/write deps. Give those pairs a memory
+        score so heuristics do not discard them before legality runs.
+        """
+        if not (producer.get_operation_names() & consumer.ancestors):
             return 0
 
-        outer_deps = list(outer_node.read_writes.reads | outer_node.read_writes.writes)
-        grouped_deps = list(
-            grouped_node.read_writes.reads | grouped_node.read_writes.writes
-        )
-        matched_grouped_deps: OrderedSet[int] = OrderedSet()
+        reads = list(consumer.read_writes.reads)
+        matched_reads: OrderedSet[int] = OrderedSet()
         score = 0
-        for outer_dep in outer_deps:
-            if not isinstance(outer_dep, MemoryDep):
+        for write in producer.read_writes.writes:
+            if not isinstance(write, MemoryDep):
                 continue
-            for i, grouped_dep in enumerate(grouped_deps):
-                if i in matched_grouped_deps or not isinstance(grouped_dep, MemoryDep):
+            for i, read in enumerate(reads):
+                if i in matched_reads:
                     continue
-                normalized_match = self.deps_match_normalized(outer_dep, grouped_dep)
-                if outer_dep.name == grouped_dep.name and normalized_match:
-                    matched_grouped_deps.add(i)
+                if self.fusable_read_and_write(
+                    read,
+                    write,
+                    allow_index_equivalence=allow_index_equivalence,
+                ):
+                    matched_reads.add(i)
                     score += max(
-                        self.dep_size_hint(outer_dep, count_bytes),
-                        self.dep_size_hint(grouped_dep, count_bytes),
+                        self.dep_size_hint(read, count_bytes),
+                        self.dep_size_hint(write, count_bytes),
                     )
                     break
         return score
@@ -7481,6 +7512,7 @@ class Scheduler:
         count_bytes: bool = ...,
         return_is_mix_order_reduction: Literal[False] = ...,
         allow_mix_order_reduction: bool = ...,
+        allow_index_equivalence: bool = ...,
     ) -> int: ...
 
     @overload
@@ -7491,6 +7523,7 @@ class Scheduler:
         count_bytes: bool = ...,
         return_is_mix_order_reduction: Literal[True] = ...,
         allow_mix_order_reduction: bool = ...,
+        allow_index_equivalence: bool = ...,
     ) -> tuple[int, int, bool]: ...
 
     def score_fusion_memory(
@@ -7500,6 +7533,7 @@ class Scheduler:
         count_bytes: bool = True,
         return_is_mix_order_reduction: bool = False,
         allow_mix_order_reduction: bool = True,
+        allow_index_equivalence: bool = False,
     ) -> int | tuple[int, int, bool]:
         """
         The first term in our fusion score that estimates number of saved
@@ -7586,15 +7620,6 @@ class Scheduler:
             score = sum(self.dep_size_hint(dep, count_bytes) for dep in deps)
             if score:
                 return _construct_return_value(score, 0, False)
-            return _construct_return_value(
-                self._score_fusion_memory_by_nested_reduction_deps(
-                    orig_node1,
-                    orig_node2,
-                    count_bytes,
-                ),
-                0,
-                False,
-            )
         else:
             common_memory_deps = (
                 node1.read_writes.reads | node1.read_writes.writes
@@ -7603,11 +7628,16 @@ class Scheduler:
                 self.dep_size_hint(dep, count_bytes) for dep in common_memory_deps
             )
 
-        if score == 0:
-            score = self._score_fusion_memory_by_nested_reduction_deps(
-                node1,
-                node2,
+        allow_relaxed_dep_scoring = (
+            allow_index_equivalence
+            or NestedReduction.is_candidate(orig_node1, orig_node2)
+        )
+        if score == 0 and allow_relaxed_dep_scoring:
+            score = self._score_fusion_memory_by_fusable_read_write(
+                orig_node1,
+                orig_node2,
                 count_bytes,
+                allow_index_equivalence=allow_relaxed_dep_scoring,
             )
 
         # If no exact dep matches, check for same-buffer reads with different indexing.
