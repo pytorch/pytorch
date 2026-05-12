@@ -19,11 +19,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
@@ -2239,23 +2235,6 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_timed_cpu_only(self):
         timed(lambda: torch.randn(10), ())
-
-    def test_complex_memory_overlap(self):
-        dense = torch.zeros(64, 32)
-        self.assertFalse(complex_memory_overlap(dense))
-        self.assertFalse(complex_memory_overlap(dense.t()))
-
-        strided = dense.split(4, dim=1)
-        self.assertFalse(complex_memory_overlap(strided[0]))
-        self.assertFalse(complex_memory_overlap(strided[0].t()))
-
-        unsqueezed = dense.unsqueeze(1)
-        self.assertFalse(complex_memory_overlap(unsqueezed))
-        self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
-        self.assertFalse(complex_memory_overlap(gathered))
-        self.assertFalse(complex_memory_overlap(gathered.t()))
 
     @requires_vectorization
     def test_vec_dynamic_shapes(self):
@@ -4882,6 +4861,25 @@ class CPUReproTests(TestCase):
         # Sanity check that gradients were computed
         self.assertIsNotNone(grad_b)
         self.assertEqual(grad_b.dtype, torch.float16)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_fused_fp16_rounding(self):
+        def fn(x, c):
+            z = torch.where(c, torch.full_like(x, 0.5), torch.full_like(x, -0.5))
+            y = z.to(torch.float16) + x.to(torch.float16)
+            return y, y.float().sum()
+
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        c = (torch.arange(24) % 5 == 0).reshape(2, 3, 4)
+        expected = fn(x, c)
+
+        for simdlen in simd_lengths_to_test():
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, c)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
