@@ -2484,6 +2484,42 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     return a.new_empty((N, P), dtype=result_dtype)
 
 
+@register_meta(aten.addmm)
+@out_wrapper(exact_dtype=True)
+def meta_addmm(
+    self, mat1, mat2, out_dtype: torch.dtype | None = None, *, alpha=1, beta=1
+):
+    torch._check(mat1.dim() == 2, lambda: "mat1 must be 2D")
+    torch._check(mat2.dim() == 2, lambda: "mat2 must be 2D")
+    N, M1 = mat1.shape
+    M2, P = mat2.shape
+    torch._check(
+        M1 == M2,
+        lambda: f"mat1 and mat2 must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
+    )
+    # Validate out_dtype if provided
+    if out_dtype is not None:
+        input_dtype = mat1.dtype
+        torch._check(
+            mat2.dtype == input_dtype,
+            lambda: "mat1 and mat2 must have the same dtype",
+        )
+        torch._check(
+            self.dtype == input_dtype,
+            lambda: "bias and mat1 must have the same dtype",
+        )
+        torch._check(
+            out_dtype == input_dtype
+            or (
+                out_dtype == torch.float32
+                and input_dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+    result_dtype = mat1.dtype if out_dtype is None else out_dtype
+    return self.new_empty((N, P), dtype=result_dtype)
+
+
 def _compute_reduction_shape(self, dims, keepdim):
     if keepdim:
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
@@ -7985,12 +8021,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 

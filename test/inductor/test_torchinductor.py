@@ -74,6 +74,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM100OrLater,
     SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
@@ -131,11 +132,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -556,13 +553,28 @@ def check_model(
     actual_flat = pytree.tree_leaves(actual)
 
     def to_dtype_preserve_strides(src, dtype):
-        if any(s == 0 for s in src.stride()):
-            return src.to(dtype)
+        expanded_dims = []
+        src_slice = src
+
+        for dim in reversed(range(src.dim())):
+            if src.size(dim) > 1 and src.stride(dim) == 0:
+                expanded_dims.append(dim)
+                src_slice = src_slice.select(dim, 0)
+
         # Preserve strides when casting.
         result = torch.empty_strided(
-            src.size(), src.stride(), device=src.device, dtype=dtype
+            src_slice.size(),
+            src_slice.stride(),
+            device=src.device,
+            dtype=dtype,
         )
-        result.copy_(src)
+        result.copy_(src_slice)
+
+        for dim in reversed(expanded_dims):
+            result = result.unsqueeze(dim)
+
+        if expanded_dims:
+            return result.expand(src.size())
         return result
 
     def reference_to_expect(actual_flat, correct_flat):
@@ -4076,6 +4088,11 @@ class CommonTemplate:
         if torch.device(self.device).type == GPU_TYPE:
             getattr(torch, GPU_TYPE).empty_cache()
 
+        # MPS routes eager eq/all through MPSGraph, which rejects tensor
+        # dims > INT_MAX
+        # TODO remove this once MPSGraph is gone from eq/all
+        if torch.device(self.device).type == "mps":
+            actual = actual.cpu()
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
@@ -5106,6 +5123,24 @@ class CommonTemplate:
             fn,
             (torch.randn([10]),),
         )
+
+    @requires_gpu()
+    def test_to_copy_fp64_to_no_fp64_device(self):
+        # See https://github.com/pytorch/pytorch/issues/180664
+        # When the target device does not support fp64, _to_copy should
+        # convert dtype on CPU before the device transfer so that no fp64
+        # buffer is allocated on the target device.
+        def fn(x):
+            return x.to(dtype=torch.float32, device=GPU_TYPE)
+
+        x = torch.randn(4, 4, dtype=torch.float64, device="cpu")
+        with patch("torch._inductor.utils.device_supports_fp64", return_value=False):
+            _, code = run_and_get_code(torch.compile(fn), x)
+
+        # The Triton kernel should not have any fp64 pointer arguments.
+        # Without the fix, the kernel signature would contain '*fp64'.
+        code = "\n".join(code)
+        self.assertNotIn("'*fp64'", code)
 
     @requires_gpu()
     @xfail_if_triton_cpu
@@ -8616,6 +8651,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_multinomial(self):
+        # aten.multinomial output is stochastic so we can only check shape/range,
+        # not exact values. Verifies the op compiles and runs without error.
+        def fn(weights):
+            return torch.multinomial(weights, num_samples=4, replacement=True)
+
+        cfn = torch.compile(fn)
+        weights = torch.rand(10, dtype=torch.float32, device=self.device)
+        result = cfn(weights)
+        self.assertEqual(result.shape, torch.Size([4]))
+        self.assertTrue((result >= 0).all() and (result < 10).all())
+
+        # 2D: each row sampled independently
+        weights2d = torch.rand(4, 8, dtype=torch.float32, device=self.device)
+        result2d = torch.compile(
+            lambda w: torch.multinomial(w, num_samples=3, replacement=True)
+        )(weights2d)
+        self.assertEqual(result2d.shape, torch.Size([4, 3]))
+        self.assertTrue((result2d >= 0).all() and (result2d < 8).all())
+
     def test_long_tensor(self):
         def fn(a):
             return (
@@ -10724,7 +10779,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
-    @xfail_if_mps  # 100% are not close
     def test_like_rands(self):
         def fn(x):
             return torch.rand_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
@@ -10957,7 +11011,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
@@ -10989,7 +11043,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
+        if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
@@ -14256,6 +14310,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    @requires_gpu()
+    @parametrize("inplace", [False, True])
+    def test_index_add_device_mismatch(self, inplace):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires GPU for device mismatch test")
+
+        def fn(x, source):
+            index = torch.randperm(x.size(0))
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 3, device=self.device)
+        source = torch.randn(10, 3, device=self.device)
+
+        with self.assertRaises(RuntimeError):
+            fn(x, source)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
@@ -14712,10 +14789,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         result = f(torch.tensor([20]))
         self.assertTrue(len(result) == 3)
-
-    def test_complex_memory_overlap(self):
-        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
-        self.assertFalse(complex_memory_overlap(t))
 
     @xfail_if_mps
     def test_generate_rand_fp8(self):
@@ -16825,6 +16898,11 @@ if RUN_GPU:
                     # one kernel, with extra workspace/semaphore args
                     0: (0, 1, 2, 3, 5),
                 }
+            elif SM100OrLater:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    0: (0, 1, 3),
+                }
             else:
                 self.assertEqual(len(kernels), 2)
 
@@ -18388,6 +18466,51 @@ if RUN_GPU:
                 " ".join(code),
                 "Expected Triton sort codegen for kthvalue",
             )
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        def test_multinomial_lowering_no_graph_break(self):
+            # aten.multinomial must be handled by a registered lowering (extern fallback)
+            def fn(weights):
+                w = weights * 2.0
+                return torch.multinomial(w, num_samples=3, replacement=True)
+
+            inp = torch.rand(8, device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            self.assertEqual(result.shape, torch.Size([3]))
+            self.assertTrue(result.min() >= 0)
+            self.assertTrue(result.max() < 8)
+
+        def test_sort_dynamic(self):
+            def fn(a):
+                return torch.sort(a, dim=-1, stable=True)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        def test_median_dynamic(self):
+            def fn(a):
+                return torch.median(a, dim=1)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
