@@ -651,8 +651,8 @@ class ComboKernelTests(TestCase):
                 torch._inductor.metrics.generated_kernel_count, expected_kernel_count
             )
 
-    # waves_per_eu, matrix_instr_nonkdim, and kpack are HIP-only Triton
-    # compile options, so only ROCm exercises this combo-kernel rewrite path.
+    # waves_per_eu and kpack are HIP-only Triton compile options, so only ROCm
+    # exercises this combo-kernel rewrite path.
     @unittest.skipIf(not torch.version.hip, "ROCm only")
     @requires_gpu_and_triton
     @parametrize("max_autotune", [False, True])

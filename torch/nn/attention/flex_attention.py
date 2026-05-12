@@ -198,9 +198,6 @@ class FlexKernelOptions(TypedDict, total=False):
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
-    matrix_instr_nonkdim: NotRequired[int]
-    """ROCm-specific matrix instruction non-K dimension."""
-
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
