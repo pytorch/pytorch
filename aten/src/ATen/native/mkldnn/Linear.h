@@ -23,7 +23,7 @@ TORCH_API Tensor mkldnn_linear_pointwise_binary(
 
 #if AT_MKL_ENABLED()
 
-C10_API Tensor mkl_linear(
+TORCH_API Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,
