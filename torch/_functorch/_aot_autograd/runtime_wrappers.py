@@ -1859,9 +1859,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
         )
-        # Pre-compute base_groups and other_arg_map from synthetic_base_info.
-        # We avoid storing the raw synthetic_base_info because it contains
-        # torch.Tensors which are not picklable by the autograd cache.
+        # Pre-compute base_groups and other_arg_map from
+        # synthetic_base_info so the post_compile codegen can emit a
+        # wrapper without calling merge_view_inputs at runtime.
         #
         # other_arg_entries collects (new_idx, orig_idx) pairs so we can
         # sort by new_idx -- the position in the post-merge calling
@@ -2005,6 +2005,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     _outs = _compiled_fn_(_new_args)""")
 
         if num_meta_mut > 0:
+            # This does not handle all input metadata mutations -- only
+            # mutations on inputs that were converted into synthetic bases
+            # (which only happens if at least one aliased input experienced
+            # a data mutation).  E.g. f(a, b): a.mul_(2); b.t_() called
+            # with a = x.view(2,2), b = x.view(2,2).
             lines.append(f"""\
     _mut_inps = _outs[-{num_meta_mut}:]
     _user_outs = _outs[:-{num_meta_mut}]
@@ -3298,6 +3303,7 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
+
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
