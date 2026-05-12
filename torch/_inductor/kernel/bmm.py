@@ -210,7 +210,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes()
-        )  # type: ignore[arg-type]
+        )
 
     if use_cpp_bmm_template(layout, mat1, mat2):
         from ..codegen.cpp_bmm_template import CppBmmTemplate

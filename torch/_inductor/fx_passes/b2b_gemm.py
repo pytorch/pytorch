@@ -559,7 +559,7 @@ def tuned_b2b_gemm(
         create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())
     ]
     subgraph_buffer = build_subgraph_buffer(
-        placeholders,  # type: ignore[arg-type, list-item]
+        placeholders,
         subgraph,
     )
     choices: list[TritonTemplateCaller] = []

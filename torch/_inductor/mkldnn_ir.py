@@ -498,7 +498,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -654,7 +654,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups,
             transposed,
             output_padding,
-            [x_scale, x_zero_point, w_scale, w_zero_point],  # type: ignore[list-item]
+            [x_scale, x_zero_point, w_scale, w_zero_point],
         )
         # swap padding and stride to align with functional conv arg order
         if bias is None:

@@ -194,7 +194,7 @@ class LoopBody:
         submodules.pop("get_index")
         self.submodules = {
             "get_index": self.get_index,
-            **{k: v.clone(self) for k, v in submodules.items()},  # type: ignore[attr-defined]
+            **{k: v.clone(self) for k, v in submodules.items()},
         }
 
     def has_op(self, name: str):
@@ -263,7 +263,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="t",  # type: ignore[arg-type]
+            prefix="t",
         )
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
@@ -284,7 +284,7 @@ class LoopBody:
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
+            prefix="p",
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -307,7 +307,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="t",  # type: ignore[arg-type]
+            prefix="t",
         )
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
@@ -324,7 +324,7 @@ class LoopBody:
 
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
+            prefix="p",
         )
         return LoopBody(
             loop_body,
@@ -352,7 +352,7 @@ class LoopBody:
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
+            prefix="p",
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}

@@ -366,7 +366,7 @@ def clone_inputs_retaining_gradness(example_inputs: Sequence[Any]) -> list[Any]:
     for idx in range(len(example_inputs)):
         if isinstance(cloned_inputs[idx], torch.Tensor):
             cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
-    return cloned_inputs  # type: ignore[return-value]
+    return cloned_inputs
 
 
 def run_fwd_maybe_bwd(
@@ -920,7 +920,7 @@ def aot_graph_input_parser(
                     resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
-        out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
+        out = constructor(resolved_shape, dtype=dtype, device=device)
         for d in dynamic_dims:
             torch._dynamo.mark_dynamic(out, d)
         return out

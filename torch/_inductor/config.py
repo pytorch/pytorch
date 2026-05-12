@@ -1652,7 +1652,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )  # type: ignore[assignment]
+    )
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
