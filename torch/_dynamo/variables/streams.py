@@ -55,6 +55,63 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
     )
 
 
+def _index_for_external_object(obj: Any) -> int:
+    """Return a registry index that resolves to ``obj`` at runtime.
+
+    If ``obj`` is already registered, the existing index is returned;
+    otherwise a fresh entry is added with a construct_fn that installs
+    ``obj`` as a graph-created global so it persists across compilation.
+    """
+    from ..graph_bytecode_inputs import index_to_external_object_weakref
+
+    for idx, ref in index_to_external_object_weakref.items():
+        if ref() is obj:
+            return idx
+
+    def construct_fn(idx: int, codegen: "PyCodegen") -> None:
+        name = codegen.tx.output.install_global_by_id(
+            f"___streams_external_obj_{idx}", obj
+        )
+        codegen.extend_output([codegen.create_load_global(name, add=True)])
+
+    return register_graph_created_object(obj, construct_fn)
+
+
+def maybe_emit_streams_op_proxy(
+    op: Any, event: "torch.Event", stream: "torch.Stream"
+) -> bool:
+    """If we are inside an active fx proxy tracer, emit an FX node for
+    ``op(event_index, stream_index)`` so the cross-stream side effect
+    lands in the captured graph.
+
+    This is the bridge between Python ``Event.record(stream)`` /
+    ``Stream.wait_event(event)`` calls and the FX-level
+    ``torch.ops.streams.{record,wait}_event`` ops.  Bytecode tracing
+    already produces these nodes via ``EventVariable.call_method`` /
+    ``StreamVariable.call_method``, but when the same Python calls
+    happen during eager execution under an active fx proxy tracer
+    (for example, inside a tensor subclass's ``__torch_function__``
+    that dynamo cannot symbolically inline), there is no bytecode
+    interception and nothing emits the op.  This helper closes that
+    gap: callers invoke it from the Python ``record`` / ``wait_event``
+    methods just before performing the eager side effect.
+
+    Returns ``True`` if a node was emitted, ``False`` otherwise.  The
+    caller should perform the eager side effect either way -- the FX
+    node only describes what the compiled artifact must do at replay
+    time.
+    """
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is None or getattr(proxy_mode, "tracer", None) is None:
+        return False
+    eid = _index_for_external_object(event)
+    sid = _index_for_external_object(stream)
+    proxy_mode.tracer.create_proxy("call_function", op, (eid, sid), {})
+    return True
+
+
 def _codegen_current_stream(device: torch.device, cg: "PyCodegen") -> None:
     cg.add_push_null(
         lambda: cg.load_import_from(
