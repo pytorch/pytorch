@@ -64,6 +64,10 @@ static PyObject* THXPStream_pynew(
 
 static void THXPStream_dealloc(THXPStream* self) {
   self->xpu_stream.~XPUStream();
+  // Mirror base THPStream_dealloc: clear weakrefs and release the
+  // lazily-allocated stream context.
+  PyObject_ClearWeakRefs((PyObject*)self);
+  Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -163,7 +167,7 @@ static PyTypeObject THXPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPStream, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPStream_methods, /* tp_methods */

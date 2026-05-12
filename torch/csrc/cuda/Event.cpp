@@ -105,6 +105,9 @@ static void THCPEvent_dealloc(THCPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.~CUDAEvent();
   }
+  // Mirror base THPEvent_dealloc: tear down native state under the GIL
+  // release, then clear weakrefs under the GIL before tp_free.
+  PyObject_ClearWeakRefs((PyObject*)self);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -245,7 +248,7 @@ PyTypeObject THCPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THCPEvent_methods, /* tp_methods */
