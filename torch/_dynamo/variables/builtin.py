@@ -51,6 +51,7 @@ from ..exc import (
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_type_error,
     unimplemented,
     Unsupported,
     UserError,
@@ -2333,6 +2334,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_slice(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
+        if not 1 <= len(args) < 4:
+            raise_type_error(tx, f"slice expected at least 1 argument, got {len(args)}")
         return variables.SliceVariable(args, tx)
 
     def _dyn_proxy(
@@ -2696,7 +2699,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
             isinstance_type_tuple = (isinstance_type,)
         elif isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = isinstance_type.__args__
+            isinstance_type_tuple = typing.get_args(isinstance_type)
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
             for tp in isinstance_type

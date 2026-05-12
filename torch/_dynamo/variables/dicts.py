@@ -1078,7 +1078,7 @@ class DictKeysVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1105,7 +1105,7 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement nb_or and nb_inplace_or
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None  # type: ignore[bad-override]
+    nb_inplace_or = None
 
     def is_hashable(self) -> bool:
         return True
@@ -1252,7 +1252,7 @@ class DictItemsVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1419,6 +1419,26 @@ class DunderDictVariable(ConstDictVariable):
             value = default()
             self.items[name] = value
             return value
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ConstDictVariable(
+                dict(self.items), mutation_type=ValueMutationNew(), source=None
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.

@@ -140,15 +140,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
 
-        # Temporarily redirect self.prefix so the base class
-        # codegen_input_symbol_assignment writes into our buffer.
-        orig_prefix = self.prefix
-        self.prefix = code
-        try:
+        # Redirect self.prefix so the base class codegen_input_symbol_assignment
+        # writes into our buffer.
+        with self._target_buf("prefix", code):
             for name, value in inputs:
                 self.codegen_input_symbol_assignment(name, value, bound_vars)
-        finally:
-            self.prefix = orig_prefix
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
@@ -539,7 +535,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
-                            V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
+                            V.graph.graph_inputs[input_key]
                         )
                         assert dtype is not None, (
                             "Fails to get the dtype of the sympy.Expr"
@@ -809,7 +805,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             else f"{buffer.get_name()}.reset();"
         )
 
-    def make_buffer_allocation(self, buffer):
+    # is_uninitialized: see comment in CppWrapperCpu.make_buffer_allocation
+    def make_buffer_allocation(self, buffer, is_uninitialized=False):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -829,6 +826,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         stride,
         buffer_if_can_stack_allocate=None,
         is_pinned=False,
+        is_uninitialized=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
