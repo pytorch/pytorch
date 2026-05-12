@@ -819,6 +819,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.tp_iternext_impl(tx)
         elif name == "__contains__" and not kwargs:
             if len(args) != 1:
+                from ..exc import raise_observed_exception
+
                 msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
                 raise_observed_exception(TypeError, tx, args=[msg])
 
