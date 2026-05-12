@@ -452,14 +452,6 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
-    "hook_with_zero_step",
-    "hook_with_zero_step_interleaved",
-    # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
-    "post_localSGD_hook",
-    # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
-    "quantization_perchannel_hook",
-    "quantization_pertensor_hook",
     # torch.distributed.checkpoint.default_planner
     "create_default_global_load_plan",
     "create_default_global_save_plan",
