@@ -2993,11 +2993,14 @@ class InstructionTranslatorBase(
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
-        # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [bad-assignment, unbound-name]
-        kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [bad-argument-type, unbound-name]
-        self.call_function(fn, argsvars.items, kwargsvars)
+        kwargsvars_const = cast(
+            dict[Any, VariableTracker],
+            kwargsvars.keys_as_python_constant(),
+        )
+        for key in kwargsvars_const:
+            if not isinstance(key, str):
+                exc.raise_type_error(self, "keywords must be strings")
+        self.call_function(fn, argsvars.items, kwargsvars_const)
 
     @break_graph_if_unsupported(
         push=True,
@@ -3746,8 +3749,20 @@ class InstructionTranslatorBase(
             return
 
         items = self.popn(inst.argval * 2)
-        d = dict(zip(items[::2], items[1::2]))
-        self.push(VariableTracker.build(self, d))
+        self.push(self._build_const_dict_variable(items[::2], items[1::2]))
+
+    def _build_const_dict_variable(
+        self,
+        keys: list[VariableTracker],
+        values: list[VariableTracker],
+    ) -> ConstDictVariable:
+        if len(keys) != len(values):
+            raise AssertionError("expected len(keys) == len(values) to be true")
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        tx = cast("InstructionTranslator", self)
+        for key, value in zip(keys, values, strict=True):
+            result._setitem_const(tx, key, value)
+        return result
 
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3756,19 +3771,17 @@ class InstructionTranslatorBase(
             VariableTracker.build(self, dict).call_function(self, [x], {})
             for x in items
         ]  # type: ignore[arg-type]
-        result: dict[Any, Any] = {}
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
         for x in items:
             if not isinstance(x, ConstDictVariable):
                 raise AssertionError(
                     "expected isinstance(x, ConstDictVariable) to be true"
                 )
-            result.update(x.items)
-        self.push(
-            VariableTracker.build(
-                self,
-                result,
-            )
-        )
+            for key, value in x.items.items():
+                result._setitem_const(
+                    cast("InstructionTranslator", self), key.vt, value
+                )
+        self.push(result)
 
     BUILD_MAP_UNPACK_WITH_CALL = BUILD_MAP_UNPACK
 
@@ -3784,12 +3797,7 @@ class InstructionTranslatorBase(
         if len(keys) != len(values):
             raise AssertionError("expected len(keys) == len(values) to be true")
 
-        self.push(
-            VariableTracker.build(
-                self,
-                dict(zip(keys, values)),
-            )
-        )
+        self.push(self._build_const_dict_variable(keys, values))
 
     def MAP_ADD(self, inst: Instruction) -> None:
         k, v = self.popn(2)

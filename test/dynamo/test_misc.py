@@ -14835,6 +14835,74 @@ fn
         self.assertEqual(res, t.sin())
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___non_constant_closure_cell(self):
+        class Holder:
+            def __init__(self, value):
+                self.value = value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            holder = Holder(t)
+
+            class NonTensor:
+                def __init__(self):
+                    self.value = holder.value
+
+                def compute(self):
+                    return self.value.sin()
+
+            return NonTensor().compute()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___cell_assigned_after_class_body(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def compute(self):
+                    return values["t"].sin()
+
+            values = {"t": t}
+            return NonTensor().compute()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___constant_cell_reassigned_after_class_body(self):
+        def fn():
+            x = 1
+
+            class C:
+                def f(self):
+                    return x
+
+            x = 2
+            return C().f()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___aliased_cell_visible_to_python_comparison(self):
+        def fn():
+            class X(int):
+                def __hash__(self):
+                    return 13
+
+                def __eq__(self, other):
+                    return len(d) > 1
+
+            d = {}
+            d = {X(1): 1, X(2): 2}
+            return len(d)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True)
         def fn(t):

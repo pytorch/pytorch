@@ -110,7 +110,7 @@ class SideEffects:
     """
 
     id_to_variable: dict[int, VariableTracker]
-    store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+    store_attr_mutations: dict[VariableTracker, dict[Any, VariableTracker]]
     keepalive: list[Any]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -119,7 +119,7 @@ class SideEffects:
         self,
         output_graph: "OutputGraph",
         id_to_variable: dict[int, VariableTracker] | None = None,
-        store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+        store_attr_mutations: dict[VariableTracker, dict[Any, VariableTracker]]
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
@@ -399,7 +399,7 @@ class SideEffects:
         return False
 
     def store_attr(
-        self, item: VariableTracker, name: str, value: VariableTracker
+        self, item: VariableTracker, name: Any, value: VariableTracker
     ) -> None:
         if not self.is_attribute_mutation(item):
             raise AssertionError(
@@ -416,6 +416,7 @@ class SideEffects:
             and not self.should_allow_side_effects_in_hop()
             and not self.should_allow_externally_visible_side_effects_in_subtracer()
             and value.is_python_constant()
+            and isinstance(name, str)
         ):
             deferred = self.snapshot_attr_mutation(item, name, value)
         if not deferred:
@@ -426,13 +427,13 @@ class SideEffects:
         # Capture user stack for this mutation
         self._capture_user_stack(item)
         item_source = getattr(item, "source", None)
-        if item_source is not None:
+        if item_source is not None and isinstance(name, str):
             self.mutated_sources.add(AttrSource(item_source, name))
 
     def load_attr(
         self,
         item: VariableTracker,
-        name: str,
+        name: Any,
         deleted_ok: bool = False,
         check: bool = False,
     ) -> VariableTracker:
@@ -468,6 +469,14 @@ class SideEffects:
                 f"Expected VariableTracker, got {type(value)} in store_cell"
             )
         self.store_attr(cellvar, "cell_contents", value)
+        for cell in cellvar.closure_cell_aliases or []:
+            try:
+                cell.cell_contents = value.as_python_constant()
+            except NotImplementedError:
+                try:
+                    del cell.cell_contents
+                except ValueError:
+                    pass
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         if not isinstance(cellvar, variables.CellVariable):
@@ -537,7 +546,7 @@ class SideEffects:
             self.store_attr_mutations.get(item)
         )
 
-    def has_pending_mutation_of_attr(self, item: VariableTracker, name: str) -> bool:
+    def has_pending_mutation_of_attr(self, item: VariableTracker, name: Any) -> bool:
         return self.is_attribute_mutation(
             item
         ) and name in self.store_attr_mutations.get(item, ())
@@ -1492,6 +1501,58 @@ class SideEffects:
                         var._base_vt  # pyrefly: ignore[bad-argument-type]
                     )
 
+                elif (
+                    isinstance(var, variables.UserDefinedObjectVariable)
+                    and var.dict_vt is not None
+                    and var.dict_vt.requires_reconstruct_all()
+                ):
+                    varname_map = {}
+                    for name in _manual_dict_setitem.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    mro_index = type(var.value.__dict__).__mro__.index(dict)
+                    cg.extend_output(
+                        [
+                            create_instruction("LOAD_CONST", argval=mro_index),
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["mro_index"]
+                            ),
+                        ]
+                    )
+
+                    cg(var)
+                    cg.load_attr("__dict__")
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_to"]
+                            )
+                        ]
+                    )
+
+                    var.dict_vt.should_reconstruct_all = True
+                    cg(var.dict_vt, allow_cache=False)
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_from"]
+                            )
+                        ]
+                    )
+
+                    dict_update_insts = bytecode_from_template(
+                        _manual_dict_setitem, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    _maybe_log_side_effect(var)
+                    continue
+
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
                 # apply the mutations.
@@ -1513,6 +1574,10 @@ class SideEffects:
                     self.store_attr_mutations.get(var, {}).items()
                 ):
                     if isinstance(var, variables.NewGlobalVariable):
+                        if not isinstance(name, str):
+                            raise AssertionError(
+                                f"Expected global mutation name to be str, got {type(name)}"
+                            )
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
@@ -1523,6 +1588,19 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
+                        side_effect_occurred = True
+                    elif not isinstance(name, str):
+                        if isinstance(value, variables.DeletedVariable):
+                            cg(var)
+                            cg.load_attr("__dict__")
+                            cg(variables.ConstantVariable.create(name))
+                            suffixes.append([create_instruction("DELETE_SUBSCR")])
+                        else:
+                            cg(value)
+                            cg(var)
+                            cg.load_attr("__dict__")
+                            cg(variables.ConstantVariable.create(name))
+                            suffixes.append([create_instruction("STORE_SUBSCR")])
                         side_effect_occurred = True
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(

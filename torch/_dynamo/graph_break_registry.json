@@ -615,6 +615,116 @@
       ]
     }
   ],
+  "GB7861": [
+    {
+      "Gb_type": "Non-constant dict key equality",
+      "Context": "dict key equality {left} == {right}",
+      "Explanation": "Dynamo requires dict key equality to produce a constant result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8927": [
+    {
+      "Gb_type": "Unsupported exec() form",
+      "Context": "exec() with {len(args)} args",
+      "Explanation": "Dynamo only supports exec() with constant string source and dict locals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1456": [
+    {
+      "Gb_type": "Unsupported exec() source",
+      "Context": "exec({code_arg})",
+      "Explanation": "Dynamo only supports exec() with constant string source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5169": [
+    {
+      "Gb_type": "Unsupported exec() locals",
+      "Context": "exec() locals type: {typestr(scope_arg)}",
+      "Explanation": "Dynamo only supports exec() with locals().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1659": [
+    {
+      "Gb_type": "Unsupported exec() builtins type",
+      "Context": "exec() __builtins__ type: {type(builtins_value).__name__}",
+      "Explanation": "Dynamo only supports exec() with dict or module __builtins__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7652": [
+    {
+      "Gb_type": "Unsupported exec() syntax",
+      "Context": "source",
+      "Explanation": "Dynamo does not support exec() syntax {type(node).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8538": [
+    {
+      "Gb_type": "Unsupported exec() assignment target",
+      "Context": "source",
+      "Explanation": "Dynamo does not support assignment to {type(target).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1407": [
+    {
+      "Gb_type": "Unsupported exec() dynamic builtins",
+      "Context": "exec() __builtins__ type: {typestr(builtins_vt)}",
+      "Explanation": "Dynamo only supports exec() with dict or module __builtins__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4776": [
+    {
+      "Gb_type": "Unsupported exec() call keywords",
+      "Context": "source",
+      "Explanation": "Dynamo does not support keyword calls inside exec().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0572": [
+    {
+      "Gb_type": "Unsupported exec() statement",
+      "Context": "source",
+      "Explanation": "Dynamo does not support exec() statement {type(stmt).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5190": [
+    {
+      "Gb_type": "Unsupported exec() dict unpack",
+      "Context": "source",
+      "Explanation": "Dynamo does not support dict unpacking inside exec().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4880": [
     {
       "Gb_type": "missing_mp_subscript",

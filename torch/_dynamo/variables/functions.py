@@ -23,6 +23,7 @@ accurate graph capture while handling Python's various function-related behavior
 
 import _collections  # type: ignore[import-not-found]
 import builtins
+import dis
 import functools
 import importlib.metadata
 import importlib.util
@@ -1904,6 +1905,21 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
         # _converting is used a way to break cycles when
         # two nested_functions refer to each other.
+        return self._get_function(_converting, allow_closure_cell_aliases=False)
+
+    def get_function_for_build_class(
+        self, _converting: set[int] | None = None
+    ) -> types.FunctionType:
+        if not self._can_alias_closure_cells_for_class_body():
+            return self.get_function(_converting)
+        return self._get_function(_converting, allow_closure_cell_aliases=True)
+
+    def _get_function(
+        self,
+        _converting: set[int] | None,
+        *,
+        allow_closure_cell_aliases: bool,
+    ) -> types.FunctionType:
         from .base import AsPythonConstantNotImplementedError
 
         self_id = id(self)
@@ -1915,7 +1931,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
         _converting.add(self_id)
         try:
-            return self._get_function_impl(_converting)
+            return self._get_function_impl(
+                _converting,
+                allow_closure_cell_aliases=allow_closure_cell_aliases,
+            )
         except AsPythonConstantNotImplementedError as e:
             raise ClosureConversionError(
                 "failed to convert closure cell to Python constant"
@@ -1930,7 +1949,41 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         except (NotImplementedError, Unsupported):
             return False
 
-    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
+    def _can_alias_closure_cells_for_class_body(self) -> bool:
+        code = self.get_code()
+        freevars = set(code.co_freevars)
+        if not freevars:
+            return False
+        for inst in dis.get_instructions(code):
+            if inst.argval in freevars and inst.opname not in (
+                "LOAD_FAST",
+                "LOAD_CLOSURE",
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _alias_closure_cell(
+        tx: "InstructionTranslator",
+        cell_var: VariableTracker,
+        cell: types.CellType,
+    ) -> None:
+        if not isinstance(cell_var, variables.CellVariable):
+            raise AssertionError(
+                f"expected CellVariable in closure, got {type(cell_var)}"
+            )
+        if cell_var.closure_cell_aliases is None:
+            cell_var.closure_cell_aliases = []
+        cell_var.closure_cell_aliases.append(cell)
+        tx.output.side_effects.id_to_variable[id(cell)] = cell_var
+        tx.output.side_effects.keepalive.append(cell)
+
+    def _get_function_impl(
+        self,
+        _converting: set[int],
+        *,
+        allow_closure_cell_aliases: bool,
+    ) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1941,7 +1994,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
-                cell_contents = tx.output.side_effects.load_cell(cell_var)
+                try:
+                    cell_contents = tx.output.side_effects.load_cell(cell_var)
+                except Unsupported:
+                    if not allow_closure_cell_aliases:
+                        raise
+                    cell = types.CellType()
+                    self._alias_closure_cell(tx, cell_var, cell)
+                    cells.append(cell)
+                    continue
 
                 # Check for self-referential closure (function capturing itself for recursion)
                 # For example:
@@ -1959,8 +2020,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 if isinstance(cell_contents, NestedUserFunctionVariable):
                     value = cell_contents.get_function(_converting)
                 else:
-                    value = cell_contents.as_python_constant()
-                cells.append(make_cell(value))
+                    try:
+                        value = cell_contents.as_python_constant()
+                    except NotImplementedError:
+                        if not allow_closure_cell_aliases:
+                            raise
+                        cell = types.CellType()
+                        self._alias_closure_cell(tx, cell_var, cell)
+                        cells.append(cell)
+                        continue
+                cell = make_cell(value)
+                if allow_closure_cell_aliases:
+                    self._alias_closure_cell(tx, cell_var, cell)
+                cells.append(cell)
             closure_cells = tuple(cells)
 
         func = types.FunctionType(

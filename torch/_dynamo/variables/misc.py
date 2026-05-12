@@ -823,6 +823,10 @@ class ComptimeVariable(VariableTracker):
 class CellVariable(VariableTracker):
     # PyCell_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L151
     _cpython_type = types.CellType
+    _nonvar_fields = {
+        "closure_cell_aliases",
+        *VariableTracker._nonvar_fields,
+    }
 
     # If the cell existed before Dynamo tracing started, this will be the
     # VariableTracker that represents the cell content.
@@ -837,10 +841,14 @@ class CellVariable(VariableTracker):
     local_name: str | None = None
 
     def __init__(
-        self, pre_existing_contents: VariableTracker | None = None, **kwargs: Any
+        self,
+        pre_existing_contents: VariableTracker | None = None,
+        closure_cell_aliases: list[types.CellType] | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
+        self.closure_cell_aliases = closure_cell_aliases
 
     def python_type(self) -> type:
         return types.CellType

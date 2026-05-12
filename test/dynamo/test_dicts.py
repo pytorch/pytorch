@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import builtins
 import enum
 import itertools
 import operator
@@ -45,6 +46,17 @@ class FakeMapping:
 
     def __getitem__(self, key: str) -> Any:
         return self._value
+
+
+class MappingWithKeys:
+    def __init__(self, data):
+        self.data = data
+
+    def keys(self):
+        return self.data.keys()
+
+    def __getitem__(self, key):
+        return self.data[key]
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
@@ -2124,6 +2136,125 @@ class DictGuardTests(LoggingTestCase):
         )
 
 
+class _InvalidKeywordCustomDict(dict):
+    pass
+
+
+class _BadDictKeyException(Exception):
+    pass
+
+
+class _BadDictKey:
+    def __hash__(self):
+        return hash(self.__class__)
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            raise _BadDictKeyException
+        return other
+
+
+class _CountingHashEqKey:
+    def __init__(self):
+        self.hash_count = 0
+        self.eq_count = 0
+
+    def __hash__(self):
+        self.hash_count += 1
+        return 42
+
+    def __eq__(self, other):
+        self.eq_count += 1
+        return id(self) == id(other)
+
+
+class _BaseCollisionKey:
+    def __hash__(self):
+        return 7
+
+    def __eq__(self, other):
+        return NotImplemented
+
+
+class _ReflectedCollisionKey(_BaseCollisionKey):
+    __hash__ = _BaseCollisionKey.__hash__
+
+    def __init__(self):
+        self.eq_count = 0
+
+    def __eq__(self, other):
+        self.eq_count += 1
+        return isinstance(other, _BaseCollisionKey)
+
+
+class _ClearingCollisionKey:
+    def __init__(self):
+        self.dict_to_clear = None
+
+    def __hash__(self):
+        return 13
+
+    def __eq__(self, other):
+        self.dict_to_clear.clear()
+        return True
+
+
+class _InsertingFalseCollisionKey:
+    def __init__(self):
+        self.dict_to_update = None
+        self.hash_count = 0
+
+    def __hash__(self):
+        self.hash_count += 1
+        return 17
+
+    def __eq__(self, other):
+        d = self.dict_to_update
+        self.dict_to_update = None
+        if d is not None:
+            d[other] = "hit"
+        return False
+
+
+class _StringKeywordCollisionKey:
+    def __hash__(self):
+        return hash("key3")
+
+    def __eq__(self, other):
+        return other == "key3"
+
+
+class _StringNameCollisionKey:
+    def __init__(self, name):
+        self.name = name
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return other == self.name
+
+
+class _EqualCollisionKey:
+    def __hash__(self):
+        return 23
+
+    def __eq__(self, other):
+        return isinstance(other, _EqualCollisionKey)
+
+
+_FAKE_BUILTINS_WITH_GETATTR = types.ModuleType("fake_builtins")
+
+
+def _fake_builtins_getattr(name):
+    if name == "len":
+        return lambda x: 99
+    raise AttributeError(name)
+
+
+_FAKE_BUILTINS_WITH_GETATTR.__getattr__ = _fake_builtins_getattr
+
+
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
 
@@ -2431,6 +2562,160 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.setdefault, [[]])
 
     @make_dynamo_test
+    def test_invalid_non_string_keyword_arguments(self):
+        for invalid in ({1: 2}, _InvalidKeywordCustomDict({1: 2})):
+            with self.assertRaises(TypeError):
+                dict(**invalid)
+            with self.assertRaises(TypeError):
+                {}.update(**invalid)
+
+    @make_dynamo_test
+    def test_bad_key_exec_raises(self):
+        d = {}
+        x1 = _BadDictKey()
+        x2 = _BadDictKey()
+        d[x1] = 1
+        for stmt in (
+            "d[x2] = 2",
+            "z = d[x2]",
+            "x2 in d",
+            "d.get(x2)",
+            "d.setdefault(x2, 42)",
+            "d.pop(x2)",
+            "d.update({x2: 2})",
+        ):
+            with self.assertRaises(_BadDictKeyException):
+                exec(stmt, locals())
+
+    @make_dynamo_test
+    def test_setdefault_custom_key_hash_eq_once(self):
+        hashed1 = _CountingHashEqKey()
+        y = {hashed1: 5}
+        hashed2 = _CountingHashEqKey()
+        y.setdefault(hashed2, [])
+        self.assertEqual(hashed1.hash_count, 1)
+        self.assertEqual(hashed2.hash_count, 1)
+        self.assertEqual(hashed1.eq_count + hashed2.eq_count, 1)
+
+    @make_dynamo_test
+    def test_setitem_custom_key_hash_eq_once_at_resize(self):
+        hashed1 = _CountingHashEqKey()
+        y = {hashed1: 5, 0: 0, 1: 1, 2: 2, 3: 3}
+        hashed2 = _CountingHashEqKey()
+        y[hashed2] = []
+        self.assertEqual(hashed1.hash_count, 1)
+        self.assertEqual(hashed2.hash_count, 1)
+        self.assertEqual(hashed1.eq_count + hashed2.eq_count, 1)
+
+    @make_dynamo_test
+    def test_dict_key_lookup_uses_reflected_subtype_eq(self):
+        base = _BaseCollisionKey()
+        child = _ReflectedCollisionKey()
+        d = {base: "hit"}
+        self.assertEqual(d[child], "hit")
+        self.assertTrue(child in d)
+        self.assertEqual(d.setdefault(child, "miss"), "hit")
+        self.assertEqual(child.eq_count, 3)
+
+    @make_dynamo_test
+    def test_dict_key_lookup_rechecks_after_eq_mutation(self):
+        stored = _ClearingCollisionKey()
+        lookup = _ClearingCollisionKey()
+        d = {stored: "hit"}
+        stored.dict_to_clear = d
+        self.assertFalse(lookup in d)
+        self.assertEqual(d, {})
+
+        d = {stored: "hit"}
+        stored.dict_to_clear = d
+        self.assertEqual(d.get(lookup, "missing"), "missing")
+        self.assertEqual(d, {})
+
+    @make_dynamo_test
+    def test_dict_key_lookup_restarts_after_false_eq_mutation(self):
+        stored = _InsertingFalseCollisionKey()
+        lookup = _InsertingFalseCollisionKey()
+        d = {stored: "old"}
+        stored.dict_to_update = d
+        self.assertEqual((d.get(lookup, "missing"), len(d)), ("hit", 2))
+        self.assertEqual(lookup.hash_count, 2)
+
+    def test_exec_explicit_globals_locals_unsupported(self):
+        def fn():
+            exec("x", {"x": 1}, {})
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported exec"):
+            opt_fn()
+
+    def test_exec_explicit_globals_unsupported(self):
+        def fn():
+            g = {}
+            exec("x = 1", g)
+            return g["x"], "__builtins__" in g
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported exec"):
+            opt_fn()
+
+    @make_dynamo_test
+    def test_exec_locals_injects_builtins(self):
+        l = locals()
+        exec("x = 1", l)
+        self.assertEqual((l["x"], "__builtins__" in l), (1, True))
+
+    @make_dynamo_test
+    def test_exec_locals_resolves_builtin_names(self):
+        d = {}
+        exec("d['len'] = len", locals())
+        self.assertEqual(d["len"]([1, 2]), 2)
+
+    @make_dynamo_test
+    def test_exec_locals_honors_existing_builtins_dict(self):
+        __builtins__ = {"len": lambda x: 99}
+        l = locals()
+        exec("x = len", l)
+        self.assertEqual(l["x"]([1, 2, 3]), 99)
+
+    @make_dynamo_test
+    def test_exec_locals_scope_lookup_uses_collision_lookup(self):
+        k = _StringNameCollisionKey("x")
+        l = locals()
+        l[k] = 99
+        exec("out = x", l)
+        self.assertEqual(l["out"], 99)
+
+    @make_dynamo_test
+    def test_exec_locals_builtins_lookup_uses_collision_lookup(self):
+        k = _StringNameCollisionKey("len")
+        __builtins__ = {k: lambda x: 99}
+        l = locals()
+        exec("x = len", l)
+        self.assertEqual(l["x"]([1, 2, 3]), 99)
+
+    @make_dynamo_test
+    def test_exec_locals_honors_existing_builtins_module(self):
+        __builtins__ = builtins
+        l = locals()
+        exec("x = len", l)
+        self.assertEqual(l["x"]([1, 2, 3]), 3)
+
+    @make_dynamo_test
+    def test_exec_locals_builtins_module_ignores_getattr(self):
+        __builtins__ = _FAKE_BUILTINS_WITH_GETATTR
+        l = locals()
+        with self.assertRaises(NameError):
+            exec("x = len", l)
+
+    @make_dynamo_test
+    def test_exec_dict_literal_uses_collision_lookup(self):
+        k1 = _EqualCollisionKey()
+        k2 = _EqualCollisionKey()
+        l = locals()
+        exec("x = {k1: 1, k2: 2}", l)
+        self.assertEqual((len(l["x"]), l["x"].get(k1), l["x"].get(k2)), (1, 2, 2))
+
+    @make_dynamo_test
     def test_update(self):
         d = self.thetype({"a": 1, "b": 2})
         d.update({"b": 3, "c": 4})
@@ -2461,6 +2746,59 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test invalid usage
         self.assertRaises(TypeError, d.update, 1)
+
+    @make_dynamo_test
+    def test_update_kwargs_uses_collision_lookup(self):
+        k = _StringKeywordCollisionKey()
+        d = {k: 1}
+        d.update(key3=2)
+        self.assertEqual((len(d), d.get(k), d.get("key3")), (1, 2, 2))
+
+    @make_dynamo_test
+    def test_dict_literal_uses_collision_lookup(self):
+        k1 = _EqualCollisionKey()
+        k2 = _EqualCollisionKey()
+        d = {k1: 1, k2: 2}
+        self.assertEqual((len(d), d.get(k1), d.get(k2)), (1, 2, 2))
+
+    @make_dynamo_test
+    def test_dict_unpack_uses_collision_lookup(self):
+        k1 = _EqualCollisionKey()
+        k2 = _EqualCollisionKey()
+        d = {**{k1: 1}, **{k2: 2}}  # noqa: PIE800
+        self.assertEqual((len(d), d.get(k1), d.get(k2)), (1, 2, 2))
+
+    @make_dynamo_test
+    def test_delitem_uses_collision_lookup(self):
+        k = _StringKeywordCollisionKey()
+        d = {k: 1}
+        del d["key3"]
+        self.assertEqual(d, {})
+
+    @make_dynamo_test
+    def test_init_uses_collision_lookup(self):
+        k = _StringKeywordCollisionKey()
+        d = {k: 1}
+        d.__init__(key3=2)
+        self.assertEqual((len(d), d.get(k), d.get("key3")), (1, 2, 2))
+
+    @make_dynamo_test
+    def test_update_cpython_merge_paths(self):
+        d = self.thetype({"a": 1})
+        d.update()
+        self.assertEqual(d, {"a": 1})
+
+        d.update(MappingWithKeys({"b": 2, "c": 3}))
+        self.assertEqual(d, {"a": 1, "b": 2, "c": 3})
+
+        d.update([("b", 4), ("d", 5)])
+        self.assertEqual(d, {"a": 1, "b": 4, "c": 3, "d": 5})
+
+    @make_dynamo_test
+    def test_ior_malformed_sequence_raises(self):
+        d = self.thetype({"a": 1})
+        self.assertRaises(ValueError, d.__ior__, "BAD")
+        self.assertEqual(d.__ior__(""), {"a": 1})
 
     @make_dynamo_test
     def test_values(self):
@@ -2852,6 +3190,98 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         items, keys = fn(obj)
         self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
         self.assertEqual(keys, {"x", "y", "z"})
+
+    def test_dunder_dict_non_string_key_promotes_to_generic_mapping(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.__dict__[1] = 1
+            obj.a = "a"
+            return list(obj.__dict__), dict(obj.__dict__.items())
+
+        keys, items = fn()
+        self.assertEqual(keys, [1, "a"])
+        self.assertEqual(items, {1: 1, "a": "a"})
+
+    def test_dunder_dict_replays_non_string_key_mutation(self):
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            d = obj.__dict__
+            d[2] = 2
+            return list(d), dict(d.items())
+
+        obj = MyClass()
+        keys, items = fn(obj)
+        self.assertEqual(keys, ["x", 2])
+        self.assertEqual(items, {"x": 1, 2: 2})
+        self.assertEqual(obj.__dict__, {"x": 1, 2: 2})
+
+    def test_dunder_dict_reinsert_existing_key_updates_order(self):
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+                self.y = 2
+                self.z = 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            d = obj.__dict__
+            d.pop("y")
+            d["y"] = 42
+            return list(d), dict(d.items())
+
+        obj = MyClass()
+        keys, items = fn(obj)
+        self.assertEqual(keys, ["x", "z", "y"])
+        self.assertEqual(items, {"x": 1, "z": 3, "y": 42})
+        self.assertEqual(list(obj.__dict__), ["x", "z", "y"])
+
+    def test_dunder_dict_delattr_reinsert_updates_order(self):
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+                self.y = 2
+                self.z = 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            d = obj.__dict__
+            del obj.y
+            obj.y = 42
+            return list(d), dict(d.items())
+
+        obj = MyClass()
+        keys, items = fn(obj)
+        self.assertEqual(keys, ["x", "z", "y"])
+        self.assertEqual(items, {"x": 1, "z": 3, "y": 42})
+        self.assertEqual(list(obj.__dict__), ["x", "z", "y"])
+
+    def test_dunder_dict_popitem_is_lifo(self):
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+                self.y = 2
+                self.z = 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            d = obj.__dict__
+            item = d.popitem()
+            return item, list(d), dict(d.items())
+
+        obj = MyClass()
+        item, keys, items = fn(obj)
+        self.assertEqual(item, ("z", 3))
+        self.assertEqual(keys, ["x", "y"])
+        self.assertEqual(items, {"x": 1, "y": 2})
+        self.assertEqual(obj.__dict__, {"x": 1, "y": 2})
 
     def test_dunder_dict_items_iteration(self):
         """Test iterating over __dict__.items() with mutations"""
