@@ -351,7 +351,7 @@ def bmm(
 ) -> torch.Tensor:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
-    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+    if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
         return (self * batch2).contiguous()
@@ -1065,6 +1065,14 @@ def index_reduce(
     *,
     include_self: bool = True,
 ) -> torch.Tensor:
+    torch._check(
+        self.device == index.device and self.device == src.device,
+        lambda: (
+            f"index_reduce(): self, index and source expected to be in the same device, "
+            f"but got (self) {self.device}, (index) {index.device}, "
+            f"and (source) {src.device}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):

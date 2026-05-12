@@ -132,20 +132,12 @@ CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=false
 VERIFY_WHEELNAME=true
 case $desired_python in
-    3.14t)
-        echo "Using 3.14 deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
+    3.14*)
+        echo "Using ${desired_python} deps"
+        NUMPY_PINNED_VERSION="==2.3.4"
         ;;
-    3.14)
-        echo "Using 3.14t deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
-        ;;
-    3.13t)
-        echo "Using 3.13t deps"
-        NUMPY_PINNED_VERSION="==2.1.0"
-        ;;
-    3.13)
-        echo "Using 3.13 deps"
+    3.13*)
+        echo "Using ${desired_python} deps"
         NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
@@ -197,17 +189,8 @@ _PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --w
 
 echo "Finished -m build --wheel --no-isolation at $(date)"
 
-if [[ $package_type != 'libtorch' ]]; then
-    echo "delocating wheel dependencies"
-    retry pip install https://github.com/matthew-brett/delocate/archive/refs/tags/0.10.4.zip
-    echo "found the following wheels:"
-    find $whl_tmp_dir -name "*.whl"
-    echo "running delocate"
-    find $whl_tmp_dir -name "*.whl" | xargs -I {} delocate-wheel -v {}
-    find $whl_tmp_dir -name "*.whl"
-    find $whl_tmp_dir -name "*.whl" | xargs -I {} delocate-listdeps {}
-    echo "Finished delocating wheels at $(date)"
-fi
+# Wheel delocation runs as a separate workflow step; see
+# .ci/wheel/delocate_wheels.sh.
 
 echo "The wheel is in $(find $whl_tmp_dir -name '*.whl')"
 

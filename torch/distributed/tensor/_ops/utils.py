@@ -412,6 +412,18 @@ def expand_to_full_mesh_op_strategy(
     args_strategy = op_schema.args_strategy
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
+
+    # Propagate use_strided_shard_as_shard_order from inputs so that
+    # strategy specs with _StridedShard get the correct flag (and thus
+    # correct shard_order) at construction time, avoiding shard_order
+    # mismatches in redistribute_cost computation.
+    _input_use_strided: bool | None = None
+    for input_strat in input_args_strategy:
+        input_spec = input_strat.strategies[0].output_spec
+        if any(isinstance(p, _StridedShard) for p in input_spec.placements):
+            _input_use_strided = input_spec.use_strided_shard_as_shard_order
+            break
+
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
     blocking_inplace_input_placements: tuple[Placement, ...] | None = None
@@ -450,7 +462,20 @@ def expand_to_full_mesh_op_strategy(
                         input_strategy_counter += 1
 
                 # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                use_strided = (
+                    _input_use_strided
+                    if _input_use_strided is not None
+                    and any(isinstance(p, _StridedShard) for p in specs)
+                    else None
+                )
+                spec_list.append(
+                    DTensorSpec(
+                        mesh,
+                        specs,
+                        tensor_meta=tensor_meta,
+                        use_strided_shard_as_shard_order=use_strided,
+                    )
+                )
             else:
                 spec_list.append(None)
 

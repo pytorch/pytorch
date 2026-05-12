@@ -3655,10 +3655,39 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # This would error before fixing guard orering on nn.Modules (https://github.com/pytorch/pytorch/issues/170429)
         _ = runner_func(model, input_tensor)
 
+    def test_prepend_hook_ordering(self):
+        class HookedLinear(torch.nn.Linear):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.register_forward_pre_hook(self._hook_add)
+                self.register_forward_pre_hook(self._hook_mul, prepend=True)
 
-devices = ["cuda", "hpu", "xpu"]
+            @staticmethod
+            def _hook_add(module, args):
+                return (args[0] + 1,)
+
+            @staticmethod
+            def _hook_mul(module, args):
+                return (args[0] * 2,)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = HookedLinear(4, 4, bias=False)
+
+            def forward(self, x):
+                return self.layer(x)
+
+        model = Model()
+        x = torch.ones(1, 4)
+
+        eager = model(x)
+        compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
+        self.assertEqual(eager, compiled)
+
+
 instantiate_device_type_tests(
-    NNModuleTestsDevice, globals(), only_for=devices, allow_xpu=True
+    NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )
 
 if __name__ == "__main__":

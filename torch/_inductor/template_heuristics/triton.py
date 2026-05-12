@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -617,7 +619,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 256, 128, 4, 4),
         ]
 
-        self.blackwell_scaled_persistent_mm_configs = [
+        self.blackwell_scaled_persistent_mm_configs: list[BaseConfig] = [
             BlackwellGPUGemmConfig(
                 block_m=c.block_m,
                 block_n=c.block_n,
@@ -1298,9 +1300,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 256): FlexConfig(64, 16, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 64, 3, 4),
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 192): FlexConfig(128, 32, 2, 8),
             (torch.bfloat16, 256): FlexConfig(32, 64, 3, 4),
             (torch.float16, 64): FlexConfig(128, 64, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 192): FlexConfig(128, 32, 2, 8),
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
@@ -1554,16 +1558,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         # Architecture-aware default kpack for flex configs
         default_kpack = get_default_kpack()
 
-        self.default_flex_config = {
+        self.gfx950_default_flex_config = {
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
             (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
             (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
+        }
+
+        self.gfx942_default_flex_config = {
+            (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
+            (torch.bfloat16, 64): ROCmFlexConfig(64, 64, 2, 8, kpack=default_kpack),
+            (torch.bfloat16, 128): ROCmFlexConfig(64, 64, 2, 8, kpack=default_kpack),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(64, 32, 1, 8, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(64, 32, 1, 8, kpack=default_kpack),
+            (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1748,20 +1764,27 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
+        capability = torch.cuda.get_device_capability()
         default_kpack = get_default_kpack()
+
         if head_dim <= 256:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack)
-            default_config = self.default_flex_config.get(
-                (dtype, head_dim), default_config
-            )
+                default_config = ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack)
+            if capability >= (9, 5):  # gfx950 (MI350X/MI355X)
+                default_config = self.gfx950_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability >= (9, 4):  # gfx942 (MI300X/MI325X)
+                default_config = self.gfx942_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(64, 32, 2, 4, kpack=default_kpack)
+                default_config = ROCmFlexConfig(64, 32, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -2095,6 +2118,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         return options_dict
 
+    @staticmethod
+    def _dtype_to_triton(dtype: torch.dtype) -> str:
+        """Convert a torch dtype to a triton type string."""
+        return f"tl.{dtype}".replace("torch.", "")
+
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
         Get accumulator type for the given dtype.
@@ -2102,7 +2130,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         if dtype in (torch.float16, torch.bfloat16):
             return "tl.float32"
-        return f"tl.{dtype}".replace("torch.", "")
+        return self._dtype_to_triton(dtype)
 
 
 # INT8 specific mixin to filter correctly
@@ -2211,6 +2239,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "tma_load_for_template_epilogue": config.triton.enable_tma_load_for_template_epilogue,
             "transpose_discontiguous_tensor_descriptors_override": True,
         }
 
@@ -2252,7 +2281,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            flatten = (
+                template_kwargs.get("FLATTEN", True)
+                and not constraints_violated
+                and USE_META_WS
+            )
             yield {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
@@ -2325,7 +2359,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         if bias:
             nodes.append(bias)
         return MMKernelInputs(
-            nodes, mat1_idx=kernel_inputs._mat1_idx, mat2_idx=kernel_inputs._mat2_idx
+            nodes,
+            mat1_idx=kernel_inputs._mat1_idx,
+            mat2_idx=kernel_inputs._mat2_idx,
         )
 
     def _get_template_configs_impl(
@@ -2574,7 +2610,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,  # type: ignore[misc]
+    ROCmConfigHeuristic,
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
@@ -2758,8 +2794,7 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune scaled_persistent_mm_configs for Blackwell
-        self.mm_configs = self.blackwell_persistent_addmm_configs
+        self.mm_configs = self.blackwell_scaled_persistent_mm_configs
 
 
 @register_template_heuristic(
@@ -2830,6 +2865,18 @@ class ROCmMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
 )
 class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeuristic):
     """Addmm specific mixin for ROCm"""
+
+
+@register_template_heuristic(
+    persistent_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTemplateConfigHeuristic(
+    AddMMConfigMixin, PersistentMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for persistent MM on ROCm"""
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
