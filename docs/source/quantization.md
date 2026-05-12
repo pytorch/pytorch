@@ -1,42 +1,40 @@
-.. _quantization-doc:
+(quantization-doc)=
 
-Quantization
-============
+# Quantization
 
+```{eval-rst}
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
+```
 
-We are cetralizing all quantization related development to `torchao <https://github.com/pytorch/ao>`__, please checkout our new doc page: https://docs.pytorch.org/ao/stable/index.html
+We are centralizing all quantization related development to [torchao](https://github.com/pytorch/ao), please checkout our new doc page: <https://docs.pytorch.org/ao/stable/index.html>
 
 Plan for the existing quantization flows:
-1. Eager mode quantization (torch.ao.quantization.quantize,
-torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode
-`quantize_ <https://docs.pytorch.org/ao/main/generated/torchao.quantization.quantize_.html#torchao.quantization.quantize_>`__ API instead
 
-2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx
-torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization
-API instead (`torchao.quantization.pt2e.quantize_pt2e.prepare_pt2e`, `torchao.quantization.pt2e.quantize_pt2e.convert_pt2e`)
+1. **Eager mode quantization** (`torch.ao.quantization.quantize`, `torch.ao.quantization.quantize_dynamic`): please migrate to use torchao eager mode [`quantize_`](https://docs.pytorch.org/ao/main/api_reference/generated/torchao.quantization.quantize_.html#torchao.quantization.quantize_) API instead.
 
-3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e)
-see https://github.com/pytorch/ao/issues/2259 for more details
+2. **FX graph mode quantization** (`torch.ao.quantization.quantize_fx.prepare_fx`, `torch.ao.quantization.quantize_fx.convert_fx`): please migrate to use torchao pt2e quantization API instead (`torchao.quantization.pt2e.quantize_pt2e.prepare_pt2e`, `torchao.quantization.pt2e.quantize_pt2e.convert_pt2e`).
+
+3. **pt2e quantization** has been migrated to torchao (<https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e>); see <https://github.com/pytorch/ao/issues/2259> for more details.
 
 We plan to delete `torch.ao.quantization` in 2.10 if there are no blockers, or in the earliest PyTorch version until all the blockers are cleared.
 
+## Quantization API Reference (Kept since APIs are still public)
 
-Quantization API Reference (Kept since APIs are still public)
------------------------------------------------------------------
-
-The :doc:`Quantization API Reference <quantization-support>` contains documentation
+The {doc}`Quantization API Reference <quantization-support>` contains documentation
 of quantization APIs, such as quantization passes, quantized tensor operations,
 and supported quantized modules and functions.
 
-.. toctree::
-    :hidden:
+```{toctree}
+:hidden:
 
-    quantization-support
+quantization-support
+```
 
-.. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
-.. They are here for tracking purposes until they are more permanently fixed.
+<!-- torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now. -->
+<!-- They are here for tracking purposes until they are more permanently fixed. -->
+
+```{eval-rst}
 .. py:module:: torch.ao
 .. py:module:: torch.ao.nn
 .. py:module:: torch.ao.nn.quantizable
@@ -187,8 +185,8 @@ and supported quantized modules and functions.
 .. py:module:: torch.quantization.stubs
 .. py:module:: torch.quantization.utils
 
-
 .. currentmodule:: torch.ao.ns.fx.utils
 .. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
+```
