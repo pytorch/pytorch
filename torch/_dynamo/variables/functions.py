@@ -3570,7 +3570,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
             type_source = AttrSource(ImportSource("collections"), "namedtuple")
-            return VariableTracker.build(tx, namedtuple, type_source)
+            return VariableTracker.build(tx, namedtuple, type_source)  # noqa: PYI024
         return VariableTracker.build(tx, python_type, source=type_source)
 
 
