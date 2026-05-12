@@ -136,7 +136,7 @@ docstring-code-format = true
 quote-style = "double"
 
 [tool.ruff.lint]
-# NOTE: Synchoronize the ignores with .flake8
+# NOTE: Synchronize the ignores with .flake8
 external = [
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
@@ -180,8 +180,6 @@ ignore = [
     "PERF203",
     "PERF401",
     # these ignores are from PYI; please fix!
-    "PYI024",
-    "PYI036",
     "PYI041",
     "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
@@ -350,7 +348,6 @@ select = [
 ]
 
 # torch/ folders still needing S101 migration
-"torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 
 [tool.codespell]

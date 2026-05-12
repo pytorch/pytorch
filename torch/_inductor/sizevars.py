@@ -60,6 +60,14 @@ _GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
 )
 
 
+# Threshold above which we skip sympy reasoning that scales poorly in the
+# number of symbols. Past this point, polynomial-domain conversions inside
+# sympy (e.g. gcd, Mod) dominate compile time on wide concat/sum expressions
+# (see https://github.com/sympy/sympy/issues/28200). Chosen empirically from
+# AOT-partitioned bwd graphs with ~60-variable shape expressions.
+_MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
+
+
 def statically_known_true(
     shape_env: ShapeEnv,
     expr: sympy.Basic | bool,
@@ -68,6 +76,17 @@ def statically_known_true(
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
+
+    # Hint fast-path: if the current concrete hints make `expr` evaluate to
+    # False, it cannot be universally True, so bail out without running the
+    # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
+    # us conclude universal truth, so we still fall through in that case.)
+    try:
+        hinted = expr.xreplace(shape_env.backed_var_to_val)
+        if hinted is sympy.S.false:
+            return False
+    except Exception:
+        pass
 
     try:
         simplified = shape_env._maybe_evaluate_static(
@@ -219,17 +238,14 @@ class SizeVarAllocator:
             if not statically_known(base >= 0):
                 return base
 
+            from torch.utils._sympy.functions import safe_gcd
+
             for v in base.free_symbols:
                 if v in var_ranges:
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
-                        # v can be removed if it doesn't affect the FloorDiv.
-                        # rest is always a multiple of gcd(rest, divisor), so
-                        # rest % divisor is also a multiple of that gcd. The
-                        # worst case is rest % divisor == divisor - gcd, so
-                        # adding v is safe when v < gcd.
-                        gcd = sympy.gcd(m[rest], divisor)
+                        gcd = safe_gcd(m[rest], divisor)
                         if statically_known(v < gcd):
                             base = m[rest]
             return base
@@ -374,7 +390,7 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
+        return self.statically_known_true(sympy.Eq(left, right))
 
     def statically_known_list_equals(
         self, left: Sequence[Expr], right: Sequence[Expr]
@@ -429,7 +445,6 @@ class SizeVarAllocator:
             for factor in numerator.args:
                 if self._is_multiple_of(factor, denominator):
                     return True
-            # Also check if combined constant factors are divisible
             const = 1
             for factor in numerator.args:
                 if isinstance(factor, (int, sympy.Integer)):
@@ -458,7 +473,16 @@ class SizeVarAllocator:
             ):
                 return True
 
-        # Rule 6 — axiom fallback: ask ShapeEnv
+        # Rule 6 — cheap gcd check before expensive sympy fallback.
+        from torch.utils._sympy.functions import simple_floordiv_gcd
+
+        gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
+        if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
+            return True
+
+        # Rule 7 — full sympy fallback (expensive on many-variable exprs).
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)
 
@@ -468,18 +492,20 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
-
-        if len(free_symbols(numerator)) > 20:
-            return False
+        # Use cheap structural equality, not statically_known_equals —
+        # the latter constructs sympy.Eq(wide, wide) which has measurable
+        # overhead (~30s on 64-variable expressions).
+        if numerator is denominator or numerator == denominator:
+            return True
 
         if isinstance(denominator, (int, sympy.Integer)):
             return self._is_multiple_of(numerator, int(denominator))
 
-        # For symbolic denominators, fall back to direct sympy check
+        # Symbolic denominator: only the sympy fallback can prove this.
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
         expr = sympy.Eq(Mod(numerator, denominator), 0)
-        return self.statically_known_true(expr)  # type: ignore[arg-type]
+        return self.statically_known_true(expr)
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
@@ -588,9 +614,9 @@ class SizeVarAllocator:
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         if self.guard_or_false(sympy.Le(left, right)):
             return left
         if self.guard_or_false(sympy.Le(right, left)):
@@ -656,8 +682,8 @@ class SizeVarAllocator:
         return [self.guard_int(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
-        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
-            return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
         return expr
 
     def replace_backed_symbols_with_hints(
@@ -898,6 +924,8 @@ class SizeVarAllocator:
         """
         strides = []
         index = self.simplify(index)
+        if isinstance(index, Expr):
+            index = index.expand(identity=True)
         # remove any offset
         index = index - sympy_subs(
             index, {v: sympy.S.Zero for v in support_vars if v != 0}
@@ -937,8 +965,8 @@ class SizeVarAllocator:
         support_vars: Sequence[sympy.Symbol] | None = None,
     ) -> list[int]:
         for v in index.free_symbols:
-            if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
-                index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
+            if symbol_is_type(v, SymT.INDIRECT):
+                index = sympy_subs(index, {v: 0})
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             result.append(self.optimization_hint(s, fallback=0))
