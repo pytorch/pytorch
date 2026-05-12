@@ -1291,6 +1291,31 @@ def memory_usage(device: Device = None) -> float:
     return 1e6 * bytes_transferred / (mem_bandwidth.maxBandwidth * dt)
 
 
+def device_memory_used(device: Device = None) -> int:
+    r"""Return the current GPU used global (device) memory in bytes.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU memory usage information.
+    """
+    memory_handle = _zes_get_memory_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    mem_state = pyzes.zes_mem_state_t()
+    rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU memory usage querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU memory state (rc={rc}).")
+    return mem_state.size - mem_state.free
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -1340,6 +1365,7 @@ __all__ = [
     "device",
     "device_of",
     "device_count",
+    "device_memory_used",
     "empty_cache",
     "get_arch_list",
     "get_device_capability",

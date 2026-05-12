@@ -19,6 +19,7 @@
     device
     device_count
     device_of
+    device_memory_used
     get_arch_list
     get_device_capability
     get_device_name
