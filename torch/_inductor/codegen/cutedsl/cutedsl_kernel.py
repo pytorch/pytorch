@@ -567,10 +567,15 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            dim_indices = (
+                index.args if isinstance(index, HierarchicalIndex) else (index,)
+            )
             idx_vars = [
-                self._emit_index_fragment(dim_index, "cutlass.Int32", torch.int32)
-                for dim_index in (
-                    index.args if isinstance(index, HierarchicalIndex) else (index,)
+                self._emit_index_fragment(
+                    dim_index, dim_size, "cutlass.Int32", torch.int32
+                )
+                for dim_index, dim_size in zip(
+                    dim_indices, buffer.get_size(), strict=True
                 )
             ]
 
@@ -784,20 +789,26 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return f"({', '.join(items)})"
 
     def _emit_index_fragment(
-        self, expr: sympy.Expr, cute_dtype: str, torch_dtype: torch.dtype
+        self,
+        expr: sympy.Expr,
+        dim_size: sympy.Expr,
+        cute_dtype: str,
+        torch_dtype: torch.dtype,
     ) -> CuteDSLIndexFragment:
         """Materialize an index and preserve enough metadata for load selection."""
         static_expr = self._static_integer_expr(expr)
         if static_expr is not None:
             return CuteDSLIndexFragment(
-                self.kernel.kexpr(static_expr), is_static_int=True
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
             )
 
         expr = self.kernel.rename_indexing(expr)
         static_expr = self._static_integer_expr(expr)
         if static_expr is not None:
             return CuteDSLIndexFragment(
-                self.kernel.kexpr(static_expr), is_static_int=True
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
             )
 
         semantic_expr = self._semantic_index_expr(expr)
@@ -842,6 +853,14 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             if expr.is_Integer:
                 return expr
         return None
+
+    @staticmethod
+    def _wrap_static_index(
+        index: int | sympy.Integer, dim_size: sympy.Expr
+    ) -> int | sympy.Expr:
+        if int(index) < 0:
+            return V.graph.sizevars.simplify(sympy.Integer(index) + dim_size)
+        return index
 
     def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
         """Recover the original index meaning from generated CSE names."""

@@ -125,6 +125,7 @@ SM100_VECTORIZED_AUX_SCORE_MOD_CASES = (
     (128, "kv_floor_div_2", lambda seq_len: _sm100_bias(seq_len // 2 + 1), 1, False),
     (128, "q", lambda seq_len: _sm100_bias(seq_len), 8, False),
     (128, "q_mod_4", lambda seq_len: _sm100_bias(seq_len), 8, False),
+    (128, "static_negative", lambda seq_len: _sm100_bias(seq_len), 1, False),
     (128, "q_kv", lambda seq_len: _sm100_bias(seq_len, seq_len), 8, True),
     (128, "kv_q", lambda seq_len: _sm100_bias(seq_len, seq_len), 1, False),
     (
@@ -146,6 +147,7 @@ SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
     ("kv_floor_div_2", lambda seq_len: (_sm100_bias(seq_len // 2 + 1),), 1, False),
     ("kv_times_2", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
     ("q", lambda seq_len: (_sm100_bias(seq_len),), 8, False),
+    ("static_negative", lambda seq_len: (_sm100_bias(seq_len),), 1, False),
     ("q_kv", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 8, True),
     ("kv_q", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 1, False),
     ("relative_position", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
@@ -1299,6 +1301,8 @@ class TestFlexFlash(InductorTestCase):
                         return score + bias[q_idx]
                     case "q_mod_4":
                         return score + bias[q_idx % 4]
+                    case "static_negative":
+                        return score + bias[-1]
                     case "q_kv":
                         return score + bias[q_idx, kv_idx]
                     case "kv_q":
@@ -1368,6 +1372,8 @@ class TestFlexFlash(InductorTestCase):
                         return score + biases[0][2 * kv_idx]
                     case "q":
                         return score + biases[0][q_idx]
+                    case "static_negative":
+                        return score + biases[0][-1]
                     case "q_kv":
                         return score + biases[0][q_idx, kv_idx]
                     case "kv_q":
