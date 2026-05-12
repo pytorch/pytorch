@@ -164,6 +164,14 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
+        min_block = None
+        if name == "XBLOCK":
+            min_block = self.inductor_meta.get("min_xblock")
+        elif name == "R0_BLOCK":
+            min_block = self.inductor_meta.get("min_rblock")
+        if min_block is not None and val < min_block:
+            return True
+
         # In native matmul, block size should be >= 16 for tl.dot
         if self.is_native_matmul:
             if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:

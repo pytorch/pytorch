@@ -5733,6 +5733,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
+        if self.min_xblock is not None:
+            out["min_xblock"] = self.min_xblock
+        if self.min_rblock is not None:
+            out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
         if self.add_persistent_rblock:
