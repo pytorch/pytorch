@@ -60,7 +60,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
+backend = c10d.get_default_backend_for_device(device_type)
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @instantiate_parametrized_tests
@@ -69,7 +69,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
 
-    device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    
 
     def get_world_trs(self):
         return {
@@ -2258,9 +2258,6 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
         torch.get_device_module(self.device).set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
-        backend = c10d.get_default_backend_for_device(
-            torch.accelerator.current_accelerator().type
-        )
 
         torch.distributed.init_process_group(
             backend=backend,
@@ -2542,7 +2539,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.accelerator.set_device_idx(self.rank)
         c10d.init_process_group(
-            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2666,7 +2663,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2789,7 +2786,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -2907,7 +2904,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.accelerator.set_device_index(self.rank)
         c10d.init_process_group(
-            backend="xccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
@@ -3086,7 +3083,6 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def test_schedule_overlap_benchmark(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.accelerator.set_device_index(self.rank)
-        backend = torch.distributed.get_default_backend_for_device(self.device)
         c10d.init_process_group(
             backend=backend, store=store, rank=self.rank, world_size=self.world_size
         )
