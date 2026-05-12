@@ -30,27 +30,27 @@ are relevant to understanding the role of the `agent` in torchelastic.
 
 ```{eval-rst}
 .. autoclass:: ElasticAgent
-   :members:
+   :members:
 ```
 
 ```{eval-rst}
 .. autoclass:: WorkerSpec
-   :members:
+   :members:
 ```
 
 ```{eval-rst}
 .. autoclass:: WorkerState
-   :members:
+   :members:
 ```
 
 ```{eval-rst}
 .. autoclass:: Worker
-   :members:
+   :members:
 ```
 
 ```{eval-rst}
 .. autoclass:: WorkerGroup
-   :members:
+   :members:
 ```
 
 ## Implementations
@@ -79,8 +79,8 @@ to implement.
 
 ```{eval-rst}
 .. autoclass:: SimpleElasticAgent
-   :members:
-   :private-members:
+   :members:
+   :private-members:
 ```
 
 ```{eval-rst}
@@ -116,7 +116,7 @@ Additionally, health check server will have callback to check watchdog is alive.
 
 ```{eval-rst}
 .. autoclass:: HealthCheckServer
-   :members:
+   :members:
 ```
 
 ```{eval-rst}
