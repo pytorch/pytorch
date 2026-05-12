@@ -32,7 +32,7 @@ import types
 import typing
 import unittest
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Iterable, KeysView, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
@@ -85,6 +85,7 @@ from ..utils import (
     specialize_symnode,
     str_methods,
     tensortype_to_dtype,
+    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable, FakeIdVariable
@@ -1784,14 +1785,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     self, args[0], args[1:]
                 )
 
-            if (
-                self.fn is tuple
-                and len(args) == 2
-                and args[1].has_force_unpack_var_sequence(tx)
-                and not kwargs
-            ):
+            if self.fn is tuple and len(args) == 2 and not kwargs:
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].force_unpack_var_sequence(tx)
+                    init_args = unpack_iterable(tx, args[1])
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -2052,8 +2048,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def _call_min_max(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker | None:
-        if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-            items = args[0].force_unpack_var_sequence(tx)
+        if len(args) == 1:
+            items = unpack_iterable(tx, args[0])
             return self._call_min_max_seq(tx, items)
         elif len(args) == 2:
             return self._call_min_max_binary(tx, args[0], args[1])
@@ -2259,100 +2255,28 @@ class BuiltinVariable(BaseBuiltinVariable):
             ),
         )
 
-    # NOTE must handle IteratorVariable separately!
-    def _call_iter_tuple_list(
+    def call_tuple(
         self,
         tx: "InstructionTranslator",
-        obj: VariableTracker | None = None,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        if isinstance(obj, variables.IteratorVariable):
-            raise AssertionError(
-                "IteratorVariable should not be passed to _call_iter_tuple_list"
+        # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
+        if len(args) == 0:
+            return TupleVariable([], mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
+                tx,
+                f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
+            )
+        elif kwargs:
+            raise_type_error(
+                tx,
+                f"{self.fn.__name__} takes no keyword arguments",
             )
 
-        if self._dynamic_args(*args, **kwargs):
-            return self._dyn_proxy(tx, *args, **kwargs)
-
-        cls = variables.BaseListVariable.cls_for(self.fn)
-        if obj is None:
-            return cls(
-                [],
-                mutation_type=ValueMutationNew(),
-            )
-        elif obj.has_unpack_var_sequence(tx):
-            if obj.source and not is_constant_source(obj.source):
-                if isinstance(obj, TupleIteratorVariable):
-                    install_guard(
-                        obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
-                    )
-                else:
-                    if getattr(obj, "source", False) and isinstance(
-                        obj,
-                        (
-                            ConstDictVariable,
-                            variables.OrderedSetVariable,
-                            variables.DictKeySetVariable,
-                        ),
-                    ):
-                        tx.output.guard_on_key_order.add(obj.source)
-
-                    if isinstance(obj, variables.MappingProxyVariable):
-                        # This could be an overguarding, but its rare to iterate
-                        # through a mapping proxy and not use the keys.
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
-                        )
-                    elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
-                        # Prevent calling __len__ method for guards, the tracing
-                        # of __iter__ will insert the right guards later.
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
-                        )
-
-            return cls(
-                list(obj.unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
-            )
-
-        return None
-
-    def _call_iter_tuple_generator(
-        self,
-        tx: "InstructionTranslator",
-        obj: VariableTracker,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        cls = variables.BaseListVariable.cls_for(self.fn)
-        return cls(
-            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
-            mutation_type=ValueMutationNew(),
-        )
-
-    def _call_tuple_list(
-        self,
-        tx: "InstructionTranslator",
-        obj: VariableTracker | None = None,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        if isinstance(obj, variables.IteratorVariable):
-            cls = variables.BaseListVariable.cls_for(self.fn)
-            return cls(
-                list(obj.force_unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
-            )
-        elif isinstance(obj, variables.LocalGeneratorObjectVariable) or (
-            isinstance(obj, UserDefinedObjectVariable)
-            and obj.has_force_unpack_var_sequence(tx)
-        ):
-            return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
-        else:
-            return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
-
-    call_tuple = _call_tuple_list
+        items = unpack_iterable(tx, args[0])
+        return TupleVariable(items, mutation_type=ValueMutationNew())
 
     def call_callable(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2419,40 +2343,23 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        if kwargs:
-            raise AssertionError(
-                f"set() does not accept keyword arguments, got {kwargs}"
-            )
-        if not args:
-            return SetVariable([], mutation_type=ValueMutationNew())
-        if len(args) != 1:
-            raise_observed_exception(
-                TypeError,
+        # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
+        if len(args) == 0:
+            return variables.SetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
                 tx,
-                args=[f"set() takes 1 positional argument but {len(args)} were given"],
+                f"set expected at most 1 argument, got {len(args)}",
             )
-        arg = args[0]
-        if istype(arg, variables.SetVariable):
-            return arg.clone(mutation_type=ValueMutationNew())
-        elif arg.has_force_unpack_var_sequence(tx):
-            items = arg.force_unpack_var_sequence(tx)
-            return SetVariable(items, mutation_type=ValueMutationNew())
-        elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
-            arg.value, KeysView
-        ):
-            iter_fn = generic_getiter(tx, arg)
-            if isinstance(iter_fn, variables.UserMethodVariable):
-                out = tx.inline_user_function_return(iter_fn, args, kwargs)
-                if isinstance(out, SetVariable):
-                    return out
-                return SourcelessBuilder.create(tx, set).call_set(tx, out)
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=["failed to construct builtin set()"],
-        )
+        elif kwargs:
+            raise_type_error(
+                tx,
+                "set() takes no keyword arguments",
+            )
+
+        s = SetVariable([], mutation_type=ValueMutationNew())
+        s.call_method(tx, "update", [args[0]], kwargs)
+        return s
 
     def call_frozenset(
         self,
@@ -2460,32 +2367,26 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise AssertionError(
-                f"frozenset() does not accept keyword arguments, got {kwargs}"
-            )
-        if not args:
-            return FrozensetVariable([])
-        if len(args) != 1:
-            raise_observed_exception(
-                TypeError,
+        if len(args) == 0:
+            return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
                 tx,
-                args=[
-                    f"frozenset() takes 1 positional argument but {len(args)} were given"
-                ],
+                f"frozenset expected at most 1 argument, got {len(args)}",
             )
-        arg = args[0]
-        if istype(arg, variables.FrozensetVariable):
+        elif kwargs:
+            raise_type_error(
+                tx,
+                "frozenset() takes no keyword arguments",
+            )
+
+        if istype(args[0], variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
-            return arg
-        elif arg.has_force_unpack_var_sequence(tx):
-            items = arg.force_unpack_var_sequence(tx)
-            return FrozensetVariable(items)
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=["failed to construct builtin frozenset()"],
-        )
+            return args[0]
+
+        items = unpack_iterable(tx, args[0])
+        fs = FrozensetVariable(items, mutation_type=ValueMutationNew())
+        return fs
 
     def call_zip(
         self,
@@ -2493,8 +2394,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2822-L2887
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
                 raise_args_mismatch(
@@ -2504,10 +2404,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        iter_args = [
-            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
-            for arg in args
-        ]
+        items = []
+        for arg in args:
+            items.append(generic_getiter(tx, arg))
+        iter_args = TupleVariable(items, mutation_type=ValueMutationNew())
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
@@ -2698,6 +2598,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if len(seqs) == 0:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["map() must have at least two arguments."],
+            )
+
         strict = ConstantVariable.create(False)
         if kwargs:
             if sys.version_info >= (3, 14):
@@ -2717,13 +2624,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
 
-        seq_list = [
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-            for seq in seqs
-        ]
+        iterables = [generic_getiter(tx, seq) for seq in seqs]
+        iter_args = TupleVariable(iterables, mutation_type=ValueMutationNew())
         return variables.MapVariable(
             fn,
-            seq_list,  # type: ignore[arg-type]
+            iter_args,
             strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
@@ -2731,12 +2636,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_filter(
         self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
-        seq_or_list = (
-            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-        )
         return variables.FilterVariable(
             fn,
-            seq_or_list,  # type: ignore[arg-type]
+            generic_getiter(tx, seq),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2971,11 +2873,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        if obj.has_force_unpack_var_sequence(tx) and not isinstance(
-            obj, variables.TensorVariable
-        ):
+        if not isinstance(obj, variables.TensorVariable):
             list_var = variables.ListVariable(
-                obj.force_unpack_var_sequence(tx),
+                unpack_iterable(tx, obj),
                 mutation_type=ValueMutationNew(),
             )
             list_var.call_method(tx, "sort", [], kwargs)
@@ -3421,8 +3321,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
             return _make_result(dict.fromkeys(arg_list, value))
-        elif arg.has_force_unpack_var_sequence(tx):
-            keys = arg.force_unpack_var_sequence(tx)
+        elif iterator := generic_getiter(tx, arg):
+            keys = unpack_iterable(tx, iterator)
             if all(is_hashable(v) for v in keys):
                 return _make_result(dict.fromkeys(keys, value))
 
@@ -3711,55 +3611,47 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .user_defined import UserDefinedObjectVariable
-
-        obj = args[0] if args else None
-
-        if isinstance(
-            obj, (variables.IteratorVariable, variables.LocalGeneratorObjectVariable)
-        ) or (
-            isinstance(obj, UserDefinedObjectVariable)
-            and obj.has_force_unpack_var_sequence(tx)
-        ):
-            return ListVariable(
-                list(obj.force_unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
-            )
-
-        if obj is None:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
+        if len(args) == 0:
             return ListVariable([], mutation_type=ValueMutationNew())
-
-        if obj.has_unpack_var_sequence(tx):
-            if obj.source and not is_constant_source(obj.source):
-                if isinstance(obj, TupleIteratorVariable):
-                    install_guard(
-                        obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
-                    )
-                else:
-                    if isinstance(obj, ConstDictVariable) and not istype(
-                        obj, (SetVariable, FrozensetVariable)
-                    ):
-                        tx.output.guard_on_key_order.add(obj.source)
-                    if isinstance(obj, variables.MappingProxyVariable):
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
-                        )
-                    elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
-                        )
-            return ListVariable(
-                list(obj.unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
+        elif len(args) > 1:
+            raise_type_error(
+                tx,
+                f"list expected at most 1 argument, got {len(args)}",
+            )
+        elif kwargs:
+            raise_type_error(
+                tx,
+                "list() takes no keyword arguments",
             )
 
-        arg_types = [type(a).__name__ for a in args]
-        unimplemented(
-            gb_type="Failed to trace list()",
-            context=f"list({arg_types})",
-            explanation=f"Dynamo does not know how to construct a list from argument types {arg_types}",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        obj = args[0]
+        if obj.source and not is_constant_source(obj.source):
+            if isinstance(obj, TupleIteratorVariable):
+                install_guard(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+            elif not isinstance(
+                obj,
+                (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
+            ):
+                if isinstance(
+                    obj,
+                    (
+                        ConstDictVariable,
+                        variables.OrderedSetVariable,
+                        variables.DictKeySetVariable,
+                    ),
+                ):
+                    tx.output.guard_on_key_order.add(obj.source)
+                if isinstance(obj, variables.MappingProxyVariable):
+                    install_guard(
+                        obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
+                    )
+                elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+
+        lst = ListVariable([], mutation_type=ValueMutationNew())
+        lst.call_method(tx, "extend", [args[0]], kwargs)
+        return lst
 
     def call_method(
         self,
