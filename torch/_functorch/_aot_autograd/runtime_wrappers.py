@@ -2005,11 +2005,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     _outs = _compiled_fn_(_new_args)""")
 
         if num_meta_mut > 0:
-            # This does not handle all input metadata mutations -- only
-            # mutations on inputs that were converted into synthetic bases
-            # (which only happens if at least one aliased input experienced
-            # a data mutation).  E.g. f(a, b): a.mul_(2); b.t_() called
-            # with a = x.view(2,2), b = x.view(2,2).
+            # Handles metadata mutations on inputs that were merged into
+            # synthetic bases (create_synthetic_base_metadata hides these
+            # from the normal tracking by forcing mutates_metadata=False
+            # on the base).  Metadata mutations on non-aliased inputs are
+            # handled separately by _apply_input_mutations in the runtime
+            # epilogue.
             lines.append(f"""\
     _mut_inps = _outs[-{num_meta_mut}:]
     _user_outs = _outs[:-{num_meta_mut}]
