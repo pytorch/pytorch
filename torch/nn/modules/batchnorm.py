@@ -452,8 +452,8 @@ class BatchNorm2d(_BatchNorm):
     The mean and standard-deviation are calculated per-dimension over the
     mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
     vectors of size `C` (where `C` is the input number of channels). By default, the
-    elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    elements of :math:`\gamma` are set to 1 and the elements of
+    :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased  estimator, equivalent to
@@ -577,8 +577,8 @@ class BatchNorm3d(_BatchNorm):
     The mean and standard-deviation are calculated per-dimension over the
     mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
     vectors of size `C` (where `C` is the input number of channels). By default, the
-    elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    elements of :math:`\gamma` are set to 1 and the elements of
+    :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased  estimator, equivalent to
