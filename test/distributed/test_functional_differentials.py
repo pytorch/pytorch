@@ -597,6 +597,142 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             test_utils=test_utils,
         )
 
+    # ============================================================
+    # _c10d_functional_autograd Backward Compatibility Tests
+    # ============================================================
+
+    @parametrize("device", devices)
+    def test_all_gather_into_tensor_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.all_gather_into_tensor backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
+        output = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
+            input_tensor, self.world_size, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward with ones
+        output.sum().backward()
+
+        # Gradient should be reduce_scatter of ones (all world_size)
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.full(
+            (3, 3), fill_value=float(self.world_size), device=device
+        )
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    @parametrize("device", devices)
+    def test_reduce_scatter_tensor_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.reduce_scatter_tensor backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, requires_grad=True, device=device
+        )
+        output = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
+            input_tensor, "sum", self.world_size, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward with ones
+        output.sum().backward()
+
+        # Gradient should be all_gather of ones
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    @parametrize("device", devices)
+    def test_all_to_all_single_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.all_to_all_single backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+        group_size = dist.group.WORLD.size()
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, requires_grad=True, device=device
+        )
+        output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
+        input_split_sizes = output_split_sizes
+
+        output = torch.ops._c10d_functional_autograd.all_to_all_single(
+            input_tensor, output_split_sizes, input_split_sizes, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward
+        output.sum().backward()
+
+        # Gradient should have same shape as input
+        self.assertIsNotNone(input_tensor.grad)
+        self.assertEqual(input_tensor.grad.shape, input_tensor.shape)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    # ============================================================
+    # _c10d_functional_autograd opcheck Tests
+    # ============================================================
+
+    # Skip test_faketensor for autograd ops - they share impl with _c10d_functional
+    autograd_test_utils = [
+        "test_schema",
+        "test_autograd_registration",
+    ]
+
+    @parametrize("test_utils", autograd_test_utils)
+    def test_all_gather_into_tensor_autograd_opcheck(self, test_utils):
+        """Test _c10d_functional_autograd.all_gather_into_tensor op registration."""
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.ones(3, 3, requires_grad=True)
+
+        torch.library.opcheck(
+            torch.ops._c10d_functional_autograd.all_gather_into_tensor,
+            (input_tensor, self.world_size, group_name),
+            test_utils=test_utils,
+        )
+
+    @parametrize("test_utils", autograd_test_utils)
+    def test_reduce_scatter_tensor_autograd_opcheck(self, test_utils):
+        """Test _c10d_functional_autograd.reduce_scatter_tensor op registration."""
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.ones(4 * self.world_size, 3, requires_grad=True)
+
+        torch.library.opcheck(
+            torch.ops._c10d_functional_autograd.reduce_scatter_tensor,
+            (input_tensor, "sum", self.world_size, group_name),
+            test_utils=test_utils,
+        )
+
+    @parametrize("test_utils", autograd_test_utils)
+    def test_all_to_all_single_autograd_opcheck(self, test_utils):
+        """Test _c10d_functional_autograd.all_to_all_single op registration."""
+        group_name = dist.group.WORLD.group_name
+        group_size = dist.group.WORLD.size()
+
+        input_tensor = torch.ones(4 * self.world_size, 3, requires_grad=True)
+        output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
+        input_split_sizes = output_split_sizes
+
+        torch.library.opcheck(
+            torch.ops._c10d_functional_autograd.all_to_all_single,
+            (input_tensor, output_split_sizes, input_split_sizes, group_name),
+            test_utils=test_utils,
+        )
+
 
 @instantiate_parametrized_tests
 class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
@@ -689,6 +825,86 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
             return output.sum()
 
         # Input should be divisible by world_size
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, device=self.device, requires_grad=True
+        )
+
+        loss = compiled_fn(input_tensor)
+        loss.backward()
+
+        # Gradient should be all_to_all with reversed splits (ones)
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    # ============================================================
+    # _c10d_functional_autograd torch.compile Integration Tests
+    # ============================================================
+
+    @with_comms
+    def test_all_gather_into_tensor_autograd_compile(self):
+        """Test that _c10d_functional_autograd.all_gather_into_tensor works with torch.compile."""
+        group_name = dist.group.WORLD.group_name
+
+        @torch.compile(fullgraph=True)
+        def compiled_fn(tensor):
+            output = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
+                tensor, self.world_size, group_name
+            )
+            output = fcols.wait_tensor(output)
+            return output.sum()
+
+        input_tensor = torch.randn(3, 3, device=self.device, requires_grad=True)
+
+        loss = compiled_fn(input_tensor)
+        loss.backward()
+
+        # Gradient should be reduce_scatter of ones (all world_size)
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    @with_comms
+    def test_reduce_scatter_tensor_autograd_compile(self):
+        """Test that _c10d_functional_autograd.reduce_scatter_tensor works with torch.compile."""
+        group_name = dist.group.WORLD.group_name
+
+        @torch.compile(fullgraph=True)
+        def compiled_fn(tensor):
+            output = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
+                tensor, "sum", self.world_size, group_name
+            )
+            output = fcols.wait_tensor(output)
+            return output.sum()
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, device=self.device, requires_grad=True
+        )
+
+        loss = compiled_fn(input_tensor)
+        loss.backward()
+
+        # Gradient should be all_gather of ones
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    @with_comms
+    def test_all_to_all_single_autograd_compile(self):
+        """Test that _c10d_functional_autograd.all_to_all_single works with torch.compile."""
+        group_name = dist.group.WORLD.group_name
+
+        @torch.compile(fullgraph=True)
+        def compiled_fn(tensor):
+            output = torch.ops._c10d_functional_autograd.all_to_all_single(
+                tensor,
+                output_split_sizes=None,
+                input_split_sizes=None,
+                group_name=group_name,
+            )
+            output = fcols.wait_tensor(output)
+            return output.sum()
+
         input_tensor = torch.randn(
             4 * self.world_size, 3, device=self.device, requires_grad=True
         )
