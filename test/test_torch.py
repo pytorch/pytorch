@@ -356,6 +356,8 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
+        self.assertFalse(s0.is_shared())
+
         with self.assertRaisesRegex(NotImplementedError, r'Not available'):
             s0.tolist()
 
