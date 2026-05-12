@@ -676,6 +676,10 @@ only_allow_pt2_compliant_ops = False
 # This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
+# Prototype: emit a lazy autograd.Function wrapper whose forward and backward
+# invoke Dynamo when each phase runs.
+lazy_compile_autograd_function = False
+
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
