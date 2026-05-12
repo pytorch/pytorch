@@ -27,7 +27,7 @@ import torch
 import torch._logging.structured as structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import (  # noqa: F401
+from torch import (
     sym_float,
     sym_ite,
     sym_max,
@@ -116,7 +116,7 @@ class SymNode:
         self.pytype = pytype
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
-        self._expr_cache = None
+        self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
         #
@@ -387,7 +387,7 @@ class SymNode:
     def rshift(self, other: SymNode) -> SymNode:
         return self._rshift(other)  # type: ignore[attr-defined]
 
-    def sym_not(self) -> SymNode:  # noqa: F811
+    def sym_not(self) -> SymNode:
         return self._sym_not()  # type: ignore[attr-defined]
 
     def eq(self, other: SymNode) -> SymNode:
@@ -414,7 +414,7 @@ class SymNode:
     def is_integer(self) -> SymNode:
         return self._is_integer()  # type: ignore[attr-defined]
 
-    def sym_float(self) -> SymNode:  # noqa: F811
+    def sym_float(self) -> SymNode:
         return self._sym_float()  # type: ignore[attr-defined]
 
     def sym_int(self) -> SymNode:
@@ -426,10 +426,10 @@ class SymNode:
     def neg(self) -> SymNode:
         return self._neg()  # type: ignore[attr-defined]
 
-    def sym_min(self, other: SymNode) -> SymNode:  # noqa: F811
+    def sym_min(self, other: SymNode) -> SymNode:
         return self._sym_min(other)  # type: ignore[attr-defined]
 
-    def sym_max(self, other: SymNode) -> SymNode:  # noqa: F811
+    def sym_max(self, other: SymNode) -> SymNode:
         return self._sym_max(other)  # type: ignore[attr-defined]
 
     def sym_ite(self, then_val: SymNode, else_val: SymNode) -> SymNode:
@@ -690,7 +690,9 @@ class DynamicInt(_DynamicScalar, int):
     def __rfloordiv__(self, other: int) -> DynamicInt:
         return DynamicInt(other // self.real)
 
-    def __pow__(self, other, modulo=None):
+    def __pow__(  # pyrefly: ignore[bad-override]
+        self, other: int, modulo: int | None = None
+    ) -> DynamicInt | float:
         if modulo is not None:
             result = pow(self.real, other, modulo)
         else:
@@ -701,7 +703,7 @@ class DynamicInt(_DynamicScalar, int):
             return DynamicInt(result)
         return result
 
-    def __rpow__(self, other, modulo=None):
+    def __rpow__(self, other: int, modulo: int | None = None) -> DynamicInt | float:
         if modulo is not None:
             result = pow(other, self.real, modulo)
         else:

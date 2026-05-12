@@ -135,12 +135,12 @@ def _disable_dynamo_if_unsupported(
                 and has_state_steps
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
-                and arg[0].is_cuda
+                and arg[0].device.type in {"cuda", "xpu"}
                 or (
                     "state_steps" in kwargs
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
-                    and kwarg[0].is_cuda
+                    and kwarg[0].device.type in {"cuda", "xpu"}
                 )
             ):
                 return disabled_func(*args, **kwargs)
@@ -460,21 +460,16 @@ class Optimizer:
             return
 
         # Determine available accelerator device
-        accelerator = None
-        if torch.cuda.is_available():
-            accelerator = (torch.cuda, "CUDA")
-        elif torch.xpu.is_available():
-            accelerator = (torch.xpu, "XPU")
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
 
-        if accelerator:
-            device_module, device_name = accelerator
-            capturing = device_module.is_current_stream_capturing()
+        if accelerator and accelerator.type in {"cuda", "xpu"}:
+            capturing = torch.accelerator.current_stream().is_capturing()
 
             if capturing and not all(
                 group["capturable"] for group in self.param_groups
             ):
                 raise RuntimeError(
-                    f"Attempting {device_name} graph capture of step() for an instance of "
+                    f"Attempting {accelerator.type.upper()} graph capture of step() for an instance of "
                     + self.__class__.__name__
                     + " but param_groups' capturable is False."
                 )
@@ -486,7 +481,7 @@ class Optimizer:
             ):
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
-                    f"but step() is running without {device_name} graph capture. If you never intend to graph-capture this "
+                    f"but step() is running without {accelerator.type.upper()} graph capture. If you never intend to graph-capture this "
                     "instance, capturable=True can impair performance, and you should set capturable=False.",
                     stacklevel=2,
                 )

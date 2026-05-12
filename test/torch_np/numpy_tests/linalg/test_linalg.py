@@ -1077,6 +1077,7 @@ class TestLstsq(LstsqCases, TestCase):
 @instantiate_parametrized_tests
 class TestMatrixPower(TestCase):
     def setUp(self):
+        super().setUp()
         self.rshft_0 = np.eye(4)
         self.rshft_1 = self.rshft_0[[3, 0, 1, 2]]
         self.rshft_2 = self.rshft_0[[2, 3, 0, 1]]
