@@ -529,18 +529,11 @@ coverage_ignore_functions = [
     # torch.distributed.rendezvous
     "rendezvous",
     # torch.distributed.rpc.api
-    # "get_worker_info",
     "method_factory",
     "new_method",
-    # "remote",
-    # "rpc_async",
-    # "rpc_sync",
-    # "shutdown",
     # torch.distributed.rpc.backend_registry
-    # "backend_registered",
     "construct_rpc_backend_options",
     "init_backend",
-    # "register_backend",
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
