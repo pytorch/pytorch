@@ -1199,11 +1199,16 @@ class TestFlexFlash(InductorTestCase):
             (128, "kv_minus_8", 1, False),
             (128, "kv_mul_1", 8, True),
             (128, "kv_mod_4", 4, True),
+            (128, "kv_mod_3", 1, False),
             (128, "kv_stride_mix", 4, False),
+            (128, "kv_times_2", 1, False),
             (128, "kv_floor_div_2", 1, False),
             (128, "q", 8, False),
             (128, "q_mod_4", 8, False),
             (128, "q_kv", 8, True),
+            (128, "kv_q", 1, False),
+            (128, "q_kv_noncontig", 8, True),
+            (128, "relative_position", 1, False),
         ):
             q, k, v = create_test_tensors(
                 batch_size=1,
@@ -1213,8 +1218,10 @@ class TestFlexFlash(InductorTestCase):
                 dtype=torch.float16,
                 device="cuda",
             )
-            if index_dim == "q_kv":
+            if index_dim in ("q_kv", "kv_q", "q_kv_noncontig"):
                 bias_shape = (seq_len, seq_len)
+            elif index_dim in ("kv_times_2", "relative_position"):
+                bias_shape = (2 * seq_len,)
             elif index_dim == "kv_plus_8":
                 bias_shape = (seq_len + 8,)
             elif index_dim == "kv_floor_div_2":
@@ -1224,6 +1231,8 @@ class TestFlexFlash(InductorTestCase):
             else:
                 bias_shape = (seq_len,)
             bias = torch.randn(*bias_shape, device="cuda", dtype=torch.float16)
+            if index_dim == "q_kv_noncontig":
+                bias = bias.t()
 
             def fn(q, k, v, bias):
                 def score_mod(score, b, h, q_idx, kv_idx):
@@ -1240,8 +1249,12 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias[kv_idx * 1]
                         case "kv_mod_4":
                             return score + bias[kv_idx % 4]
+                        case "kv_mod_3":
+                            return score + bias[kv_idx % 3]
                         case "kv_stride_mix":
                             return score + bias[2 * kv_idx - kv_idx % 4]
+                        case "kv_times_2":
+                            return score + bias[2 * kv_idx]
                         case "kv_floor_div_2":
                             return score + bias[kv_idx // 2]
                         case "q":
@@ -1250,6 +1263,12 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias[q_idx % 4]
                         case "q_kv":
                             return score + bias[q_idx, kv_idx]
+                        case "kv_q":
+                            return score + bias[kv_idx, q_idx]
+                        case "q_kv_noncontig":
+                            return score + bias[q_idx, kv_idx]
+                        case "relative_position":
+                            return score + bias[q_idx - kv_idx + seq_len]
 
                 return flex_attention(
                     q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
@@ -1259,7 +1278,7 @@ class TestFlexFlash(InductorTestCase):
             actual, code = run_and_get_code(
                 torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, bias
             )
-            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2, msg=index_dim)
 
             src = "\n".join(code)
             self.assertIn(f"score_mod.__vec_size__ = {expected_vec_size}", src)
@@ -1277,11 +1296,15 @@ class TestFlexFlash(InductorTestCase):
         for index_dim, expected_auto_vec_size, expect_auto_autovec in (
             ("kv", 8, True),
             ("kv_mod_4", 4, True),
+            ("kv_mod_3", 1, False),
             ("kv_plus_8", 8, True),
             ("kv_minus_8", 1, False),
             ("kv_floor_div_2", 1, False),
+            ("kv_times_2", 1, False),
             ("q", 8, False),
             ("q_kv", 8, True),
+            ("kv_q", 1, False),
+            ("relative_position", 1, False),
             ("multi", 8, True),
         ):
             torch.manual_seed(0)
@@ -1301,10 +1324,20 @@ class TestFlexFlash(InductorTestCase):
                 seq_len // 2 + 1, device="cuda", dtype=torch.float16
             )
             bias_qkv = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+            bias_rel = torch.randn(2 * seq_len, device="cuda", dtype=torch.float16)
             bias_q = torch.randn(seq_len, device="cuda", dtype=torch.float16)
 
             def fn(
-                q, k, v, bias_kv, bias_mod, bias_offset, bias_floor, bias_qkv, bias_q
+                q,
+                k,
+                v,
+                bias_kv,
+                bias_mod,
+                bias_offset,
+                bias_floor,
+                bias_qkv,
+                bias_rel,
+                bias_q,
             ):
                 def score_mod(score, b, h, q_idx, kv_idx):
                     match index_dim:
@@ -1312,16 +1345,24 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias_kv[kv_idx]
                         case "kv_mod_4":
                             return score + bias_mod[kv_idx % 4]
+                        case "kv_mod_3":
+                            return score + bias_mod[kv_idx % 3]
                         case "kv_plus_8":
                             return score + bias_offset[kv_idx + 8]
                         case "kv_minus_8":
                             return score + bias_kv[kv_idx - 8]
                         case "kv_floor_div_2":
                             return score + bias_floor[kv_idx // 2]
+                        case "kv_times_2":
+                            return score + bias_rel[2 * kv_idx]
                         case "q":
                             return score + bias_q[q_idx]
                         case "q_kv":
                             return score + bias_qkv[q_idx, kv_idx]
+                        case "kv_q":
+                            return score + bias_qkv[kv_idx, q_idx]
+                        case "relative_position":
+                            return score + bias_rel[q_idx - kv_idx + seq_len]
                         case "multi":
                             return (
                                 score
@@ -1343,6 +1384,7 @@ class TestFlexFlash(InductorTestCase):
                 bias_offset,
                 bias_floor,
                 bias_qkv,
+                bias_rel,
                 bias_q,
             )
             with force_flex_flash_score_mod_vec_size(1):
