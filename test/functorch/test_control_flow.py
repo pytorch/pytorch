@@ -10405,22 +10405,6 @@ class TestHopSchema(TestCase):
             """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",
         )
 
-    def test_scan_gen_schema_with_init_mutation(self):
-        def combine_fn(carry, x):
-            carry.add_(x)
-            return carry, carry * x
-
-        schema = torch.ops.higher_order.scan.gen_schema(
-            combine_fn,
-            (torch.randn(3, 4),),
-            (torch.randn(5, 3, 4),),
-            (),
-        )
-        self.assertExpectedInline(
-            str(schema),
-            """scan(Any combine_fn, Tensor(a1!) init0, Tensor xs0) -> (Tensor, Tensor)""",
-        )
-
     def test_scan_gen_schema_with_additional_input_mutation(self):
         def combine_fn(carry, x, buf):
             buf.add_(x)
@@ -10437,22 +10421,38 @@ class TestHopSchema(TestCase):
             """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0) -> (Tensor, Tensor)""",
         )
 
-    def test_scan_gen_schema_with_init_and_additional_input_mutation(self):
-        def combine_fn(carry1, carry2, x, buf):
-            carry1.add_(x)
-            buf.sub_(x)
-            return carry1, carry2 * x, carry1 - x, carry2 + x
+    def test_scan_gen_schema_with_multiple_additional_input_mutation(self):
+        def combine_fn(carry, x, buf1, buf2):
+            buf1.add_(x)
+            buf2.sub_(x)
+            return carry + x, carry * x
 
         schema = torch.ops.higher_order.scan.gen_schema(
             combine_fn,
-            (torch.randn(3, 4), torch.randn(3, 4)),
-            (torch.randn(5, 3, 4),),
             (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.randn(3, 4), torch.randn(3, 4)),
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor(a1!) init0, Tensor init1, Tensor xs0, Tensor(a4!) additional_input0) -> (Tensor, Tensor, Tensor, Tensor)""",
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0, Tensor(a4!) additional_input1) -> (Tensor, Tensor)""",
         )
+
+    def test_scan_gen_schema_init_mutation_raises(self):
+        def combine_fn(carry, x):
+            carry.add_(x)
+            return carry, carry * x
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For scan, combine_fn can only mutate additional_inputs",
+        ):
+            torch.ops.higher_order.scan.gen_schema(
+                combine_fn,
+                (torch.randn(3, 4),),
+                (torch.randn(5, 3, 4),),
+                (),
+            )
 
     def test_scan_gen_schema_xs_mutation_raises(self):
         def combine_fn(carry, x):
@@ -10461,7 +10461,24 @@ class TestHopSchema(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "For scan, combine_fn cannot mutate xs inputs",
+            "For scan, combine_fn can only mutate additional_inputs",
+        ):
+            torch.ops.higher_order.scan.gen_schema(
+                combine_fn,
+                (torch.randn(3, 4),),
+                (torch.randn(5, 3, 4),),
+                (),
+            )
+
+    def test_scan_gen_schema_init_and_xs_mutation_raises(self):
+        def combine_fn(carry, x):
+            carry.add_(x)
+            x.add_(1)
+            return carry, carry * x
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For scan, combine_fn can only mutate additional_inputs",
         ):
             torch.ops.higher_order.scan.gen_schema(
                 combine_fn,

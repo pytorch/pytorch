@@ -264,14 +264,12 @@ class ScanOp(HigherOrderOperator):
         ) = check_input_alias_and_mutation_return_outputs(combine_gm)
 
         # Mutation semantics for scan:
-        # - init is mutable: scan iterates sequentially, and each step's
-        #   carry is delivered via the combine_fn return, so an in-place
-        #   update to init means the final carry is the mutated init.
-        #   Matches while_loop.carried_inputs.
         # - additional_inputs is mutable: loop-invariant tensor identity
         #   across sequential iterations, same semantics as while_loop's
         #   additional_inputs (CUDA-graph-friendly lifted / pre-allocated
         #   buffers such as KV caches or workspace scratch).
+        # - init is NOT mutable: init is only the *initial* carry,
+        #   thus an in-place update to init only affects step 0.
         # - xs is NOT mutable: each iteration sees a fresh, storage-disjoint
         #   slice (xs[t] and xs[t+1] share no storage), so a mutation on
         #   xs[t] cannot be observed by iteration t+1. The only externally-
@@ -281,11 +279,19 @@ class ScanOp(HigherOrderOperator):
         #   additional_inputs and index into it inside combine_fn.
         n_init = len(init)
         n_xs = len(xs)
+        init_mutated = [i for i in mutated_inputs if i < n_init]
         xs_mutated = [i for i in mutated_inputs if n_init <= i < n_init + n_xs]
-        if xs_mutated:
+        if init_mutated or xs_mutated:
+            parts = []
+            if init_mutated:
+                parts.append(f"init {init_mutated}")
+            if xs_mutated:
+                parts.append(f"xs {[i - n_init for i in xs_mutated]}")
             raise RuntimeError(
-                "For scan, combine_fn cannot mutate xs inputs but found "
-                f"{[i - n_init for i in xs_mutated]}-th xs inputs are mutated."
+                "For scan, combine_fn can only mutate additional_inputs, "
+                f"but found mutations at: {', '.join(parts)}. Update the "
+                "carry via the combine_fn return value; for in-place lifted "
+                "buffers use additional_inputs."
             )
         mutated_set = set(mutated_inputs)
 
@@ -293,7 +299,7 @@ class ScanOp(HigherOrderOperator):
         schema_gen.add_arg("combine_fn", combine_gm)
 
         for idx, arg in enumerate(init):
-            schema_gen.add_arg(f"init{idx}", arg, is_mutated=idx in mutated_set)
+            schema_gen.add_arg(f"init{idx}", arg)
 
         for idx, arg in enumerate(xs):
             schema_gen.add_arg(f"xs{idx}", arg)
