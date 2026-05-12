@@ -14,14 +14,15 @@ import contextlib
 import logging
 from typing import Any, TYPE_CHECKING
 
-from .template.base import TemplateConfigHeuristics
-
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from .template.base import TemplateConfigHeuristics
+
 
 _REGISTRY: dict[tuple[str | None, ...], Any] = {}
+_TEMPLATE_HEURISTIC_REGISTRY = _REGISTRY  # alias for test compatibility
 _CACHE: dict[tuple[str | None, ...], Any] = {}
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,8 @@ def get_template_heuristic(
     heuristic_class = _lookup(template_name, device_type, op_name)
 
     if heuristic_class is None:
+        from .template.base import TemplateConfigHeuristics as _Base
+
         log.error(
             "No template heuristic found - template_name=%s, device_type=%s, op_name=%s. "
             "Available: %s. Using fallback.",
@@ -121,7 +124,7 @@ def get_template_heuristic(
             op_name,
             list(_REGISTRY.keys()),
         )
-        return TemplateConfigHeuristics()
+        return _Base()
 
     instance = heuristic_class()
     _CACHE[cache_key] = instance
@@ -227,7 +230,7 @@ def clear_registry() -> None:
 def override_template_heuristics(
     device_type: str,
     template_op_pairs: list[tuple[str, str]],
-    override_heuristic_class: type[TemplateConfigHeuristics] = TemplateConfigHeuristics,
+    override_heuristic_class: type[TemplateConfigHeuristics] | None = None,
 ) -> Iterator[None]:
     """
     Context manager to temporarily override template heuristics.
@@ -237,6 +240,10 @@ def override_template_heuristics(
         template_op_pairs: List of (template_name, op_name) pairs to override.
         override_heuristic_class: Heuristic class to use for the override.
     """
+    if override_heuristic_class is None:
+        from .template.base import TemplateConfigHeuristics as _Base
+
+        override_heuristic_class = _Base
     original_entries: dict[tuple[str | None, ...], Any] = {}
     new_keys: list[tuple[str | None, ...]] = []
     _CACHE.clear()
