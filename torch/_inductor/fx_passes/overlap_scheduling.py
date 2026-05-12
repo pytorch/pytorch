@@ -1745,18 +1745,18 @@ def gather_node_runtime_estimations(
     for node in nodes:
         if is_compute_node(node):
             custom_est = get_custom_estimation(
-            node,
-            custom_runtime_estimation,
-            None,
-        )
-        if custom_est is not None:
-            est = custom_est
-        else:
-            est = estimate_roofline_runtime_ms(node)
+                node,
+                custom_runtime_estimation,
+                None,
+            )
+            if custom_est is not None:
+                est = custom_est
+            else:
+                est = estimate_roofline_runtime_ms(node)
 
-        estimations[node] = est
-        compute_nodes.append(node)
-        compute_analytical.append(est
+            estimations[node] = est
+            compute_nodes.append(node)
+            compute_analytical.append(est)
 
         elif node.op == "call_function" and node not in estimations:
             custom_est = get_custom_estimation(
