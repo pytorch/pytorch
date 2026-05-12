@@ -150,13 +150,16 @@ def _(
 #   - Offload (D2H): keepalive is the GPU tensor; freed after the D2H copy.
 #   - Reload (H2D): keepalive is the CPU tensor; freed after the H2D copy.
 _lib = torch.library.Library("ao", "DEF")
-_lib.define("wait_tensor(Tensor(a) tensor, Tensor? keepalive=None) -> Tensor(a)")
+_lib.define(
+    "wait_tensor(Tensor(a) tensor, Tensor? keepalive=None, Tensor? dep=None) -> Tensor(a)"
+)
 
 
 @torch.library.impl("ao::wait_tensor", "CompositeExplicitAutograd")
 def _ao_wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     completion_event, device = _pop_wait(tensor)
     current_stream = torch.accelerator.current_stream(device)
@@ -173,6 +176,7 @@ def _ao_wait_tensor(
 def _ao_wait_tensor_fake(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return tensor
 
@@ -183,6 +187,7 @@ has_side_effect(torch.ops.ao.wait_tensor.default)
 def wait_tensor(
     tensor: torch.Tensor,
     keepalive: torch.Tensor | None = None,
+    dep: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Callable wrapper so ``wait_tensor`` can be imported by name for op registration."""
-    return torch.ops.ao.wait_tensor.default(tensor, keepalive)
+    return torch.ops.ao.wait_tensor.default(tensor, keepalive, dep)
