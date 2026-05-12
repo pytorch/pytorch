@@ -9006,6 +9006,40 @@ copy_tests(
 )
 
 
+# Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
+GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
+    **GPU_TEST_FAILURES,
+}
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+class AOTInductorTestABICompatibleGpuLazyAutotune(TestCase):
+    """Run AOTInductor tests with autotune_at_compile_time=False, exercising
+    the lazy Triton compile + dual-wrapper-mode codegen path."""
+
+    device = GPU_TYPE
+    device_type = GPU_TYPE
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+    def setUp(self):
+        super().setUp()
+        ctx = torch._inductor.config.patch("triton.autotune_at_compile_time", False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleGpuLazyAutotune,
+    GPU_TYPE,
+    GPU_LAZY_AUTOTUNE_TEST_FAILURES,
+)
+
+
 @unittest.skipIf(not torch.backends.mps.is_available(), "No MPS backend available")
 class AOTInductorTestABICompatibleMps(TestCase):
     device = "mps"

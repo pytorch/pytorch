@@ -60,6 +60,97 @@ def cpp_string_literal(s: str) -> str:
     return f'"{escaped}"'
 
 
+def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
+    """Generate a C header defining macros for each lazy-compiled kernel.
+
+    Called after the JIT first-pass runs and populates CudaKernelParamCache.
+    The AOTI compilation includes this header so that LazyKernelCompileResult
+    structs get compile-time-initialized with the autotuned values.
+    """
+
+    def braced(values: list[int]) -> str:
+        return "{" + ", ".join(str(v) for v in values) + "}"
+
+    buf = IndentedBuffer()
+    buf.splice("""
+        #pragma once
+        // Auto-generated kernel configurations for AOTInductor lazy compile.
+    """)
+
+    for kernel_name in kernel_names:
+        params = CudaKernelParamCache.get(kernel_name)
+        assert params is not None, (
+            f"CudaKernelParamCache not populated for {kernel_name} "
+            "after first-pass execution"
+        )
+
+        macro_prefix = kernel_name.upper()
+        cubin_path = cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()])
+        mangled_name = cpp_string_literal(params["mangled_name"])
+        num_warps = params["num_warps"]
+        shared_mem = params["shared_mem"]
+
+        # params["config"] is already a dict (from config_to_dict in CachingAutotuner)
+        config_dict = params.get("config") or {}
+
+        # For combo/foreach kernels, merge default_config
+        inductor_meta = params.get("inductor_meta") or {}
+        combo_grid_meta = inductor_meta.get("combo_grid_meta")
+        default_config = (
+            combo_grid_meta.get("default_config") if combo_grid_meta else None
+        )
+        if default_config:
+            config_dict = {**default_config, **config_dict}
+
+        config_index: int | None = None
+        grid_type = inductor_meta.get("grid_type")
+        if grid_type == "PrecomputedGrid":
+            precomputed_grids = inductor_meta.get("precomputed_grids", [])
+            for idx, entry in enumerate(precomputed_grids):
+                entry_config = entry.get("config", {})
+                if all(config_dict.get(k) == v for k, v in entry_config.items()):
+                    config_index = idx
+                    break
+
+        # Per-subkernel block sizes for combo kernels, or single-element lists.
+        num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
+        if num_kernels > 1 and "XBLOCK_0" in config_dict:
+            xblocks = [config_dict.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
+            yblocks = [config_dict.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
+            zblocks = [config_dict.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
+            r0blocks = [config_dict.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+        else:
+            xblocks = [config_dict.get("XBLOCK", 128)]
+            yblocks = [config_dict.get("YBLOCK", 1)]
+            zblocks = [config_dict.get("ZBLOCK", 1)]
+            r0blocks = [config_dict.get("R0_BLOCK", 1)]
+        rsplit = config_dict.get("RSPLIT", 1)
+        rsplit_size = config_dict.get("RSPLIT_SIZE", 1)
+        ci = config_index if config_index is not None else -1
+        gs = params.get("global_scratch", -1) or -1
+        ps = params.get("profile_scratch", -1) or -1
+
+        buf.writeline("")
+        buf.splice(f"""
+            // Kernel: {kernel_name}
+            #define {macro_prefix}_CUBIN_PATH {cubin_path}
+            #define {macro_prefix}_MANGLED_NAME {mangled_name}
+            #define {macro_prefix}_NUM_WARPS {num_warps}
+            #define {macro_prefix}_SHARED_MEM {shared_mem}
+            #define {macro_prefix}_XBLOCKS {braced(xblocks)}
+            #define {macro_prefix}_YBLOCKS {braced(yblocks)}
+            #define {macro_prefix}_ZBLOCKS {braced(zblocks)}
+            #define {macro_prefix}_R0BLOCKS {braced(r0blocks)}
+            #define {macro_prefix}_RSPLIT {rsplit}
+            #define {macro_prefix}_RSPLIT_SIZE {rsplit_size}
+            #define {macro_prefix}_CONFIG_INDEX {ci}
+            #define {macro_prefix}_GLOBAL_SCRATCH {gs}
+            #define {macro_prefix}_PROFILE_SCRATCH {ps}
+        """)
+
+    return buf.getvalue()
+
+
 TRITON_SIGNATURE_TO_CPP = {
     "i32": "int32_t",
     "i64": "int64_t",
@@ -493,17 +584,26 @@ class DeferredTritonCallWrapper:
         # kernel_args_ is consumed by both JIT and AOT launchKernel calls.
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
+        prefix.writeline_aot(
+            f"launchKernel(kernels_.{kernel_name}, {common_launch_args});"
+        )
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
         """
-        Generate C++ code that embeds Triton source and compiles it at runtime.
+        Generate dual-wrapper-mode C++ code for lazy Triton kernel compilation.
 
-        Writes JIT-side content via writeline_jit/splice_jit; on a plain
-        IndentedBuffer those are equivalent to writeline/splice. AOTI-side
-        emission for dual-wrapper mode is added later in the stack.
+        DualIndentedBuffer routes lines into separate JIT and AOTI sources:
+        - JIT side: embeds Triton source, compiles at runtime, autotunes
+          with real inputs.
+        - AOTI side: uses a compile-time-initialized LazyKernelCompileResult
+          from a config header generated after the JIT first-pass.
+
+        Grid computation and kernel launch are shared between both sides
+        via the LazyKernelCompileResult struct.
         """
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
+        macro_prefix = kernel_name.upper()
 
         # Track kernel names for parallel initialization (JIT only)
         wrapper._lazy_kernel_names.append(kernel_name)
@@ -525,11 +625,34 @@ class DeferredTritonCallWrapper:
             f"static const char* {kernel_name}_source = {kernel_body};"
         )
 
+        # LazyKernelCompileResult: JIT fills at runtime; AOTI uses compile-time
+        # init from the config header generated after the first pass.
         prefix.writeline_jit(f"static LazyKernelCompileResult {kernel_name}_result;")
+        prefix.splice_aot(
+            f"""\
+            static LazyKernelCompileResult {kernel_name}_result = {{
+                {macro_prefix}_CUBIN_PATH,
+                {macro_prefix}_MANGLED_NAME,
+                {macro_prefix}_NUM_WARPS,
+                {macro_prefix}_SHARED_MEM,
+                {macro_prefix}_XBLOCKS,
+                {macro_prefix}_YBLOCKS,
+                {macro_prefix}_ZBLOCKS,
+                {macro_prefix}_R0BLOCKS,
+                {macro_prefix}_RSPLIT,
+                {macro_prefix}_RSPLIT_SIZE,
+                {macro_prefix}_CONFIG_INDEX,
+                {macro_prefix}_GLOBAL_SCRATCH,
+                {macro_prefix}_PROFILE_SCRATCH,
+            }};
+            """
+        )
 
         wrapper_arg_names, kernel_arg_names = self._resolve_lazy_arg_names()
         signature = (self.triton_meta or {}).get("signature", {})
 
+        # kernels_type_/kernels_ are routed to the AOTI buffer; if prefix is a
+        # plain IndentedBuffer (pure JIT lazy compile) those writes are dropped.
         self._write_wrapper_signature(
             prefix,
             wrapper,
@@ -559,9 +682,11 @@ class DeferredTritonCallWrapper:
                 autotune_arg_list.append(name)
         autotune_args = ", ".join(autotune_arg_list)
 
-        # Lazy compile with autotuning on first invocation.
-        # Build into temp buffer to avoid DualIndentedBuffer dispatch.
         with prefix.indent():
+            # First-call initialization: JIT lazy compiles, AOTI loads cubin
+
+            # JIT: lazy compile with autotuning on first invocation.
+            # Build into temp buffer to avoid DualIndentedBuffer dispatch.
             jit_init = IndentedBuffer(initial_indent=prefix._indent)
             jit_init.writeline(f"if ({kernel_name} == nullptr) {{")
             with jit_init.indent():
@@ -586,6 +711,23 @@ class DeferredTritonCallWrapper:
             jit_init.writeline("}")
             prefix.splice_jit(jit_init)
 
+            # AOTI: load precompiled cubin from compile-time-initialized result.
+            aoti_init = IndentedBuffer(initial_indent=prefix._indent)
+            aoti_init.writeline(f"if (kernels_.{kernel_name} == nullptr) {{")
+            with aoti_init.indent():
+                aoti_init.splice(
+                    f"""\
+                    kernels_.{kernel_name} = loadKernel(
+                        {kernel_name}_result.cubin_path,
+                        {kernel_name}_result.mangled_name,
+                        {kernel_name}_result.shared_mem,
+                        cubin_dir_);
+                    """
+                )
+            aoti_init.writeline("}")
+            prefix.splice_aot(aoti_init)
+
+            # Shared: grid computation and launch using result struct
             self._generate_lazy_grid(prefix)
             self._generate_lazy_launch(
                 prefix,
