@@ -43,21 +43,6 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-#if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-// With -msve-vector-bits=128, svfloat32_t and float32x4_t have identical layout
-// so these conversions compile to zero instructions.
-static inline svfloat32_t neon_to_sve(float32x4_t v) {
-  svfloat32_t r;
-  __builtin_memcpy(&r, &v, sizeof(v));
-  return r;
-}
-static inline float32x4_t sve_to_neon(svfloat32_t v) {
-  float32x4_t r;
-  __builtin_memcpy(&r, &v, sizeof(r));
-  return r;
-}
-#endif
-
 template <int index, bool mask_val>
 struct BlendRegs {
   static float32x4_t impl(
@@ -323,14 +308,7 @@ class Vectorized<float> {
     return map(calc_erfinv);
   }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp)
-#if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-  Vectorized<float> exp2() const {
-    return Vectorized<float>(
-        sve_to_neon(Sleef_exp2fx_u10sve(neon_to_sve(values))));
-  }
-#else
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
-#endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
   // Implementation copied from Arm Optimized Routine
   // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/advsimd/expf.c

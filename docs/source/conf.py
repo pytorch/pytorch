@@ -435,8 +435,6 @@ coverage_ignore_functions = [
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
-    # torch.backends.xeon.run_cpu
-    "create_args",
     # torch.cuda.amp.autocast_mode
     "custom_bwd",
     "custom_fwd",
@@ -452,27 +450,8 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
-    "hook_with_zero_step",
-    "hook_with_zero_step_interleaved",
-    # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
-    "post_localSGD_hook",
-    # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
-    "quantization_perchannel_hook",
-    "quantization_pertensor_hook",
     # torch.distributed.checkpoint.default_planner
-    "create_default_global_load_plan",
-    "create_default_global_save_plan",
     "create_default_local_load_plan",
-    "create_default_local_save_plan",
-    # torch.distributed.checkpoint.optimizer
-    "load_sharded_optimizer_state_dict",
-    # torch.distributed.checkpoint.planner_helpers
-    "create_read_items_for_chunk_list",
-    # torch.distributed.checkpoint.state_dict_loader
-    "load_state_dict",
-    # torch.distributed.checkpoint.state_dict_saver
-    "save_state_dict",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -536,12 +515,6 @@ coverage_ignore_functions = [
     "synchronize",
     "store_timeout",
     # torch.distributed.fsdp.wrap
-    "always_wrap_policy",
-    "enable_wrap",
-    "lambda_auto_wrap_policy",
-    "size_based_auto_wrap_policy",
-    "transformer_auto_wrap_policy",
-    "wrap",
     # torch.distributed.nn.functional
     "all_to_all",
     "all_to_all_single",
@@ -608,6 +581,11 @@ coverage_ignore_functions = [
     "set_grad_fn_seq_nr",
     "set_stack_trace",
     "get_current_replay_node",
+    # torch.fx.experimental.proxy_tensor
+    "wrap_key",
+    "wrapper_and_args_for_make_fx",
+    # torch.fx.experimental.sym_node
+    "wrap_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
@@ -955,9 +933,6 @@ coverage_ignore_functions = [
     "hann",
     "kaiser",
     "nuttall",
-    # torch.utils.backend_registration
-    "generate_methods_for_privateuse1_backend",
-    "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
@@ -990,8 +965,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    # torch.utils.cpp_backtrace
-    "get_cpp_backtrace",
     # torch.utils.cpp_extension
     "check_compiler_is_gcc",
     "check_compiler_ok_for_platform",
@@ -1046,7 +1019,6 @@ coverage_ignore_functions = [
     "apply_shuffle_settings",
     "get_all_graph_pipes",
     # torch.utils.hooks
-    "unserializable_hook",
     "warn_if_has_hooks",
     # torch.utils.jit.log_extract
     "extract_ir",
@@ -1080,8 +1052,6 @@ coverage_ignore_functions = [
     "tensor_proto",
     "text",
     "video",
-    # torch.utils.throughput_benchmark
-    "format_time",
 ]
 
 coverage_ignore_classes = [
