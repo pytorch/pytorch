@@ -44,6 +44,8 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
+    unpack_and_apply_fn,
+    unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -54,7 +56,10 @@ from .object_protocol import type_implements_nb_index, validate_sequence_index
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslator,
+        InstructionTranslatorBase,
+    )
 
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
@@ -200,7 +205,9 @@ class BaseListVariable(VariableTracker):
                     IndexError, tx, args=["list index out of range"]
                 )
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return list(self.items)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -213,7 +220,7 @@ class BaseListVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(self.unpack_var_sequence(tx), item, tx)
+        return iter_contains(unpack_iterable(tx, self), item, tx)
 
     def call_tree_map_branch(
         self,
@@ -669,7 +676,7 @@ class RangeVariable(BaseListVariable):
         return self.python_type()(*self._as_proxy())
 
     def unpack_var_sequence(
-        self, tx: Optional["InstructionTranslator"] = None
+        self, tx: Optional["InstructionTranslatorBase"] = None
     ) -> list[VariableTracker]:
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
@@ -870,15 +877,30 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if not args[0].has_force_unpack_var_sequence(tx):
-                raise_observed_exception(
-                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
+            # CPython has a series of checks to optimize list.extend for different data types
+            # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
+            from .dicts import ConstDictVariable
+            from .sets import SetVariable
+            from .user_defined import UserDefinedObjectVariable
+
+            sz = len(self.items)
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                self.items.extend(args[0].items)
+            elif isinstance(args[0], UserDefinedObjectVariable):
+                self.items.extend(unpack_iterable(tx, args[0]))
+            elif isinstance(args[0], (ConstDictVariable, SetVariable)):
+                items = [item.vt for item in args[0].items]
+                self.items.extend(items)
+            elif isinstance(args[0], ConstantVariable):
+                items = unpack_iterable(tx, args[0])
+                self.items.extend(items)
+            else:
+                unpack_and_apply_fn(
+                    tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
                 )
 
-            (arg,) = args
-            arg.force_apply_to_var_sequence(
-                tx, lambda item: self.call_method(tx, "append", [item], {})
-            )
+            if len(self.items) > sz:
+                tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
@@ -1101,18 +1123,13 @@ class ListVariable(CommonListMethodsVariable):
 
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                if not value.has_force_unpack_var_sequence(tx):
-                    raise_observed_exception(
-                        TypeError, tx, args=["can only assign an iterable"]
-                    )
-
                 key_as_const = key.as_python_constant()
                 if key_as_const.step == 0:
                     raise_observed_exception(
                         ValueError, tx, args=["slice step cannot be zero"]
                     )
 
-                value_unpack = value.force_unpack_var_sequence(tx)
+                value_unpack = unpack_iterable(tx, value)
                 try:
                     self.items[key_as_const] = value_unpack
                 except Exception as exc:
@@ -1205,10 +1222,10 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
-            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+            elif len(args) == 1:
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
-                self.items[:] = arg.force_unpack_var_sequence(tx)
+                self.items[:] = unpack_iterable(tx, arg)
                 return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1243,7 +1260,7 @@ class ListVariable(CommonListMethodsVariable):
                 f"can only concatenate list (not '{other.python_type_name()}') to list",
             )
 
-        items = self.items + other.unpack_var_sequence(tx)
+        items = self.items + unpack_iterable(tx, other)
         return ListVariable(items, mutation_type=ValueMutationNew())
 
     def sq_inplace_concat_impl(
@@ -1328,7 +1345,7 @@ class DequeVariable(CommonListMethodsVariable):
             )
 
         return DequeVariable(
-            self.items + other.unpack_var_sequence(tx),
+            self.items + unpack_iterable(tx, other),
             maxlen=self.maxlen,
             mutation_type=ValueMutationNew(),
         )
@@ -1441,12 +1458,7 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
-        if (
-            name == "extendleft"
-            and self.is_mutable()
-            and len(args) > 0
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
+        if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -1456,8 +1468,8 @@ class DequeVariable(CommonListMethodsVariable):
                 )
             # NOTE this is inefficient, but the alternative is to represent self.items
             # as a deque, which is a more intrusive change.
-            args[0].force_apply_to_var_sequence(
-                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
+            unpack_and_apply_fn(
+                tx, args[0], lambda item: self.call_method(tx, "appendleft", [item], {})
             )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
@@ -1579,7 +1591,7 @@ class TupleVariable(BaseListVariable):
             )
 
         return TupleVariable(
-            self.items + other.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            self.items + unpack_iterable(tx, other), mutation_type=ValueMutationNew()
         )
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
@@ -1710,7 +1722,9 @@ class SizeVariable(TupleVariable):
         ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return list(self.items)
 
     def numel(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -1850,7 +1864,7 @@ class SizeVariable(TupleVariable):
         if not pytuple_check(other):
             return ConstantVariable(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
-        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        a, b = unpack_iterable(tx, self_), unpack_iterable(tx, other_)
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
@@ -2038,16 +2052,13 @@ class ListIteratorVariable(IteratorVariable):
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return True
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         if self.is_exhausted:
             return []
         self.is_exhausted = True
         return list(self.items[self.index :])
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
-    ) -> list[VariableTracker]:
-        return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if not self.is_exhausted:
