@@ -1437,7 +1437,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # Graph-break before inlining the class-instantiation polyfill
                 # for extension types where object.__new__ cannot allocate an
                 # example object. SideEffects keeps a matching backstop for
-                # direct construction paths.
+                # direct construction paths. This allocates one temporary
+                # instance for classes that pass the check.
                 try:
                     object.__new__(self.value)
                 except TypeError as exc:
@@ -2374,6 +2375,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(descriptor, types.GetSetDescriptorType):
                 if name_str == "__dict__":
                     self.dict_vt = None
+                # C get/set descriptors are applied by STORE_ATTR itself, so
+                # replay must stay descriptor-aware rather than using the
+                # descriptor-bypassing instance-dict or slot paths.
                 tx.output.side_effects.store_generic_attr(self, name_str, value)
                 return variables.ConstantVariable.create(None)
 
@@ -2635,18 +2639,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return True
         return False
 
-    def try_get_descritor_and_setter_py_func(
-        self, attr_name: str
-    ) -> tuple[object, object] | None:
-        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
-        # Handle property descriptors with setters - call fset directly
-        if isinstance(descriptor, property) and descriptor.fset is not None:
-            return (descriptor, descriptor.fset)
-        setter = inspect.getattr_static(type(descriptor), "__set__", None)
-        if inspect.isfunction(setter):
-            return (descriptor, setter)
-        return None
-
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
         if tx.output.side_effects.has_pending_instance_dict_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
@@ -2807,6 +2799,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif tx.output.side_effects.has_pending_generic_mutation_of_attr(
             self, "__dict__"
         ):
+            # obj.__dict__ = {...} replaces the lookup dict as a whole, unlike
+            # per-attribute mutations tracked by the branch above.
             dict_vt = self.get_dict_vt(tx)
             if dict_vt.contains(name):
                 return dict_vt.getitem(name)
@@ -4668,8 +4662,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         """Override to handle property setters on MutableMapping subclasses.
 
         This is needed because property.__set__ is a slot wrapper (C function),
-        not a Python function, so the base class's try_get_descritor_and_setter_py_func
-        returns None for properties. But property.fset IS a Python function we can trace.
+        but property.fset is a Python function we can trace.
 
         Without this, property setters on newly created MutableMapping objects fail
         when accessing nested objects (which haven't been initialized yet on the

@@ -1649,6 +1649,8 @@ class SideEffects:
                             original_dict = getattr(
                                 getattr(var, "value", None), "__dict__", {}
                             )
+                            # If the key only existed in the traced instance
+                            # dict, the add/delete sequence is a replay no-op.
                             if name in original_dict:
                                 cg.add_push_null(
                                     lambda: cg.load_import_from(
@@ -1696,6 +1698,11 @@ class SideEffects:
                     elif isinstance(
                         var, variables.UserDefinedObjectVariable
                     ) and var.should_skip_descriptor_setter(name):
+                        if mutation_kind is AttrMutationKind.INSTANCE_DICT:
+                            raise AssertionError(
+                                "INSTANCE_DICT mutations should be handled by "
+                                "the descriptor-bypassing path above"
+                            )
                         cg.add_push_null(
                             lambda: cg.load_import_from(
                                 utils.__name__, "object_setattr_ignore_descriptor"

@@ -1315,6 +1315,9 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
                         )
                     result[key_value] = value
                 return result
+            # Other replacement forms are not materialized here yet. Leave
+            # them on the normal example-value path until Dynamo models their
+            # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
 

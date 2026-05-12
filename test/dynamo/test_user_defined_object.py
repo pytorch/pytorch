@@ -413,6 +413,32 @@ class TestSlotsAttrAssignment(TestCase):
 
         dynamo_testing.standard_test(self, fn, nargs=1)
 
+    def test_custom_descriptor_shadows_base_slot(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                if obj is None:
+                    return self
+                return obj.y * 2
+
+            def __set__(self, obj, value):
+                obj.y = value + 1
+
+        class Base:
+            __slots__ = ("x", "__dict__")
+
+        class Foo(Base):
+            x = Descriptor()
+
+        def fn(t, obj):
+            obj.x = 4
+            return t + obj.x + obj.y
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.y, 5)
+
     def test_slot_assignment_no_recompile_same_type(self):
         # Calling compiled fn repeatedly with the same slotted object type
         # must not trigger recompilation
