@@ -108,6 +108,9 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.10"
+# License info:
+#   - The main Pytorch project license is BSD-3-Clause.
+#   - The SPDX license expression below reflects installed pytorch packages.
 license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT"
 license-files = [
     "LICENSE",
