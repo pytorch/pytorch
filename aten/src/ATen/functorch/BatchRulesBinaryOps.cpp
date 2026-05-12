@@ -464,6 +464,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
+  BINARY_SCALAR_3_Tensor(special_modified_bessel_i, nu_scalar, x_scalar);
+  BINARY_SCALAR_3_Tensor(special_modified_bessel_k, nu_scalar, x_scalar);
 
   VMAP_SUPPORT2(where, self, where_self_batch_rule);
 
