@@ -85,15 +85,19 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
-    def test_fusable_read_after_broadcast_split(self):
+    def test_fusable_read_and_write_broadcast_split(self):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
 
         write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
         graph = Mock(sizevars=SizeVarAllocator())
         with V.set_graph_handler(graph):
             self.assertTrue(
-                Scheduler._fusable_read_after_broadcast_split(
+                scheduler.fusable_read_and_write(
                     MemoryDep(
                         "buf",
                         32 * d0 + FloorDiv(d1, 128),
@@ -104,7 +108,7 @@ class TestScheduler(TestCase):
                 )
             )
             self.assertFalse(
-                Scheduler._fusable_read_after_broadcast_split(
+                scheduler.fusable_read_and_write(
                     MemoryDep(
                         "buf",
                         32 * d0 + FloorDiv(d1, 128) + d1,
@@ -112,6 +116,75 @@ class TestScheduler(TestCase):
                         (128, 4096),
                     ),
                     write,
+                )
+            )
+
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
                 )
             )
 

@@ -604,7 +604,7 @@ class _NestedReductionBase:
 
     @parametrize(
         "B,K,D,expect_fullres_consumer",
-        [(64, 16, 4096, False), (1, 16, 1024, True)],
+        [(64, 16, 4096, True), (1, 16, 1024, True)],
     )
     def test_fullres_epilogue_small_dim_in_x(self, B, K, D, expect_fullres_consumer):
         """Small-dim-in-X full-res consumer remaps through the parent tile."""
