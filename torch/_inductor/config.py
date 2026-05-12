@@ -449,6 +449,9 @@ bucket_all_gathers_bucket_mode: Literal[
     "default", "custom_ops", "custom_ops_multidtype"
 ] = "default"
 
+# Fuse duplicate reduce_scatter ops whose waited results are summed via add.
+dedup_reduce_scatters: bool = False
+
 bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_reduce_scatters_fx_bucket_size_determinator: Callable[[int], int] | None = None
@@ -511,6 +514,14 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# When True, autotuning is spread across real kernel invocations instead of
+# blocking on the first call. Each run() call executes one config and records
+# timing via CUDA events, progressively eliminating underperforming configs.
+# An additional JK gate inside the plugin can still block the feature on True.
+incremental_autotune: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
+)
 
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
@@ -951,7 +962,14 @@ max_fusion_buffer_group_pairwise_attempts = 64
 # The check is disabled if set to None.
 max_fusion_unique_io_buffers: int | None = None
 
-# max number of inputs to generate cat as a pointwise op with masked loads
+# max number of inputs to always fuse cat as a pointwise op regardless of
+# per-input op complexity. Beyond this limit (up to max_pointwise_cat_inputs),
+# fusion is only applied when every input has a low op count.
+max_complex_pointwise_cat_inputs = 8
+
+# max number of inputs to generate cat as a pointwise op with masked loads.
+# Inputs beyond max_complex_pointwise_cat_inputs but within this limit are
+# only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
@@ -1218,9 +1236,9 @@ class aten_distributed_optimizations:
     bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
-    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
-    # as atomic units with memory-bound runtime estimates.
-    enable_fusion_regions: bool | None = None
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) have their
+    # I/O costs corrected to exclude intermediates that inductor will not materialize.
+    enable_fusion_regions: bool = True
 
     # Default bucketing mode for auto and manual overlap scheduling
     # "default": traced bucketing, fully lowered by inductor during compilation
@@ -1240,7 +1258,9 @@ class aten_distributed_optimizations:
     # Verify FX graphs are identical across ranks before overlap scheduling.
     # Detects non-SPMD graphs that would cause NCCL collective ordering
     # mismatches and hangs.
-    spmd_check: bool = True
+    # Disabled: when one rank has a cache hit while another has a cache miss,
+    # the check itself causes an NCCL hang. Re-enable once that is fixed.
+    spmd_check: bool = False
 
     # Action on SPMD graph mismatch: "warn" logs a warning, "error" raises
     # RuntimeError. "error" fails fast instead of risking silent NCCL hang.
@@ -1536,8 +1556,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles. Incompatible with cpp_wrapper.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
-# When True, complex_memory_overlap always reports True
-always_complex_memory_overlap_TESTING_ONLY: bool = False
+# When True, all compiled graphs report a cudagraph fail reason. Used by tests
+# that need to exercise the cudagraph-skip path.
+force_disable_cudagraph_TESTING_ONLY: bool = False
 
 # enable linear binary folding
 enable_linear_binary_folding = (
@@ -1631,7 +1652,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )  # type: ignore[assignment]
+    )
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2010,6 +2031,10 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Controls TMA load enablement in template epilogues
+    enable_tma_load_for_template_epilogue = (
+        os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
+    )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -2546,6 +2571,33 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    #
+    # When True, the rocm-origami pip package is consulted at GEMM compile time
+    # to pre-select a top-K of Triton configs from the DEFAULT search space,
+    # reducing autotuning cost while keeping runtime within ~5% of full
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
+    # toggling at runtime via config.patch has no effect because the rocm-origami
+    # module import is cached at template_heuristics/triton.py load time.
+    #
+    # Active only when all of these hold:
+    #   - IS_ROCM (torch.version.hip is not None)
+    #   - config.max_autotune
+    #   - config.rocm.origami (this knob)
+    #   - config.max_autotune_gemm_search_space == "DEFAULT"
+    #   - rocm-origami is installed (else the import gate sets it inert)
+    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
+    # one-time warning; the regular config generator runs instead.
+    #
+    # Side-effect: when this is True, choices._need_to_fix_layout() returns True
+    # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
+    # on exact strides and would mis-compile under flexible layouts.
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+
+    # Number of top configs origami selects per GEMM. Read once from
+    # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile
+    # time and runtime within the validated 4-8 range).
+    origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
@@ -2711,7 +2763,7 @@ _cache_config_ignore_prefix: list[str] = [
     # CUDAGraphPolicy only affects post_compile, not compiled output
     "cudagraph_policy",
     # tests assume that changes here don't invalidate cache
-    "always_complex_memory_overlap_TESTING_ONLY",
+    "force_disable_cudagraph_TESTING_ONLY",
     # timing affects cache structure, not cache content
     "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
