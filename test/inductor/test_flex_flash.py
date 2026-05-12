@@ -138,18 +138,27 @@ SM100_VECTORIZED_AUX_SCORE_MOD_CASES = (
 )
 
 SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
-    ("kv", 8, True),
-    ("kv_mod_4", 4, True),
-    ("kv_mod_3", 1, False),
-    ("kv_plus_8", 8, True),
-    ("kv_minus_8", 1, False),
-    ("kv_floor_div_2", 1, False),
-    ("kv_times_2", 1, False),
-    ("q", 8, False),
-    ("q_kv", 8, True),
-    ("kv_q", 1, False),
-    ("relative_position", 1, False),
-    ("multi", 8, True),
+    ("kv", lambda seq_len: (_sm100_bias(seq_len),), 8, True),
+    ("kv_mod_4", lambda seq_len: (_sm100_bias(4),), 4, True),
+    ("kv_mod_3", lambda seq_len: (_sm100_bias(4),), 1, False),
+    ("kv_plus_8", lambda seq_len: (_sm100_bias(seq_len + 8),), 8, True),
+    ("kv_minus_8", lambda seq_len: (_sm100_bias(seq_len),), 1, False),
+    ("kv_floor_div_2", lambda seq_len: (_sm100_bias(seq_len // 2 + 1),), 1, False),
+    ("kv_times_2", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
+    ("q", lambda seq_len: (_sm100_bias(seq_len),), 8, False),
+    ("q_kv", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 8, True),
+    ("kv_q", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 1, False),
+    ("relative_position", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
+    (
+        "multi",
+        lambda seq_len: (
+            _sm100_bias(seq_len),
+            _sm100_bias(seq_len),
+            _sm100_bias(seq_len, seq_len),
+        ),
+        8,
+        True,
+    ),
 )
 
 
@@ -159,7 +168,7 @@ def sm100_vectorized_aux_score_mod_case_name(case):
 
 
 def sm100_aux_vec_matches_scalar_case_name(case):
-    index_dim, _expected_auto_vec_size, _expect_auto_autovec = case
+    index_dim, _bias_factory, _expected_auto_vec_size, _expect_auto_autovec = case
     return index_dim
 
 
@@ -1327,7 +1336,7 @@ class TestFlexFlash(InductorTestCase):
         name_fn=sm100_aux_vec_matches_scalar_case_name,
     )
     def test_flash_attention_sm100_aux_vec_matches_scalar_bitwise(self, case):
-        index_dim, expected_auto_vec_size, expect_auto_autovec = case
+        index_dim, bias_factory, expected_auto_vec_size, expect_auto_autovec = case
         torch.manual_seed(0)
         seq_len = 128
         q, k, v = create_test_tensors(
@@ -1338,74 +1347,46 @@ class TestFlexFlash(InductorTestCase):
             dtype=torch.float16,
             device="cuda",
         )
-        bias_kv = torch.randn(seq_len, device="cuda", dtype=torch.float16)
-        bias_mod = torch.randn(4, device="cuda", dtype=torch.float16)
-        bias_offset = torch.randn(seq_len + 8, device="cuda", dtype=torch.float16)
-        bias_floor = torch.randn(seq_len // 2 + 1, device="cuda", dtype=torch.float16)
-        bias_qkv = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
-        bias_rel = torch.randn(2 * seq_len, device="cuda", dtype=torch.float16)
-        bias_q = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        biases = bias_factory(seq_len)
 
-        def fn(
-            q,
-            k,
-            v,
-            bias_kv,
-            bias_mod,
-            bias_offset,
-            bias_floor,
-            bias_qkv,
-            bias_rel,
-            bias_q,
-        ):
+        def fn(q, k, v, *biases):
             def score_mod(score, b, h, q_idx, kv_idx):
                 match index_dim:
                     case "kv":
-                        return score + bias_kv[kv_idx]
+                        return score + biases[0][kv_idx]
                     case "kv_mod_4":
-                        return score + bias_mod[kv_idx % 4]
+                        return score + biases[0][kv_idx % 4]
                     case "kv_mod_3":
-                        return score + bias_mod[kv_idx % 3]
+                        return score + biases[0][kv_idx % 3]
                     case "kv_plus_8":
-                        return score + bias_offset[kv_idx + 8]
+                        return score + biases[0][kv_idx + 8]
                     case "kv_minus_8":
-                        return score + bias_kv[kv_idx - 8]
+                        return score + biases[0][kv_idx - 8]
                     case "kv_floor_div_2":
-                        return score + bias_floor[kv_idx // 2]
+                        return score + biases[0][kv_idx // 2]
                     case "kv_times_2":
-                        return score + bias_rel[2 * kv_idx]
+                        return score + biases[0][2 * kv_idx]
                     case "q":
-                        return score + bias_q[q_idx]
+                        return score + biases[0][q_idx]
                     case "q_kv":
-                        return score + bias_qkv[q_idx, kv_idx]
+                        return score + biases[0][q_idx, kv_idx]
                     case "kv_q":
-                        return score + bias_qkv[kv_idx, q_idx]
+                        return score + biases[0][kv_idx, q_idx]
                     case "relative_position":
-                        return score + bias_rel[q_idx - kv_idx + seq_len]
+                        return score + biases[0][q_idx - kv_idx + seq_len]
                     case "multi":
                         return (
                             score
-                            + bias_kv[kv_idx]
-                            + bias_q[q_idx]
-                            + bias_qkv[q_idx, kv_idx]
+                            + biases[0][kv_idx]
+                            + biases[1][q_idx]
+                            + biases[2][q_idx, kv_idx]
                         )
 
             return flex_attention(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
-        fn_args = (
-            q,
-            k,
-            v,
-            bias_kv,
-            bias_mod,
-            bias_offset,
-            bias_floor,
-            bias_qkv,
-            bias_rel,
-            bias_q,
-        )
+        fn_args = (q, k, v, *biases)
         with force_flex_flash_score_mod_vec_size(1):
             torch._dynamo.reset()
             scalar, scalar_code = run_and_get_code(
@@ -1416,7 +1397,7 @@ class TestFlexFlash(InductorTestCase):
             torch.compile(fn, fullgraph=True, dynamic=False), *fn_args
         )
 
-        self.assertTrue(torch.equal(auto, scalar), index_dim)
+        self.assertEqual(auto, scalar, atol=0, rtol=0, msg=index_dim)
         self.assertIn("score_mod.__vec_size__ = 1", "\n".join(scalar_code))
         auto_src = "\n".join(auto_code)
         self.assertIn(f"score_mod.__vec_size__ = {expected_auto_vec_size}", auto_src)
