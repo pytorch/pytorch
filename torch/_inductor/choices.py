@@ -64,9 +64,9 @@ class FusionScore:
     def __lt__(self, other):
         """
         node_type_score orders same-kind fusions above mixed-kind fusions unless
-        the memory_score differs too much. Dependent reductions with different
-        reduction sizes use -1 so nested candidates rank below ordinary
-        mixed-kind fusions.
+        the memory_score differs too much. Nested reduction candidates use -1
+        so they rank below ordinary mixed-kind fusions; mix-order reductions
+        are still scored through memory_score.
 
         buffer_overlap_score is prioritized below memory_score so that
         strict global memory savings (exact dep matches) are preferred
