@@ -557,4 +557,6 @@ Each DSL controller provides the following methods:
 
 ```{eval-rst}
 .. py:module:: torch.backends.xeon.run_cpu
+
+.. autofunction:: torch.backends.xeon.run_cpu.create_args
 ```
