@@ -36,16 +36,6 @@ add_custom_target(merge_compile_commands ALL
   VERBATIM
 )
 
-# --- Windows export library ---
-if(WIN32 AND BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
-  install(CODE "
-    if(EXISTS \"${_cmake_bindir}/torch/csrc/_C.lib\")
-      file(INSTALL \"${_cmake_bindir}/torch/csrc/_C.lib\"
-           DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_LIB_DIR}\")
-    endif()
-  ")
-endif()
-
 # --- Runtime DLL bundling (Windows) ---
 # The old CI scripts (copy.bat / copy_cpu.bat) copied runtime DLLs into the
 # source tree before setuptools ran.  With scikit-build-core the wheel is
