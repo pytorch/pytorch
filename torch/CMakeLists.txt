@@ -480,7 +480,7 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 # building it here lets both setuptools and scikit-build-core use the
 # same code path.
 if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
-  Python_add_library(_C MODULE "${TORCH_SRC_DIR}/csrc/stub.c")
+  Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
   target_link_libraries(_C PRIVATE torch_python)
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
