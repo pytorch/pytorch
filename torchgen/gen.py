@@ -1490,6 +1490,60 @@ def get_grouped_native_functions(
     )
 
 
+# Windows: merge native forward decls while aggregating per namespace, using a DLL-macro-insensitive
+# equivalence key so the merged header never lists the same symbol twice with different TORCH_* / static prefixes.
+# Tuple entries must include trailing space so we only strip whole macro tokens, not identifiers.
+_NATIVE_DECL_DEDUPE_EXPORT_PREFIXES = (
+    "TORCH_CUDA_CPP_API ",
+    "TORCH_XPU_API ",
+    "TORCH_API ",
+)
+
+# Remove leading TORCH_* from one line (including after 'struct '). Used only for compare keys.
+def _strip_native_decl_export_prefix(line: str) -> str:
+    def without_leading_export(s: str) -> str:
+        for p in _NATIVE_DECL_DEDUPE_EXPORT_PREFIXES:
+            if s.startswith(p):
+                return s.removeprefix(p).lstrip()
+        return s
+
+    s = line.strip()
+    if not s:
+        return ""
+    if s.startswith("struct "):
+        return "struct " + without_leading_export(s.removeprefix("struct ").lstrip())
+    return without_leading_export(s)
+
+# Join normalized non-empty lines so decls that differ only by TORCH_* DLL export macros share one equivalence key.
+def _decl_equivalence_key_for_dll_macros(decl: str) -> str:
+    parts: list[str] = []
+    for ln in decl.splitlines():
+        normalized = _strip_native_decl_export_prefix(ln)
+        if normalized:
+            parts.append(normalized)
+    return "\n".join(parts)
+
+
+# Collide variants with the same DLL-macro equivalence key; prefer TORCH_API, then static, else first.
+def _merge_native_decl_variants(existing: str | None, incoming: str) -> str:
+    if existing is None:
+        return incoming
+
+    def first_sig_line(decl: str) -> str:
+        for ln in decl.splitlines():
+            t = ln.strip()
+            if t:
+                return t.removeprefix("struct ").lstrip() if t.startswith("struct ") else t
+        return ""
+
+    pair = (existing, incoming)
+    return (
+        next((v for v in pair if first_sig_line(v).startswith("TORCH_API ")), None)
+        or next((v for v in pair if first_sig_line(v).startswith("static ")), None)
+        or pair[0]
+    )
+
+
 def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
@@ -1498,7 +1552,7 @@ def get_ns_grouped_kernels(
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
 ) -> dict[str, list[str]]:
-    ns_grouped_kernels: dict[str, list[str]] = defaultdict(list)
+    ns_grouped_kernels: dict[str, OrderedDict[str, str]] = defaultdict(OrderedDict)
     for f in grouped_native_functions:
         native_function_namespaces = set()
         dispatch_keys = set()
@@ -1515,10 +1569,29 @@ def get_ns_grouped_kernels(
                     f"Codegen only supports one namespace per operator, "
                     f"got {native_function_namespaces} from {dispatch_keys}"
                 )
-            ns_grouped_kernels[namespace].extend(
-                native_function_decl_gen(f, backend_idx)
-            )
-    return ns_grouped_kernels
+            decls_merged_by_equivalence_key = ns_grouped_kernels[namespace]
+            for decl in native_function_decl_gen(f, backend_idx):
+                # Skip whitespace-only decl strings so they are not stored in the map.
+                if not decl.strip():
+                    continue
+                # Normalized multiline text: equal for two decls that differ only by leading TORCH_* /
+                # other DLL export macros, so they bucket as one logical forward declaration.
+                equivalence_key = _decl_equivalence_key_for_dll_macros(decl)
+                # For this C++ namespace we store at most one declaration string per equivalence_key
+                # (same key when two decl strings only differ by TORCH_* DLL macros or static on the
+                # same signature).
+                # decls_merged_by_equivalence_key.get(equivalence_key) is None the first time we see
+                # this key, otherwise it is the declaration we already stored for that key.
+                # _merge_native_decl_variants(previous, decl): if previous is None, the result is decl;
+                # if previous is set, the result is one chosen string from the two (prefers TORCH_API,
+                # then static, else keeps previous). The assignment saves that single result here (replacing the old one for that key).
+                decls_merged_by_equivalence_key[equivalence_key] = _merge_native_decl_variants(
+                    decls_merged_by_equivalence_key.get(equivalence_key), decl
+                )
+    return {
+        namespace: list(merged.values())
+        for namespace, merged in ns_grouped_kernels.items()
+    }
 
 
 def get_native_function_declarations_from_ns_grouped_kernels(
@@ -1535,6 +1608,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
+        # get_ns_grouped_kernels already merges decls that share a DLL-macro equivalence key.
         ordered_kernels = list(OrderedDict.fromkeys(kernels))
         declarations.extend(
             f"""

@@ -4,29 +4,59 @@ import torchgen.api.meta as meta
 import torchgen.api.structured as structured
 from torchgen.api.types import kernel_signature
 from torchgen.context import with_native_function_and_index
-from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
+from torchgen.model import (
+    BackendIndex,
+    DispatchKey,
+    NativeFunction,
+    NativeFunctionsGroup,
+    is_cuda_dispatch_key,
+    is_xpu_dispatch_key,
+)
 from torchgen.utils import mapMaybe
 
+# native_functions.yaml tag: see tags.yaml ("cpu_dll_cuda_kernel").
+_CPU_DLL_CUDA_KERNEL_TAG = "cpu_dll_cuda_kernel"
+# QuantizedCUDA dispatch implemented in torch_cpu-only TU; tag applies only to
+# QuantizedCUDA forward decl macro selection (see dll_export_macro_for_kernel).
+_CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG = "cpu_dll_quantized_cuda_kernel"
 
-def torch_api_key_word_prefix(bankend_index: BackendIndex) -> str:
-    if bankend_index.external:
+# Dispatch key → TORCH_* for generated forward decls (Windows). Also used from register_dispatch_key.
+def torch_api_key_word_prefix(backend_index: BackendIndex) -> str:
+    if backend_index.external:
         return ""
 
-    # Although Intel GPU ATen library is out-of-tree, it still utilizes torchgen to produce structured
-    # kernels. Regarding these produced structured kernels, they should be visible for the Intel GPU ATen
-    # library. Therefore, we need to add "TORCH_XPU_API" prefix to these structured kernels,
-    # rather than "TORCH_API". Because the semantic of "TORCH_API" is "hidden" for out-of-tree backends.
-    # For other in-tree backends like cpu and cuda, they still use "TORCH_API" prefix with "visible" semantic.
-    device_torch_api_key_word_mapping = {
-        "XPU": "TORCH_XPU_API",
-    }
+    # Use DispatchKey predicates, not only the bare "CUDA"/"XPU" enum names: NestedTensorCUDA,
+    # SparseCUDA, etc. still use the CUDA component DLL and need TORCH_CUDA_CPP_API on Windows.
+    # A name-only map left those on TORCH_API and caused -Winconsistent-dllimport vs HIP/CUDA TUs.
+    dk = backend_index.dispatch_key
+    if is_cuda_dispatch_key(dk):
+        return "TORCH_CUDA_CPP_API"
+    if is_xpu_dispatch_key(dk):
+        return "TORCH_XPU_API"
+    return "TORCH_API"
 
-    return (
-        device_torch_api_key_word_mapping.get(
-            bankend_index.dispatch_key.name, "TORCH_API"
+
+# Native forward-decl export macro: dispatch-key default, or TORCH_API when cpu_dll_* yaml marks
+# the CUDA-family kernel as defined in torch_cpu (TORCH_CUDA_CPP_API would mis-declare it for torch_cuda on Windows).
+def dll_export_macro_for_kernel(
+    backend_index: BackendIndex,
+    g: NativeFunction | NativeFunctionsGroup | None,
+) -> str:
+    macro = torch_api_key_word_prefix(backend_index)
+    if macro == "TORCH_CUDA_CPP_API" and g is not None:
+        tags = (
+            g.tags
+            if isinstance(g, NativeFunction)
+            else set().union(*(f.tags for f in g.functions()))
         )
-        + " "
-    )
+        if _CPU_DLL_CUDA_KERNEL_TAG in tags:
+            return "TORCH_API"
+        if (
+            _CPU_DLL_QUANTIZED_CUDA_KERNEL_TAG in tags
+            and backend_index.dispatch_key == DispatchKey.QuantizedCUDA
+        ):
+            return "TORCH_API"
+    return macro
 
 
 @with_native_function_and_index
@@ -38,7 +68,7 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> str | No
     if "legacy::" in metadata.kernel:
         return None
     else:
-        prefix = "static" if backend_index.external else "TORCH_API"
+        prefix = "static" if backend_index.external else dll_export_macro_for_kernel(backend_index, f)
         return f"{prefix} {sig.decl(name=metadata.kernel)};"
 
 
@@ -49,7 +79,7 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
-    prefix = torch_api_key_word_prefix(backend_index)
+    prefix = dll_export_macro_for_kernel(backend_index, g) + " "
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
