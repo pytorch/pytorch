@@ -650,7 +650,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         buffer: Any,
         var_dtype: torch.dtype,
     ) -> bool:
-        """Return true when vector lanes form a safe contiguous last-dim tile."""
+        """Return true when vector lanes form a safe contiguous last-dim tile.
+
+        This is stricter than lane-contiguity analysis: CuTe autovec also needs
+        a real byte-addressable copy type, uniform prefix dimensions, unit last
+        stride, and a statically aligned full-width tile.
+        """
         if var_dtype is torch.bool:
             return False
         if not idx_vars or not idx_vars[-1].is_contiguous_kv:
@@ -755,7 +760,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _emit_index_fragment(
         self, expr: sympy.Expr, cute_dtype: str, torch_dtype: torch.dtype
     ) -> CuteDSLIndexFragment:
-        """Materialize a dynamic SSA index, or keep static integer indices inline."""
+        """Materialize an index and preserve enough metadata for load selection."""
         static_expr = self._static_integer_expr(expr)
         if static_expr is not None:
             return CuteDSLIndexFragment(
@@ -805,6 +810,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return None
 
     def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
+        """Recover the original score_mod index meaning from generated CSE names."""
         replacements: dict[sympy.Symbol, sympy.Expr] = dict(
             self._semantic_index_replacements
         )
@@ -835,6 +841,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _aligned_contiguous_width(
         expr: sympy.Expr, contiguous_width: int | None
     ) -> int | None:
+        """Narrow contiguous width until the first lane is statically aligned."""
         if contiguous_width is None:
             return None
         kv_idx = sympy_index_symbol("kv_idx")

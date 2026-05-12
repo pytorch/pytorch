@@ -1198,6 +1198,7 @@ class TestFlexFlash(InductorTestCase):
             (128, "kv_plus_8", 8, True),
             (128, "kv_mul_1", 8, True),
             (128, "kv_mod_4", 4, True),
+            (128, "kv_stride_mix", 4, False),
             (128, "kv_floor_div_2", 1, False),
             (128, "q", 8, False),
             (128, "q_mod_4", 8, False),
@@ -1217,6 +1218,8 @@ class TestFlexFlash(InductorTestCase):
                 bias_shape = (seq_len + 8,)
             elif index_dim == "kv_floor_div_2":
                 bias_shape = (seq_len // 2 + 1,)
+            elif index_dim == "kv_stride_mix":
+                bias_shape = (2 * seq_len,)
             else:
                 bias_shape = (seq_len,)
             bias = torch.randn(*bias_shape, device="cuda", dtype=torch.float16)
@@ -1234,6 +1237,8 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias[kv_idx * 1]
                         case "kv_mod_4":
                             return score + bias[kv_idx % 4]
+                        case "kv_stride_mix":
+                            return score + bias[2 * kv_idx - kv_idx % 4]
                         case "kv_floor_div_2":
                             return score + bias[kv_idx // 2]
                         case "q":

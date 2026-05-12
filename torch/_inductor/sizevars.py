@@ -44,6 +44,13 @@ log = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class LaneContiguity:
+    """How an index expression varies across lanes in a vector group.
+
+    This describes only the per-lane relationship, not full memory safety.
+    Callers still need to prove the relevant tensor dimension, stride, and base
+    alignment make a vector load valid.
+    """
+
     contiguous_width: int | SymInt | None = None
     stride: int | SymInt | None = None
     uniform: bool = False
@@ -591,6 +598,13 @@ class SizeVarAllocator:
     def analyze_lane_contiguity(
         self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
+        """Analyze whether `expr` is uniform or contiguous over vector lanes.
+
+        The analysis is conservative: unknown cases must fall back to scalar or
+        gather-style lowering. `contiguous_width` can be smaller than
+        `requested_width` for modular expressions whose contiguous span is known
+        only for a narrower aligned group.
+        """
         expr = self.simplify(
             simplify_index_in_vec_range(expr, lane_var, requested_width)
         )
@@ -681,6 +695,12 @@ class SizeVarAllocator:
         lane_var: sympy.Symbol,
         requested_width: int,
     ) -> LaneContiguity:
+        """Handle modulo when the whole vector group cannot wrap.
+
+        `(base % modulus)` is lane-contiguous only when the group start and the
+        modulus are aligned to the accepted width. Otherwise vector lanes can
+        wrap around the modulus boundary and are not a contiguous memory span.
+        """
         if not isinstance(modulus, (int, sympy.Integer)):
             return LaneContiguity(unknown=True)
         base_result = self.analyze_lane_contiguity(base, lane_var, requested_width)
