@@ -3,8 +3,14 @@ import operator
 import os
 import tempfile
 from threading import Event
+from unittest.mock import mock_open, patch
 
 import torch._inductor.config as config
+from torch._inductor.async_compile import (
+    _get_available_memory_fraction,
+    _get_compile_threads_for_memory,
+    AsyncCompile,
+)
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
@@ -161,6 +167,251 @@ class TestTimer(TestCase):
             t.record_call()
         self.assertTrue(done.wait(4))
         t.quit()
+
+
+class TestDynamicWakeup(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_wakeup_with_fewer_workers(self):
+        pool = SubprocPool(4)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            self.assertEqual(a.result(), 101)
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_wakeup_scale_up(self):
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=2)
+            a = pool.submit(operator.add, 10, 5)
+            self.assertEqual(a.result(), 15)
+            pool.wakeup(nprocs=4)
+            b = pool.submit(operator.mul, 10, 5)
+            self.assertEqual(b.result(), 50)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_eager_quiesce_cycle(self):
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=4)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+
+            b = pool.submit(operator.add, 3, 4)
+            self.assertEqual(b.result(), 7)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=4)
+
+            c = pool.submit(operator.add, 5, 6)
+            self.assertEqual(c.result(), 11)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_submit_after_reduced_wakeup(self):
+        # After quiesce + wakeup(small), submitting jobs should not scale the
+        # sidecar pool back up to the original nprocs. Before the fix in
+        # _start_pool, _submit_inner used a stale self.nprocs default which
+        # defeated memory-aware scaling.
+        pool = SubprocPool(8)
+        try:
+            pool.wakeup(nprocs=8)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+
+            for i in range(5):
+                f = pool.submit(operator.add, i, 10)
+                self.assertEqual(f.result(), i + 10)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_multi_cycle_quiesce_wakeup(self):
+        # Simulates multiple compilation cycles: full wakeup -> work ->
+        # quiesce -> reduced wakeup -> full wakeup -> work -> quiesce.
+        pool = SubprocPool(4)
+        try:
+            pool.wakeup(nprocs=4)
+            self.assertEqual(pool.submit(operator.add, 1, 1).result(), 2)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=1)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=4)
+            self.assertEqual(pool.submit(operator.mul, 3, 7).result(), 21)
+
+            pool.quiesce()
+            pool.wakeup(nprocs=2)
+            self.assertEqual(pool.submit(operator.sub, 10, 4).result(), 6)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_crash_recovery_uses_reduced_pool(self):
+        # After wakeup with a reduced nprocs, a BrokenProcessPool crash
+        # recovery should recreate the pool at the reduced size, not the
+        # original constructor size.
+        pool = SubprocPool(8)
+        try:
+            pool.wakeup(nprocs=2)
+            a = pool.submit(operator.add, 1, 2)
+            self.assertEqual(a.result(), 3)
+
+            with self.assertRaises(Exception):
+                pool.submit(os._exit, 1).result()
+
+            b = pool.submit(operator.add, 10, 20)
+            self.assertEqual(b.result(), 30)
+        finally:
+            pool.shutdown()
+
+
+class TestMemoryAwareThreads(TestCase):
+    MEMINFO_TEMPLATE = (
+        "MemTotal:       {total} kB\n"
+        "MemFree:        {free} kB\n"
+        "MemAvailable:   {available} kB\n"
+    )
+
+    def _mock_meminfo(self, total_kb, available_kb):
+        content = self.MEMINFO_TEMPLATE.format(
+            total=total_kb, available=available_kb, free=available_kb
+        )
+        return patch(
+            "torch._inductor.async_compile.open",
+            mock_open(read_data=content),
+        )
+
+    def test_available_memory_fraction(self):
+        with self._mock_meminfo(100000, 50000):
+            frac = _get_available_memory_fraction()
+            self.assertAlmostEqual(frac, 0.5, places=2)
+
+    def test_available_memory_fraction_unavailable(self):
+        with patch(
+            "torch._inductor.async_compile.open",
+            side_effect=OSError("no /proc/meminfo"),
+        ):
+            self.assertIsNone(_get_available_memory_fraction())
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_no_scaling_when_memory_ok(self):
+        with self._mock_meminfo(100000, 90000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 32)
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_scaled_down_when_memory_low(self):
+        # available=50% => scale = (0.5 - 0.4) / (0.8 - 0.4) = 0.25
+        # result = int(32 * 0.25) = 8
+        with self._mock_meminfo(100000, 50000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 8)
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 2)
+    def test_threads_min_when_memory_very_low(self):
+        with self._mock_meminfo(100000, 10000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 2)
+
+    @config.patch("compile_worker_memory_threshold", 0.0)
+    def test_threshold_zero_disables_scaling(self):
+        with self._mock_meminfo(100000, 1000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 32)
+
+    @config.patch("compile_worker_memory_threshold", 0.8)
+    @config.patch("compile_threads_min", 0)
+    def test_threads_min_zero_clamps_to_one(self):
+        with self._mock_meminfo(100000, 10000):
+            self.assertEqual(_get_compile_threads_for_memory(32), 1)
+
+
+class TestEagerQuiesce(TestCase):
+    def setUp(self):
+        super().setUp()
+        from torch._inductor.async_compile import shutdown_compile_workers
+
+        shutdown_compile_workers()
+
+    def tearDown(self):
+        from torch._inductor.async_compile import shutdown_compile_workers
+
+        shutdown_compile_workers()
+        super().tearDown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch("quiesce_async_compile_eager", True)
+    @config.patch("compile_threads_min", 0)
+    @config.patch("compile_threads", 4)
+    @config.patch("worker_start_method", "subprocess")
+    def test_eager_quiesce_full_shutdown(self):
+        pool = AsyncCompile.process_pool()
+        self.assertIsInstance(pool, SubprocPool)
+        pool.wakeup(nprocs=4)
+        a = pool.submit(operator.add, 1, 2)
+        self.assertEqual(a.result(), 3)
+
+        AsyncCompile._eager_quiesce()
+        self.assertTrue(AsyncCompile._pool_needs_wakeup)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch("quiesce_async_compile_eager", True)
+    @config.patch("compile_threads_min", 2)
+    @config.patch("compile_threads", 4)
+    @config.patch("worker_start_method", "subprocess")
+    def test_eager_quiesce_warm_start(self):
+        pool = AsyncCompile.process_pool()
+        self.assertIsInstance(pool, SubprocPool)
+        pool.wakeup(nprocs=4)
+        a = pool.submit(operator.add, 1, 2)
+        self.assertEqual(a.result(), 3)
+
+        AsyncCompile._eager_quiesce()
+        self.assertTrue(AsyncCompile._pool_needs_wakeup)
+
+        b = pool.submit(operator.add, 3, 4)
+        self.assertEqual(b.result(), 7)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch("quiesce_async_compile_eager", True)
+    @config.patch("compile_threads_min", 1)
+    @config.patch("compile_threads", 4)
+    @config.patch("worker_start_method", "subprocess")
+    def test_pool_needs_wakeup_triggers_wakeup(self):
+        pool = AsyncCompile.process_pool()
+        self.assertIsInstance(pool, SubprocPool)
+        AsyncCompile._ready_future = pool.submit(AsyncCompile._get_ready)
+        AsyncCompile._ready_future.result()
+
+        AsyncCompile._eager_quiesce()
+        self.assertTrue(AsyncCompile._pool_needs_wakeup)
+
+        result = AsyncCompile.use_process_pool()
+        self.assertTrue(result)
+        self.assertFalse(AsyncCompile._pool_needs_wakeup)
+
+    @config.patch("quiesce_async_compile_eager", True)
+    @config.patch("compile_threads", 4)
+    def test_eager_quiesce_skips_uncreated_pool(self):
+        AsyncCompile.process_pool.cache_clear()
+        self.assertEqual(AsyncCompile.process_pool.cache_info().currsize, 0)
+        AsyncCompile._eager_quiesce()
+        self.assertEqual(AsyncCompile.process_pool.cache_info().currsize, 0)
 
 
 class TestSetTritonLibdevicePath(TestCase):
