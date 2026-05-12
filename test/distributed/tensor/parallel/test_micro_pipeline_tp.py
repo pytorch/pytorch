@@ -234,15 +234,36 @@ class MicroPipelineTPTest(TestCase):
             self.assertEqual(eager_stride, compiled_stride)
 
         if gather_dim == A_dims - 1:
-            # Decomposing the matmul on the K dimension is not supported.
-            # The view optimization in _maybe_view_chunk_cat allows the
-            # all_gather to be optimized away entirely, so we only check that
-            # fused_all_gather_matmul is NOT used.
+            # Gathering on the K dimension of the matmul -- fusion not supported.
             self.assertNotIn("fused_all_gather_matmul", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_fuse_all_gather_matmul_view_optimization(self):
+        """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view
+        (no data movement), so the all_gather is optimized away entirely and
+        there is no all_gather+matmul pattern to fuse."""
+        group = dist.group.WORLD
+
+        def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            A = all_gather_tensor(A_shard, gather_dim=1, group=group)
+            return A @ B
+
+        # batch=1: after all_gather, shape[0] == world_size == group_size,
+        # so the view optimization in _maybe_view_chunk_cat applies.
+        # Shard is [1, 32, 32], all_gather gives [2, 32, 32], view to [1, 64, 32].
+        A_shard = torch.rand(1, 32, 32, device="cuda")
+        B = torch.rand(32, 16, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, A_shard, B)
+
+        self.assertNotIn("fused_all_gather_matmul", code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")

@@ -43,7 +43,7 @@ static void im2col_out_mps_template(Tensor& output,
   int64_t stride_height = stride[0];
   int64_t stride_width = stride[1];
 
-  Tensor input = input_.contiguous();
+  Tensor input = input_;
 
   bool batched_input = true;
 
