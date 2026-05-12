@@ -21,8 +21,8 @@ the sources of randomness.
 ## Batched computations or slice computations
 
 Many operations in PyTorch support batched computation, where the same operation is performed
-for the elements of the batches of inputs. An example of this is {meth}`torch.mm` and
-{meth}`torch.bmm`. It is possible to implement batched computation as a loop over batch
+for the elements of the batches of inputs. An example of this is {func}`torch.mm` and
+{func}`torch.bmm`. It is possible to implement batched computation as a loop over batch
 elements, and apply the necessary math operations to the individual batch elements, for
 efficiency reasons we are not doing that, and typically perform computation for the whole
 batch. The mathematical libraries that we are calling, and PyTorch internal implementations
@@ -61,7 +61,7 @@ an operation will remain finite. For workflows that are sensitive to non-finite 
 consider normalizing or clamping extremal inputs and using {func}`torch.isfinite` to detect
 them.
 
-(linear-algebra-torchlinalg)=
+(Linear Algebra Stability)=
 
 ## Linear algebra (`torch.linalg`)
 
@@ -81,10 +81,10 @@ situation.
 
 ### Extremal values in linalg
 
-Functions within `torch.linalg` have more {ref}`extremal-values` than
+Functions within `torch.linalg` have more {ref}`extremal values <extremal-values>` than
 other PyTorch functions.
 
-{ref}`linalg solvers <linalg-solvers>` and {ref}`linalg inverses <linalg-inverses>` assume
+{ref}`linalg solvers <linalg solvers>` and {ref}`linalg inverses <linalg inverses>` assume
 that the input matrix `A` is invertible. If it is close to being non-invertible (for
 example, if it has a very small singular value), then these algorithms may silently return
 incorrect results. These matrices are said to be
@@ -140,6 +140,7 @@ If reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False`.
 
 (bf16reducedprecision)=
+
 A similar flag exists for BF16 GEMM operations and is turned on by default. If BF16
 reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False`.
@@ -159,6 +160,8 @@ computations shift from FP16/BF16 BMM to FP32/TF32 BMM/Matmul.
 
 For scenarios where reduced-precision reductions are preferred for speed, they can be enabled
 with the following setting: `torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)`.
+
+(fp16_on_mi200)=
 
 ## Reduced Precision FP16 and BF16 GEMMs and Convolutions on AMD Instinct MI200 devices
 
