@@ -11,6 +11,11 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      ci-docker-hash:
+        required: false
+        type: string
+        default: ""
+        description: Git tree hash of .ci/docker, used to construct docker image tags.
       build-generates-artifacts:
         required: false
         type: boolean
@@ -137,19 +142,33 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix || jobs.build-osdc.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+      # Separate output for the OSDC-remapped test matrix so shadow-mode test
+      # invocations (issue #183242) can route the OSDC test job to the right
+      # runners while the EC2 test job uses the prefix-stripped matrix above.
+      test-matrix-osdc:
+        value: ${{ jobs.build-osdc.outputs.test-matrix || jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run on OSDC runners.
       build-environment:
         value: ${{ jobs.build.outputs.build-environment || jobs.build-osdc.outputs.build-environment }}
         description: Top-level label for what's being built/tested.
 
 jobs:
   build:
-    # Don't run on forked repos
-    if: github.repository_owner == 'pytorch' && !inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    # Don't run on forked repos.
+    # Experiment (https://github.com/pytorch/pytorch/issues/183242): on
+    # pull_request events, always run the EC2 route so that callers passing
+    # use-arc=true execute OSDC in shadow mode alongside EC2. Pushed commits
+    # and scheduled workflows continue to honor use-arc as usual.
+    if: github.repository_owner == 'pytorch' && (!inputs.use-arc || github.event_name == 'pull_request')
+    # Skip runner_prefix on the EC2 route during the OSDC shadow-mode
+    # experiment: the prefix (e.g. mt-) is meant for OSDC runner labels and
+    # would turn an EC2 label like linux.c7i.2xlarge into mt-linux.c7i.2xlarge,
+    # which is not a valid EC2 runner. Revert this once the experiment ends.
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 480
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      test-matrix: ${{ steps.strip-runner-prefix.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -193,6 +212,7 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
+          ci-docker-hash: ${{ inputs.ci-docker-hash }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -219,6 +239,27 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
+
+      # Strip the runner_prefix (e.g. mt-) from runner labels in the test matrix
+      # so EC2 test jobs queue against linux.* labels rather than mt-linux.*.
+      # This is needed during the OSDC shadow-mode experiment (issue #183242)
+      # because callers set runner_prefix to the OSDC prefix even when EC2 also
+      # runs. Revert with the rest of the experiment changes.
+      - name: Strip runner prefix from EC2 test matrix
+        id: strip-runner-prefix
+        env:
+          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
+        shell: bash
+        run: |
+          if [[ -z "${FILTERED_TEST_MATRIX}" || -z "${RUNNER_PREFIX}" ]]; then
+            echo "test-matrix=${FILTERED_TEST_MATRIX}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          stripped=$(jq -c --arg p "${RUNNER_PREFIX}" '
+            if .include then .include |= map(.runner |= ltrimstr($p)) else . end
+          ' <<< "${FILTERED_TEST_MATRIX}")
+          echo "test-matrix=${stripped}" >> "${GITHUB_OUTPUT}"
 
       - name: Start monitoring script
         id: monitor-script
@@ -473,10 +514,10 @@ jobs:
     if: github.repository_owner == 'pytorch' && inputs.use-arc
     runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
-      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
+      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
     outputs:
-      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
+      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
       test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
@@ -563,7 +604,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}
+          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
