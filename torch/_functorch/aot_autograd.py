@@ -537,9 +537,12 @@ def create_aot_state(
     stack.enter_context(fake_mode)
     stack.enter_context(python_dispatcher_mode)
     stack.enter_context(PhiloxStateTracker())
-    stack.enter_context(
-        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
+    saved_tensors_hooks_ctx = (
+        nullcontext()
+        if torch._dynamo.config.lazy_compile_activation_checkpoint
+        else torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    stack.enter_context(saved_tensors_hooks_ctx)
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
     from torch._library.opaque_object import is_opaque_type

@@ -793,6 +793,10 @@ inline_torch_dispatch_torch_compile = True
 # to accept this eager and compile divergence.
 skip_fwd_side_effects_in_bwd_under_checkpoint = False
 
+# Prototype: lower activation checkpointing to eager checkpoint over a Dynamo
+# traced checkpointed forward, instead of using the partitioner tag path.
+lazy_compile_activation_checkpoint = False
+
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}

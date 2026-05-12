@@ -26,7 +26,10 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     normalize_gm,
 )
-from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch._higher_order_ops.wrap import (
+    lazy_activation_checkpoint,
+    tag_activation_checkpoint,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -2027,6 +2030,160 @@ class GraphModule(torch.nn.Module):
             return (y,)
 """,
         )
+
+    @torch._dynamo.config.patch(lazy_compile_activation_checkpoint=True)
+    def test_lazy_compile_checkpoint_uses_lazy_hop(self):
+        def gn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+
+        x_ref = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        backend = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertIsNotNone(
+            find_first_node(backend.graphs[0], lazy_activation_checkpoint)
+        )
+
+    @torch._dynamo.config.patch(lazy_compile_activation_checkpoint=True)
+    def test_lazy_compile_checkpoint_python_context_fn(self):
+        events = []
+
+        @contextlib.contextmanager
+        def forward_context():
+            events.append("forward_enter")
+            try:
+                yield
+            finally:
+                events.append("forward_exit")
+
+        @contextlib.contextmanager
+        def recompute_context():
+            events.append("recompute_enter")
+            try:
+                yield
+            finally:
+                events.append("recompute_exit")
+
+        def context_fn():
+            return forward_context(), recompute_context()
+
+        def gn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, use_reentrant=False, context_fn=context_fn
+            )
+
+        x_ref = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x_ref)
+        ref.sum().backward()
+        self.assertIn("recompute_enter", events)
+
+        events.clear()
+        x = x_ref.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        res = opt_fn(x)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertIn("forward_enter", events)
+        self.assertIn("recompute_enter", events)
+
+    @torch._dynamo.config.patch(lazy_compile_activation_checkpoint=True)
+    def test_lazy_compile_checkpoint_selective_context_fn(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        def gn(x, w):
+            y = x @ w
+            return y.sin() + y.cos()
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, context_fn=context_fn
+            )
+
+        x_ref = torch.randn(4, 4, requires_grad=True)
+        w_ref = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x_ref, w_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        w = w_ref.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    @torch._dynamo.config.patch(lazy_compile_activation_checkpoint=True)
+    def test_lazy_compile_checkpoint_context_fn_skips_recompute_mutation(self):
+        def make_fn():
+            should_mutate = True
+            buffer = torch.zeros(3)
+
+            @contextlib.contextmanager
+            def disable_mutation():
+                nonlocal should_mutate
+                old = should_mutate
+                should_mutate = False
+                try:
+                    yield
+                finally:
+                    should_mutate = old
+
+            def context_fn():
+                return contextlib.nullcontext(), disable_mutation()
+
+            def gn(x):
+                y = x.sin()
+                if should_mutate:
+                    buffer.add_(y.detach())
+                return y.cos()
+
+            def fn(x):
+                return torch.utils.checkpoint.checkpoint(
+                    gn, x, use_reentrant=False, context_fn=context_fn
+                )
+
+            return fn, buffer
+
+        x_ref = torch.randn(3, requires_grad=True)
+        ref_fn, ref_buffer = make_fn()
+        ref = ref_fn(x_ref)
+        expected_buffer = x_ref.sin().detach()
+        self.assertEqual(ref_buffer, expected_buffer)
+        ref.sum().backward()
+        self.assertEqual(ref_buffer, expected_buffer)
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        opt_fn, opt_buffer = make_fn()
+        res = torch.compile(opt_fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+        self.assertEqual(opt_buffer, expected_buffer)
+        res.sum().backward()
+        self.assertEqual(opt_buffer, expected_buffer)
+        self.assertEqual(x.grad, x_ref.grad)
 
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_nonlocal_mutation(self):
