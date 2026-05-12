@@ -77,6 +77,7 @@ from ..source import (
 )
 from ..utils import (
     base_exception_methods,
+    check_args_peekable_as_constant,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -99,7 +100,13 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import MutationType, NO_SUCH_SUBOBJ, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    MutationType,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
 from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
@@ -506,16 +513,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Step 5: Plain attribute.
             return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
-        # TODO(tp_descr_get) - Revisit if we can use new descriptor VTs here.
         # Step 6: Metaclass non-data descriptor or plain attr.
-        # These are non-data descriptors on the metaclass (e.g. type.__call__,
-        # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
-        # runtime rather than VariableTracker.build, because build would create
-        # a variable for the raw C-level descriptor which then fails when
-        # called (e.g. type.__subclasses__ is a method_descriptor that dynamo
-        # can't trace).  GetAttrVariable defers the access and lets
-        # call_method handle it.
+        # For C-level descriptors with proper VTs, invoke tp_descr_get to
+        # produce a bound method. For everything else, defer to GetAttrVariable
+        # which routes call_function through call_method at runtime.
         if meta_attr is not NO_SUCH_SUBOBJ:
+            metacls_source = TypeSource(self.source) if self.source else None
+            metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
+            if isinstance(meta_attr, types.WrapperDescriptorType):
+                wd_vt = variables.WrapperDescriptorVariable(
+                    meta_attr, owner=metacls_vt, source=source
+                )
+                return wd_vt.tp_descr_get_impl(tx, self, metacls_vt)
+            if isinstance(meta_attr, types.MethodDescriptorType):
+                md_vt = variables.MethodDescriptorVariable(
+                    meta_attr, owner=metacls_vt, source=source
+                )
+                return md_vt.tp_descr_get_impl(tx, self, metacls_vt)
+            if isinstance(meta_attr, types.ClassMethodDescriptorType):
+                cmd_vt = variables.ClassMethodDescriptorVariable(
+                    meta_attr, source=source
+                )
+                return cmd_vt.tp_descr_get_impl(tx, self, metacls_vt)
             return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
@@ -613,6 +632,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 else None
             )
             return variables.PropertyVariable(cls_attr, source=descriptor_source)
+
+        # member_get with obj=NULL returns self.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
+        if isinstance(cls_attr, types.MemberDescriptorType):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
+            return variables.MemberDescriptorVariable(
+                cls_attr, source=descriptor_source
+            )
 
         if isinstance(cls_attr, _collections._tuplegetter):
             descriptor_source = (
@@ -1017,15 +1048,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
-        if self.can_constant_fold_through() and constant_args:
-            # constant fold
-            return VariableTracker.build(
-                tx,
-                self.as_python_constant()(  # type: ignore[operator]
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
+        if (
+            self.can_constant_fold_through()
+            and self.value is not torch.Size
+            and (constant_args or check_args_peekable_as_constant(args, kwargs))
+        ):
+            # constant fold - catch AsPythonConstantNotImplementedError for lazy
+            # args that realize into SymNodeVariable (specialize_int=False)
+            try:
+                return VariableTracker.build(
+                    tx,
+                    self.as_python_constant()(  # type: ignore[operator]
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+            except AsPythonConstantNotImplementedError:
+                pass
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
@@ -4006,7 +4045,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
             if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
                 last = kwargs["last"].as_python_constant()
 
-            k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            if isinstance(self._base_vt.items, collections.OrderedDict):  # type: ignore[union-attr]
+                k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            else:
+                k, v = self._base_vt.items.popitem()  # type: ignore[union-attr]
             self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
             tx.output.side_effects.mutation(self._base_vt)
             return variables.TupleVariable([k.vt, v])
@@ -4449,6 +4491,23 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             _, (idx, _) = type_attr.__reduce__()
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
+
+    def is_python_constant(self) -> bool:
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        return can_peek and not is_unrealized
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        from .lists import TupleVariable
+
+        if not isinstance(self._base_vt, TupleVariable):
+            return (False, False, None)
+        can_peek, any_unrealized, values = self._base_vt._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        try:
+            return (True, any_unrealized, self.get_construct_fn()(values))
+        except NotImplementedError:
+            return (False, False, None)
 
     def call_method(
         self,
