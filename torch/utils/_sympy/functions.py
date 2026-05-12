@@ -589,6 +589,10 @@ class FloorToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
+    def _ccode(self, printer) -> str:
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"floor({number})"
+
 
 class CeilDiv(sympy.Function):
     """
@@ -1264,6 +1268,10 @@ class TruncToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
+    def _ccode(self, printer) -> str:
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"trunc({number})"
+
 
 # This is float -> int
 class RoundToInt(sympy.Function):
@@ -1321,6 +1329,10 @@ class ToFloat(sympy.Function):
             return sympy.oo
         if number is -int_oo:
             return -sympy.oo
+
+    def _ccode(self, printer) -> str:
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"(double)({number})"
 
 
 class Identity(sympy.Function):
