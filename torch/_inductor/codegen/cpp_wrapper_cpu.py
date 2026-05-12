@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import dataclasses
 import functools
@@ -301,6 +302,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
+
+    @contextlib.contextmanager
+    def _target_buf(self, attr: str, buf: IndentedBuffer):
+        """Temporarily redirect self.<attr> to a specific buffer."""
+        saved = getattr(self, attr)
+        setattr(self, attr, buf)
+        try:
+            yield
+        finally:
+            setattr(self, attr, saved)
 
     @staticmethod
     def _generate_temporary_array_pointer(
@@ -1332,34 +1343,31 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.write_wrapper_decl()
             return super().generate(is_inference)
 
-    def _codegen_aoti_model_class(self, buf: IndentedBuffer):
-        """Emit AOTI model class, constructor, and const_run driver into buf.
-
-        codegen_model_kernels / codegen_model_constructor / codegen_const_run_driver
-        write to self.prefix, so the caller is expected to set self.prefix == buf.
-        """
-        buf.writeline("namespace torch::aot_inductor {")
+    def _codegen_aoti_model_class(self):
+        """Emit AOTI model class, constructor, and const_run driver into self.prefix."""
+        self.prefix.writeline("namespace torch::aot_inductor {")
         self.codegen_model_kernels()
         self.codegen_model_constructor()
         self.codegen_const_run_driver()
-        buf.writeline("} // namespace torch::aot_inductor")
-        buf.writeline("using namespace torch::aot_inductor;")
+        self.prefix.writeline("} // namespace torch::aot_inductor")
+        self.prefix.writeline("using namespace torch::aot_inductor;")
 
     def finalize_prefix(self):
         prior = self.prefix
-        self.prefix = aot_mode_decls = IndentedBuffer()
+        aot_mode_decls = IndentedBuffer()
         if V.graph.aot_mode and not V.graph.is_const_graph:
-            self._codegen_aoti_model_class(aot_mode_decls)
+            with self._target_buf("prefix", aot_mode_decls):
+                self._codegen_aoti_model_class()
 
-        self.prefix = cache_decls = make_codegen_buffer()
+        self.prefix = make_codegen_buffer()
         for dtype in self.used_cached_dtypes:
-            cache_decls.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            self.prefix.writeline(f"CACHE_TORCH_DTYPE({dtype});")
         for device in self.used_cached_devices:
-            cache_decls.writeline(f"CACHE_TORCH_DEVICE({device});")
+            self.prefix.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
-            cache_decls.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+            self.prefix.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         for memory_format in self.used_cached_memory_formats:
-            cache_decls.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
+            self.prefix.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
 
         # Includes are needed whenever a kernel was *defined* (the model
         # kernels class references `CpuTritonLauncherFn`); `call_<k>` bodies
