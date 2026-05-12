@@ -75,14 +75,14 @@ class CuteDSLIndexFragment:
     Attributes:
         code: Python source expression for the index or index fragment.
         is_static_int: True when code is an inline integer index, not a fragment.
-        is_lane_uniform: True when every score_mod vector lane has the same index.
-        is_contiguous_kv: True when code is lane-contiguous in kv_idx.
+        is_lane_uniform: True when every vector lane has the same index.
+        is_contiguous: True when code is lane-contiguous in the vectorized index.
     """
 
     code: str
     is_static_int: bool
     is_lane_uniform: bool = False
-    is_contiguous_kv: bool = False
+    is_contiguous: bool = False
     contiguous_width: int | None = None
 
 
@@ -634,9 +634,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             f"{val_frag} = cute.make_rmem_tensor("
             f"cute.size({first_index_fragment.code}.shape), {cute_dtype})"
         )
-        if self._can_emit_contiguous_last_dim_load(idx_vars, buffer, var_dtype):
-            self._emit_contiguous_last_dim_load(
-                var, idx_vars, val_frag, cute_dtype, var_dtype
+        vector_dim = self._vector_load_dim(len(idx_vars))
+        if self._can_emit_contiguous_dim_load(idx_vars, buffer, var_dtype, vector_dim):
+            self._emit_contiguous_dim_load(
+                var, idx_vars, val_frag, cute_dtype, var_dtype, vector_dim
             )
         elif self._can_emit_uniform_load(idx_vars):
             self._emit_uniform_load(var, idx_vars, val_frag)
@@ -644,51 +645,70 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             self._emit_per_lane_gather_load(var, idx_vars, val_frag)
         return str(val_frag)
 
-    def _can_emit_contiguous_last_dim_load(
+    def _can_emit_contiguous_dim_load(
         self,
         idx_vars: list[CuteDSLIndexFragment],
         buffer: Any,
         var_dtype: torch.dtype,
+        vector_dim: int,
     ) -> bool:
-        """Return true when vector lanes form a safe contiguous last-dim tile.
+        """Return true when vector lanes form a safe contiguous tensor tile.
 
         This is stricter than lane-contiguity analysis: CuTe autovec also needs
-        a real byte-addressable copy type, uniform prefix dimensions, unit last
-        stride, and a statically aligned full-width tile.
+        a real byte-addressable copy type, uniform non-vector dimensions, unit
+        vector stride, and a statically aligned full-width tile.
         """
         if var_dtype is torch.bool:
             return False
-        if not idx_vars or not idx_vars[-1].is_contiguous_kv:
+        if not idx_vars or not idx_vars[vector_dim].is_contiguous:
             return False
-        if any(not (idx.is_static_int or idx.is_lane_uniform) for idx in idx_vars[:-1]):
+        if any(
+            not (idx.is_static_int or idx.is_lane_uniform)
+            for dim, idx in enumerate(idx_vars)
+            if dim != vector_dim
+        ):
             return False
         sizes = buffer.get_size()
         strides = buffer.get_stride()
-        score_mod_vec_size = self._score_mod_vec_size()
+        vector_size = self._vector_load_vec_size()
+        contiguous_width = idx_vars[vector_dim].contiguous_width
         return (
-            score_mod_vec_size > 1
-            and V.graph.sizevars.statically_known_equals(strides[-1], 1)
-            and idx_vars[-1].contiguous_width is not None
-            and idx_vars[-1].contiguous_width >= score_mod_vec_size
+            vector_size > 1
+            and V.graph.sizevars.statically_known_equals(strides[vector_dim], 1)
+            and contiguous_width is not None
+            and contiguous_width >= vector_size
             and V.graph.sizevars.statically_known_multiple_of(
-                sizes[-1], score_mod_vec_size
+                sizes[vector_dim], vector_size
             )
         )
 
-    def _score_mod_vec_size(self) -> int:
-        return int(self.fixed_inputs.get("score_mod_vec_size", 1))
+    def _vector_load_vec_size(self) -> int:
+        value = self.fixed_inputs.get(
+            "vector_load_vec_size", self.fixed_inputs.get("score_mod_vec_size", 1)
+        )
+        return int(1 if value is None else value)
 
-    def _emit_contiguous_last_dim_load(
+    def _vector_load_index_symbol(self) -> sympy.Symbol:
+        return sympy_index_symbol(
+            str(self.fixed_inputs.get("vector_load_index", "kv_idx"))
+        )
+
+    def _vector_load_dim(self, ndim: int) -> int:
+        dim = int(self.fixed_inputs.get("vector_load_dim", ndim - 1))
+        return dim + ndim if dim < 0 else dim
+
+    def _emit_contiguous_dim_load(
         self,
         var: str,
         idx_vars: list[CuteDSLIndexFragment],
         val_frag: str,
         cute_dtype: str,
         var_dtype: torch.dtype,
+        vector_dim: int,
     ) -> None:
-        """Emit an autovec load for lanes contiguous in the last tensor dimension."""
-        prefix_indices = [
-            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars[:-1]
+        """Emit an autovec load for lanes contiguous in one tensor dimension."""
+        scalar_indices = [
+            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars
         ]
         vec_size = f"cute.size({val_frag}.shape)"
         aligned_idx = self.kernel.cse.newvar(dtype=torch.int32)
@@ -696,18 +716,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         aligned_ptr = self.kernel.cse.newvar(dtype=var_dtype)
         aligned_source = self.kernel.cse.newvar(dtype=var_dtype)
 
-        last_idx = idx_vars[-1].code
-        tiler = self._tuple_expr([*("1" for _ in idx_vars[:-1]), vec_size])
-        coord = self._tuple_expr([*prefix_indices, f"{aligned_idx} // {vec_size}"])
+        vector_idx = idx_vars[vector_dim].code
+        tiler_items = ["1"] * len(idx_vars)
+        tiler_items[vector_dim] = vec_size
+        coord_items = scalar_indices
+        coord_items[vector_dim] = f"{aligned_idx} // {vec_size}"
+        source_view_items = ["0"] * len(idx_vars)
+        source_view_items[vector_dim] = "None"
         source_view = (
             str(aligned_source)
-            if not prefix_indices
-            else f"{aligned_source}[{', '.join('0' for _ in prefix_indices)}, None]"
+            if len(idx_vars) == 1
+            else f"{aligned_source}[{', '.join(source_view_items)}]"
         )
         self.kernel.body.splice(
             f"""
-            {aligned_idx} = cute.assume({last_idx}[0], divby={vec_size})
-            {source_tile} = cute.local_tile({var}, {tiler}, {coord})
+            {aligned_idx} = cute.assume({vector_idx}[0], divby={vec_size})
+            {source_tile} = cute.local_tile({var}, {self._tuple_expr(tiler_items)}, {self._tuple_expr(coord_items)})
             {aligned_ptr} = cute.make_ptr({cute_dtype}, {source_tile}.iterator.toint(), {source_tile}.iterator.memspace, assumed_align=min(16, {vec_size} * {var_dtype.itemsize}))
             {aligned_source} = cute.make_tensor({aligned_ptr}, {source_tile}.layout)
             cute.autovec_copy({source_view}, {val_frag})
@@ -776,16 +800,18 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
 
         semantic_expr = self._semantic_index_expr(expr)
+        vector_index = self._vector_load_index_symbol()
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
-            semantic_expr, sympy_index_symbol("kv_idx"), self._score_mod_vec_size()
+            semantic_expr, vector_index, self._vector_load_vec_size()
         )
         raw_contiguous_width = lane_contiguity.contiguous_width
         contiguous_width = self._aligned_contiguous_width(
             semantic_expr,
+            vector_index,
             raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
         )
-        is_lane_uniform = self._is_lane_uniform_expr(semantic_expr)
-        is_contiguous_kv = lane_contiguity.stride == 1 and contiguous_width is not None
+        is_lane_uniform = self._is_lane_uniform_expr(semantic_expr, vector_index)
+        is_contiguous = lane_contiguity.stride == 1 and contiguous_width is not None
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_fragment({self.kernel.kexpr(expr)}, {cute_dtype})"
@@ -794,7 +820,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             str(result),
             is_static_int=False,
             is_lane_uniform=is_lane_uniform,
-            is_contiguous_kv=is_contiguous_kv,
+            is_contiguous=is_contiguous,
             contiguous_width=contiguous_width,
         )
 
@@ -827,27 +853,25 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 )
         return V.graph.sizevars.simplify(expr.xreplace(replacements))
 
-    @staticmethod
-    def _is_lane_uniform_expr(expr: sympy.Expr) -> bool:
+    def _is_lane_uniform_expr(
+        self, expr: sympy.Expr, vector_index: sympy.Symbol
+    ) -> bool:
         allowed_symbols = OrderedSet(
-            [
-                sympy_index_symbol("b_idx"),
-                sympy_index_symbol("h_idx"),
-                sympy_index_symbol("q_idx"),
-            ]
+            sympy_index_symbol(source_expr)
+            for source_expr in self.kernel.cse._cache
+            if isinstance(source_expr, str) and source_expr != vector_index.name
         )
         return bool(expr.free_symbols and expr.free_symbols <= allowed_symbols)
 
     @staticmethod
     def _aligned_contiguous_width(
-        expr: sympy.Expr, contiguous_width: int | None
+        expr: sympy.Expr, vector_index: sympy.Symbol, contiguous_width: int | None
     ) -> int | None:
         """Narrow contiguous width until the first lane is statically aligned."""
         if contiguous_width is None:
             return None
-        kv_idx = sympy_index_symbol("kv_idx")
         start_expr = V.graph.sizevars.simplify(
-            expr.xreplace({kv_idx: sympy.Integer(0)})
+            expr.xreplace({vector_index: sympy.Integer(0)})
         )
         for width in (contiguous_width, 4, 2):
             if (
