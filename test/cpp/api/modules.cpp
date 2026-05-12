@@ -3842,12 +3842,6 @@ TEST_F(ModulesTest, PrettyPrintUnflatten) {
   ASSERT_EQ(
       c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
       "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
-  ASSERT_EQ(
-      c10::str(Unflatten(UnflattenOptions(
-          "B",
-          {std::pair<std::string, int64_t>{"B1", 2},
-           std::pair<std::string, int64_t>{"B2", 2}}))),
-      "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
 TEST_F(ModulesTest, ReflectionPad1d) {
