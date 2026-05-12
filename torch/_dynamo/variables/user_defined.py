@@ -174,7 +174,8 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
     # in independent try blocks so that one missing symbol doesn't drop the others.
     try:
-        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
+        # pyrefly: ignore [missing-import]
+        from _pytest.raises import RaisesExc, RaisesGroup
 
         f_ctxs.append(RaisesExc)
         f_ctxs.append(RaisesGroup)
@@ -189,7 +190,8 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         pass
 
     try:
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
+        # pyrefly: ignore [missing-import]
+        from _pytest.recwarn import WarningsChecker
 
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -571,7 +573,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source=self.source and AttrSource(self.source, "__dict__"),
             )
         if name == "__mro__":
-            attr_source = self.source and TypeMROSource(self.source)
+            if meta_attr is type.__dict__["__mro__"]:
+                attr_source = self.source and TypeMROSource(self.source)
+            else:
+                attr_source = source
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
         # __name__, __qualname__, __doc__, __module__, __bases__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
@@ -667,12 +672,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # wrapperdescr_get/method_get with obj=NULL returns the
         # descriptor itself.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
-        #
-        # Torch classes are excluded: their C-level descriptors (e.g.
-        # Tensor.detach, Size.__add__) must go through VariableTracker.build /
-        # trace_rules to get TorchInGraphFunctionVariable, which carries guards
-        # like inplace-view-on-input-tensor detection. The descriptor VTs would
-        # bypass trace_rules and lose those guards.
         if (
             isinstance(cls_attr, types.WrapperDescriptorType)
             and not is_torch_class(self.value)
@@ -707,23 +706,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # instancemethod_descr_get with obj=NULL returns __func__.
-        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L160
-        if torch._C._dynamo.utils.is_instancemethod(cls_attr):  # type: ignore[attr-defined]
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
-            im_vt = variables.InstanceMethodVariable(cls_attr, source=descriptor_source)
-            return im_vt.tp_descr_get_impl(tx, None, self)
-
-        # Remaining C-level descriptors: wrapper/method descriptors on torch
-        # classes (excluded from the VT checks above by is_torch_class). These
-        # must go through VariableTracker.build / trace_rules to get the right
-        # VT (e.g. TorchInGraphFunctionVariable for Tensor.detach).
-        if inspect.ismethoddescriptor(cls_attr) and is_torch_class(self.value):
-            if source:
+        # TODO(tp_descr_get) - C-level descriptors not matched above (e.g.
+        # instancemethod, or wrapper/method descriptors on torch classes that
+        # need trace_rules). OrderedDict's C-level methods are handled at
+        # runtime.
+        if inspect.ismethoddescriptor(cls_attr):
+            if (
+                source
+                and self.value is not collections.OrderedDict
+                and (
+                    name in getattr(self.value, "__dict__", {})
+                    or self.value.__module__.startswith("torch.")
+                    or self.value.__module__ == "torch"
+                )
+            ):
                 return VariableTracker.build(tx, cls_attr, source)
             return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
@@ -1035,7 +1031,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 [],
             )
-            var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
+            var.call_method(tx, "__init__", list(args), kwargs)
             return var
 
         if (
@@ -1048,7 +1044,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             try:
                 return VariableTracker.build(
                     tx,
-                    self.as_python_constant()(  # type: ignore[operator]
+                    self.as_python_constant()(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     ),
@@ -1643,7 +1639,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def python_type(self) -> type:
-        return self.value_type  # type: ignore[return-value]
+        return self.value_type
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -2184,17 +2180,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     method = unpatched_nn_module_init
                 return UserMethodVariable(
                     method, self, source_fn=source_fn, source=source
-                ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+                ).call_function(tx, args, kwargs)
 
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
-            if trace_rules.is_polyfilled_callable(method):  # type: ignore[arg-type]
+            if trace_rules.is_polyfilled_callable(method):
                 from .functions import PolyfilledFunctionVariable
 
                 polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
-                wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
+                wrapped: Any = polyfill_handlers.get(method)
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
                     return variables.UserMethodVariable(
@@ -2796,7 +2792,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         variables.NNModuleVariable,
                     ),
                 ):
-                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
+                    out.set_nn_module_stack_source(
                         AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
                     )
             return out
@@ -2948,7 +2944,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         elif isinstance(type_attr, types.FunctionType):
             while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
+                type_attr = type_attr._torchdynamo_inline
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
@@ -2962,19 +2958,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-        # instancemethod_descr_get binds __func__ to obj via PyMethod_New.
-        # https://github.com/python/cpython/blob/3.13/Objects/funcimpl.h#L155-L168
-        if torch._C._dynamo.utils.is_instancemethod(type_attr):  # type: ignore[attr-defined]
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if can_use_mro_source
-                else source
-            )
-            im_vt = variables.InstanceMethodVariable(
-                type_attr, source=descriptor_source
-            )
-            return im_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
-        if is_cython_function(type_attr):
+        # TODO(tp_descr_get) - Investigate if we need a separate descriptor
+        # VT for instancemethod and cython functions.
+        if (
+            torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            or is_cython_function(type_attr)
+        ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
@@ -3363,7 +3352,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         args: list[object] = []
         kwargs: dict[str, object] = {}
-        for field in fields(self.value):  # type: ignore[arg-type]
+        for field in fields(self.value):
             if field.init:
                 data = self._get_field_vt(field.name).as_python_constant()
                 if getattr(field, "kw_only", False):
@@ -3879,8 +3868,8 @@ class OrderedDictVariable(UserDefinedDictVariable):
             if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
                 last = kwargs["last"].as_python_constant()
 
-            if isinstance(self._base_vt.items, collections.OrderedDict):  # type: ignore[union-attr]
-                k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+            if isinstance(self._base_vt.items, collections.OrderedDict):
+                k, v = self._base_vt.items.popitem(last=last)
             else:
                 k, v = self._base_vt.items.popitem()  # type: ignore[union-attr]
             self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
@@ -4188,7 +4177,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
+                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(
                     tx, init_args, {}
                 )
         else:
@@ -4272,7 +4261,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return StructSequenceVariable
         return NamedTupleVariable
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         from .lists import TupleVariable
 
         tx = kwargs.pop("tx", None)
@@ -4510,19 +4499,19 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             # We emulate _tuplegetter.__get__ by indexing into the tracked
             # tuple items, because self.value may not hold actual runtime values.
             _, (idx, _) = type_attr.__reduce__()
-            return self.items[idx]  # type: ignore[union-attr]
+            return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def get_construct_fn(self) -> Callable[..., Any]:
-        return self.tuple_cls._make  # type: ignore[attr-defined]
+        return self.tuple_cls._make
 
     def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
-        return self.tuple_cls(*items)  # type: ignore[arg-type]
+        return self.tuple_cls(*items)
 
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
-        return self.tuple_cls(*items)  # type: ignore[arg-type]
+        return self.tuple_cls(*items)
 
 
 class StructSequenceVariable(UserDefinedTupleVariable):

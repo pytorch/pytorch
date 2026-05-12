@@ -65,7 +65,6 @@ from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
-    BuiltinMethodVariable,
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
@@ -75,7 +74,6 @@ from .functions import (
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
-    InstanceMethodVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     MemberDescriptorVariable,
@@ -128,7 +126,6 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CellVariable,
-    ConstantMethodWrapperVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
