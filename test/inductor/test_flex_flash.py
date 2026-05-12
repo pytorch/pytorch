@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _hierarchical_indexer_cute,
@@ -80,6 +81,30 @@ def _distance_decay(score, _b, _h, q_idx, kv_idx):
     distance_sq = (q_idx - kv_idx) * (q_idx - kv_idx)
     decay = 1.0 / (1.0 + distance_sq * 0.0001)
     return score * decay
+
+
+@contextmanager
+def force_flex_flash_score_mod_vec_size(vec_size: int):
+    original = flex_flash_attention_module._get_flex_flash_fwd_configs
+
+    def configs(
+        has_score_mod,
+        has_aux_tensors,
+        device=None,
+        score_mod_graph_module=None,
+        score_mod_other_buffers=(),
+    ):
+        if has_score_mod and has_aux_tensors:
+            return [
+                flex_flash_attention_module.FlexFlashConfig(score_mod_vec_size=vec_size)
+            ]
+        return [flex_flash_attention_module.FlexFlashConfig()]
+
+    flex_flash_attention_module._get_flex_flash_fwd_configs = configs
+    try:
+        yield
+    finally:
+        flex_flash_attention_module._get_flex_flash_fwd_configs = original
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
@@ -1235,6 +1260,101 @@ class TestFlexFlash(InductorTestCase):
             else:
                 self.assertNotIn("cute.autovec_copy", src)
 
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 10,
+        "SM100+ only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_aux_vec_matches_scalar_bitwise(self):
+        for index_dim, expected_auto_vec_size, expect_auto_autovec in (
+            ("kv", 8, True),
+            ("kv_mod_4", 4, True),
+            ("kv_plus_8", 8, True),
+            ("kv_floor_div_2", 1, False),
+            ("q", 8, False),
+            ("q_kv", 8, True),
+            ("multi", 8, True),
+        ):
+            torch.manual_seed(0)
+            seq_len = 128
+            q, k, v = create_test_tensors(
+                batch_size=1,
+                num_heads=1,
+                seq_len=seq_len,
+                dim=64,
+                dtype=torch.float16,
+                device="cuda",
+            )
+            bias_kv = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+            bias_mod = torch.randn(4, device="cuda", dtype=torch.float16)
+            bias_offset = torch.randn(seq_len + 8, device="cuda", dtype=torch.float16)
+            bias_floor = torch.randn(
+                seq_len // 2 + 1, device="cuda", dtype=torch.float16
+            )
+            bias_qkv = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+            bias_q = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+            def fn(
+                q, k, v, bias_kv, bias_mod, bias_offset, bias_floor, bias_qkv, bias_q
+            ):
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    match index_dim:
+                        case "kv":
+                            return score + bias_kv[kv_idx]
+                        case "kv_mod_4":
+                            return score + bias_mod[kv_idx % 4]
+                        case "kv_plus_8":
+                            return score + bias_offset[kv_idx + 8]
+                        case "kv_floor_div_2":
+                            return score + bias_floor[kv_idx // 2]
+                        case "q":
+                            return score + bias_q[q_idx]
+                        case "q_kv":
+                            return score + bias_qkv[q_idx, kv_idx]
+                        case "multi":
+                            return (
+                                score
+                                + bias_kv[kv_idx]
+                                + bias_q[q_idx]
+                                + bias_qkv[q_idx, kv_idx]
+                            )
+
+                return flex_attention(
+                    q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+                )
+
+            fn_args = (
+                q,
+                k,
+                v,
+                bias_kv,
+                bias_mod,
+                bias_offset,
+                bias_floor,
+                bias_qkv,
+                bias_q,
+            )
+            with force_flex_flash_score_mod_vec_size(1):
+                torch._dynamo.reset()
+                scalar, scalar_code = run_and_get_code(
+                    torch.compile(fn, fullgraph=True, dynamic=False), *fn_args
+                )
+            torch._dynamo.reset()
+            auto, auto_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *fn_args
+            )
+
+            self.assertTrue(torch.equal(auto, scalar), index_dim)
+            self.assertIn("score_mod.__vec_size__ = 1", "\n".join(scalar_code))
+            auto_src = "\n".join(auto_code)
+            self.assertIn(
+                f"score_mod.__vec_size__ = {expected_auto_vec_size}", auto_src
+            )
+            if expect_auto_autovec:
+                self.assertIn("cute.autovec_copy", auto_src)
+            else:
+                self.assertNotIn("cute.autovec_copy", auto_src)
+
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_shared_captured_buffers(self, device, dtype):
@@ -2159,7 +2279,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr4[tmp3, tmp4]"
+        expected_pattern = "in_ptr4[tmp3[0], tmp4[0]]"
         self.assertIn(
             expected_pattern,
             code_str,
@@ -2206,7 +2326,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr4[tmp4, tmp5, tmp6]"
+        expected_pattern = "in_ptr4[tmp4[0], tmp5[0], tmp6[0]]"
         self.assertIn(
             expected_pattern,
             code_str,
@@ -2252,12 +2372,16 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr4[tmp5, tmp6, tmp7, tmp8]"
-        self.assertIn(
-            expected_pattern,
-            code_str,
-            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
-        )
+        for expected_pattern in (
+            "cute.local_tile(in_ptr4",
+            "tmp5[0], tmp6[0], tmp7[0]",
+            "cute.autovec_copy",
+        ):
+            self.assertIn(
+                expected_pattern,
+                code_str,
+                f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            )
 
 
 if __name__ == "__main__":

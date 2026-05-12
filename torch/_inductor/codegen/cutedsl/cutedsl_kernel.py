@@ -804,7 +804,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             self._semantic_index_replacements
         )
         for source_expr, var in self.kernel.cse._cache.items():
-            if isinstance(source_expr, str) and source_expr in ("q_idx", "kv_idx"):
+            if isinstance(source_expr, str) and source_expr in (
+                "b_idx",
+                "h_idx",
+                "q_idx",
+                "kv_idx",
+            ):
                 replacements[sympy_index_symbol(var.name)] = sympy_index_symbol(
                     source_expr
                 )
@@ -812,7 +817,13 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     @staticmethod
     def _is_lane_uniform_expr(expr: sympy.Expr) -> bool:
-        allowed_symbols = OrderedSet([sympy_index_symbol("q_idx")])
+        allowed_symbols = OrderedSet(
+            [
+                sympy_index_symbol("b_idx"),
+                sympy_index_symbol("h_idx"),
+                sympy_index_symbol("q_idx"),
+            ]
+        )
         return bool(expr.free_symbols and expr.free_symbols <= allowed_symbols)
 
     @staticmethod
