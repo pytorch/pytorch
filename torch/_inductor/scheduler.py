@@ -7213,7 +7213,7 @@ class Scheduler:
             if remaining:
                 for rd in remaining:
                     if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
-                        rd,
+                        rd.rename(self.mutation_renames),
                         cd,
                         allow_index_equivalence=allow_index_equivalence,
                     ):
@@ -7306,26 +7306,17 @@ class Scheduler:
     ) -> bool:
         """Return whether a producer write can satisfy a consumer read.
 
-        By default this accepts exact matches plus the conservative
-        broadcast-split pattern below. ``allow_index_equivalence`` additionally
-        accepts access-equivalent forms used by nested full-res pointwise nodes,
-        such as a broadcasted read or a pure loop-order change.
+        By default this accepts exact matches. ``allow_index_equivalence``
+        additionally accepts access-equivalent forms used by nested full-res
+        pointwise nodes, such as a broadcasted read or a pure loop-order change.
         """
         if isinstance(read, MemoryDep):
-            read_name = self.mutation_renames.get(read.name, read.name)
-            write_name = self.mutation_renames.get(write.name, write.name)
-
             if (
-                read_name != write_name
+                read.name != write.name
                 or free_symbol_is_type(read.index, SymT.TMP)
                 or free_symbol_is_type(write.index, SymT.TMP)
             ):
                 return False
-
-            if read.name != read_name:
-                read = dataclasses.replace(read, name=read_name)
-            if write.name != write_name:
-                write = dataclasses.replace(write, name=write_name)
 
             original_read = read
             original_write = write
@@ -7349,21 +7340,20 @@ class Scheduler:
             ):
                 return True
 
-            equivalent_index_matches = allow_index_equivalence and (
+            if not allow_index_equivalence:
+                return False
+
+            return (
                 original_read.normalize_without_broadcast()
                 == original_write.normalize()
                 or self.deps_match_normalized(original_read, original_write)
-            )
-            return equivalent_index_matches or self._fusable_read_after_broadcast_split(
-                read, write
+                or self._fusable_read_after_broadcast_split(read, write)
             )
         elif isinstance(read, StarDep):
-            read_name = self.mutation_renames.get(read.name, read.name)
-            write_name = self.mutation_renames.get(write.name, write.name)
             if (
                 read.mode == write.mode
                 and write.mode is not None
-                and read_name == write_name
+                and read.name == write.name
             ):
                 return True
         return False
