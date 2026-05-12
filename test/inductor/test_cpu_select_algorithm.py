@@ -57,6 +57,15 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 aten = torch.ops.aten
 
 
+def should_reduce_range(device: torch.device) -> bool:
+    """
+    Helper to determine if int8 tensor quantization range should be reduced
+    to avoid overflow on CPUs without VNNI support (e.g., AMD CPUs).
+    Reference: torchao/utils.py
+    """
+    return device.type == "cpu" and not torch.cpu._is_vnni_supported()
+
+
 def patches(fn):
     def skip_cache(self, choices, name, key, benchmark, hint_override=None):
         if benchmark is None:
@@ -3154,19 +3163,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         torch._dynamo.reset()
 
+        # Adjust quantization range for CPUs without VNNI support
+        reduce_range = should_reduce_range(torch.device("cpu"))
+        if reduce_range:
+            # Reduce int8 range to avoid overflow: [-64, 63] for weights, [0, 127] for activations
+            w_qmin, w_qmax = -64, 63
+            x_qmin, x_qmax = 0, 127
+            x_zp_val = 64  # Middle of [0, 127]
+        else:
+            w_qmin, w_qmax = -128, 127
+            x_qmin, x_qmax = 0, 255
+            x_zp_val = 128  # Middle of [0, 255]
+
         class QLinearUnaryModule(torch.nn.Module):
-            def __init__(self, N, K):
+            def __init__(self, N, K, x_zp_val):
                 super().__init__()
-                qw = torch.randint(-128, 127, (N, K), dtype=torch.int8)
+                qw = torch.randint(w_qmin, w_qmax, (N, K), dtype=torch.int8)
                 self.qw_packed = torch.ops.onednn.qlinear_prepack(qw, None)
                 self.w_scales = torch.full((N,), 0.05)
                 self.w_zps = torch.zeros(N, dtype=torch.int32)
                 self.bias = torch.randn(N, dtype=torch.float32)
                 self.output_scale = 1.0
                 self.output_zp = 0
+                self.x_zp_val = x_zp_val
 
             def forward(self, qx):
-                x_zp = torch.full([], 128, dtype=torch.int32)
+                x_zp = torch.full([], self.x_zp_val, dtype=torch.int32)
                 x_scale = torch.full([], 0.1, dtype=torch.float32)
 
                 return torch.ops.onednn.qlinear_pointwise.tensor(
@@ -3188,10 +3210,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size, in_features, out_features = 32, 64, 32
 
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
-        x_scale_val = 0.1
-        qx = torch.quantize_per_tensor(x, x_scale_val, 128, torch.quint8).int_repr()
+        x_scale = torch.full([], 0.1, dtype=torch.float32)
+        x_zp = torch.full([], x_zp_val, dtype=torch.int32)
+        qx = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            x, x_scale, x_zp, x_qmin, x_qmax, torch.uint8
+        )
 
-        mod = QLinearUnaryModule(out_features, in_features).eval()
+        mod = QLinearUnaryModule(out_features, in_features, x_zp_val).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
@@ -3221,19 +3246,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         torch._dynamo.reset()
 
+        # Adjust quantization range for CPUs without VNNI support
+        reduce_range = should_reduce_range(torch.device("cpu"))
+        if reduce_range:
+            # Reduce int8 range to avoid overflow: [-64, 63] for weights, [0, 127] for activations
+            w_qmin, w_qmax = -64, 63
+            x_qmin, x_qmax = 0, 127
+            x_zp_val = 64  # Middle of [0, 127]
+        else:
+            w_qmin, w_qmax = -128, 127
+            x_qmin, x_qmax = 0, 255
+            x_zp_val = 128  # Middle of [0, 255]
+
         class QLinearBinaryModule(torch.nn.Module):
-            def __init__(self, N, K):
+            def __init__(self, N, K, x_zp_val):
                 super().__init__()
-                qw = torch.randint(-128, 127, (N, K), dtype=torch.int8)
+                qw = torch.randint(w_qmin, w_qmax, (N, K), dtype=torch.int8)
                 self.qw_packed = torch.ops.onednn.qlinear_prepack(qw, None)
                 self.w_scales = torch.full((N,), 0.05)
                 self.w_zps = torch.zeros(N, dtype=torch.int32)
                 self.bias = torch.randn(N, dtype=torch.float32)
                 self.output_scale = 1.0
                 self.output_zp = 0
+                self.x_zp_val = x_zp_val
 
             def forward(self, qx, other):
-                x_zp = torch.full([], 128, dtype=torch.int32)
+                x_zp = torch.full([], self.x_zp_val, dtype=torch.int32)
                 x_scale = torch.full([], 0.1, dtype=torch.float32)
 
                 return torch.ops.onednn.qlinear_pointwise.binary_tensor(
@@ -3260,12 +3298,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size, in_features, out_features = 32, 64, 32
 
         x = torch.randn(batch_size, in_features, dtype=torch.float32)
-        x_scale_val = 0.1
-        qx = torch.quantize_per_tensor(x, x_scale_val, 128, torch.quint8).int_repr()
+        x_scale = torch.full([], 0.1, dtype=torch.float32)
+        x_zp = torch.full([], x_zp_val, dtype=torch.int32)
+        qx = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            x, x_scale, x_zp, x_qmin, x_qmax, torch.uint8
+        )
 
         other = torch.randn(batch_size, out_features, dtype=torch.float32)
 
-        mod = QLinearBinaryModule(out_features, in_features).eval()
+        mod = QLinearBinaryModule(out_features, in_features, x_zp_val).eval()
 
         # Test eager mode and compiled mode with numerical correctness check
         with verify(torch.float32) as (atol, rtol):
