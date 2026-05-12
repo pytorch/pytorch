@@ -132,11 +132,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -557,13 +553,28 @@ def check_model(
     actual_flat = pytree.tree_leaves(actual)
 
     def to_dtype_preserve_strides(src, dtype):
-        if any(s == 0 for s in src.stride()):
-            return src.to(dtype)
+        expanded_dims = []
+        src_slice = src
+
+        for dim in reversed(range(src.dim())):
+            if src.size(dim) > 1 and src.stride(dim) == 0:
+                expanded_dims.append(dim)
+                src_slice = src_slice.select(dim, 0)
+
         # Preserve strides when casting.
         result = torch.empty_strided(
-            src.size(), src.stride(), device=src.device, dtype=dtype
+            src_slice.size(),
+            src_slice.stride(),
+            device=src.device,
+            dtype=dtype,
         )
-        result.copy_(src)
+        result.copy_(src_slice)
+
+        for dim in reversed(expanded_dims):
+            result = result.unsqueeze(dim)
+
+        if expanded_dims:
+            return result.expand(src.size())
         return result
 
     def reference_to_expect(actual_flat, correct_flat):
@@ -14847,10 +14858,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         result = f(torch.tensor([20]))
         self.assertTrue(len(result) == 3)
-
-    def test_complex_memory_overlap(self):
-        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
-        self.assertFalse(complex_memory_overlap(t))
 
     @xfail_if_mps
     def test_generate_rand_fp8(self):

@@ -11,6 +11,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+
 import functools
 import inspect
 import os
@@ -342,17 +343,11 @@ coverage_ignore_functions = [
     "module_contains_param",
     "module_to_fqn",
     "swap_module",
-    # torch.ao.quantization.backend_config.executorch
-    "get_executorch_backend_config",
-    # torch.ao.quantization.backend_config.fbgemm
-    "get_fbgemm_backend_config",
     # torch.ao.quantization.backend_config.native
     "get_native_backend_config",
     "get_native_backend_config_dict",
     "get_test_only_legacy_native_backend_config",
     "get_test_only_legacy_native_backend_config_dict",
-    # torch.ao.quantization.backend_config.onednn
-    "get_onednn_backend_config",
     # torch.ao.quantization.backend_config.qnnpack
     "get_qnnpack_backend_config",
     # torch.ao.quantization.backend_config.tensorrt
@@ -400,16 +395,10 @@ coverage_ignore_functions = [
     "fold_bn_weights_into_conv_node",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
-    "get_default_qat_qconfig",
     "get_default_qat_qconfig_dict",
-    "get_default_qconfig",
     "get_default_qconfig_dict",
-    "qconfig_equals",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_fx
-    "attach_preserved_attrs_to_model",
-    "convert_to_reference_fx",
     # torch.ao.quantization.quantize_jit
     "convert_dynamic_jit",
     "convert_jit",
@@ -564,7 +553,6 @@ coverage_ignore_functions = [
     "get_remote_module_template",
     # torch.distributed.optim.utils
     "as_functional_optim",
-    "register_functional_optim",
     # torch.distributed.rendezvous
     "rendezvous",
     # torch.distributed.rpc.api
@@ -944,10 +932,6 @@ coverage_ignore_functions = [
     "verify_aten_graph",
     # torch.overrides
     "enable_reentrant_dispatch",
-    # torch.profiler.profiler
-    "schedule",
-    "supported_activities",
-    "tensorboard_trace_handler",
     # torch.return_types
     "pytree_register_structseq",
     # torch.serialization
