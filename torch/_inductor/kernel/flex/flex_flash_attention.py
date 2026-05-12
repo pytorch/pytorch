@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
+from ...sizevars import stride_at
 from ...virtualized import V
 from .common import (
     create_indices_fake,
@@ -136,14 +137,24 @@ def _max_direct_aux_load_vec_size(
 
     # FlashAttention's score_mod loop groups consecutive flattened score entries.
     # On SM100, those entries have consecutive KV coordinates for a fixed Q row.
+    offset = buffer.get_layout().offset
     for vec_size in (8, 4, 2):
-        if not V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size):
+        if not (
+            V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size)
+            and V.graph.sizevars.statically_known_multiple_of(offset, vec_size)
+        ):
             continue
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
             last_expr, kv_idx, vec_size
         )
         if (
-            lane_contiguity.contiguous_width is not None
+            (
+                isinstance(last_expr, ModularIndexing)
+                or V.graph.sizevars.statically_known_equals(
+                    stride_at(last_expr, kv_idx), 1
+                )
+            )
+            and lane_contiguity.contiguous_width is not None
             and lane_contiguity.contiguous_width >= vec_size
             and _lane_group_start_is_aligned(last_expr, kv_idx, vec_size)
             and _lane_group_start_is_nonnegative(last_expr, kv_idx)

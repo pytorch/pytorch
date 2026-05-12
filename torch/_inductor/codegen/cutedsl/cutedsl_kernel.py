@@ -570,13 +570,14 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             dim_indices = (
                 index.args if isinstance(index, HierarchicalIndex) else (index,)
             )
+            dim_sizes = buffer.get_size()
+            if len(dim_sizes) == 0:
+                dim_indices = ()
             idx_vars = [
                 self._emit_index_fragment(
                     dim_index, dim_size, "cutlass.Int32", torch.int32
                 )
-                for dim_index, dim_size in zip(
-                    dim_indices, buffer.get_size(), strict=True
-                )
+                for dim_index, dim_size in zip(dim_indices, dim_sizes, strict=True)
             ]
 
             val_frag = self._emit_tensor_load_fragment(
@@ -637,6 +638,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # Dynamic index fragments all carry the same vector-lane shape, so one
         # representative fragment is enough to size the loaded value fragment.
         val_frag = self.kernel.cse.newvar(dtype=var_dtype)
+        if len(buffer.get_size()) == 0:
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            )
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[()])")
+            return str(val_frag)
         if dynamic_index_fragment is None:
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
@@ -688,6 +695,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         strides = buffer.get_stride()
         vector_size = self._vector_load_vec_size()
         contiguous_width = idx_vars[vector_dim].contiguous_width
+        offset = buffer.get_layout().offset
         return (
             vector_size > 1
             and V.graph.sizevars.statically_known_equals(strides[vector_dim], 1)
@@ -696,6 +704,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             and V.graph.sizevars.statically_known_multiple_of(
                 sizes[vector_dim], vector_size
             )
+            and V.graph.sizevars.statically_known_multiple_of(offset, vector_size)
         )
 
     def _vector_load_vec_size(self) -> int:
@@ -821,7 +830,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         semantic_expr = self._semantic_index_expr(expr)
         vector_index = self._vector_load_index_symbol()
         vector_size = self._vector_load_vec_size()
-        if vector_index is None or vector_size <= 1:
+        if vector_size <= 1:
+            is_lane_uniform = True
+            is_contiguous = False
+            contiguous_width = None
+        elif vector_index is None:
             is_lane_uniform = False
             is_contiguous = False
             contiguous_width = None

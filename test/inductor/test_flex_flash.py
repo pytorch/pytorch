@@ -5,17 +5,22 @@ import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
+
+import sympy
 
 import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _hierarchical_indexer_cute,
+    _max_direct_aux_load_vec_size,
     ensure_flash_available,
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     AuxRequest,
@@ -43,6 +48,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 IS_SM8X = SM80OrLater and not SM90OrLater
@@ -111,47 +117,15 @@ def _sm100_bias(*shape):
     return torch.randn(*shape, device="cuda", dtype=torch.float16)
 
 
-SM100_VECTORIZED_AUX_SCORE_MOD_CASES = (
-    (128, "kv", lambda seq_len: _sm100_bias(seq_len), 8, True),
-    (130, "kv", lambda seq_len: _sm100_bias(seq_len), 2, True),
-    (128, "kv_plus_0", lambda seq_len: _sm100_bias(seq_len), 8, True),
-    (128, "kv_plus_8", lambda seq_len: _sm100_bias(seq_len + 8), 8, True),
-    (128, "kv_minus_8", lambda seq_len: _sm100_bias(seq_len), 1, False),
-    (128, "kv_mul_1", lambda seq_len: _sm100_bias(seq_len), 8, True),
-    (128, "kv_mod_4", lambda seq_len: _sm100_bias(seq_len), 4, True),
-    (128, "kv_mod_3", lambda seq_len: _sm100_bias(seq_len), 1, False),
-    (128, "kv_stride_mix", lambda seq_len: _sm100_bias(2 * seq_len), 4, False),
-    (128, "kv_times_2", lambda seq_len: _sm100_bias(2 * seq_len), 1, False),
-    (128, "kv_floor_div_2", lambda seq_len: _sm100_bias(seq_len // 2 + 1), 1, False),
-    (128, "q", lambda seq_len: _sm100_bias(seq_len), 8, False),
-    (128, "q_mod_4", lambda seq_len: _sm100_bias(seq_len), 8, False),
-    (128, "static_negative", lambda seq_len: _sm100_bias(seq_len), 1, False),
-    (128, "q_kv", lambda seq_len: _sm100_bias(seq_len, seq_len), 8, True),
-    (128, "kv_q", lambda seq_len: _sm100_bias(seq_len, seq_len), 1, False),
+SM100_AUX_SCORE_MOD_CASES = (
+    (128, "kv", lambda seq_len: (_sm100_bias(seq_len),), 8, True),
+    (128, "kv_mod_4", lambda seq_len: (_sm100_bias(4),), 4, True),
+    (128, "kv_misaligned", lambda seq_len: (_sm100_bias(seq_len + 1)[1:],), 8, True),
+    (128, "kv_stride_mix", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
+    (128, "q", lambda seq_len: (_sm100_bias(seq_len),), 8, False),
+    (128, "q_kv", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 8, True),
     (
         128,
-        "q_kv_noncontig",
-        lambda seq_len: _sm100_bias(seq_len, seq_len).t(),
-        8,
-        True,
-    ),
-    (128, "relative_position", lambda seq_len: _sm100_bias(2 * seq_len), 1, False),
-)
-
-SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
-    ("kv", lambda seq_len: (_sm100_bias(seq_len),), 8, True),
-    ("kv_mod_4", lambda seq_len: (_sm100_bias(4),), 4, True),
-    ("kv_mod_3", lambda seq_len: (_sm100_bias(4),), 1, False),
-    ("kv_plus_8", lambda seq_len: (_sm100_bias(seq_len + 8),), 8, True),
-    ("kv_minus_8", lambda seq_len: (_sm100_bias(seq_len),), 1, False),
-    ("kv_floor_div_2", lambda seq_len: (_sm100_bias(seq_len // 2 + 1),), 1, False),
-    ("kv_times_2", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
-    ("q", lambda seq_len: (_sm100_bias(seq_len),), 8, False),
-    ("static_negative", lambda seq_len: (_sm100_bias(seq_len),), 1, False),
-    ("q_kv", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 8, True),
-    ("kv_q", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 1, False),
-    ("relative_position", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
-    (
         "multi",
         lambda seq_len: (
             _sm100_bias(seq_len),
@@ -164,14 +138,93 @@ SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
 )
 
 
-def sm100_vectorized_aux_score_mod_case_name(case):
+def sm100_aux_score_mod_case_name(case):
     seq_len, index_dim, _bias_factory, _expected_vec_size, _expect_autovec = case
     return f"{index_dim}_seq{seq_len}"
 
 
-def sm100_aux_vec_matches_scalar_case_name(case):
-    index_dim, _bias_factory, _expected_auto_vec_size, _expect_auto_autovec = case
-    return index_dim
+@dataclass
+class FakeAuxBuffer:
+    size: tuple[int, ...]
+    stride: tuple[int, ...]
+    offset: int = 0
+
+    def get_size(self):
+        return self.size
+
+    def get_stride(self):
+        return self.stride
+
+    def get_layout(self):
+        return SimpleNamespace(offset=sympy.Integer(self.offset))
+
+
+def _aux_index_graph():
+    graph = torch.fx.Graph()
+    return graph, graph.placeholder("q_idx"), graph.placeholder("kv_idx")
+
+
+class TestFlexFlashAuxVecSelection(InductorTestCase):
+    def test_direct_aux_load_vec_size_selector(self):
+        graph, q_idx, kv_idx = _aux_index_graph()
+        kv_mod_4 = graph.call_function(torch.ops.aten.remainder.Tensor, (kv_idx, 4))
+        kv_stride_mix = graph.call_function(
+            torch.ops.aten.sub.Tensor,
+            (
+                graph.call_function(torch.ops.aten.mul.Tensor, (kv_idx, 2)),
+                kv_mod_4,
+            ),
+        )
+        kv_times_2 = graph.call_function(torch.ops.aten.mul.Tensor, (kv_idx, 2))
+        kv_floor_div_2 = graph.call_function(
+            torch.ops.aten.div.Tensor_mode,
+            (kv_idx, 2),
+            {"rounding_mode": "floor"},
+        )
+
+        buffer = FakeAuxBuffer((128,), (1,))
+        with V.set_graph_handler(MockGraphHandler()):
+            self.assertEqual(
+                _max_direct_aux_load_vec_size([kv_idx], buffer, q_idx, kv_idx), 8
+            )
+            self.assertEqual(
+                _max_direct_aux_load_vec_size([kv_mod_4], buffer, q_idx, kv_idx), 4
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size([kv_stride_mix], buffer, q_idx, kv_idx)
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size([kv_times_2], buffer, q_idx, kv_idx)
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size([kv_floor_div_2], buffer, q_idx, kv_idx)
+            )
+
+    def test_direct_aux_load_vec_size_requires_contiguous_aligned_vector_dim(self):
+        graph, q_idx, kv_idx = _aux_index_graph()
+        with V.set_graph_handler(MockGraphHandler()):
+            self.assertEqual(
+                _max_direct_aux_load_vec_size(
+                    [q_idx, kv_idx],
+                    FakeAuxBuffer((128, 128), (128, 1)),
+                    q_idx,
+                    kv_idx,
+                ),
+                8,
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size(
+                    [q_idx, kv_idx],
+                    FakeAuxBuffer((128, 128), (1, 128)),
+                    q_idx,
+                    kv_idx,
+                )
+            )
+            self.assertIsNone(
+                _max_direct_aux_load_vec_size(
+                    [kv_idx], FakeAuxBuffer((128,), (1,), offset=1), q_idx, kv_idx
+                )
+            )
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
@@ -1257,92 +1310,15 @@ class TestFlexFlash(InductorTestCase):
         torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 10,
         "SM100+ only",
     )
-    @parametrize(
-        "case",
-        SM100_VECTORIZED_AUX_SCORE_MOD_CASES,
-        name_fn=sm100_vectorized_aux_score_mod_case_name,
-    )
-    def test_flash_attention_sm100_vectorized_aux_score_mod(self, case):
-        seq_len, index_dim, bias_factory, expected_vec_size, expect_autovec = case
-        q, k, v = create_test_tensors(
-            batch_size=1,
-            num_heads=1,
-            seq_len=seq_len,
-            dim=64,
-            dtype=torch.float16,
-            device="cuda",
-        )
-        bias = bias_factory(seq_len)
-
-        def fn(q, k, v, bias):
-            def score_mod(score, b, h, q_idx, kv_idx):
-                match index_dim:
-                    case "kv":
-                        return score + bias[kv_idx]
-                    case "kv_plus_0":
-                        return score + bias[kv_idx + 0]
-                    case "kv_plus_8":
-                        return score + bias[kv_idx + 8]
-                    case "kv_minus_8":
-                        return score + bias[kv_idx - 8]
-                    case "kv_mul_1":
-                        return score + bias[kv_idx * 1]
-                    case "kv_mod_4":
-                        return score + bias[kv_idx % 4]
-                    case "kv_mod_3":
-                        return score + bias[kv_idx % 3]
-                    case "kv_stride_mix":
-                        return score + bias[2 * kv_idx - kv_idx % 4]
-                    case "kv_times_2":
-                        return score + bias[2 * kv_idx]
-                    case "kv_floor_div_2":
-                        return score + bias[kv_idx // 2]
-                    case "q":
-                        return score + bias[q_idx]
-                    case "q_mod_4":
-                        return score + bias[q_idx % 4]
-                    case "static_negative":
-                        return score + bias[-1]
-                    case "q_kv":
-                        return score + bias[q_idx, kv_idx]
-                    case "kv_q":
-                        return score + bias[kv_idx, q_idx]
-                    case "q_kv_noncontig":
-                        return score + bias[q_idx, kv_idx]
-                    case "relative_position":
-                        return score + bias[q_idx - kv_idx + seq_len]
-
-            return flex_attention(
-                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
-            )
-
-        expected = fn(q, k, v, bias)
-        actual, code = run_and_get_code(
-            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, bias
-        )
-        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2, msg=index_dim)
-
-        src = "\n".join(code)
-        self.assertIn(f"score_mod.__vec_size__ = {expected_vec_size}", src)
-        if expect_autovec:
-            self.assertIn("cute.autovec_copy", src)
-        else:
-            self.assertNotIn("cute.autovec_copy", src)
-
-    @unittest.skipUnless(
-        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 10,
-        "SM100+ only",
-    )
     @torch._inductor.config.patch(force_disable_caches=True)
     @parametrize(
         "case",
-        SM100_AUX_VEC_MATCHES_SCALAR_CASES,
-        name_fn=sm100_aux_vec_matches_scalar_case_name,
+        SM100_AUX_SCORE_MOD_CASES,
+        name_fn=sm100_aux_score_mod_case_name,
     )
-    def test_flash_attention_sm100_aux_vec_matches_scalar_bitwise(self, case):
-        index_dim, bias_factory, expected_auto_vec_size, expect_auto_autovec = case
+    def test_flash_attention_sm100_aux_score_mod_vec_selection(self, case):
+        seq_len, index_dim, bias_factory, expected_vec_size, expect_autovec = case
         torch.manual_seed(0)
-        seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
             num_heads=1,
@@ -1356,30 +1332,16 @@ class TestFlexFlash(InductorTestCase):
         def fn(q, k, v, *biases):
             def score_mod(score, b, h, q_idx, kv_idx):
                 match index_dim:
-                    case "kv":
+                    case "kv" | "kv_misaligned":
                         return score + biases[0][kv_idx]
                     case "kv_mod_4":
                         return score + biases[0][kv_idx % 4]
-                    case "kv_mod_3":
-                        return score + biases[0][kv_idx % 3]
-                    case "kv_plus_8":
-                        return score + biases[0][kv_idx + 8]
-                    case "kv_minus_8":
-                        return score + biases[0][kv_idx - 8]
-                    case "kv_floor_div_2":
-                        return score + biases[0][kv_idx // 2]
-                    case "kv_times_2":
-                        return score + biases[0][2 * kv_idx]
+                    case "kv_stride_mix":
+                        return score + biases[0][2 * kv_idx - kv_idx % 4]
                     case "q":
                         return score + biases[0][q_idx]
-                    case "static_negative":
-                        return score + biases[0][-1]
                     case "q_kv":
                         return score + biases[0][q_idx, kv_idx]
-                    case "kv_q":
-                        return score + biases[0][kv_idx, q_idx]
-                    case "relative_position":
-                        return score + biases[0][q_idx - kv_idx + seq_len]
                     case "multi":
                         return (
                             score
@@ -1393,6 +1355,7 @@ class TestFlexFlash(InductorTestCase):
             )
 
         fn_args = (q, k, v, *biases)
+        expected = fn(*fn_args)
         with force_flex_flash_score_mod_vec_size(1):
             torch._dynamo.reset()
             scalar, scalar_code = run_and_get_code(
@@ -1403,11 +1366,12 @@ class TestFlexFlash(InductorTestCase):
             torch.compile(fn, fullgraph=True, dynamic=False), *fn_args
         )
 
+        self.assertEqual(scalar, expected, atol=3e-2, rtol=3e-2, msg=index_dim)
         self.assertEqual(auto, scalar, atol=0, rtol=0, msg=index_dim)
         self.assertIn("score_mod.__vec_size__ = 1", "\n".join(scalar_code))
         auto_src = "\n".join(auto_code)
-        self.assertIn(f"score_mod.__vec_size__ = {expected_auto_vec_size}", auto_src)
-        if expect_auto_autovec:
+        self.assertIn(f"score_mod.__vec_size__ = {expected_vec_size}", auto_src)
+        if expect_autovec:
             self.assertIn("cute.autovec_copy", auto_src)
         else:
             self.assertNotIn("cute.autovec_copy", auto_src)
