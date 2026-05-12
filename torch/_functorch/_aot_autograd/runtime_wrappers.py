@@ -377,7 +377,7 @@ def _check_custom_op_aliasing(
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
+            msg = f"{e} This is deprecated and will become an error in a future version of PyTorch."
             warnings.warn(msg, UserWarning, stacklevel=3)
 
 
@@ -2587,11 +2587,6 @@ class _AutogradSavedState:
             )
         ctx.opaque_objects = opaque_object_outs
 
-    def load_tensors(self, ctx: Any) -> Sequence[torch.Tensor]:
-        if len(ctx._tensors_no_vc_check) > 0:
-            return list(ctx.saved_tensors) + ctx._tensors_no_vc_check
-        return ctx.saved_tensors
-
 
 @dataclass
 class _AutogradForwardEpilogue:
@@ -3095,6 +3090,114 @@ def _codegen_backward_epilogue(
     )
 
 
+def _codegen_compiled_forward(
+    fw_metadata: ViewAndMutationMeta,
+    backward_state_indices: list[int],
+    disable_amp: bool,
+    num_rng: int,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    lines: list[str] = [
+        "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
+    ]
+    code_globals: dict[str, object] = {
+        "torch": torch,
+        "BackwardState": BackwardState,
+        "_normalize_as_list_": normalize_as_list,
+    }
+
+    if backward_state_indices:
+        idx = backward_state_indices[0]
+        lines.append(f"    _bw_state = args[{idx}]")
+        lines.append("    if not isinstance(_bw_state, BackwardState):")
+        lines.append("        raise AssertionError(")
+        lines.append("            f'expected BackwardState, got {type(_bw_state)}')")
+        lines.append("    ctx._compiled_autograd_backward_state = _bw_state")
+
+    if num_rng > 0:
+        lines.append("    args = _rng_add_(ctx, args)")
+
+    if disable_amp:
+        code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+        lines.append("    with _DisableAutocast_():")
+        lines.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+    else:
+        lines.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+
+    lines.append("    _save_(ctx, fw_outs)")
+    lines.append("    return _finalize_(ctx, fw_outs)")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_compiled_forward", "compiled_function_forward"
+    )
+
+
+def _codegen_compiled_backward(
+    num_rng: int,
+    num_tensors_no_vc_check: int | None,
+) -> Callable[..., Any]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    lines: list[str] = [
+        "def _compiled_backward("
+        "_flat_args_, _ctx_, _prologue_,"
+        " _rng_add_, _impl_, _epilogue_, _double_bw_):"
+    ]
+    code_globals: dict[str, object] = {
+        "torch": torch,
+        "functools": functools,
+    }
+
+    lines.append("""\
+    if len(_flat_args_) != 1 or not isinstance(_flat_args_[0], list):
+        raise AssertionError(
+            'Compiled backward expects grads as a single mutable list '
+            f'argument, but got {len(_flat_args_)} args. '
+            'Grads must be passed as [grad0, grad1, ...] to allow '
+            'freeing individual grads mid-backward.')
+    grad_args = _flat_args_[0]
+    del _flat_args_""")
+
+    if num_tensors_no_vc_check is not None and num_tensors_no_vc_check > 0:
+        lines.append("    _saved = (*_ctx_.saved_tensors, *_ctx_._tensors_no_vc_check)")
+    else:
+        lines.append("    _saved = _ctx_.saved_tensors")
+
+    lines.append(
+        "    all_args = _prologue_(_saved, _ctx_.symints,"
+        " _ctx_.opaque_objects, grad_args)"
+    )
+    lines.append("    del _saved")
+
+    if num_rng > 0:
+        lines.append("    _rng_add_(_ctx_, all_args)")
+
+    lines.append("    def impl_fn(double_ctx=None):")
+    lines.append("        out = _impl_(_ctx_, all_args)")
+    lines.append("        return _epilogue_(out)")
+
+    lines.append("    if (torch._C._is_key_in_tls('context')")
+    lines.append(
+        "            and (_cc := torch._C._get_obj_in_tls('context')) is not None):"
+    )
+    lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
+
+    lines.append("    _ng = torch.is_grad_enabled() and any(")
+    lines.append(
+        "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+    )
+    lines.append("    if _ng:")
+    lines.append("        return _double_bw_(_ctx_, impl_fn, all_args)")
+    lines.append("    return impl_fn()")
+
+    source = "\n".join(lines)
+    return _compile_and_exec_source(
+        source, code_globals, "_compiled_backward", "compiled_function_backward"
+    )
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
@@ -3149,6 +3252,19 @@ class _AOTDispatchAutogradFunctionFactory:
             maybe_subclass_meta,
             _codegen_bw_wrap_fn,
         )
+
+        _codegen_fwd = _codegen_compiled_forward(
+            fw_metadata,
+            backward_state_indices,
+            disable_amp,
+            rng_state.num_rng,
+        )
+
+        _codegen_bwd = _codegen_compiled_backward(
+            rng_state.num_rng,
+            fw_metadata.num_tensors_saved_with_no_vc_check,
+        )
+
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
@@ -3262,6 +3378,8 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_prologue_fn = _codegen_bw_prologue
             _bw_epilogue_fn = _codegen_bw_epilogue
+            _fwd_fn = _codegen_fwd
+            _bwd_fn = _codegen_bwd
             boxed_grads_call = True
 
             @staticmethod
@@ -3271,79 +3389,26 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
-                args = deduped_flat_tensor_args
-                if backward_state_indices:
-                    bw_state = args[backward_state_indices[0]]
-                    if not isinstance(bw_state, BackwardState):
-                        raise AssertionError(
-                            f"expected BackwardState, got {type(bw_state)}"
-                        )
-                    ctx._compiled_autograd_backward_state = bw_state
-
-                args = rng_state.add_forward_args(ctx, args)
-
-                # There is a pretty complicated calling convention around what the compiled fw returns.
-                # The full list of outputs and their relative order is:
-                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-                #   of the original view, and not the synthetic base
-                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
-                #   in the fw output order.
-                fw_outs = call_func_at_runtime_with_args(
+                return CompiledFunction._fwd_fn(
+                    ctx,
+                    deduped_flat_tensor_args,
+                    rng_state.add_forward_args,
+                    saved_state.save_from_forward,
+                    forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
-                    # pyrefly: ignore [bad-argument-type]
-                    args,
-                    disable_amp=disable_amp,
                 )
-
-                saved_state.save_from_forward(ctx, fw_outs)
-                return forward_epilogue.finalize(ctx, fw_outs)
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
-                # With boxed_grads_call, grads arrive as a single mutable
-                # list (not *args) so backward can free them individually
-                # to reduce peak memory.
-                if CompiledFunction.boxed_grads_call:
-                    if len(flat_args) != 1 or not isinstance(flat_args[0], list):
-                        raise AssertionError(
-                            "boxed_grads_call is set but backward received "
-                            f"{len(flat_args)} args instead of a single mutable "
-                            "list. When boxed_grads_call=True, grads must be "
-                            "passed as a single list argument [grad0, grad1, ...] "
-                            "to allow freeing individual grads mid-backward."
-                        )
-                    grad_args = flat_args[0]
-                else:
-                    # Non-boxed path: used by subclasses of CompiledFunction
-                    # that override boxed_grads_call to False.
-                    grad_args = list(flat_args)
-                del flat_args
-                all_args = CompiledFunction._bw_prologue_fn(
-                    saved_state.load_tensors(ctx),
-                    ctx.symints,
-                    ctx.opaque_objects,
-                    grad_args,
+                return CompiledFunction._bwd_fn(
+                    flat_args,
+                    ctx,
+                    CompiledFunction._bw_prologue_fn,
+                    rng_state.add_backward_args,
+                    CompiledFunction._backward_impl,
+                    CompiledFunction._bw_epilogue_fn,
+                    CompiledFunction._double_backward,
                 )
-                rng_state.add_backward_args(ctx, all_args)
-
-                def impl_fn(double_ctx: Any = None) -> Any:
-                    out = CompiledFunction._backward_impl(ctx, all_args)
-                    return CompiledFunction._bw_epilogue_fn(out)
-
-                if (
-                    torch._C._is_key_in_tls("context")
-                    and (config_ctx := torch._C._get_obj_in_tls("context")) is not None
-                ):
-                    impl_fn = functools.partial(config_ctx.run, impl_fn)
-
-                needs_grad = torch.is_grad_enabled() and any(
-                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
-                )
-                if needs_grad:
-                    # double backward
-                    return CompiledFunction._double_backward(ctx, impl_fn, all_args)
-                return impl_fn()
 
             @staticmethod
             def _double_backward(

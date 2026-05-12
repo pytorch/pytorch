@@ -118,6 +118,20 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    def test_addmm_out_dtype_compile(self):
+        bias = torch.randn(2, 3, device="cuda", dtype=torch.float16)
+        a = torch.randn(2, 4, device="cuda", dtype=torch.float16)
+        b = torch.randn(4, 3, device="cuda", dtype=torch.float16)
+
+        def fn(bias, x, y):
+            return torch.addmm(bias, x, y, beta=0.5, alpha=2.0, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(bias, a, b)
+        expected = fn(bias, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -194,7 +208,6 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
-    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2891")
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 
@@ -3013,6 +3026,17 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.linalg.vector_norm(x, dim=(-2, -1))
 
         self.common(fn4, [y])
+
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_div_by_constant_with_division_rounding(self):
+        # When division_rounding is enabled, div-by-constant must NOT be
+        # converted to mul-by-reciprocal, because mul-by-reciprocal does not
+        # match IEEE round-to-nearest division.
+        def fn(x):
+            return x / torch.tensor(1e-8, device=x.device)
+
+        x = torch.randn(2, 64, 32, 32, device=device_type).relu()
+        self.common(fn, [x], atol=0, rtol=0)
 
 
 if __name__ == "__main__":
