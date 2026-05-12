@@ -3527,6 +3527,21 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(shell._data, data)
         self.assertEqual(shell._scale, 2.0)
 
+    def test_tensor_subclass_super_new(self):
+        # super().__new__(cls, tensor) should be traceable in Tensor subclasses
+        class MyTensor(torch.Tensor):
+            def __new__(cls, x):
+                return super().__new__(cls, x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def forward(x):
+            return MyTensor(x)
+
+        x = torch.randn(4, 10)
+        result = forward(x)
+        self.assertIsInstance(result, MyTensor)
+        self.assertEqual(result, x)
+
 
 instantiate_parametrized_tests(SubclassTests)
 
