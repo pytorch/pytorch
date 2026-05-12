@@ -22,7 +22,6 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
     if(CXX_SVE256_FOUND)
-      # Any compiler that supports SVE256 also supports SVE128
       set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
       message(STATUS "SVE support detected.")
     else()
