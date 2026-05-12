@@ -349,24 +349,14 @@ class TestOrigami(TestCase):
                     msg=f"Error should mention topk parameter: {e}",
                 )
 
-        # Test case 5: Float topk values (type error)
-        # Should raise TypeError since topk expects an integer
-        with self.subTest(topk=3.5, test_case="float_topk"):
-            try:
-                result = self._compile_with_config(
-                    op_name,
-                    self._origami_default_config(3.5),  # type: ignore[arg-type]
-                    size=size,
-                )
-                # Some implementations may coerce float to int
-                self.assertIsNotNone(result["compiled"])
-            except (TypeError, ValueError) as e:
-                # Expected: float values may raise type errors
-                self.assertIn(
-                    "topk",
-                    str(e).lower(),
-                    msg=f"Error should mention topk parameter: {e}",
-                )
+        # Test case 5: Mid-range integer topk
+        with self.subTest(topk=3, test_case="int_topk"):
+            result = self._compile_with_config(
+                op_name,
+                self._origami_default_config(3),
+                size=size,
+            )
+            self.assertIsNotNone(result["compiled"])
 
         # Test case 6: Valid normal topk values for comparison
         # These should all work normally

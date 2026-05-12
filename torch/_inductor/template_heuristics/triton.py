@@ -2056,6 +2056,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         [], partial[Generator[TritonConfig, None, None]]
     ]
     _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
+    # Provided by ROCmConfigHeuristic / BaseConfigHeuristic when this mixin is
+    # combined with a backend heuristic. Annotated here so type-checkers see the
+    # attributes used by the origami branch in _get_template_configs_impl.
+    default_num_stages: int
+    exhaustive_configs: list[BaseConfig]
+    _get_exceeding_shared_memory_checker: Callable[
+        [bool, int], Callable[[BaseConfig, int], bool] | None
+    ]
+    preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
 
     def get_extra_kwargs(
         self,
@@ -2124,9 +2133,39 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             strides = kernel_inputs.strides_symbolic()
             a_stride = strides[kernel_inputs._mat1_idx]
             b_stride = strides[kernel_inputs._mat2_idx]
-            origami_cfg_gen = self.get_exhaustive_mm_configs()
-            allcfgs = origami_cfg_gen(
-                m, n, k, dtype_size=dtype.itemsize, op_name=op_name
+            # Pre-filter exhaustive_configs against LDS BEFORE origami sees them.
+            # Origami otherwise ranks LDS-busting tiles in its top-K and we'd
+            # have to drop its best picks at compile time (Triton OutOfResources
+            # is not always caught on the HIP backend). Check against
+            # self.default_num_stages because ROCmConfigHeuristic._filter_configs
+            # (triton.py:1728) clobbers num_stages to that value downstream.
+            lds_check = self._get_exceeding_shared_memory_checker(False, 0)
+            exhaustive = self.exhaustive_configs
+            if lds_check is not None:
+                exhaustive = [
+                    c
+                    for c in self.exhaustive_configs
+                    if not lds_check(
+                        dataclasses.replace(c, num_stages=self.default_num_stages),
+                        dtype.itemsize,
+                    )
+                ]
+                pruned = len(self.exhaustive_configs) - len(exhaustive)
+                if pruned:
+                    log.info(
+                        "Origami: pruned %d/%d exhaustive configs "
+                        "exceeding LDS for dtype %s",
+                        pruned,
+                        len(self.exhaustive_configs),
+                        dtype,
+                    )
+            allcfgs = self.preprocess_mm_configs(
+                m,
+                n,
+                k,
+                configs=exhaustive,
+                dtype_size=dtype.itemsize,
+                op_name=op_name,
             )
             selector = origami.OrigamiMatmulSelector(
                 allcfgs,
@@ -2203,18 +2242,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     max_warps,
                     max(1, tile_area // (mfma_dim * warp_size)),
                 )
-                # num_stages from origami occupancy.
-                num_stages = max(
-                    1,
-                    min(4, (cfg.occupancy * 4) // 100)
-                    if hasattr(cfg, "occupancy")
-                    else 2,
-                )
+                # num_stages: ROCmConfigHeuristic._filter_configs (triton.py:1728)
+                # overwrites this to self.default_num_stages, so seed with that
+                # value to keep the in-flight GemmConfig consistent with the
+                # post-filter state.
                 base_config = GemmConfig(
                     block_m=cfg.mt.m,
                     block_n=cfg.mt.n,
                     block_k=cfg.mt.k,
-                    num_stages=num_stages,
+                    num_stages=self.default_num_stages,
                     num_warps=num_warps,
                     group_m=wgm_result.wgm,
                 )
@@ -2227,6 +2263,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 )
 
             # Apply backend filters (max block size, memory constraints, etc.).
+            # LDS-overflow prune already happened upstream against
+            # self.exhaustive_configs before origami selection.
             filtered_configs = self._filter_configs(origami_configs)
 
             # If origami returned configs, use them; otherwise fall back to regular generator
