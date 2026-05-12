@@ -2511,6 +2511,46 @@
       ]
     }
   ],
+  "GB9887": [
+    {
+      "Gb_type": "lazy_autograd_function_unsupported_ctx_attr_mutation",
+      "Context": "autograd.Function ctx attribute: {name}",
+      "Explanation": "The prototype lazy autograd.Function backward path does not support this ctx attribute mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0415": [
+    {
+      "Gb_type": "lazy_autograd_function_duplicate_tensor_arg",
+      "Context": "autograd.Function args: {args}",
+      "Explanation": "The prototype lazy autograd.Function backward path does not support passing the same Tensor as multiple user-visible autograd.Function inputs.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6550": [
+    {
+      "Gb_type": "lazy_autograd_function_unsupported_ctx_payload",
+      "Context": "autograd.Function ctx value: {value}",
+      "Explanation": "The prototype lazy autograd.Function backward path only supports Tensor and constant values in ctx payloads.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6505": [
+    {
+      "Gb_type": "lazy_autograd_function_unsupported_ctx_attr_value",
+      "Context": "autograd.Function ctx attribute: {name}={value}",
+      "Explanation": "The prototype lazy autograd.Function backward path only supports Tensor and constant ctx attributes.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0184": [
     {
       "Gb_type": "failed to call str() on user defined object",
@@ -3251,6 +3291,16 @@
       "Gb_type": "Attempted to call op with non-contiguous `out=` list of tensors",
       "Context": "self.value={self.value}, args={args}, kwargs={kwargs}",
       "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0912": [
+    {
+      "Gb_type": "lazy_compile_autograd_function_arg",
+      "Context": "call_apply {self} {args} {kwargs}",
+      "Explanation": "The prototype lazy autograd.Function backward path only supports Tensor and constant arguments.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
