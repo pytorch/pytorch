@@ -185,7 +185,7 @@ def compare_tensor_meta(
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
+            a, b, only_cuda=False, allow_rhs_unbacked=allow_rhs_unbacked
         )
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
@@ -1537,7 +1537,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 #   - VIEW, a view of an input tensor is returned
 #   - INPLACE, one or more input tensors is modified
 #
-# these descriptors are mututally exclusive and exhaustive.
+# these descriptors are mutually exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
