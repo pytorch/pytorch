@@ -53,6 +53,7 @@ from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
     MultiProcessTestCase,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
     requires_nccl_shrink,
@@ -67,11 +68,9 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_SANDCASTLE,
-    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
-    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
@@ -1199,6 +1198,76 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group_backend_filter(self):
+        # Hybrid parent (cpu:gloo + cuda:nccl); request only cuda:nccl in the
+        # child via the new `backend` arg. The child should only have the cuda
+        # backend, and the gloo backend should not be split.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        c10d.init_process_group(
+            "cpu:gloo,cuda:nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        cuda_backend = pg._get_backend(torch.device("cuda"))
+
+        subg_ranks = [0, 1]
+        ng = c10d.split_group(pg, [subg_ranks], backend="cuda:nccl")
+        if self.rank in subg_ranks:
+            self.assertIsNotNone(ng)
+            ng_cuda = ng._get_backend(torch.device("cuda"))
+            self.assertEqual(cuda_backend.options._timeout, ng_cuda.options._timeout)
+            # cpu backend should not be present in the child.
+            with self.assertRaises(Exception):
+                ng._get_backend(torch.device("cpu"))
+            self.assertEqual(
+                c10d.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl"
+            )
+
+            cuda_tensor = torch.full((1,), self.rank).cuda(device)
+            dist.broadcast(cuda_tensor, dist.get_global_rank(ng, 0), group=ng)
+            self.assertEqual(cuda_tensor, torch.full((1,), 0))
+
+        # cuda comm split happened on this rank.
+        self.assertEqual(cuda_backend.comm_split_count(), 1)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group_backend_validation(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        c10d.init_process_group(
+            "cpu:gloo,cuda:nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+
+        # Backend name mismatch (parent has cuda:nccl, request cuda:gloo).
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            c10d.split_group(pg, [[0, 1]], backend="cuda:gloo")
+
+        # Device type not present in parent.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            c10d.split_group(pg, [[0, 1]], backend="xpu:nccl")
+
+        # Filtering out the parent's default backend (cuda) must raise from C++.
+        with self.assertRaises(RuntimeError):
+            c10d.split_group(pg, [[0, 1]], backend="cpu:gloo")
 
         dist.destroy_process_group()
 
@@ -4553,7 +4622,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @runOnRocmArch(MI300_ARCH)
     @parametrize(
         "custom_group_name",
         [True, False],
@@ -4562,13 +4630,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
 
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+
         for peer in range(self.world_size):
             if peer == self.rank:
                 continue
             if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
                 raise SkipTest("Test requires p2p access")
 
-        if not SM80OrLater:
+        if not SM80OrLater and not TEST_WITH_ROCM:
             raise SkipTest("Test requires sm>=80")
 
         group_name = ""
@@ -4747,6 +4818,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.min_ctas, -2147483648)
         self.assertEqual(pg_opts_2.config.min_ctas, 2)
         self.assertEqual(nccl_cfg_2.min_ctas, 4)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_max_p2p_peers(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "max_p2p_peers"):
+            raise SkipTest(
+                "max_p2p_peers binding absent (PyTorch might be built against NCCL < 2.30)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_max_p2p_peers = 1
+        pg_opts.config.max_p2p_peers = new_max_p2p_peers
+        self.assertEqual(pg_opts.config.max_p2p_peers, new_max_p2p_peers)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
