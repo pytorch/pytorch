@@ -28,7 +28,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, is_dual_mode, make_codegen_buffer, normalize_name
+from ..utils import _align, make_codegen_buffer, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -40,6 +40,7 @@ from .wrapper import (
     HasWriteLine,
     PythonWrapperCodegen,
     SymbolicCallArg,
+    WrapperLine,
 )
 
 
@@ -52,6 +53,26 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
+
+
+@dataclasses.dataclass
+class _DualWrapperModeAssertSizeStrideLine(WrapperLine):
+    """Dual-wrapper-mode-aware size/stride assert.
+
+    JIT side gets a plain `assert_size_stride(...)` because the
+    `_check_aoti_runtime_check_inputs_env()` helper is AOTI-only; AOT side
+    keeps the env-guarded form.
+    """
+
+    name: str
+    size: str
+    stride: str
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        stmt = f'assert_size_stride({self.name}, {self.size}, {self.stride}, "{self.op_name}");'
+        code.writeline_jit(stmt)
+        code.writeline_aot(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
 
 
 @dataclasses.dataclass
@@ -808,11 +829,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_additional_funcs()
 
         if V.graph.const_module:
-            # In dual-mode, the const graph's JIT output is emitted separately,
+            # In dual-wrapper-mode, the const graph's JIT output is emitted separately,
             # while its AOTI body is spliced below into the main AOTI source.
             # Keep the const graph header out of the main output to avoid
             # duplicate standalone header content.
-            if not is_dual_mode():
+            if not V.graph.is_dual_wrapper_mode:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
             assert V.graph.const_wrapper_code is not None
             self.prefix.splice_aot(V.graph.const_wrapper_code)
@@ -881,7 +902,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         AOTI: AOTInductorModel::run_impl with stream and proxy_executor params.
         JIT: inductor_entry_impl free function.
-        Dual-mode: both signatures, to their respective buffers.
+        Dual-wrapper-mode: both signatures, to their respective buffers.
         """
         if V.graph.aot_mode:
             self._write_aoti_entry_point_signature()
@@ -1348,7 +1369,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
             self.write_wrapper_decl()
             result = super().generate(is_inference)
-            if is_dual_mode():
+            if V.graph.is_dual_wrapper_mode:
                 self._aot_output = self._assemble_aot_output()
             return result
 
@@ -1542,10 +1563,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         before the GIL is released. Default no-op."""
 
     def generate_before_suffix(self, result):
-        # Close the entry function. In dual-mode `result` is the JIT side;
+        # Close the entry function. In dual-wrapper-mode `result` is the JIT side;
         # the AOTI side close is emitted by _assemble_aot_output.
         if V.graph.aot_mode:
-            if is_dual_mode():
+            if V.graph.is_dual_wrapper_mode:
                 result.writeline("} // inductor_entry_impl")
             else:
                 entry = "_const_run_impl" if V.graph.is_const_graph else "run_impl"
@@ -1640,9 +1661,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_end(self, result):
         """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
-            if not is_dual_mode():
+            if not V.graph.is_dual_wrapper_mode:
                 self._generate_end_aoti(result)
-            # In dual-mode, AOTI closing handled by _assemble_aot_output
+            # In dual-wrapper-mode, AOTI closing handled by _assemble_aot_output
             return
         self._generate_end_jit(result)
 
@@ -2097,7 +2118,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
                 return
-            self.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
+            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+            if V.graph.is_dual_wrapper_mode:
+                # _check_aoti_runtime_check_inputs_env() is AOTI-only.
+                # JIT side gets the plain assert; AOT keeps the env-guarded
+                # form. Inside the wrapper_call replay loop, write directly;
+                # otherwise queue a dual-wrapper-mode-aware WrapperLine.
+                if (
+                    hasattr(self.writeline, "__self__")
+                    and self.writeline.__self__ is self.wrapper_call
+                ):
+                    self.wrapper_call.writeline_jit(stmt)
+                    self.wrapper_call.writeline_aot(guarded)
+                else:
+                    self.writeline(
+                        _DualWrapperModeAssertSizeStrideLine(
+                            name, size, stride, op_name
+                        )
+                    )
+            else:
+                self.writeline(guarded)
         else:
             self.writeline(stmt)
 
@@ -2234,10 +2274,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         device_type, device_id = device_str.split(",")
         if V.graph.aot_mode:
-            # Pure AOTI allocates on the model runtime device. Dual-mode shares
+            # Pure AOTI allocates on the model runtime device. Dual-wrapper-mode shares
             # this expression with JIT code, where `this->device_idx_` is not
             # available, so use the concrete graph device id.
-            device_idx = device_id if is_dual_mode() else "this->device_idx_"
+            device_idx = (
+                device_id if V.graph.is_dual_wrapper_mode else "this->device_idx_"
+            )
         else:
             device_idx = device_id
 
@@ -2850,12 +2892,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_args = output_name
 
         if V.graph.aot_mode:
-            # The fallback helpers below emit via self.writeline. In dual-mode,
+            # The fallback helpers below emit via self.writeline. In dual-wrapper-mode,
             # temporarily route those writes first to wrapper_call's AOTI side
             # and then to its JIT side. setattr (vs direct assignment) avoids
             # a pyrefly type cascade on self.writeline.
             saved_writeline = self.writeline
-            if is_dual_mode():
+            if V.graph.is_dual_wrapper_mode:
                 setattr(self, "writeline", self.wrapper_call.writeline_aot)  # noqa: B010
             self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
@@ -2863,7 +2905,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_args,
                 outputs,
             )
-            if is_dual_mode():
+            if V.graph.is_dual_wrapper_mode:
                 setattr(self, "writeline", self.wrapper_call.writeline_jit)  # noqa: B010
                 self._generate_fallback_kernel_jit(
                     buf_name,

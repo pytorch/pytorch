@@ -30,7 +30,6 @@ from ..utils import (
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
-    is_dual_mode,
     make_codegen_buffer,
     XPU_KERNEL_FORMAT,
 )
@@ -491,7 +490,8 @@ class DeferredTritonCallWrapper:
             f" kernel_args_, stream_"
         )
 
-        prefix.writeline_jit(f"void* kernel_args_[] = {{{call_args_str}}};")
+        # kernel_args_ is consumed by both JIT and AOT launchKernel calls.
+        prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
@@ -500,7 +500,7 @@ class DeferredTritonCallWrapper:
 
         Writes JIT-side content via writeline_jit/splice_jit; on a plain
         IndentedBuffer those are equivalent to writeline/splice. AOTI-side
-        emission for dual mode is added later in the stack.
+        emission for dual-wrapper mode is added later in the stack.
         """
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
@@ -859,16 +859,16 @@ class CppWrapperGpu(CppWrapperCpu):
         return CppWrapperGpu()
 
     def write_header(self):
-        if V.graph.is_const_graph and not is_dual_mode():
+        if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:
             # We do not write header for constant graph, it will be written by main module.
             return
 
         super().write_header()
         kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
-        if V.graph.is_const_graph and is_dual_mode():
-            # For a dual-mode const graph, only the standalone JIT output needs
-            # this header content. The AOTI const body is spliced into the main
-            # AOTI source, which has its own kernel driver.
+        if V.graph.is_const_graph and V.graph.is_dual_wrapper_mode:
+            # For a dual-wrapper-mode const graph, only the standalone JIT
+            # output needs this header content. The AOTI const body is spliced
+            # into the main AOTI source, which has its own kernel driver.
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -879,12 +879,18 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and
-        # dual-mode code use an explicit stream variable so the shared kernel
+        # dual-wrapper-mode code use an explicit stream variable so the shared kernel
         # call arguments are valid for the JIT entry point.
-        if V.graph.aot_mode and not is_dual_mode():
+        if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
             return "stream"
 
         name = f"stream{device_idx}"
+        # In dual-wrapper mode, the JIT stream is declared at the entry function
+        # prologue (see _codegen_entry_impl_prologue) so it stays in scope
+        # across all kernel call sites.
+        if V.graph.is_dual_wrapper_mode:
+            return name
+
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
@@ -961,11 +967,29 @@ class CppWrapperGpu(CppWrapperCpu):
             return super().generate(is_inference)
 
     def _codegen_entry_impl_prologue(self):
-        self.prefix.writeline(
+        # ensure_triton_kernel_compiles_started() is JIT-only; AOTI has no
+        # Python-dependent lazy compile flow.
+        self.prefix.writeline_jit(
             _LazyTritonCompileKickoffLine(
                 self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
             )
         )
+        # In dual-wrapper mode, hoist the JIT-side stream declaration to the entry
+        # function prologue. Kernel calls run inside KernelContextGuard
+        # scopes, so a per-call declaration would be scoped to the guard
+        # and unavailable to other kernel calls in the same function.
+        if V.graph.is_dual_wrapper_mode:
+            stream_type = maybe_hipify_code_wrapper(
+                self.device_codegen.cpp_stream_type()
+            )
+            get_stream = self.device_codegen.aoti_get_stream()
+            for device_idx in sorted(V.graph.device_idxs):
+                name = f"stream{device_idx}"
+                self.prefix.writeline_jit(f"{stream_type} {name};")
+                self.prefix.writeline_jit(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK("
+                    f"{get_stream}({device_idx}, (void**)&{name}));"
+                )
 
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
@@ -1319,25 +1343,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type
 
-            # Pure AOTI passes the model runtime device. Dual-mode shares this
+            # Pure AOTI passes the model runtime device. Dual-wrapper-mode shares this
             # call arg list with JIT code, where `this->device_idx_` is not
             # available, so use the concrete graph device index.
             device_idx = (
                 "this->device_idx_"
-                if V.graph.aot_mode and not is_dual_mode()
+                if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode
                 else str(device.index)
             )
             call_args.append(device_idx)
-            call_args.append(stream)
+            # In dual-wrapper mode, JIT side uses the locally-declared stream{idx}
+            # (see _codegen_entry_impl_prologue) while AOT side uses the
+            # `stream` function parameter of run_impl.
+            jit_call_args = [*call_args, stream]
+            aot_call_args = (
+                [*call_args, "stream"]
+                if V.graph.is_dual_wrapper_mode
+                else jit_call_args
+            )
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
-                call_args[: len(arg_types)], kernel_name, arg_types, None
+                jit_call_args[: len(arg_types)], kernel_name, arg_types, None
             )
-            base_call = f"{wrapper_name}({', '.join(call_args)}"
-            self.wrapper_call.writeline_jit(f"{base_call});")
+            self.wrapper_call.writeline_jit(
+                f"{wrapper_name}({', '.join(jit_call_args)});"
+            )
             with debug_printer_manager:
                 self.wrapper_call.writeline_aot(
-                    f"{base_call}, kernels, this->cubin_dir_);"
+                    f"{wrapper_name}({', '.join(aot_call_args)}, "
+                    f"kernels, this->cubin_dir_);"
                 )
         else:
             casted = []

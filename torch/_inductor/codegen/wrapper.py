@@ -58,7 +58,6 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
-    is_dual_mode,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -576,7 +575,7 @@ class EnterDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if is_dual_mode():
+            if V.graph.is_dual_wrapper_mode:
                 if self.last_seen_device_guard_index is None:
                     code.writeline_aot(
                         f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
@@ -2156,13 +2155,13 @@ class PythonWrapperCodegen(CodeGen):
         result.writeline("")
         result.splice(self.header)
         # Intermediate const graphs normally use headers rendered by the main
-        # module. In dual-mode, the const graph's JIT wrapper is emitted as
+        # module. In dual-wrapper-mode, the const graph's JIT wrapper is emitted as
         # standalone C++ and needs its own header.
         if (
             V.graph.aot_mode
             and V.graph.cpp_wrapper
             and V.graph.is_const_graph
-            and not is_dual_mode()
+            and not V.graph.is_dual_wrapper_mode
         ):
             result = IndentedBuffer()
 
