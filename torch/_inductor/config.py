@@ -594,6 +594,17 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
+# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
+# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
+# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
+# that triton does not use TF32 wherever cublas would not use TF32
+# DEPRECATED. cuBLAS no longer has the above alignment requirements. will remove in the future.
+force_same_precision: bool = Config(
+    justknob="pytorch/compiler:force_same_precision",
+    env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
+    default=False,
+)
+
 # Size hints for multi-kernel dispatch.
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
