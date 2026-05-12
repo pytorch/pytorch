@@ -8,6 +8,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
+from ..ir import TensorBox
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -34,8 +35,6 @@ from .mm_common import load_kernel_template
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
@@ -457,6 +456,7 @@ def convolution(
     output_padding: Sequence[int],
     groups: int,
 ):
+    """Lower convolution to backend-specific or template-based Inductor kernels."""
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -591,10 +591,19 @@ def convolution(
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
-        args = [x, weight, bias]
-        bias.realize()
-        bias.freeze_layout()
-        V.graph.sizevars.guard_int_seq(bias.get_size())
+        bias_tensor = bias
+        # Bias can arrive as a generic View (for example from flatten()).
+        # Canonicalize it to a layout-backed contiguous tensor before we
+        # freeze layout for the backend conv call.
+        if isinstance(bias_tensor.data, ir.BaseView) and not isinstance(
+            bias_tensor.data, ir.ReinterpretView
+        ):
+            bias_tensor = TensorBox(ir.ExternKernel.require_contiguous(bias_tensor))
+
+        args = [x, weight, bias_tensor]
+        bias_tensor.realize()
+        bias_tensor.freeze_layout()
+        V.graph.sizevars.guard_int_seq(bias_tensor.get_size())
 
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
