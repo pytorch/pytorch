@@ -101,7 +101,6 @@ class TestModifiedBesselFunctions(TestCase):
         x_ok = torch.tensor([1.0], device=device, dtype=dtype)
         x_neg = torch.tensor([-1.0], device=device, dtype=dtype)
         x_zero = torch.tensor([0.0], device=device, dtype=dtype)
-
         self.assertTrue(
             torch.isnan(
                 torch.special.modified_bessel_i(
@@ -123,14 +122,12 @@ class TestModifiedBesselFunctions(TestCase):
             ),
             torch.zeros_like(x_ok),
         )
-
         eps = 1e-4 if dtype == torch.float32 else 1e-12
         for nu_val in [1.0 + eps, 2.0 - eps, -1.0 - eps]:
             nu_near_int = torch.tensor([nu_val], device=device, dtype=dtype)
             self.assertTrue(
                 torch.isnan(torch.special.modified_bessel_i(x_neg, nu_near_int)).all()
             )
-
         self.assertEqual(
             torch.special.modified_bessel_i(
                 x_zero, torch.tensor([1e-12], device=device, dtype=dtype)
@@ -349,7 +346,6 @@ class TestModifiedBesselFunctions(TestCase):
     def test_modified_bessel_cpu_cuda_parity(self, device, dtype):
         if device == "cpu" or not torch.cuda.is_available():
             self.skipTest("requires CUDA for cross-device comparison")
-
         x_cpu = torch.tensor(
             [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 100.0, 1000.0],
             dtype=dtype,
