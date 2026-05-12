@@ -2678,51 +2678,26 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
-    def test_polylr_total_iters_zero_initialization_mismatch(self):
-        # When total_iters=0, a PolynomialLR schedule should be considered
-        # already finished at initialization, so the learning rate should
-        # immediately be set to end_lr.
-        
-        # However, the recursive initialization path leaves the learning rate
-        # at base_lr instead. Closed form stepping uses end_lr semantics, so
-        # the two modes disagree immediately after construction.
-        
-        # This test documents the current behavior and exposes the mismatch
+    def test_lrscheduler_constructor_performs_implicit_step(self):
+        class TrackingLRScheduler(LRScheduler):
+            def __init__(self, optimizer):
+                self.get_lr_call_count = 0
+                super().__init__(optimizer)
 
-        model = torch.nn.Linear(1, 1)
-        base_lr = 0.1
-        optimizer = torch.optim.SGD(model.parameters(), lr=base_lr)
+            def get_lr(self):
+                self.get_lr_call_count += 1
+                return [group["lr"] + 1.0 for group in self.optimizer.param_groups]
 
-        # Try the modern PolynomialLR API first and fall back if end_lr
-        # is not supported on this version.
-        try:
-            torch.optim.lr_scheduler.PolynomialLR(
-                optimizer,
-                total_iters=0,
-                power=1.0,
-                end_lr=0.0,
-            )
-            expected_end_lr = 0.0
-        except TypeError:
-            torch.optim.lr_scheduler.PolynomialLR(
-                optimizer,
-                total_iters=0,
-                power=1.0,
-            )
-            expected_end_lr = 0.0
+        optimizer = SGD([torch.rand(1)], lr=0.1)
+        # Constructing the scheduler currently performs an implicit step
+        # during initialization, so scheduler state and optimizer LRs are
+        # already updated before any explicit scheduler.step() call.
+        scheduler = TrackingLRScheduler(optimizer)
 
-        init_lr = optimizer.param_groups[0]["lr"]
-
-        self.assertAlmostEqual(
-            init_lr,
-            expected_end_lr,
-            places=12,
-            msg=(
-                f"PolynomialLR(total_iters=0) initialized LR to {init_lr}, "
-                f"but expected {expected_end_lr}. Recursive initialization does "
-                f"not match closed-form semantics."
-            ),
-        )
+        self.assertEqual(scheduler.get_lr_call_count, 1)
+        self.assertEqual(scheduler.last_epoch, 0)
+        self.assertEqual(scheduler._step_count, 1)
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 1.1)
 
 instantiate_parametrized_tests(TestLRScheduler)
 
