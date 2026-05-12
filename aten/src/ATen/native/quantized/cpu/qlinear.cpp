@@ -1452,13 +1452,13 @@ at::Tensor PackedLinearWeightsACL::apply_relu(
 namespace at::native {
 
   Tensor QLinearOnednn::run_pointwise_tensor(
-      const Tensor& act, // int8 CPU tensor, not QTensor
-      const Tensor& act_scale,
-      const Tensor& act_zero_point,
-      const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-      const Tensor& weight_scales,
-      const Tensor& weight_zero_points,
-      const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
@@ -1481,14 +1481,14 @@ namespace at::native {
   }
 
   Tensor QLinearOnednn::run_pointwise_binary_tensor(
-      const Tensor& act, // int8 CPU tensor, not QTensor
-      const Tensor& act_scale,
-      const Tensor& act_zero_point,
-      const Tensor& onednn_weight, // int8 tensor from MkldnnCPU
-      const Tensor& weight_scales,
-      const Tensor& weight_zero_points,
-      const std::optional<at::Tensor>& other, // extra input for binary post-op
-      const std::optional<Tensor>& bias,
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      std::optional<Tensor> other, // extra input for binary post-op
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
