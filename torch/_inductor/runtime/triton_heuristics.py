@@ -4329,7 +4329,8 @@ def _reduction_configs(
         # Default XBLOCK=2 launches too few programs to fill
         # the device. Prefer XBLOCK=1 so the autotuner has a candidate
         # that can saturate all CUs.
-        1 if (torch.version.hip and size_hints.get("x", 0) <= 64)
+        1
+        if (torch.version.hip and size_hints.get("x", 0) <= 64)
         else (2 if rnumel <= 2048 else 1),  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
