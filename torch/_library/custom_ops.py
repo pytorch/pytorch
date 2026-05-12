@@ -861,11 +861,15 @@ class CustomOpDef:
             chain = (backend_dispatch,)
 
         def fast_call(*args, **kwargs):
+            # Dynamo needs the real dispatcher graph
             if torch.compiler.is_compiling():
                 return _FAST_PATH_FALLBACK
+            # kwargs / no-positional-arg calls need schema-level handling
             if not args or kwargs:
                 return _FAST_PATH_FALLBACK
 
+            # Returns (device_type,) or None; rejects subclasses, modes,
+            # autocast, multi-device, nested/sparse/quantized, tensor lists
             check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
                 args
             )
@@ -874,8 +878,10 @@ class CustomOpDef:
 
             device_type = check[0]
 
+            # meta tensors and disabled kernels need C++ fallback logic
             if device_type == "meta" or device_type in disabled_kernel:
                 return _FAST_PATH_FALLBACK
+            # No registered kernel for this device
             fn = raw_fns.get(device_type) or raw_fns.get(None)
             if fn is None:
                 return _FAST_PATH_FALLBACK

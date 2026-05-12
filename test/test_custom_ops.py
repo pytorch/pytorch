@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_WITH_CROSSREF,
     TEST_XPU,
     TestCase,
 )
@@ -4635,6 +4636,11 @@ class TestCustomOpFastPath(TestCase):
     def _assert_fast_path_taken(self, opdef):
         """Replace the C++ dispatcher fallback with one that errors, so the
         test fails if the fast path doesn't handle the call."""
+        if TEST_WITH_CROSSREF:
+            # CrossRefMode is a TorchFunctionMode, so the fast path correctly
+            # falls back to the C++ dispatcher — skip the poison.
+            yield
+            return
         packet = opdef._opoverload._overloadpacket
         overload = opdef._opoverload
         saved_packet_orig = packet._orig_op
