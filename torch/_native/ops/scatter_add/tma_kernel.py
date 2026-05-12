@@ -359,7 +359,12 @@ def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
         Int32(0),  # grid_x
         Int32(0),  # grid_y
         Int64(0),  # out_row_stride
-        options="--enable-tvm-ffi",
+        # ``--enable-assertions`` keeps the ``cute_testing.assert_``
+        # bounds checks on ``r`` live in production. Cost is roughly
+        # +1-10% (geomean +7.7%) on most shapes; the safety net is
+        # worth it because an OOB ``r`` would otherwise silently
+        # corrupt unrelated gmem via ``cp.reduce.async.bulk``.
+        options="--enable-tvm-ffi --enable-assertions",
     )
 
 

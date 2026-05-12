@@ -88,20 +88,16 @@ def _inner_contiguous(t: torch.Tensor) -> bool:
     """True iff ``t.shape[1:]`` is packed contiguously (so flattening to
     ``(t.shape[0], prod(t.shape[1:]))`` is a valid view), regardless of
     the outer stride. Covers slices like ``X[:, :K]`` of a wider buffer.
+
+    Empty outer axis returns ``False``: the kernel has no work to do,
+    and letting it through means ``select(0, 0)`` below would raise.
     """
     if t.ndim == 0:
         return False
     if t.ndim == 1:
         return t.stride(0) == 1
     if t.shape[0] == 0:
-        # select(0, 0) would raise on an empty outer axis. Check the
-        # inner layout by checking strides directly.
-        expected = 1
-        for d in range(t.ndim - 1, 0, -1):
-            if t.stride(d) != expected:
-                return False
-            expected *= t.shape[d]
-        return True
+        return False
     return t.select(0, 0).is_contiguous()
 
 
@@ -140,12 +136,8 @@ def _expanded_1d_inner_size(
     for i in range(1, index.ndim):
         if index.stride(i) != 0:
             return None
-    if src.shape[0] == 0 or self.shape[0] == 0:
-        # src.shape[0] == 0 is a no-op; self.shape[0] == 0 means every
-        # index is out of range. Either way, decline and let aten
-        # handle (and for self.shape[0] == 0, raise the proper index
-        # error -- our kernel would silently write OOB).
-        return None
+    # shape[0] == 0 on self or src is already rejected by
+    # ``_inner_contiguous`` above.
     N = math.prod(src.shape[1:])
     if N == 0:
         return None
