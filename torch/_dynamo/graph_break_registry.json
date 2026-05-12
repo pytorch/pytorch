@@ -3166,6 +3166,16 @@
       ]
     }
   ],
+  "GB0808": [
+    {
+      "Gb_type": "vectorcall_maybe on C method descriptor",
+      "Context": "name={name}, type={self.python_type_name()}, method={method}",
+      "Explanation": "Cannot trace special method '{name}' implemented in C on user-defined type '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6025": [
     {
       "Gb_type": "Failed to trace list()",
@@ -5113,6 +5123,26 @@
       "Gb_type": "record_function escaped from compiled region",
       "Context": "str(self)",
       "Explanation": "Dynamo doesn't support graph break inside record_function region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3934": [
+    {
+      "Gb_type": "missing sq_concat",
+      "Context": "sq_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support concatenating '{self.python_type_name()}' and '{other.python_type_name()}'",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2544": [
+    {
+      "Gb_type": "missing sq_inplace_concat",
+      "Context": "sq_inplace_concat not defined for {type(self).__name__}",
+      "Explanation": "Dynamo does not yet support inplace concat of '{self.python_type_name()}' and '{other.python_type_name()}'",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
