@@ -1,6 +1,6 @@
 # Owner(s): ["module: cuda graphs"]
 
-"""Tests for CUDA graph kernel annotation via mark_kernels."""
+"""Tests for CUDA graph utilities: kernel annotations and graph introspection."""
 
 import unittest
 
@@ -393,6 +393,83 @@ class TestMarkKernels(TestCase):
 
         # Annotations should be empty because resolve was never called.
         self.assertEqual(len(get_kernel_annotations()), 0)
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA not available")
+@unittest.skipUnless(TEST_CUDA_BINDINGS, "cuda.bindings not available")
+@unittest.skipIf(
+    _is_tools_id_unavailable(),
+    "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
+)
+class TestGetGraphData(TestCase):
+    def test_basic_structure(self):
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            z = x + y
+            z = z.relu()
+
+        g.instantiate()
+        data = g.get_graph_data()
+
+        self.assertIn("exec_graph_id", data)
+        self.assertIn("nodes", data)
+        self.assertIsInstance(data["exec_graph_id"], int)
+        self.assertGreater(len(data["nodes"]), 0)
+
+        exec_graph_id = data["exec_graph_id"]
+        for node in data["nodes"]:
+            self.assertIn("index", node)
+            self.assertIn("node_type", node)
+            self.assertIn("tools_id", node)
+            self.assertIn("graph_id", node)
+            self.assertIn("node_id", node)
+            self.assertIn("kernel_name", node)
+            self.assertIn("dependencies", node)
+            self.assertIn("dependents", node)
+            self.assertEqual(node["graph_id"], exec_graph_id)
+            self.assertEqual(node["tools_id"], (exec_graph_id << 32) | node["node_id"])
+
+        kernel_nodes = [n for n in data["nodes"] if n["node_type"] == "kernel"]
+        self.assertGreater(len(kernel_nodes), 0)
+        for kn in kernel_nodes:
+            self.assertIsNotNone(kn["kernel_name"])
+            self.assertIsInstance(kn["kernel_name"], str)
+
+    def test_edges(self):
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            z = x + y
+            z = z * 2
+            z = z.relu()
+
+        g.instantiate()
+        data = g.get_graph_data()
+        nodes = data["nodes"]
+
+        has_deps = any(len(n["dependencies"]) > 0 for n in nodes)
+        has_dependents = any(len(n["dependents"]) > 0 for n in nodes)
+        self.assertTrue(has_deps)
+        self.assertTrue(has_dependents)
+
+        for node in nodes:
+            for dep_idx in node["dependencies"]:
+                self.assertIn(node["index"], nodes[dep_idx]["dependents"])
+            for dep_idx in node["dependents"]:
+                self.assertIn(node["index"], nodes[dep_idx]["dependencies"])
+
+    def test_keep_graph_false_raises(self):
+        g = torch.cuda.CUDAGraph(keep_graph=False)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(g, capture_error_mode="relaxed"):
+            _ = x + y
+
+        with self.assertRaises(RuntimeError):
+            g.get_graph_data()
 
 
 if __name__ == "__main__":

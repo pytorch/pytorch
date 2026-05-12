@@ -6204,6 +6204,33 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
+    def test_fold_invalid_input_raises(self):
+        # F.fold/col2im on MPS must raise the same shape errors as CPU. See #170639.
+        cases = [
+            # (shape, output_size, kernel_size, padding, stride, error_regex)
+            # dim-2 mismatch (the issue's exact repro: 3*3=9 expected, got 10)
+            ((1, 6, 10), (4, 5), (2, 3), 0, 1,
+             r"expected size of input's dimension 2 to match the calculated number of sliding blocks"),
+            # input channels not divisible by kernel product (5 not divisible by 2*3=6)
+            ((1, 5, 9), (4, 5), (2, 3), 0, 1,
+             r"Expected size of input's dimension 1 to be divisible"),
+            # zero kernel size
+            ((1, 6, 9), (4, 5), (0, 3), 0, 1,
+             r"kernel size should be greater than zero"),
+            # negative padding
+            ((1, 6, 9), (4, 5), (2, 3), (-1, 0), 1,
+             r"padding should be non-negative"),
+        ]
+        for shape, output_size, kernel_size, padding, stride, regex in cases:
+            x_cpu = torch.randn(*shape)
+            x_mps = x_cpu.to('mps')
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_cpu, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_mps, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
