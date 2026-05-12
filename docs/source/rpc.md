@@ -119,8 +119,6 @@ how a given function should be treated on the callee side.
 ```
 
 ```{eval-rst}
-.. automodule:: torch.distributed.rpc.backend_registry
-
 .. currentmodule:: torch.distributed.rpc.backend_registry
 
 .. autofunction:: backend_registered
