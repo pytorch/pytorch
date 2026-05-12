@@ -1383,7 +1383,6 @@ quiesce_async_compile_eager: bool = Config(
 # compilation the memory-aware scaler always uses at least 1 worker regardless
 # of this setting.
 compile_threads_min: int = Config(
-    env_name_force="TORCHINDUCTOR_COMPILE_THREADS_MIN",
     default=0,
 )
 
@@ -1391,7 +1390,6 @@ compile_threads_min: int = Config(
 # Workers are scaled linearly between compile_threads and compile_threads_min
 # as available memory drops from this threshold toward half of it.
 compile_worker_memory_threshold: float = Config(
-    env_name_force="TORCHINDUCTOR_COMPILE_WORKER_MEMORY_THRESHOLD",
     default=0.85,
 )
 
