@@ -244,7 +244,9 @@ C10_CUDA_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
  */
 C10_CUDA_API void setCurrentCUDAStream(CUDAStream stream);
 
-C10_CUDA_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
+C10_CUDA_API std::ostream& operator<<(
+    std::ostream& stream,
+    const CUDAStream& s);
 
 } // namespace c10::cuda
 
