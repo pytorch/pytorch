@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 
+USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -617,7 +619,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 256, 128, 4, 4),
         ]
 
-        self.blackwell_scaled_persistent_mm_configs = [
+        self.blackwell_scaled_persistent_mm_configs: list[BaseConfig] = [
             BlackwellGPUGemmConfig(
                 block_m=c.block_m,
                 block_n=c.block_n,
@@ -1298,9 +1300,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 256): FlexConfig(64, 16, 3, 4),
             (torch.bfloat16, 64): FlexConfig(128, 64, 3, 4),
             (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 192): FlexConfig(128, 32, 2, 8),
             (torch.bfloat16, 256): FlexConfig(32, 64, 3, 4),
             (torch.float16, 64): FlexConfig(128, 64, 3, 4),
             (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 192): FlexConfig(128, 32, 2, 8),
             (torch.float16, 256): FlexConfig(32, 64, 3, 4),
         }
 
@@ -2008,10 +2012,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ) -> dict[str, Any]:
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
-        # Calculate allow_tf32
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+        )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+            size_threshold
         )
 
         return {
@@ -2102,7 +2109,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(out_dtype),
-            OUT_DTYPE=self._get_out_dtype(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
             **triton_config.kwargs,
@@ -2127,10 +2133,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         if dtype in (torch.float16, torch.bfloat16):
             return "tl.float32"
-        return self._dtype_to_triton(dtype)
-
-    def _get_out_dtype(self, dtype: torch.dtype) -> str:
-        """Get output dtype as a triton type string."""
         return self._dtype_to_triton(dtype)
 
 
@@ -2240,6 +2242,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "tma_load_for_template_epilogue": config.triton.enable_tma_load_for_template_epilogue,
             "transpose_discontiguous_tensor_descriptors_override": True,
         }
 
@@ -2281,7 +2284,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            flatten = (
+                template_kwargs.get("FLATTEN", True)
+                and not constraints_violated
+                and USE_META_WS
+            )
             yield {
                 **template_kwargs,
                 "NUM_SMS": get_num_sms(),
@@ -2357,7 +2365,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
-            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
@@ -2606,7 +2613,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,  # type: ignore[misc]
+    ROCmConfigHeuristic,
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 
@@ -2790,8 +2797,7 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune scaled_persistent_mm_configs for Blackwell
-        self.mm_configs = self.blackwell_persistent_addmm_configs
+        self.mm_configs = self.blackwell_scaled_persistent_mm_configs
 
 
 @register_template_heuristic(

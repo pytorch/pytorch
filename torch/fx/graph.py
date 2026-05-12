@@ -31,6 +31,7 @@ from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .tensor_type import TensorType
 
 
 log = logging.getLogger(__name__)
@@ -555,7 +556,7 @@ class CodeGen:
             typename = _type_repr(o)
             if isinstance(o, types.UnionType) and "|" in typename:
                 # str | int
-                args = [type_repr(arg) for arg in o.__args__]
+                args = [type_repr(arg) for arg in typing.get_args(o)]
                 return "|".join(args)
 
             if origin_type := getattr(o, "__origin__", None):
@@ -567,8 +568,12 @@ class CodeGen:
 
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                if hasattr(o, "__args__") and o.__args__:
-                    args = [type_repr(arg) for arg in o.__args__]
+                if isinstance(o, TensorType):
+                    type_args = o.dims
+                else:
+                    type_args = typing.get_args(o)
+                if type_args:
+                    args = [type_repr(arg) for arg in type_args]
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
                     return origin_typename
@@ -1606,7 +1611,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporary set the insert point and
+        When used within a 'with' statement, this will temporarily set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_before(n):
@@ -1631,7 +1636,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def inserting_after(self, n: Node | None = None) -> _InsertPoint:
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporary set the insert point and
+        When used within a 'with' statement, this will temporarily set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_after(n):

@@ -78,7 +78,7 @@ case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
@@ -851,6 +851,10 @@ class FSDPParam:
         if grad is None:
             raise AssertionError("Expects unsharded_accumulated_grad to not be None")
         return self._get_grad_inner_tensor(grad)
+
+    @property
+    def unsharded_zero_grad_data(self) -> torch.Tensor:
+        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_dtensor:
