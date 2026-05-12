@@ -559,6 +559,10 @@ def generic_getiter(
 # ---------------------------------------------------------------------------
 
 NB_SLOT_MAPPING = {
+    "nb_lshift": PyNumberSlots.NB_LSHIFT,
+    "nb_inplace_lshift": PyNumberSlots.NB_INPLACE_LSHIFT,
+    "nb_inplace_rshift": PyNumberSlots.NB_INPLACE_RSHIFT,
+    "nb_rshift": PyNumberSlots.NB_RSHIFT,
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
 }
@@ -606,7 +610,7 @@ def binary_op1(
     w_slot = getattr(type(w), impl_attr, None)
 
     # Same class -> only call once (CPython: slotw = NULL if same type)
-    if v.python_type() is w.python_type():
+    if type(v) is type(w):
         w_slot = None
     # Same implementation (inherited) -> skip w
     elif v_slot is w_slot:

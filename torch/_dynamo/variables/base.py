@@ -820,6 +820,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_or_impl(tx, args[0], reverse=True)
         elif name == "__ior__":
             return self.nb_inplace_or_impl(tx, args[0])
+        elif name == "__lshift__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_lshift_impl(tx, args[0])
+        elif name == "__rlshift__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_lshift_impl(tx, args[0], reverse=True)
+        elif name == "__ilshift__":
+            return self.nb_inplace_lshift_impl(tx, args[0])
+        elif name == "__rshift__":
+            return self.nb_rshift_impl(tx, args[0])
+        elif name == "__rrshift__":
+            return self.nb_rshift_impl(tx, args[0], reverse=True)
+        elif name == "__irshift__":
+            return self.nb_inplace_rshift_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1224,18 +1239,47 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    def _nb_slot_not_implemented(
+    def nb_lshift_impl(
         self,
-        tp_slot_name: str,
+        tx: Any,
         other: VariableTracker,
         reverse: bool = False,
-    ):
-        unimplemented(
-            gb_type="tp_as_number slot not implemented",
-            context=f"{tp_slot_name}({self.python_type_name()}, {other.python_type_name()}, reverse={reverse})",
-            explanation=f"The type {self.python_type_name()} does not implement the {tp_slot_name}",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+    ) -> VariableTracker:
+        """tp_as_number->nb_lshift slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rlshift__`` instead of ``__lshift__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_lshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_rshift slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rrshift__`` instead of ``__rshift__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_or_impl(
         self,
@@ -1248,7 +1292,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__ror__`` instead of ``__or__``).
         """
-        return self._nb_slot_not_implemented("nb_or_impl", other, reverse=reverse)
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_inplace_or_impl(
         self,
@@ -1256,7 +1300,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
-        return self._nb_slot_not_implemented("nb_inplace_or", other)
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_negative_impl(
         self,
