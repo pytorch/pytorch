@@ -8651,6 +8651,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_multinomial(self):
+        # aten.multinomial output is stochastic so we can only check shape/range,
+        # not exact values. Verifies the op compiles and runs without error.
+        def fn(weights):
+            return torch.multinomial(weights, num_samples=4, replacement=True)
+
+        cfn = torch.compile(fn)
+        weights = torch.rand(10, dtype=torch.float32, device=self.device)
+        result = cfn(weights)
+        self.assertEqual(result.shape, torch.Size([4]))
+        self.assertTrue((result >= 0).all() and (result < 10).all())
+
+        # 2D: each row sampled independently
+        weights2d = torch.rand(4, 8, dtype=torch.float32, device=self.device)
+        result2d = torch.compile(
+            lambda w: torch.multinomial(w, num_samples=3, replacement=True)
+        )(weights2d)
+        self.assertEqual(result2d.shape, torch.Size([4, 3]))
+        self.assertTrue((result2d >= 0).all() and (result2d < 8).all())
+
     def test_long_tensor(self):
         def fn(a):
             return (
@@ -18538,6 +18558,27 @@ if RUN_GPU:
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
+
+        def test_multinomial_lowering_no_graph_break(self):
+            # aten.multinomial must be handled by a registered lowering (extern fallback)
+            def fn(weights):
+                w = weights * 2.0
+                return torch.multinomial(w, num_samples=3, replacement=True)
+
+            inp = torch.rand(8, device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            self.assertEqual(result.shape, torch.Size([3]))
+            self.assertTrue(result.min() >= 0)
+            self.assertTrue(result.max() < 8)
 
         def test_sort_dynamic(self):
             def fn(a):
