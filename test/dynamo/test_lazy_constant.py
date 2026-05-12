@@ -130,6 +130,26 @@ class LazyConstantVariableTests(TestCase):
         result = opt_fn(5)
         self.assertEqual(result, expected)
 
+    def test_math_prod_with_lazy_constant_list(self):
+        """math.prod on a list containing lazy constants must constant-fold.
+
+        When a list-of-lists is passed as an argument, inner lists become
+        LazyVariableTrackers whose items are LazyConstantVariables.
+        math.prod (a TorchInGraphFunctionVariable) must still constant-fold
+        through them; otherwise fullgraph compilation fails with
+        'torch.* op returned non-Tensor'.
+        """
+        import math
+
+        def fn(x, dims):
+            sizes = [math.prod(d) for d in dims]
+            return x + sum(sizes)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        dims = [[2, 64], [3, 32]]
+        self.assertEqual(opt_fn(x, dims), fn(x, dims))
+
     def test_dict_attr_swap_restore_in_hop(self):
         """Swapping and restoring a dict attribute inside a HOP must not
         graph-break.
