@@ -7321,17 +7321,27 @@ class Scheduler:
             original_read = read
             original_write = write
 
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel. Atomic modes
+            # and TMA stores require synchronization barriers.
+            if self.mode_requires_synchronization(original_write.mode):
+                return False
+
+            if (
+                original_read.index == original_write.index
+                and len(original_read.size) >= len(original_write.size)
+                and original_read.size[: len(original_write.size)]
+                == original_write.size
+            ):
+                return True
+
             if config.loop_ordering_after_fusion and read.num_vars != write.num_vars:
                 # Need merge loops if we do loop ordering after fusion since
                 # we have not merged the loops yet when creating the scheduler
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
-            # Operations like index_add_, scatter_add_, etc. require global
-            # synchronization - all threads must complete writes before any reads.
-            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
-            if self.mode_requires_synchronization(write.mode):
-                return False
 
             if (
                 read.index == write.index
@@ -7342,13 +7352,20 @@ class Scheduler:
 
             if not allow_index_equivalence:
                 return False
+            if not (
+                OrderedSet(original_write.var_names)
+                <= original_write.index.free_symbols
+            ):
+                return False
+            if not (
+                original_write.normalize().is_contiguous()
+                or original_write.normalize_with_stride_order().is_contiguous()
+            ):
+                return False
 
-            return (
-                original_read.normalize_without_broadcast()
-                == original_write.normalize()
-                or self.deps_match_normalized(original_read, original_write)
-                or self._fusable_read_after_broadcast_split(read, write)
-            )
+            return self.deps_match_normalized(
+                original_read, original_write
+            ) or self._fusable_read_after_broadcast(original_read, original_write)
         elif isinstance(read, StarDep):
             if (
                 read.mode == write.mode
@@ -7359,23 +7376,39 @@ class Scheduler:
         return False
 
     @staticmethod
-    def _fusable_read_after_broadcast_split(read: MemoryDep, write: MemoryDep) -> bool:
-        """Match a broadcast read by splitting larger read dims.
+    def _fusable_read_after_broadcast(read: MemoryDep, write: MemoryDep) -> bool:
+        """Match conservative broadcasted read forms.
 
-        The normal ``read.normalize() == write.normalize()`` path handles
-        rank-changing broadcasts such as a flat read of a 2D write. This handles
-        same-rank broadcasts where one read dimension is an exact multiple of
-        the corresponding write dimension.
+        This handles two nested-reduction dependency shapes:
 
-        Example:
+        - Pure broadcast dims absent from the read index:
 
-            read:  32*d0 + FloorDiv(d1, 128), {d0: 128, d1: 4096}
-            write: 32*d0 + d1,                {d0: 128, d1: 32}
+              read:  d1, {d0: 1024, d1: 16}
+              write: d0, {d0: 16}
 
-        For each read dim that is an exact multiple of the write dim, rewrite
-        the read var as ``write_var * factor + tail_var`` and rely on range
-        simplification to prove the refactored read index equals the write.
+        - Same-rank expanded dims used through a quotient:
+
+              read:  32*d0 + FloorDiv(d1, 128), {d0: 128, d1: 4096}
+              write: 32*d0 + d1,                {d0: 128, d1: 32}
+
+        Producer-side broadcast and non-dense writes are rejected before this
+        helper, so these cases only relax consumer-side broadcasts.
         """
+        read_vars = tuple(
+            var for var in read.var_names if var in read.index.free_symbols
+        )
+        if len(read_vars) != read.num_vars:
+            read_ranges = {var: read.ranges[var] for var in read_vars}
+            read = MemoryDep(
+                read.name,
+                read.index,
+                tuple(read_ranges),
+                tuple(read_ranges.values()),
+                read.mode,
+            )
+            if read.normalize() == write.normalize():
+                return True
+
         if read.num_vars != write.num_vars:
             return False
 
