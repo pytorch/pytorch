@@ -11,7 +11,11 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.sizevars import (
+    simplify_index_in_vec_range,
+    SizeVarAllocator,
+    stride_at_vec_range,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
@@ -38,6 +42,51 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 class TestIndexingSimplification(InductorTestCase):
+    def test_simplify_index_in_vec_range(self):
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 16), i, 8),
+            i + sympy.Symbol("i_mod_c0"),
+        )
+        self.assertEqual(stride_at_vec_range(ModularIndexing(i, 1, 16), i, 8), 1)
+        self.assertEqual(stride_at_vec_range(FloorDiv(i, 8), i, 8), 0)
+        self.assertEqual(
+            simplify_index_in_vec_range(ModularIndexing(i, 1, 10), i, 8),
+            ModularIndexing(i, 1, 10),
+        )
+
+    def test_analyze_lane_contiguity(self):
+        sizevars = SizeVarAllocator()
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+
+        result = sizevars.analyze_lane_contiguity(i + 8, i, 8)
+        self.assertEqual(result.contiguous_width, 8)
+        self.assertEqual(result.stride, 1)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i, 8)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 4, 1, 8), i, 8)
+        self.assertEqual(result.contiguous_width, 4)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i, 8)
+        self.assertEqual(result.contiguous_width, 2)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i, 8)
+        self.assertTrue(result.unknown)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8), i, 8)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.stride, 0)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i, 8)
+        self.assertTrue(result.unknown)
+
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)

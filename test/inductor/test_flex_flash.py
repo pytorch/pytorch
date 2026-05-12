@@ -1161,6 +1161,80 @@ class TestFlexFlash(InductorTestCase):
         for expected_reinterpret_tensor in expected_reinterpret_tensors:
             self.assertIn(expected_reinterpret_tensor, src)
 
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 10,
+        "SM100+ only",
+    )
+    def test_flash_attention_sm100_vectorized_aux_score_mod(self):
+        for seq_len, index_dim, expected_vec_size, expect_autovec in (
+            (128, "kv", 8, True),
+            (130, "kv", 2, True),
+            (128, "kv_plus_0", 8, True),
+            (128, "kv_plus_8", 8, True),
+            (128, "kv_mul_1", 8, True),
+            (128, "kv_mod_4", 4, True),
+            (128, "kv_floor_div_2", 1, False),
+            (128, "q", 8, False),
+            (128, "q_mod_4", 8, False),
+            (128, "q_kv", 8, True),
+        ):
+            q, k, v = create_test_tensors(
+                batch_size=1,
+                num_heads=1,
+                seq_len=seq_len,
+                dim=64,
+                dtype=torch.float16,
+                device="cuda",
+            )
+            if index_dim == "q_kv":
+                bias_shape = (seq_len, seq_len)
+            elif index_dim == "kv_plus_8":
+                bias_shape = (seq_len + 8,)
+            elif index_dim == "kv_floor_div_2":
+                bias_shape = (seq_len // 2 + 1,)
+            else:
+                bias_shape = (seq_len,)
+            bias = torch.randn(*bias_shape, device="cuda", dtype=torch.float16)
+
+            def fn(q, k, v, bias):
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    match index_dim:
+                        case "kv":
+                            return score + bias[kv_idx]
+                        case "kv_plus_0":
+                            return score + bias[kv_idx + 0]
+                        case "kv_plus_8":
+                            return score + bias[kv_idx + 8]
+                        case "kv_mul_1":
+                            return score + bias[kv_idx * 1]
+                        case "kv_mod_4":
+                            return score + bias[kv_idx % 4]
+                        case "kv_floor_div_2":
+                            return score + bias[kv_idx // 2]
+                        case "q":
+                            return score + bias[q_idx]
+                        case "q_mod_4":
+                            return score + bias[q_idx % 4]
+                        case "q_kv":
+                            return score + bias[q_idx, kv_idx]
+
+                return flex_attention(
+                    q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+                )
+
+            expected = fn(q, k, v, bias)
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, bias
+            )
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+            src = "\n".join(code)
+            self.assertIn(f"score_mod.__vec_size__ = {expected_vec_size}", src)
+            if expect_autovec:
+                self.assertIn("cute.autovec_copy", src)
+            else:
+                self.assertNotIn("cute.autovec_copy", src)
+
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_shared_captured_buffers(self, device, dtype):
