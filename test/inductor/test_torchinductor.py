@@ -135,7 +135,6 @@ from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
-    complex_memory_overlap,
     FxCompileMode,
 )
 from torch._inductor.utils import has_torchvision_roi_align
