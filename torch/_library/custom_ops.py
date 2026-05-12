@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import threading
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -19,6 +20,66 @@ from .effects import EffectType
 
 device_types_t = str | Sequence[str] | None
 log = logging.getLogger(__name__)
+
+_FAST_PATH_FALLBACK = object()
+
+_DEVICE_KEYSETS: dict[str, "_C.DispatchKeySet"] = {}
+
+_fast_dispatch_tls_fn = threading.local()
+
+
+def _keyset_for_device(device_type: str) -> "_C.DispatchKeySet":
+    ks = _DEVICE_KEYSETS.get(device_type)
+    if ks is not None:
+        return ks
+    key_name = _C._dispatch_key_for_device(device_type)
+    ks = _C.DispatchKeySet(getattr(_C.DispatchKey, key_name))
+    _DEVICE_KEYSETS[device_type] = ks
+    return ks
+
+
+if not hasattr(_C, "_custom_op_fast_path_check"):
+    _NORMAL_TLS_INCLUDE_RAW = (
+        _C.DispatchKeySet(_C.DispatchKey.BackendSelect)
+        | _C.DispatchKeySet(_C.DispatchKey.ADInplaceOrView)
+    ).raw_repr()
+
+    def _custom_op_fast_path_check(args):
+        """Pure-Python fallback for the C++ fast-path eligibility check.
+
+        Returns (device_type_str, any_requires_grad) or None."""
+        from torch.overrides import _is_torch_function_mode_enabled
+
+        if _is_torch_function_mode_enabled():
+            return None
+        if _C._len_torch_dispatch_stack() > 0:
+            return None
+        if (
+            _C._dispatch_tls_local_include_set().raw_repr() & ~_NORMAL_TLS_INCLUDE_RAW
+        ) != 0:
+            return None
+        if torch.is_autocast_enabled() or torch.is_autocast_cpu_enabled():
+            return None
+        first_device = None
+        any_requires_grad = False
+        for a in args:
+            if not isinstance(a, torch.Tensor):
+                continue
+            if type(a) is not torch.Tensor:
+                return None
+            if a.is_nested or a.is_sparse or a.is_quantized:
+                return None
+            if first_device is None:
+                first_device = a.device.type
+            elif a.device.type != first_device:
+                return None
+            if a.requires_grad:
+                any_requires_grad = True
+        if first_device is None:
+            return None
+        return (first_device, any_requires_grad)
+
+    _C._custom_op_fast_path_check = _custom_op_fast_path_check  # type: ignore[attr-defined]
 
 
 @overload
@@ -231,6 +292,9 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        self._raw_fns: dict[str | None, Callable] = {}
+        self._fast_call: Callable | None = None
+        self._autograd_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -410,6 +474,8 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
+                self._raw_fns[device_type] = fn
+            self._install_fast_call()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -677,6 +743,7 @@ class CustomOpDef:
 
     def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
+        self._autograd_impl = autograd_impl
         self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
     def _register_adinplaceorview_dispatcher_impl(self) -> None:
@@ -720,6 +787,125 @@ class CustomOpDef:
                 with_keyset=True,
             )
 
+    def _install_fast_call(self):
+        """Install a Python fast path that bypasses the C++ dispatcher for
+        common eager-mode calls. The fast path requires all of the following:
+        - All args are plain ``torch.Tensor`` (no subclasses).
+        - No ``TorchFunctionMode`` is active.
+        - No autocast is active.
+        - Device is not ``"meta"`` and the kernel is not disabled.
+        - The TLS dispatch include set is a subset of the normal eager set
+          (covers ``inference_mode``; excludes Functionalize, Vmap, etc.).
+        - The schema has no tensor-list args and is not a view op.
+        When any condition fails, ``fast_call`` returns ``_FAST_PATH_FALLBACK``
+        and the call falls through to the C++ dispatcher.
+
+        Uses a chain-based dispatch: fast_call → autograd_impl → [adinplaceorview_impl →]
+        backend_dispatch, connected via op.redispatch popping from a thread-local chain."""
+        schema = self._opoverload._schema
+
+        # View ops have special ADInplaceOrView handling that the fast path
+        # can't replicate.
+        if schema._is_view_op():
+            return
+
+        has_tensorlist = any(
+            utils.is_tensorlist_like_type(a.type)
+            for a in (*schema.arguments, *schema.returns)
+        )
+
+        # Tensor-list args can hide subclasses that the top-level arg check
+        # in fast_call wouldn't catch.
+        if has_tensorlist:
+            return
+
+        is_mutable = schema.is_mutable
+        raw_fns = self._raw_fns
+        op = self._opoverload
+        op_name = self._name
+        autograd_impl = self._autograd_impl
+        disabled_kernel = self._disabled_kernel
+
+        def backend_dispatch(keyset, *args, **kwargs):
+            fn = _fast_dispatch_tls_fn.fn
+            result = fn(*args, **kwargs)
+            utils._c_check_aliasing_constraint(op_name, args, kwargs, result)
+            return result
+
+        if is_mutable:
+            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
+
+            def fast_adinplaceorview(keyset, *args, **kwargs):
+                for idx in mutated_idxs:
+                    if idx < len(args) and args[idx] is not None:
+                        increment_version(args[idx])
+                for key in mutated_keys:
+                    if key in kwargs and kwargs[key] is not None:
+                        increment_version(kwargs[key])
+                return op.redispatch(
+                    keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
+                )
+
+            chain = (fast_adinplaceorview, backend_dispatch)
+        else:
+            chain = (backend_dispatch,)
+
+        def fast_call(*args, **kwargs):
+            if torch.compiler.is_compiling():
+                return _FAST_PATH_FALLBACK
+            if not args or kwargs:
+                return _FAST_PATH_FALLBACK
+
+            check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
+                args
+            )
+            if check is None:
+                return _FAST_PATH_FALLBACK
+
+            device_type = check[0]
+
+            if device_type == "meta" or device_type in disabled_kernel:
+                return _FAST_PATH_FALLBACK
+            fn = raw_fns.get(device_type) or raw_fns.get(None)
+            if fn is None:
+                return _FAST_PATH_FALLBACK
+
+            _fast_dispatch_tls_fn.fn = fn
+            keyset = _keyset_for_device(device_type)
+            try:
+                with _ops._enable_fast_dispatch(op, chain):
+                    return autograd_impl(keyset, *args)
+            finally:
+                _fast_dispatch_tls_fn.fn = None
+
+        self._fast_call = fast_call
+
+        # Install the fast path on both the OpOverloadPacket's `_op`
+        # (read by `torch.ops.ns.name(x)`) and the OpOverload's `_op`
+        # (read by `torch.ops.ns.name.default(x)`). Save the original
+        # entries once so repeated `_install_fast_call` invocations (e.g.
+        # registering kernels for different devices) don't nest wrappers.
+        packet = self._opoverload._overloadpacket
+        overload = self._opoverload
+        if not hasattr(packet, "_orig_op"):
+            packet._orig_op = packet._op  # pyrefly: ignore[missing-attribute]
+        if not hasattr(overload, "_orig_op"):
+            overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
+
+        def make_fast_op(target):
+            def fast_op(*args, **kwargs):
+                result = fast_call(*args, **kwargs)
+                if result is not _FAST_PATH_FALLBACK:
+                    return result
+                return target._orig_op(
+                    *args, **kwargs
+                )  # pyrefly: ignore[missing-attribute]
+
+            return fast_op
+
+        packet._op = make_fast_op(packet)
+        overload._op = make_fast_op(overload)
+
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
         Switch on the device argument to select the correct backend to dispatch to.
@@ -742,6 +928,10 @@ class CustomOpDef:
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
+        if self._fast_call is not None:
+            result = self._fast_call(*args, **kwargs)
+            if result is not _FAST_PATH_FALLBACK:
+                return result
         return self._opoverload(*args, **kwargs)
 
     def register_vmap(

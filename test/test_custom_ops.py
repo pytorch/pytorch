@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -4625,6 +4626,504 @@ Please use `add.register_fake` to add an fake impl.""",
                 RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
             ):
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
+
+
+class TestCustomOpFastPath(TestCase):
+    """Tests for the fast dispatch path in custom_op."""
+
+    @contextlib.contextmanager
+    def _assert_fast_path_taken(self, opdef):
+        """Replace the C++ dispatcher fallback with one that errors, so the
+        test fails if the fast path doesn't handle the call."""
+        packet = opdef._opoverload._overloadpacket
+        overload = opdef._opoverload
+        saved_packet_orig = packet._orig_op
+        saved_overload_orig = overload._orig_op
+        saved_overload = opdef._opoverload
+
+        def poison(*a, **kw):
+            raise AssertionError(
+                "slow path was called; fast path should have handled this"
+            )
+
+        # Poison all three fallback paths:
+        # - packet._orig_op: read by fast_op for torch.ops.ns.name(x)
+        # - overload._orig_op: read by fast_op for torch.ops.ns.name.default(x)
+        # - opdef._opoverload: used by CustomOpDef.__call__ for direct my_op(x)
+        packet._orig_op = poison
+        overload._orig_op = poison
+        opdef._opoverload = poison
+        try:
+            yield
+        finally:
+            packet._orig_op = saved_packet_orig
+            overload._orig_op = saved_overload_orig
+            opdef._opoverload = saved_overload
+
+    def test_fast_path_basic(self):
+        @torch.library.custom_op("_torch_testing::fp_add", mutates_args=())
+        def fp_add(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        with self._assert_fast_path_taken(fp_add):
+            self.assertEqual(fp_add(x, y), x + y)
+            self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
+            self.assertEqual(torch.ops._torch_testing.fp_add.default(x, y), x + y)
+
+    def test_fast_path_mutable(self):
+        @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
+        def fp_inplace(x: Tensor) -> None:
+            x.mul_(2)
+
+        x = torch.randn(3)
+        x_orig = x.clone()
+        v_before = x._version
+        with self._assert_fast_path_taken(fp_inplace):
+            fp_inplace(x)
+        self.assertTrue(x._version > v_before)
+        self.assertEqual(x, x_orig * 2)
+
+    def test_fast_path_autograd(self):
+        @torch.library.custom_op("_torch_testing::fp_square", mutates_args=())
+        def fp_square(x: Tensor) -> Tensor:
+            return x**2
+
+        @fp_square.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 2 * x
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        fp_square.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with self._assert_fast_path_taken(fp_square):
+            y = fp_square(x)
+        y.sum().backward()
+        self.assertEqual(x.grad, 2 * x)
+
+    def test_fast_path_autograd_skipped_under_no_grad(self):
+        @torch.library.custom_op("_torch_testing::fp_nograd_check", mutates_args=())
+        def fp_nograd_check(x: Tensor) -> Tensor:
+            return x**2
+
+        @fp_nograd_check.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            raise AssertionError("setup_context must not be called under no_grad")
+
+        def _backward(ctx, grad):
+            raise AssertionError("backward must not be called")
+
+        fp_nograd_check.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            with self._assert_fast_path_taken(fp_nograd_check):
+                result = fp_nograd_check(x)
+        self.assertEqual(result, x**2)
+
+    def test_fast_path_inference_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_im", mutates_args=())
+        def fp_im(x: Tensor) -> Tensor:
+            return x.clone()
+
+        with torch.inference_mode():
+            x = torch.randn(3)
+            with self._assert_fast_path_taken(fp_im):
+                result = fp_im(x)
+        self.assertEqual(result, x)
+
+    def test_fast_path_falls_back_for_autocast(self):
+        @torch.library.custom_op("_torch_testing::fp_ac", mutates_args=())
+        def fp_ac(x: Tensor) -> Tensor:
+            return x.clone()
+
+        fp_ac.register_autocast("cpu", torch.float16)
+
+        x = torch.randn(3, dtype=torch.float32)
+        with torch.autocast("cpu", dtype=torch.float16):
+            r_direct = fp_ac(x)
+            r_packet = torch.ops._torch_testing.fp_ac(x)
+        self.assertEqual(r_direct.dtype, torch.float16)
+        self.assertEqual(r_packet.dtype, torch.float16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_fast_path_falls_back_for_autocast_cuda(self):
+        @torch.library.custom_op("_torch_testing::fp_ac_cuda", mutates_args=())
+        def fp_ac_cuda(x: Tensor) -> Tensor:
+            return x.clone()
+
+        fp_ac_cuda.register_autocast("cuda", torch.float16)
+
+        x = torch.randn(3, dtype=torch.float32, device="cuda")
+        with torch.autocast("cuda", dtype=torch.float16):
+            r_direct = fp_ac_cuda(x)
+            r_packet = torch.ops._torch_testing.fp_ac_cuda(x)
+        self.assertEqual(r_direct.dtype, torch.float16)
+        self.assertEqual(r_packet.dtype, torch.float16)
+
+    def test_fast_path_falls_back_for_torch_function_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_tfm", mutates_args=())
+        def fp_tfm(x: Tensor) -> Tensor:
+            return x.clone()
+
+        sentinel = torch.tensor(-1.0)
+
+        class ReplaceMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if "fp_tfm" in str(func):
+                    return sentinel
+                return func(*args, **(kwargs or {}))
+
+        x = torch.randn(3)
+        with ReplaceMode():
+            self.assertIs(fp_tfm(x), sentinel)
+            self.assertIs(torch.ops._torch_testing.fp_tfm(x), sentinel)
+
+    def test_fast_path_catches_aliasing(self):
+        @torch.library.custom_op("_torch_testing::fp_alias", mutates_args=())
+        def fp_alias(x: Tensor) -> Tensor:
+            return x
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            fp_alias(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            torch.ops._torch_testing.fp_alias(x)
+
+    def test_fast_path_disabled_for_tensorlist_subclass(self):
+        @torch.library.custom_op("_torch_testing::fp_tl", mutates_args=())
+        def fp_tl(x: Tensor, ys: list[Tensor]) -> Tensor:
+            return x.clone()
+
+        sentinel = torch.tensor(-1.0)
+
+        class MySub(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if "fp_tl" in str(func):
+                    return sentinel
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.randn(3)
+        y = MySub(torch.randn(3))
+        self.assertIs(fp_tl(x, [y]), sentinel)
+        self.assertIs(torch.ops._torch_testing.fp_tl(x, [y]), sentinel)
+
+    def test_fast_path_mutable_normal_tensor_under_inference_mode_bumps_version(self):
+        @torch.library.custom_op("_torch_testing::fp_im_bump", mutates_args=("x",))
+        def fp_im_bump(x: Tensor) -> None:
+            x.data.add_(1)
+
+        x = torch.randn(3)
+        expected = x + 1
+        v_before = x._version
+        with torch.inference_mode():
+            fp_im_bump(x)
+        self.assertEqual(x, expected)
+        self.assertEqual(x._version, v_before + 1)
+
+    def test_fast_path_mutable_op_under_inference_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_im_mut", mutates_args=("x",))
+        def fp_im_mut(x: Tensor) -> None:
+            x.data.add_(1)
+
+        with torch.inference_mode():
+            x = torch.randn(3)
+            expected = x + 1
+            fp_im_mut(x)
+            self.assertEqual(x, expected)
+
+    def test_fast_path_disabled_for_tensorlist_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.library.custom_op("_torch_testing::fp_tl2", mutates_args=())
+        def fp_tl2(x: Tensor, ys: list[Tensor]) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as m:
+
+            def twotensor_impl(cls, func, types, args, kwargs):
+                nonlocal called
+                called = True
+                return args[0].clone()
+
+            m._register_torch_dispatch_rule("fp_tl2", TwoTensor, twotensor_impl)
+
+            x = torch.randn(3)
+            tt = TwoTensor(torch.randn(3), torch.randn(3))
+            fp_tl2(x, [tt])
+            self.assertTrue(called)
+
+            called = False
+            torch.ops._torch_testing.fp_tl2(x, [tt])
+            self.assertTrue(called)
+
+    def test_fast_path_no_wrapper_chain_on_multi_device_register(self):
+        @torch.library.custom_op(
+            "_torch_testing::fp_chain", mutates_args=(), device_types="cpu"
+        )
+        def fp_chain(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_chain.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        packet = torch.ops._torch_testing.fp_chain.default._overloadpacket
+        orig = packet._orig_op
+
+        @fp_chain.register_kernel("cuda")
+        def _(x: Tensor) -> Tensor:
+            return x.clone()
+
+        # After a second register_kernel, the fallback should still be the
+        # original C++ entry point, not a nested fast_op wrapper.
+        self.assertIs(packet._orig_op, orig)
+
+        # Exercise the fallback path (meta tensor forces fast_call to bail)
+        # to verify it reaches the real C++ dispatcher, not a stale wrapper.
+        x_meta = torch.randn(3, device="meta")
+        result = torch.ops._torch_testing.fp_chain(x_meta)
+        self.assertEqual(result.shape, x_meta.shape)
+
+        x = torch.randn(3)
+        self.assertEqual(fp_chain(x), x)
+
+    def test_fast_path_falls_back_for_functorch(self):
+        @torch.library.custom_op("_torch_testing::fp_functorch", mutates_args=())
+        def fp_functorch(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_functorch.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(3)
+        self.assertEqual(fp_functorch(x), x)
+
+        result = torch.vmap(fp_functorch)(x.unsqueeze(0))
+        self.assertEqual(result, x.unsqueeze(0))
+
+    def test_fast_path_falls_back_for_kwargs(self):
+        @torch.library.custom_op("_torch_testing::fp_kw", mutates_args=())
+        def fp_kw(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(fp_kw(x, y=y), x + y)
+        self.assertEqual(torch.ops._torch_testing.fp_kw(x, y=y), x + y)
+
+    def test_fast_path_falls_back_for_sparse(self):
+        @torch.library.custom_op("_torch_testing::fp_sparse", mutates_args=())
+        def fp_sparse(x: Tensor) -> Tensor:
+            return x.to_dense().clone()
+
+        x = torch.randn(3, 3).to_sparse()
+        result = fp_sparse(x)
+        self.assertEqual(result, x.to_dense())
+
+    def test_fast_path_falls_back_for_nested_tensor(self):
+        @torch.library.custom_op("_torch_testing::fp_nested", mutates_args=())
+        def fp_nested(x: Tensor) -> Tensor:
+            return x.clone()
+
+        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
+        with self.assertRaisesRegex(NotImplementedError, "NestedTensorCPU"):
+            fp_nested(nt)
+
+    def test_fast_path_falls_back_for_meta(self):
+        @torch.library.custom_op("_torch_testing::fp_meta", mutates_args=())
+        def fp_meta(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_meta.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(3, device="meta")
+        result = fp_meta(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertEqual(result.device, x.device)
+
+    def test_custom_op_fast_path_check_c_api(self):
+        args = (torch.randn(4), torch.randn(4))
+        result = torch._C._custom_op_fast_path_check(args)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "cpu")
+        self.assertEqual(result[1], False)
+
+        args_grad = (torch.randn(4, requires_grad=True),)
+        result = torch._C._custom_op_fast_path_check(args_grad)
+        self.assertEqual(result[1], True)
+
+        with torch.autocast("cpu"):
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+        class MyMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        with MyMode():
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+    def test_custom_op_fast_path_check_rejects_sparse(self):
+        sparse = torch.randn(3, 3).to_sparse()
+        result = torch._C._custom_op_fast_path_check((sparse,))
+        self.assertIsNone(result)
+
+    def test_custom_op_fast_path_check_rejects_torch_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3))
+        result = torch._C._custom_op_fast_path_check((tt,))
+        self.assertIsNone(result)
+
+    def test_fast_path_falls_back_for_torch_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.library.custom_op("_torch_testing::fp_dispatch_sub", mutates_args=())
+        def fp_dispatch_sub(x: Tensor) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as m:
+
+            def twotensor_impl(cls, func, types, args, kwargs):
+                nonlocal called
+                called = True
+                return args[0].clone()
+
+            m._register_torch_dispatch_rule(
+                "fp_dispatch_sub", TwoTensor, twotensor_impl
+            )
+
+            tt = TwoTensor(torch.randn(3), torch.randn(3))
+            fp_dispatch_sub(tt)
+            self.assertTrue(called)
+
+    @requires_compile
+    def test_fast_path_taken_under_torch_compile_replay(self):
+        @torch.library.custom_op("_torch_testing::fp_compile", mutates_args=())
+        def fp_compile(x: Tensor) -> Tensor:
+            return x + 1
+
+        @fp_compile.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            return torch.ops._torch_testing.fp_compile.default(x)
+
+        x = torch.randn(4)
+        expected = x + 1
+
+        self.assertEqual(f(x), expected)
+
+        with self._assert_fast_path_taken(fp_compile):
+            for _ in range(3):
+                self.assertEqual(f(x), expected)
+
+    def test_fast_path_nested_dispatch(self):
+        @torch.library.custom_op("_torch_testing::fp_inner", mutates_args=())
+        def fp_inner(x: Tensor) -> Tensor:
+            return x * 2
+
+        @torch.library.custom_op("_torch_testing::fp_outer", mutates_args=())
+        def fp_outer(x: Tensor) -> Tensor:
+            return fp_inner(x) + 1
+
+        x = torch.randn(3)
+        with self._assert_fast_path_taken(fp_inner):
+            with self._assert_fast_path_taken(fp_outer):
+                result = fp_outer(x)
+        self.assertEqual(result, x * 2 + 1)
+
+    def test_fast_path_mutable_with_autograd(self):
+        @torch.library.custom_op("_torch_testing::fp_mut_grad", mutates_args=("x",))
+        def fp_mut_grad(x: Tensor) -> None:
+            x.mul_(2)
+
+        x = torch.randn(3, requires_grad=True)
+        x_clone = x.detach().clone()
+        v_before = x._version
+        with self._assert_fast_path_taken(fp_mut_grad):
+            fp_mut_grad(x)
+        self.assertTrue(x._version > v_before)
+        self.assertEqual(x, x_clone * 2)
+
+    def test_fast_path_error_propagation(self):
+        @torch.library.custom_op("_torch_testing::fp_err", mutates_args=())
+        def fp_err(x: Tensor) -> Tensor:
+            raise ValueError("intentional error")
+
+        x = torch.randn(3)
+        with self._assert_fast_path_taken(fp_err):
+            with self.assertRaisesRegex(ValueError, "intentional error"):
+                fp_err(x)
+
+        entry = getattr(torch._ops._fast_dispatch_tls, "entry", None)
+        self.assertIsNone(entry)
+
+    def test_fast_path_multithreaded(self):
+        import concurrent.futures
+
+        @torch.library.custom_op("_torch_testing::fp_thread", mutates_args=())
+        def fp_thread(x: Tensor) -> Tensor:
+            return x + 1
+
+        def worker(val):
+            x = torch.full((4,), val, dtype=torch.float32)
+            for _ in range(100):
+                result = fp_thread(x)
+                torch.testing.assert_close(result, x + 1)
+            return True
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(worker, float(i)) for i in range(4)]
+            for f in concurrent.futures.as_completed(futures):
+                self.assertTrue(f.result())
+
+    def test_fast_path_disabled_kernel(self):
+        @torch.library.custom_op("_torch_testing::fp_disabled", mutates_args=())
+        def fp_disabled(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_disabled.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        fp_disabled._disabled_kernel.add("cpu")
+
+        x = torch.randn(3)
+        result = fp_disabled(x)
+        self.assertEqual(result, x)
+
+    def test_fast_path_mixed_device_falls_back(self):
+        @torch.library.custom_op("_torch_testing::fp_mixed", mutates_args=())
+        def fp_mixed(x: Tensor, y: Tensor) -> Tensor:
+            return x.clone()
+
+        result = torch._C._custom_op_fast_path_check(
+            (torch.randn(3, device="cpu"), torch.randn(3, device="meta"))
+        )
+        self.assertIsNone(result)
 
 
 class TestLibrarySourceLocation(TestCase):
