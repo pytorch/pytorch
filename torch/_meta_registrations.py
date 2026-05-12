@@ -189,6 +189,12 @@ def meta_take(self, index):
     return self.new_empty(index.shape)
 
 
+@register_meta([aten._standard_gamma.default, aten._standard_gamma.out])
+@out_wrapper()
+def meta__standard_gamma(self, generator=None):
+    return torch.empty_like(self)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
@@ -826,10 +832,6 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
 
-    if is_8bit_input_type:
-        if dense_B.is_contiguous():
-            raise AssertionError("dense input must be transposed for 8bit dtypes")
-
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
@@ -845,6 +847,7 @@ def meta__cslt_sparse_mm(
             in {
                 torch.float16,
                 torch.bfloat16,
+                torch.float32,
                 torch.int32,
                 torch.float8_e4m3fn,
             }
@@ -2146,7 +2149,15 @@ def _pad2d_common(input, padding, *, is_reflection):
     if input.ndim == 3:
         return input.new_empty((nplane, output_h, output_w))
     else:
-        return input.new_empty((nbatch, nplane, output_h, output_w))
+        output = input.new_empty((nbatch, nplane, output_h, output_w))
+        # CPU kernels preserve channels_last via suggest_memory_format(),
+        # but CUDA kernels always produce contiguous output.
+        if (
+            device_hint(input) != "cuda"
+            and utils.suggest_memory_format(input) == torch.channels_last
+        ):
+            output = output.to(memory_format=torch.channels_last)
+        return output
 
 
 @register_meta(aten.reflection_pad2d)
@@ -2473,6 +2484,42 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     return a.new_empty((N, P), dtype=result_dtype)
 
 
+@register_meta(aten.addmm)
+@out_wrapper(exact_dtype=True)
+def meta_addmm(
+    self, mat1, mat2, out_dtype: torch.dtype | None = None, *, alpha=1, beta=1
+):
+    torch._check(mat1.dim() == 2, lambda: "mat1 must be 2D")
+    torch._check(mat2.dim() == 2, lambda: "mat2 must be 2D")
+    N, M1 = mat1.shape
+    M2, P = mat2.shape
+    torch._check(
+        M1 == M2,
+        lambda: f"mat1 and mat2 must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
+    )
+    # Validate out_dtype if provided
+    if out_dtype is not None:
+        input_dtype = mat1.dtype
+        torch._check(
+            mat2.dtype == input_dtype,
+            lambda: "mat1 and mat2 must have the same dtype",
+        )
+        torch._check(
+            self.dtype == input_dtype,
+            lambda: "bias and mat1 must have the same dtype",
+        )
+        torch._check(
+            out_dtype == input_dtype
+            or (
+                out_dtype == torch.float32
+                and input_dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+    result_dtype = mat1.dtype if out_dtype is None else out_dtype
+    return self.new_empty((N, P), dtype=result_dtype)
+
+
 def _compute_reduction_shape(self, dims, keepdim):
     if keepdim:
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
@@ -2665,11 +2712,11 @@ def meta_miopen_batch_norm(
     out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
 
     if training:
-        save_mean = input_tensor.new_empty(save_mean_shape)
-        save_var = input_tensor.new_empty(save_var_shape)
+        save_mean = weight.new_empty(save_mean_shape)
+        save_var = weight.new_empty(save_var_shape)
     else:
-        save_mean = input_tensor.new_empty((0,))
-        save_var = input_tensor.new_empty((0,))
+        save_mean = weight.new_empty((0,))
+        save_var = weight.new_empty((0,))
 
     return out, save_mean, save_var
 
@@ -4205,6 +4252,14 @@ def meta__weight_int8pack_mm(x, w, q_scales):
         w.dtype is torch.int8,
         lambda: f"expected w to be int8, got {w.dtype}",
     )
+    torch._check(
+        w.size(1) == x.size(1),
+        lambda: f"expected w.size(1) ({w.size(1)}) == x.size(1) ({x.size(1)})",
+    )
+    torch._check(
+        q_scales.dim() == 1 and q_scales.size(0) == w.size(0),
+        lambda: f"expected q_scales to be 1D with size {w.size(0)}, got shape {q_scales.shape}",
+    )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
@@ -4521,7 +4576,7 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     # Do not allow bool+other->bool in-place
     if is_booleanic(self) and not is_booleanic(other):
         raise RuntimeError(
-            "Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change."
+            "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change."
         )
 
     if isinstance(other, torch.Tensor):
@@ -4588,11 +4643,21 @@ def meta_zero(self):
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return self
 
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return torch.empty_like(self)
 
 
@@ -7956,12 +8021,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
