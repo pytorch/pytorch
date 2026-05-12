@@ -946,9 +946,6 @@ coverage_ignore_functions = [
     "hann",
     "kaiser",
     "nuttall",
-    # torch.utils.backend_registration
-    "generate_methods_for_privateuse1_backend",
-    "rename_privateuse1_backend",
     # torch.utils.benchmark.examples.op_benchmark
     # torch.utils.benchmark.op_fuzzers.spectral
     "power_range",
@@ -981,8 +978,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    # torch.utils.cpp_backtrace
-    "get_cpp_backtrace",
     # torch.utils.cpp_extension
     "check_compiler_is_gcc",
     "check_compiler_ok_for_platform",
@@ -1037,7 +1032,6 @@ coverage_ignore_functions = [
     "apply_shuffle_settings",
     "get_all_graph_pipes",
     # torch.utils.hooks
-    "unserializable_hook",
     "warn_if_has_hooks",
     # torch.utils.jit.log_extract
     "extract_ir",
@@ -1071,8 +1065,6 @@ coverage_ignore_functions = [
     "tensor_proto",
     "text",
     "video",
-    # torch.utils.throughput_benchmark
-    "format_time",
 ]
 
 coverage_ignore_classes = [
