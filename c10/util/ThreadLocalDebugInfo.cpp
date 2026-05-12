@@ -12,6 +12,26 @@ std::ostream& operator<<(std::ostream& os, const DebugInfoKind& kind) {
   return os << (kind.value_ == nullptr ? "<uninitialized>" : *kind.value_);
 }
 
+// Names for predefined DebugInfoKinds.
+constexpr std::string_view kProducerInfoName = "PRODUCER_INFO";
+constexpr std::string_view kMobileRuntimeInfoName = "MOBILE_RUNTIME_INFO";
+constexpr std::string_view kProfilerStateName = "PROFILER_STATE";
+constexpr std::string_view kInferenceContextName = "INFERENCE_CONTEXT";
+constexpr std::string_view kParamCommsInfoName = "PARAM_COMMS_INFO";
+constexpr std::string_view kTestInfoName = "TEST_INFO";
+constexpr std::string_view kTestInfo2Name = "TEST_INFO_2";
+
+C10_API const DebugInfoKind DebugInfoKind::PRODUCER_INFO(&kProducerInfoName);
+C10_API const DebugInfoKind
+    DebugInfoKind::MOBILE_RUNTIME_INFO(&kMobileRuntimeInfoName);
+C10_API const DebugInfoKind DebugInfoKind::PROFILER_STATE(&kProfilerStateName);
+C10_API const DebugInfoKind
+    DebugInfoKind::INFERENCE_CONTEXT(&kInferenceContextName);
+C10_API const DebugInfoKind
+    DebugInfoKind::PARAM_COMMS_INFO(&kParamCommsInfoName);
+C10_API const DebugInfoKind DebugInfoKind::TEST_INFO(&kTestInfoName);
+C10_API const DebugInfoKind DebugInfoKind::TEST_INFO_2(&kTestInfo2Name);
+
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
 #define debug_info (tls_debug_info.get())
 
