@@ -304,7 +304,6 @@ def user_defined_kernel_grid_fn_code(
                     # Remove AMD specific kwargs.
                     for kwarg in c.kwargs:
                         if kwarg not in [
-                            "matrix_instr_nonkdim",
                             "waves_per_eu",
                             "kpack",
                         ]:

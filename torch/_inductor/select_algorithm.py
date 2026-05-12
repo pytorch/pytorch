@@ -848,11 +848,8 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
-        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
         kpack = self.meta.get("kpack", None)
-        if matrix_instr_nonkdim:
-            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
         if waves_per_eu:
             triton_meta["waves_per_eu"] = waves_per_eu
         if kpack:
@@ -2948,7 +2945,6 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             num_consumer_groups=num_consumer_groups,
             num_buffers_warp_spec=num_buffers_warp_spec,
-            matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
             workspace_size=workspace_size_bytes,
@@ -2992,7 +2988,6 @@ class TritonTemplate(KernelTemplate):
                 "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32")),
                 "acc_type": str(kwargs.get("ACC_TYPE")),
-                "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
                 "epilogue_subtile": kwargs.get("EPILOGUE_SUBTILE", 0),
@@ -3720,7 +3715,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 "BLOCK_N2",
                 "USE_TMA",
                 "kpack",
-                "matrix_instr_nonkdim",
                 "waves_per_eu",
             ]
         )
@@ -5254,7 +5248,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     "num_stages": info["num_stages"],
                     "num_warps": info["num_warps"],
                     "waves_per_eu": info.get("waves_per_eu", 0),
-                    "matrix_instr_nonkdim": info.get("matrix_instr_nonkdim", 0),
                     "kpack": info.get("kpack", 2),
                 }
             return None

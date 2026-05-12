@@ -177,7 +177,6 @@ class ROCmGemmConfig(GemmConfig):
     ROCm subclass for GEMMs, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -188,7 +187,6 @@ class ROCmConvConfig(ConvConfig):
     ROCm subclass for Conv, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -199,7 +197,6 @@ class ROCmFlexConfig(FlexConfig):
     ROCm subclass for FlexAttn, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -210,7 +207,6 @@ class ROCmFlexBwDConfig(FlexBwDConfig):
     ROCm subclass for FlexAttn backward, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -221,7 +217,6 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
     ROCm subclass for FlexDecode, with AMD backend specific tuneable kernargs
     """
 
-    matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
 
@@ -1536,7 +1531,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 num_stages,
                 num_warps,
                 group_m=group_m,
-                matrix_instr_nonkdim=matrix_instr_nonkdim,
                 waves_per_eu=waves_per_eu,
                 kpack=kpack,
             )
@@ -1546,7 +1540,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
-            for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
             for kpack in [1, 2]
         ]
@@ -1588,12 +1581,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
             # See Note: flex bwd configs
             ROCmFlexBwDConfig(
-                BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, mfma, kpack=default_kpack
+                BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, kpack=default_kpack
             )
             for BLOCK1 in [16, 32, 64]
             for BLOCK2 in [32, 64, 128]
             for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
-            for mfma in [0, 16]
             if BLOCK2 % BLOCK1 == 0
         ]
 
@@ -1607,12 +1599,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         self.exhaustive_flex_attn_fwd_configs: list[FlexConfig] = [
-            ROCmFlexConfig(BLOCK_M, BLOCK_N, num_stages, num_warps, mfma, wpeu, kpack)
+            ROCmFlexConfig(BLOCK_M, BLOCK_N, num_stages, num_warps, wpeu, kpack)
             for BLOCK_M in [16, 32, 64, 128]
             for BLOCK_N in [32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
-            for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
         ]
@@ -1626,7 +1617,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_N2,
                 num_stages,
                 num_warps,
-                mfma,
                 wpeu,
                 kpack,
             )
@@ -1636,7 +1626,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_N2 in [16, 32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
-            for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
             if BLOCK_N1 % BLOCK_M1 == 0
@@ -1645,12 +1634,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
             ROCmFlexDecodeConfig(
-                block_n, num_stages, num_warps, mfma, wpeu, kpack=kpack
+                block_n, num_stages, num_warps, wpeu, kpack=kpack
             )
             for block_n in [16, 32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
-            for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
             for kpack in [1, 2]
         ]
@@ -1664,13 +1652,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         pruned_configs = [
             c
             for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
-                )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
-            )
+            if not (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
         ]
         return pruned_configs
 
@@ -1698,18 +1680,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             conf.num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Defaults for AMD triton backend kern args if not set
-            matrix_instr_nonkdim: int = getattr(conf, "matrix_instr_nonkdim", 16)
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
             kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
-
-            if matrix_instr_nonkdim != 0 and (
-                conf.block_m % matrix_instr_nonkdim != 0
-                or conf.block_n % matrix_instr_nonkdim != 0
-            ):
-                #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                continue
 
             # Construct key for finding duplicate configs
             key: tuple[int, ...] = (
@@ -1719,7 +1693,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 conf.num_stages,
                 conf.num_warps,
                 waves_per_eu,
-                matrix_instr_nonkdim,
                 kpack,
             )
 
@@ -1744,7 +1717,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     "BLOCK_K": conf.block_k,
                     "num_stages": conf.num_stages,
                     "num_warps": conf.num_warps,
-                    "matrix_instr_nonkdim": matrix_instr_nonkdim,
                     "waves_per_eu": waves_per_eu,
                     "kpack": kpack,
                 }

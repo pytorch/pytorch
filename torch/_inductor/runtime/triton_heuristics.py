@@ -3012,7 +3012,6 @@ def triton_config(
     num_elements_per_warp=256,
     min_elem_per_thread=0,
     num_warps=None,
-    matrix_instr=None,
     waves_per_eu=None,
     kpack=None,
 ) -> Config:
@@ -3108,8 +3107,6 @@ def triton_config(
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
     if torch.version.hip:
-        if matrix_instr is not None:
-            config.kwargs["matrix_instr_nonkdim"] = matrix_instr
         if waves_per_eu is not None:
             config.kwargs["waves_per_eu"] = waves_per_eu
         if kpack is not None:

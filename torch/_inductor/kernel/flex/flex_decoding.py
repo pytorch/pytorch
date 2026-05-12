@@ -357,7 +357,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             cur_kernel_options["USE_TMA"] = False
 
         # Add ROCm-specific parameters if they exist in the config
-        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+        for attrib in ["kpack", "waves_per_eu"]:
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 

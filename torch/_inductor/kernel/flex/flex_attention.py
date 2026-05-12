@@ -439,7 +439,7 @@ def flex_attention(
             continue
 
         # ROCm specific kernargs
-        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+        for attrib in ["kpack", "waves_per_eu"]:
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
@@ -954,7 +954,7 @@ def flex_attention_backward(*args, **kwargs):
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         # ROCm specific kernargs
-        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+        for attrib in ["kpack", "waves_per_eu"]:
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
