@@ -60,6 +60,7 @@ class _ZesDeviceInfo:
     frequency_handle: c_void_p | None = None
     power_handle: c_void_p | None = None
     engine_handle: c_void_p | None = None
+    memory_handle: c_void_p | None = None
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
@@ -1168,6 +1169,128 @@ def utilization(device: Device = None) -> float:
     return (engine_stats.activeTime - active_start) / dt * 100
 
 
+def _zes_get_memory_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU memory module handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.memory_handle`` so that
+    repeated calls skip module enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.memory_handle is not None:
+        return info.memory_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # Enumerate all memory modules under this device handle.
+    # For tiled dGPUs each sub-device's modules are under the root handle.
+    mem_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumMemoryModules(device_handle, byref(mem_count), None),
+        "Can't get Level Zero Sysman memory module count.",
+    )
+    if mem_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman memory modules found.")
+    memory_handles = (pyzes.zes_mem_handle_t * mem_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumMemoryModules(
+            device_handle, byref(mem_count), memory_handles
+        ),
+        "Can't get Level Zero Sysman memory module handles.",
+    )
+
+    # Select the GPU memory module matching this device:
+    #   - Tiled dGPU (subdevice_id set): use the per-tile memory module
+    #     whose subdeviceId matches.
+    #   - Non-tiled: use the root-level (non-subdevice) memory module.
+    # Raises RuntimeError if no matching module is found.
+    memory_handle = None
+    for mem_handle in memory_handles:
+        mem_props = pyzes.zes_mem_properties_t()
+        mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+        _zes_check(
+            pyzes.zesMemoryGetProperties(mem_handle, byref(mem_props)),
+            "Can't get Level Zero Sysman memory properties.",
+        )
+        if mem_props.location != pyzes.ZES_MEM_LOC_DEVICE:
+            continue
+        if subdevice_id is not None:
+            # Tiled dGPU: match the per-tile module for this sub-device.
+            if mem_props.onSubdevice and mem_props.subdeviceId == subdevice_id:
+                memory_handle = mem_handle
+                break
+        else:
+            # Non-tiled or root device: pick the root-level memory module.
+            if not mem_props.onSubdevice:
+                memory_handle = mem_handle
+                break
+
+    if memory_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU memory handle found.")
+    info.memory_handle = memory_handle
+    return memory_handle
+
+
+def memory_usage(device: Device = None) -> float:
+    r"""Return the GPU memory bandwidth usage as a percentage.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU memory bandwidth usage information.
+    """
+    memory_handle = _zes_get_memory_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    mem_bandwidth = pyzes.zes_mem_bandwidth_t()
+    rc = pyzes.zesMemoryGetBandwidth(memory_handle, byref(mem_bandwidth))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU memory bandwidth usage querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            f"Can't get Level Zero Sysman GPU memory bandwidth (rc={rc})."
+        )
+    read_counter_start = mem_bandwidth.readCounter
+    write_counter_start = mem_bandwidth.writeCounter
+    timestamp_start = mem_bandwidth.timestamp
+    _zes_check(
+        pyzes.zesMemoryGetBandwidth(memory_handle, byref(mem_bandwidth)),
+        "Can't get Level Zero Sysman GPU memory bandwidth.",
+    )
+    dt = mem_bandwidth.timestamp - timestamp_start
+    if dt == 0:
+        return 0.0
+    # Counters are 32-byte transaction counts that roll over at 2^32.
+    # Modulo 2^32 handles both normal and rollover cases.
+    read_delta = (mem_bandwidth.readCounter - read_counter_start) % (1 << 32)
+    write_delta = (mem_bandwidth.writeCounter - write_counter_start) % (1 << 32)
+    # transactions * 32 bytes = actual bytes transferred
+    bytes_transferred = (read_delta + write_delta) * 32
+    # maxBandwidth is bytes/sec, dt is microseconds → multiply by 10^6
+    return 1e6 * bytes_transferred / (mem_bandwidth.maxBandwidth * dt)
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -1247,6 +1370,7 @@ __all__ = [
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "memory_usage",
     "MemPool",
     "power_draw",
     "use_mem_pool",
