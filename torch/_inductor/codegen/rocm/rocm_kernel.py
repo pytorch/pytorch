@@ -33,7 +33,7 @@ class ROCmKernel(Kernel):
     Baseclass for ROCm based Kernels
     """
 
-    overrides = OpOverrides  # type: ignore[assignment]
+    overrides = OpOverrides
 
 
 class ROCmTemplateKernel(ROCmKernel):
@@ -123,7 +123,7 @@ class ROCmTemplateKernel(ROCmKernel):
     def call_kernel(
         self,
         name: str,
-        node: "ROCmTemplateBuffer",  # type: ignore[name-defined]
+        node: "ROCmTemplateBuffer",
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -231,8 +231,8 @@ class ROCmTemplateCaller(ChoiceCaller):
             [ROCmTemplateBuffer, Sequence[IRNode] | None], str
         ],
         bmreq: ROCmBenchmarkRequest,
-        template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
+        template: "ROCmTemplate",
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category

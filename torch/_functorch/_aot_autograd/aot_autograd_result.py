@@ -270,7 +270,7 @@ class GenericCompiledBackward(InductorOutput[TOut]):
         # See note [Wrapping bw_compiler in disable]
         # This is done by _wrapped_bw_compiler in torch/_dynamo/backends/common.py
         # But since on cache hit we do not call the bw_compiler, we need to reapply the disable
-        return torch._dynamo.disable(  # type: ignore[return-value]
+        return torch._dynamo.disable(
             compiled_bw, reason="do not trace generated backwards pass"
         )
 

@@ -58,7 +58,7 @@ def _default_bucket_mode() -> BucketMode:
 
 
 # Helper functions moved to top for better organization
-def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:  # type: ignore[name-defined]
+def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:
     _, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
     return (_resolve_group_name(group_name), dtype)
@@ -69,7 +69,7 @@ def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
     return (_resolve_group_name(group_name),)
 
 
-def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type: ignore[name-defined]
+def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     _, reduce_op, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
     assert isinstance(reduce_op, str)
@@ -85,7 +85,7 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
 
 def _compute_foreach_groups(
     ag_ins: list[torch.Tensor],
-    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    out_dtypes: list[torch.dtype],
 ) -> list[int] | None:
     """
     Compute groups of indices that have the same src/dst dtype and shape.
@@ -211,7 +211,7 @@ def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | 
         return None
 
 
-def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:  # type: ignore[name-defined]
+def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:
     assert len(dtypes) > 0
     return min(dtypes, key=operator.attrgetter("itemsize"))
 
@@ -267,7 +267,7 @@ def bucket_reduce_scatter(
     merge_reduce_scatter(gm, rs_buckets, mode)
 
 
-def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
+def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return node.op == "call_function" and (
         node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
         or node.target == torch.ops._c10d_functional.all_gather_into_tensor_out.default
@@ -619,9 +619,9 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     group_name: Any,
     group_size: int,
     reduce_op: str,
-    reduce_dtype: torch.dtype,  # type: ignore[name-defined]
-    device: torch.device,  # type: ignore[name-defined]
-) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+) -> list[torch.Tensor]:
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     new_out_numels = [x.numel() // group_size for x in rs_ins]
 
@@ -644,9 +644,9 @@ def reduce_scatter_merge_fn_to_trace(
     group_name: Any,
     group_size: int,
     reduce_op: str,
-    reduce_dtype: torch.dtype,  # type: ignore[name-defined]
-    device: torch.device,  # type: ignore[name-defined]
-) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+) -> list[torch.Tensor]:
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
 
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
@@ -691,9 +691,9 @@ def all_reduce_merge_fn_to_trace(
     ar_ins: list[torch.Tensor],
     group_name: Any,
     reduce_op: str,
-    reduce_dtype: torch.dtype,  # type: ignore[name-defined]
-    device: torch.device,  # type: ignore[name-defined]
-) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+) -> list[torch.Tensor]:
     ar_ins_flattened = [x.view(-1) for x in ar_ins]
     new_ar_in = torch.cat(ar_ins_flattened)
     new_ar_out = torch.ops.c10d_functional.wait_tensor(
@@ -720,7 +720,7 @@ _ALL_DTYPES = tuple(
 def _pre_bucket_all_gather(
     ag_ins: list[torch.Tensor],
     group_size: int,
-    dtype: torch.dtype,  # type: ignore[name-defined]
+    dtype: torch.dtype,
     out_dtype_ints: list[
         int
     ],  # dtype enum values, that inputs are converted to before all_gather
@@ -791,7 +791,7 @@ def _pre_bucket_all_gather(
 def _pre_bucket_all_gather_fake(
     ag_ins: list[torch.Tensor],
     group_size: int,
-    dtype: torch.dtype,  # type: ignore[name-defined]
+    dtype: torch.dtype,
     out_dtype_ints: list[int],
     rank: int,
     foreach_group_indices: list[int] | None = None,
@@ -818,8 +818,8 @@ def all_gather_merge_fn_to_trace_custom_ops(
     _ag_ins: list[torch.Tensor],
     group_name: Any,
     group_size: int,
-    dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    dtype: torch.dtype,
+    out_dtypes: list[torch.dtype],
     rank: int,
 ) -> list[torch.Tensor]:
     # Don't create convert_element_type ops - _pre_bucket_all_gather handles conversion
@@ -874,8 +874,8 @@ def all_gather_merge_fn_to_trace(
     ag_ins: list[torch.Tensor],
     group_name: Any,
     group_size: int,
-    dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    dtype: torch.dtype,
+    out_dtypes: list[torch.dtype],
     rank: int,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
@@ -911,8 +911,8 @@ def all_gather_merge_fn_to_trace_functional(
     ag_ins: list[torch.Tensor],
     group_name: Any,
     group_size: int,
-    dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    dtype: torch.dtype,
+    out_dtypes: list[torch.dtype],
     rank: int,
     use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
@@ -969,7 +969,7 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     insert_before_node: torch.fx.Node,
     g_fn_inps: list[torch.fx.Node],
     g_fn_outs: list[torch.fx.Node],
-) -> tuple[dict[torch.fx.Node, torch.fx.Node], list[torch.fx.Node]]:  # type: ignore[no-untyped-def]
+) -> tuple[dict[torch.fx.Node, torch.fx.Node], list[torch.fx.Node]]:
     """
     Helper function that traces :attr:`fn_to_trace` with inputs
     :attr:`inps`.
@@ -1254,7 +1254,7 @@ def merge_all_gather_bucket(
     ag0 = ag_nodes[0]
     _, group_size, group_name = ag0.args
     group_name_str = _resolve_group_name(group_name)
-    _ag_dtypes: list[torch.dtype] = []  # type: ignore[name-defined]
+    _ag_dtypes: list[torch.dtype] = []
 
     for n in ag_nodes:
         assert (

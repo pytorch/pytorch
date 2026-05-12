@@ -308,7 +308,7 @@ def repro_common(
     torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module(check_guards=False)
     args, kwargs = exported_program.example_inputs
-    return mod, args, kwargs  # type: ignore[return-value]
+    return mod, args, kwargs
 
 
 def repro_get_args(
