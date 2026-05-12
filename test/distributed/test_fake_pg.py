@@ -253,15 +253,19 @@ class TestFakePG(TestCase):
         for out in output_tensors:
             self.assertEqual(out, input_tensor)
 
-    def test_gather_copy_semantics(self):
+    @parametrize("rank", [0, 1])
+    def test_gather_copy_semantics(self, rank):
         store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
         input_tensor = torch.ones(3, 3) * 42
-        gather_list = [torch.empty(3, 3) for _ in range(2)]
-        dist.gather(input_tensor, gather_list)
-        for out in gather_list:
-            self.assertEqual(out, input_tensor)
+        if rank == 0:
+            gather_list = [torch.empty(3, 3) for _ in range(2)]
+            dist.gather(input_tensor, gather_list)
+            for out in gather_list:
+                self.assertEqual(out, input_tensor)
+        else:
+            dist.gather(input_tensor, None, dst=0)
 
     @parametrize("rank", [0, 1])
     def test_allgather_coalesced_copy_semantics(self, rank):
@@ -358,6 +362,37 @@ class TestFakePG(TestCase):
         op_names = [str(op) for op in mode.ops]
         self.assertIn("aten.lift_fresh.default", op_names)
         self.assertIn("c10d.allreduce_.default", op_names)
+
+    def test_gather_non_root_rejects_output_list(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        pg = dist.distributed_c10d._get_default_group()
+
+        opts = dist.distributed_c10d.GatherOptions()
+        opts.rootRank = 0
+        output = [[torch.empty(3, 3), torch.empty(3, 3)]]
+        with self.assertRaisesRegex(RuntimeError, "requires empty output on non-root"):
+            pg.gather(output, [torch.ones(3, 3)], opts)
+
+    def test_gather_invalid_root_rank(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        pg = dist.distributed_c10d._get_default_group()
+
+        opts = dist.distributed_c10d.GatherOptions()
+        opts.rootRank = 3
+        output = [[torch.empty(3, 3), torch.empty(3, 3)]]
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+            pg.gather(output, [torch.ones(3, 3)], opts)
+
+    def test_allgather_coalesced_wrong_inner_list_size(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        output = [[torch.empty(3, 3)]]
+        inputs = [torch.ones(3, 3)]
+        with self.assertRaisesRegex(RuntimeError, "expected world size"):
+            dist.all_gather_coalesced(output, inputs)
 
 
 instantiate_parametrized_tests(TestFakePG)
