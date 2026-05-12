@@ -300,7 +300,7 @@ class SetVariable(VariableTracker):
                 )
             # Choose an item at random and pop it
             try:
-                result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
+                result: VariableTracker = self.set_items.pop().vt
             except KeyError as e:
                 raise_observed_exception(KeyError, tx, args=list(e.args))
             self.should_reconstruct_all = True

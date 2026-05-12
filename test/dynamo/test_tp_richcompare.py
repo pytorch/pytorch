@@ -975,6 +975,15 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             error_ops=self._ORDERING_OPS,
         )
 
+    def test_counter_cmp(self):
+        """Counter defines Python-level ordering (subset/superset)."""
+        from collections import Counter
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: Counter(a=3, b=1),
+            lambda: Counter(a=3, b=1, c=1),
+        )
+
     # =====================================================================
     # namedtuple comparison (UserDefinedTupleVariable)
     # =====================================================================
