@@ -6,9 +6,9 @@ Uses the `wheel` Python package for unpack/pack/tags (not zip).
 Usage: repair_wheel.py <input_dir> <output_dir>
 
 Environment variables:
-    DESIRED_CUDA       - cpu, cu126, cu130, rocm6.4.1, etc.
+    DESIRED_CUDA       - cpu, cu126, cu130, xpu, rocm6.4.1, etc.
     GPU_ARCH_TYPE      - cpu, cuda, cuda-aarch64, rocm, xpu
-    GPU_ARCH_VERSION   - 12.6, 13.0, 6.4.1, etc. (empty for CPU)
+    GPU_ARCH_VERSION   - 12.6, 13.0, 13.2, 6.4.1, etc. (empty for CPU)
     USE_CUDA           - "0" or "1"
     PYTORCH_ROCM_ARCH  - ;-separated gfx targets (ROCm only)
     ROCM_HOME          - /opt/rocm (ROCm only)
@@ -380,6 +380,12 @@ def main() -> None:
         rpaths = cuda_rpaths(gpu_arch_version)
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = f"{rpaths}:$ORIGIN"
+        force_rpath = True
+    elif gpu_arch_type == "xpu":
+        # XPU runtime libs come from pypi packages; set RPATHs like CUDA.
+        xpu_rpaths = "$ORIGIN/../../../.."
+        c_so_rpath = f"{xpu_rpaths}:$ORIGIN:$ORIGIN/lib"
+        lib_so_rpath = f"{xpu_rpaths}:$ORIGIN"
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
