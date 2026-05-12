@@ -451,18 +451,7 @@ coverage_ignore_functions = [
     # torch.cuda.profiler
     "init",
     # torch.distributed.checkpoint.default_planner
-    "create_default_global_load_plan",
-    "create_default_global_save_plan",
     "create_default_local_load_plan",
-    "create_default_local_save_plan",
-    # torch.distributed.checkpoint.optimizer
-    "load_sharded_optimizer_state_dict",
-    # torch.distributed.checkpoint.planner_helpers
-    "create_read_items_for_chunk_list",
-    # torch.distributed.checkpoint.state_dict_loader
-    "load_state_dict",
-    # torch.distributed.checkpoint.state_dict_saver
-    "save_state_dict",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
