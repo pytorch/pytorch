@@ -1058,11 +1058,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
             computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
         if (!is_contiguous) {
-          mtl_setArgs<2>(computeEncoder,
-                         outputTensor.sizes(),
-                         inputTensor.strides(),
-                         outputTensor.strides(),
-                         inputTensor.ndimension());
+          mtl_setArgs<2>(
+              computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
         }
         if (alpha) {
           mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), is_contiguous ? 2 : 6);
