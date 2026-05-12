@@ -23,7 +23,13 @@ from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import (
+    DecompositionInterpreter,
+    get_isolated_graphmodule,
+    make_fx,
+    ProxyTorchDispatchMode,
+    PythonKeyTracer,
+)
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -361,6 +367,25 @@ def forward(self, x_1):
     copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
     return copy_
     """)
+
+    def test_proxy_tensor_mode_tracks_nested_decomp_tables(self):
+        sin_table = {torch.ops.aten.sin.default: lambda x: x}
+        cos_table = {torch.ops.aten.cos.default: lambda x: x}
+        tan_table = {torch.ops.aten.tan.default: lambda x: x}
+
+        mode = ProxyTorchDispatchMode(
+            PythonKeyTracer(),
+            tracing_mode="real",
+            decomposition_table=sin_table,
+        )
+
+        self.assertIs(mode.decomposition_table, sin_table)
+        with mode.enable_decompositions(cos_table):
+            self.assertIs(mode.decomposition_table, cos_table)
+            with mode.enable_decompositions(tan_table):
+                self.assertIs(mode.decomposition_table, tan_table)
+            self.assertIs(mode.decomposition_table, cos_table)
+        self.assertIs(mode.decomposition_table, sin_table)
 
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
@@ -1018,40 +1043,39 @@ class TestSymbolicTracing(TestCase):
 
 
     def test_debug_interpreter(self):
-        import torch.library
-        from torch.library import Library
+        from torch.library import _scoped_library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("foo(Tensor self) -> Tensor")
+        with _scoped_library("foo", "DEF") as foo:
+            foo.define("foo(Tensor self) -> Tensor")
 
-        # Operator where meta and cpu disagree on strides
-        @torch.library.impl(foo, "foo", "CPU")
-        def foo_cpu(x):
-            return x.clone().T
+            # Operator where meta and cpu disagree on strides
+            @torch.library.impl(foo, "foo", "CPU")
+            def foo_cpu(x):
+                return x.clone().T
 
-        @torch.library.impl(foo, "foo", "Meta")
-        def foo_meta(x):
-            return x.clone()
+            @torch.library.impl(foo, "foo", "Meta")
+            def foo_meta(x):
+                return x.clone()
 
-        def f(x):
-            return torch.ops.foo.foo.default(x)
+            def f(x):
+                return torch.ops.foo.foo.default(x)
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
-        from torch._functorch.compilers import DebugInterpreter
+            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+            from torch._functorch.compilers import DebugInterpreter
 
-        interp = DebugInterpreter(gm)
+            interp = DebugInterpreter(gm)
 
-        # input mismatch is caught (indicates guard problem)
-        self.assertRaisesRegex(
-            AssertionError, r"3 != 1",
-            lambda: interp.run(torch.randn(3, 3).T),
-        )
+            # input mismatch is caught (indicates guard problem)
+            self.assertRaisesRegex(
+                AssertionError, r"3 != 1",
+                lambda: interp.run(torch.randn(3, 3).T),
+            )
 
-        # Catch the incorrect meta
-        self.assertRaisesRegex(
-            AssertionError, r"\(3, 1\) != \(1, 3\)",
-            lambda: interp.run(torch.randn(3, 3))
-        )
+            # Catch the incorrect meta
+            self.assertRaisesRegex(
+                AssertionError, r"\(3, 1\) != \(1, 3\)",
+                lambda: interp.run(torch.randn(3, 3))
+            )
 
     def test_int_input(self):
         def f(x, y):
