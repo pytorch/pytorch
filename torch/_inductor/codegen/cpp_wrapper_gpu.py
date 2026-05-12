@@ -30,7 +30,6 @@ from ..utils import (
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
-    is_dual_mode,
     make_codegen_buffer,
     XPU_KERNEL_FORMAT,
 )
@@ -500,7 +499,7 @@ class DeferredTritonCallWrapper:
 
         Writes JIT-side content via writeline_jit/splice_jit; on a plain
         IndentedBuffer those are equivalent to writeline/splice. AOTI-side
-        emission for dual mode is added later in the stack.
+        emission for dual-wrapper mode is added later in the stack.
         """
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
@@ -859,13 +858,13 @@ class CppWrapperGpu(CppWrapperCpu):
         return CppWrapperGpu()
 
     def write_header(self):
-        if V.graph.is_const_graph and not is_dual_mode():
+        if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:
             # We do not write header for constant graph, it will be written by main module.
             return
 
         super().write_header()
         kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
-        if V.graph.is_const_graph and is_dual_mode():
+        if V.graph.is_const_graph and V.graph.is_dual_wrapper_mode:
             # const_graph's AOTI variant merges into main (which has its own
             # kernel_driver) — JIT-only emission avoids the duplicate.
             self.header.splice_jit(kernel_driver)

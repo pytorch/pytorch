@@ -1636,13 +1636,6 @@ class IndentedBuffer:
         return new_line in self._lines
 
 
-def is_dual_mode() -> bool:
-    """True when generating dual-mode C++ for both JIT and AOTI."""
-    from .virtualized import V
-
-    return V.graph.aot_mode and config.triton.autotune_at_compile_time is False
-
-
 class DualIndentedBuffer(IndentedBuffer):
     """IndentedBuffer that simultaneously accumulates JIT and AOTI output.
 
@@ -1728,7 +1721,7 @@ class AotOnlyBuffer(IndentedBuffer):
     Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
     write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
     sites use writeline_jit/writeline_aot uniformly across pure-JIT,
-    pure-AOTI, and dual modes.
+    pure-AOTI, and dual-wrapper modes.
     """
 
     def writeline_jit(self, line) -> None:
@@ -1747,13 +1740,13 @@ class AotOnlyBuffer(IndentedBuffer):
 def make_codegen_buffer() -> IndentedBuffer:
     """Construct the IndentedBuffer subclass matching the current codegen mode.
 
-    Dual mode → DualIndentedBuffer (JIT and AOTI both active).
-    Pure AOTI → AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
-    Pure JIT  → IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    Dual-wrapper mode -> DualIndentedBuffer (JIT and AOTI both active).
+    Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
     """
     from .virtualized import V
 
-    if is_dual_mode():
+    if V.graph.is_dual_wrapper_mode:
         return DualIndentedBuffer()
     if V.graph.aot_mode:
         return AotOnlyBuffer()
