@@ -334,6 +334,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(version)                                                \
       ._(max_compute_units)                                      \
       ._(gpu_eu_count)                                           \
+      ._(gpu_eu_count_per_subslice)                              \
+      ._(gpu_hw_threads_per_eu)                                  \
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
       ._(memory_clock_rate)                                      \

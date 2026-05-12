@@ -65,27 +65,34 @@ def philox_rand_offset(
     for dim_size in shape:
         numel_scalar *= dim_size
 
-    block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
     if device.type == "cuda":
+        block_size = 256
+        unroll = 4
+        curand4_engine_calls = 4
         device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
         max_threads_per_processor = device_property.max_threads_per_multi_processor
         processor_count = device_property.multi_processor_count
+        blocks_per_sm = max_threads_per_processor // block_size
+        grid_size = (numel_scalar + block_size - 1) // block_size
+        grid_size = min(grid_size, processor_count * blocks_per_sm)
+        result = ((numel_scalar - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
     elif device.type == "xpu":
+        unroll = 4  # rand4_engine_calls are equal to unroll in XPU DistributionTemplates.h
         device_property = torch.xpu.get_device_properties(torch.xpu.current_device())
-        # TODO: XPU property mapping (max_work_group_size ≈ max_threads_per_multi_processor,
-        # max_compute_units ≈ multi_processor_count) is an approximation. XPU execution
-        # model differs from CUDA. Validate with XPU team.
-        max_threads_per_processor = device_property.max_work_group_size
-        processor_count = device_property.max_compute_units
+        max_sub_group_size = max(device_property.sub_group_sizes)
+        # group_size mirrors syclMaxWorkItemsPerSubSlice() in torch-xpu-ops
+        group_size = max_sub_group_size * device_property.gpu_eu_count_per_subslice
+        # hw_max_groups mirrors syclMaxWorkItemsPerTile() / group_size
+        max_work_items_per_tile = (
+            device_property.gpu_eu_count
+            * max_sub_group_size
+            * device_property.gpu_hw_threads_per_eu
+        )
+        hw_max_groups = max_work_items_per_tile // group_size
+        num_groups = min((numel_scalar + group_size - 1) // group_size, hw_max_groups)
+        result = ((numel_scalar - 1) // (group_size * num_groups * unroll) + 1) * unroll
     else:
         raise RuntimeError("Unexpected device type for philox_rand_offset: " + device.type)
-    blocks_per_sm = max_threads_per_processor // block_size
-    num = numel_scalar
-    grid_size = (num + block_size - 1) // block_size
-    grid_size = min(grid_size, processor_count * blocks_per_sm)
-    result = ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
     return torch.scalar_tensor(result, dtype=torch.int64)
 
 
