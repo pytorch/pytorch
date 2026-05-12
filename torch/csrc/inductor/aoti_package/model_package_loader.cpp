@@ -123,7 +123,11 @@ const char* extension_file_ext() {
 }
 
 bool is_wrapper_library(const std::string& path) {
+#ifdef _WIN32
+  return c10::ends_with(path, ".wrapper.pyd");
+#else
   return c10::ends_with(path, ".wrapper.so");
+#endif
 }
 
 const char* get_output_flags(bool compile_only) {
@@ -767,31 +771,19 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           cpp_filename = output_file_path;
         } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_file_path);
-        } else if (filename_extension == extension_file_ext()) {
-          // Triton CPU AOTI has multiple .so files: kernel.so + launcher.so
-          // alongside wrapper.so. So, prefer *.wrapper.so, and fall back to
-          // first .so for non-CPU mode.
-          if (is_wrapper_library(output_file_path)) {
-            if (!so_filename.empty() && is_wrapper_library(so_filename)) {
-              // Multiple wrapper libraries found - this is a packaging error
-              TORCH_CHECK(
-                  false,
-                  "Multiple wrapper shared libraries found in AOTI package for model '",
-                  model_name,
-                  "': '",
-                  so_filename,
-                  "' and '",
-                  output_file_path,
-                  "'. Each model should have exactly one wrapper library.");
-            }
-            so_filename = output_file_path;
-          } else if (so_filename.empty()) {
-            // Get the first .so for non Triton CPU mode, where expending a
-            // single .so
-            so_filename = output_file_path;
-          }
-          // else: auxiliary .so file (kernel.so, launcher.so for Triton CPU),
-          // ignore for wrapper selection but still extract the file
+        } else if (is_wrapper_library(output_file_path)) {
+          // Triton CPU emits kernel.so + launcher.so alongside the
+          // wrapper; ignore the auxiliaries here (already extracted above).
+          TORCH_CHECK(
+              so_filename.empty(),
+              "Multiple wrapper libraries found for model '",
+              model_name,
+              "': '",
+              so_filename,
+              "' and '",
+              output_file_path,
+              "'");
+          so_filename = output_file_path;
         } else if (filename_extension == ".blob") {
           weight_blob_filename = output_file_path;
         }
