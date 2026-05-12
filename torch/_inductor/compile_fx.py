@@ -78,6 +78,7 @@ from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
+    copy_strided_storage_,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -119,7 +120,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -731,7 +731,7 @@ def fake_tensor_prop(
                 if not force_allow_non_fake_inputs
                 else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
-            with ctx:  # type: ignore[attr-defined]
+            with ctx:
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
                     *example_inputs
                 )
@@ -1937,9 +1937,15 @@ def index_expanded_dims_and_copy_(
     expanded_dims: list[int],
 ) -> None:
     "Index into expanded dimensions of both dst and src then copy_"
-    dst = index_expanded_dims(dst, expanded_dims)
-    src = index_expanded_dims(src, expanded_dims)
-    dst.copy_(src)
+    indexed_dst = index_expanded_dims(dst, expanded_dims)
+    if torch._debug_has_internal_overlap(indexed_dst) != 0:
+        # dst still self-overlaps after dropping expanded dims (rare). A regular
+        # copy_ would have ambiguous semantics; bytewise-copy the strided extent
+        # instead so dst's overlap pattern is reproduced verbatim.
+        copy_strided_storage_(dst, src)
+        return
+    indexed_src = index_expanded_dims(src, expanded_dims)
+    indexed_dst.copy_(indexed_src)
 
 
 def cudagraphify_impl(
@@ -1950,10 +1956,10 @@ def cudagraphify_impl(
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
-    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
     # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
-        remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
+        remove_unaligned_input_idxs(inputs, static_input_idxs)
     )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
@@ -2255,7 +2261,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
     )
 
     return (
-        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
+        torch.cuda.device(next(iter(cuda_devices)))
         if len(cuda_devices) == 1
         else contextlib.nullcontext()
     )
@@ -3111,7 +3117,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)  # type: ignore[misc]
+    @functools.wraps(compiled_fn)
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
