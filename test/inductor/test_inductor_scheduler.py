@@ -11,8 +11,6 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
-from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
-from torch._inductor.runtime.hints import ReductionHint
 from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache
@@ -86,15 +84,19 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
-    def test_fusable_read_after_broadcast_split(self):
+    def test_fusable_read_and_write_broadcast_split(self):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
 
         write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
         graph = Mock(sizevars=SizeVarAllocator())
         with V.set_graph_handler(graph):
             self.assertTrue(
-                Scheduler._fusable_read_after_broadcast_split(
+                scheduler.fusable_read_and_write(
                     MemoryDep(
                         "buf",
                         32 * d0 + FloorDiv(d1, 128),
@@ -105,7 +107,7 @@ class TestScheduler(TestCase):
                 )
             )
             self.assertFalse(
-                Scheduler._fusable_read_after_broadcast_split(
+                scheduler.fusable_read_and_write(
                     MemoryDep(
                         "buf",
                         32 * d0 + FloorDiv(d1, 128) + d1,
@@ -116,88 +118,74 @@ class TestScheduler(TestCase):
                 )
             )
 
-    def test_nested_reduction_axis_from_loop_body(self):
-        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
-        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
-            "grouped_x0 grouped_x1 grouped_r"
-        )
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
 
-        def make_body(index, iter_vars, reduce_vars):
-            body = Mock()
-            body.iter_vars = iter_vars
-            body.reduce_vars = reduce_vars
-            body.indexing_exprs = {"load": index}
-            body.memory_usage = {
-                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
-            }
-            return body
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
 
-        def make_reduction(index, iter_vars, reduce_vars):
-            node = Mock()
-            node.is_reduction.return_value = True
-            node.get_ranges.return_value = ([16, 16], [16])
-            node._body = make_body(index, iter_vars, reduce_vars)
-            return node
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
 
-        def classify(outer_index, grouped_index):
-            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
-            grouped = make_reduction(
-                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
             )
-            outer_node = Mock()
-            outer_node.get_nodes.return_value = [outer]
-            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
 
-        self.assertEqual(
-            classify(
-                256 * outer_x0 + 16 * outer_x1 + outer_r,
-                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
-            ),
-            NestedReduction.GroupedAxis.R,
-        )
-        self.assertEqual(
-            classify(
-                outer_x0 + 16 * outer_x1 + 256 * outer_r,
-                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
-            ),
-            NestedReduction.GroupedAxis.R,
-        )
-        self.assertEqual(
-            classify(
-                256 * outer_x0 + 16 * outer_x1 + outer_r,
-                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
-            ),
-            NestedReduction.GroupedAxis.X,
-        )
-        self.assertEqual(
-            classify(
-                outer_x0 + 16 * outer_x1 + outer_r,
-                grouped_x0 + 16 * grouped_x1 + grouped_r,
-            ),
-            NestedReduction.GroupedAxis.UNKNOWN,
-        )
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
 
-    def test_nested_reduction_min_block_axis_hint_conflicts(self):
-        self.assertTrue(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.OUTER, group_size_in_r=True
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
             )
-        )
-        self.assertTrue(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.INNER, group_size_in_r=False
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
             )
-        )
-        self.assertFalse(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.OUTER_TINY, group_size_in_r=True
-            )
-        )
-        self.assertFalse(
-            NestedReduction._reduction_hint_conflicts_with_group_axis(
-                ReductionHint.DEFAULT, group_size_in_r=False
-            )
-        )
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
