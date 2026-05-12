@@ -556,7 +556,7 @@ def validate_function_matches_schema(
 ) -> None:
     sig = inspect.signature(func)
 
-    if not all(supported_param(p) for _, p in sig.parameters.items()):
+    if not all(supported_param(p) for p in sig.parameters.values()):
         raise ValueError(
             f"custom_op(..., manual_schema)(func): positional-only args, "
             f"varargs, and kwargs are not supported. Please rewrite `func` "
@@ -565,8 +565,7 @@ def validate_function_matches_schema(
 
     if (
         any(
-            p.annotation is not inspect.Parameter.empty
-            for _, p in sig.parameters.items()
+            p.annotation is not inspect.Parameter.empty for p in sig.parameters.values()
         )
         or sig.return_annotation is not inspect.Signature.empty
     ):

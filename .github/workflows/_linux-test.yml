@@ -11,6 +11,14 @@ on:
         required: true
         type: string
         description: JSON description of what test configs to run.
+      test-matrix-osdc:
+        required: false
+        type: string
+        default: ""
+        description: |
+          OSDC-remapped test matrix used by the test-osdc job during the
+          shadow-mode experiment (issue #183242). Falls back to test-matrix
+          when empty so OSDC-only callers keep working unchanged.
       docker-image:
         required: true
         type: string
@@ -123,8 +131,12 @@ env:
 
 jobs:
   test:
-    # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && !inputs.use-arc
+    # Don't run on forked repos or empty test matrix.
+    # Experiment (https://github.com/pytorch/pytorch/issues/183242): on
+    # pull_request events, always run the EC2 route so that callers passing
+    # use-arc=true execute OSDC in shadow mode alongside EC2. Pushed commits
+    # and scheduled workflows continue to honor use-arc as usual.
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && (!inputs.use-arc || github.event_name == 'pull_request')
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -376,12 +388,13 @@ jobs:
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           # Use offline mode by default, only enable online mode to refresh the models
-          # from HF when the PR has a special ci-refresh-hf-cache label or when the job
-          # is a nightly scheduled run on main. The ci-refresh-hf-cache label is
-          # automatically added to the vLLM pinned commit hash update, which effectively
-          # refreshes the cache daily
-          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
-          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          # from HF when the PR has a special ci-refresh-hf-cache label, when the job is
+          # a nightly scheduled run on main, or when the workflow is triggered manually
+          # via workflow_dispatch. The ci-refresh-hf-cache label is automatically added
+          # to the vLLM pinned commit hash update, which effectively refreshes the cache
+          # daily
+          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
@@ -609,10 +622,13 @@ jobs:
           docker kill -a || true
 
   test-osdc:
-    # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && inputs.use-arc
+    # Don't run on forked repos or empty test matrix.
+    # During the OSDC shadow-mode experiment (issue #183242) the build workflow
+    # emits a separate test-matrix-osdc with OSDC-remapped runners; fall back to
+    # test-matrix when callers haven't been updated yet.
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix-osdc != '' && inputs.test-matrix-osdc || inputs.test-matrix).include) != '[]' && inputs.use-arc
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix-osdc != '' && inputs.test-matrix-osdc || inputs.test-matrix) }}
       fail-fast: false
     environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
     runs-on: ${{ matrix.runner }}
@@ -767,8 +783,8 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
-          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
-          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
