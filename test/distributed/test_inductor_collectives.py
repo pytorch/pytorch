@@ -62,14 +62,13 @@ from torch.utils._python_dispatch import TorchDispatchMode
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
 
+
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
-
-    
 
     def get_world_trs(self):
         return {
