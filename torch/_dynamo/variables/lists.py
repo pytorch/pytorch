@@ -1260,7 +1260,7 @@ class ListVariable(CommonListMethodsVariable):
                 f"can only concatenate list (not '{other.python_type_name()}') to list",
             )
 
-        items = self.items + other.unpack_var_sequence(tx)
+        items = self.items + unpack_iterable(tx, other)
         return ListVariable(items, mutation_type=ValueMutationNew())
 
     def sq_inplace_concat_impl(
@@ -1345,7 +1345,7 @@ class DequeVariable(CommonListMethodsVariable):
             )
 
         return DequeVariable(
-            self.items + other.unpack_var_sequence(tx),
+            self.items + unpack_iterable(tx, other),
             maxlen=self.maxlen,
             mutation_type=ValueMutationNew(),
         )
@@ -1591,7 +1591,7 @@ class TupleVariable(BaseListVariable):
             )
 
         return TupleVariable(
-            self.items + other.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            self.items + unpack_iterable(tx, other), mutation_type=ValueMutationNew()
         )
 
     def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
@@ -1864,7 +1864,7 @@ class SizeVariable(TupleVariable):
         if not pytuple_check(other):
             return ConstantVariable(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
-        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        a, b = unpack_iterable(tx, self_), unpack_iterable(tx, other_)
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
