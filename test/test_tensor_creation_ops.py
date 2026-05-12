@@ -3128,6 +3128,19 @@ class TestTensorCreation(TestCase):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.logspace, device)
 
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    def test_linspace_integral(self, device, dtype):
+        cases = [
+            (3.7, -3, 10),
+            (0, 100, 2),
+            (-50, 50, 1000),
+            (0, 2**31, 500),
+        ]
+        for start, end, steps in cases:
+            cpu = torch.linspace(start, end, steps, dtype=dtype, device="cpu")
+            dev = torch.linspace(start, end, steps, dtype=dtype, device=device)
+            self.assertEqual(cpu, dev.cpu())
+
     # The implementation of linspace+logspace goes through a different path
     # when the steps arg is equal to 0 or 1. For other values of `steps`
     # they call specialized linspace (or logspace) kernels.
