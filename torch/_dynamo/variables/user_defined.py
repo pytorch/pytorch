@@ -2339,7 +2339,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
                 raise_observed_exception(AttributeError, tx, args=[error_msg])
 
-        tx.output.side_effects.store_attr(self, name_str, value)
+        if self.dict_vt is not None:
+            if isinstance(value, variables.DeletedVariable):
+                self.dict_vt.delitem(name_str)
+            else:
+                self.dict_vt.setitem(name_str, value)
+        else:
+            tx.output.side_effects.store_attr(self, name_str, value)
         return variables.ConstantVariable.create(None)
 
     def needs_slow_setattr(self) -> bool:

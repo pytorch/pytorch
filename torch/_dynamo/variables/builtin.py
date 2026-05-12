@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import ast
 import builtins
 import contextlib
 import functools
@@ -86,7 +87,12 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -1634,6 +1640,185 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
 
+    def call_exec(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        if len(args) > 3:
+            raise_args_mismatch(tx, "exec", "1 to 3 args", f"{len(args)} args")
+        if len(args) != 2:
+            unimplemented(
+                gb_type="Unsupported exec() form",
+                context=f"exec() with {len(args)} args",
+                explanation="Dynamo only supports exec() with constant string source and dict locals.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        code_arg = args[0]
+        if not code_arg.is_python_constant() or not isinstance(
+            code_arg.as_python_constant(), str
+        ):
+            unimplemented(
+                gb_type="Unsupported exec() source",
+                context=f"exec({code_arg})",
+                explanation="Dynamo only supports exec() with constant string source.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        scope_arg = args[1]
+        if isinstance(scope_arg, ConstDictVariable) and scope_arg.is_locals_snapshot:
+            scope = scope_arg
+        else:
+            unimplemented(
+                gb_type="Unsupported exec() locals",
+                context=f"exec() locals type: {typestr(scope_arg)}",
+                explanation="Dynamo only supports exec() with locals().",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        def lookup_const_dict(
+            dict_vt: ConstDictVariable, name: str
+        ) -> VariableTracker | None:
+            key = dict_vt._find_key(tx, ConstantVariable.create(name))
+            if key is None:
+                return None
+            return dict_vt.items[key]
+
+        builtins_vt = lookup_const_dict(scope, "__builtins__")
+        if builtins_vt is None:
+            builtins_vt = VariableTracker.build(tx, tx.f_builtins)
+            scope.call_method(
+                tx,
+                "__setitem__",
+                [ConstantVariable.create("__builtins__"), builtins_vt],
+                {},
+            )
+
+        source = code_arg.as_python_constant()
+        try:
+            module = ast.parse(source, mode="exec")
+        except SyntaxError as e:
+            raise_observed_exception(SyntaxError, tx, args=list(e.args))
+
+        def lookup_builtin(name: str) -> VariableTracker | None:
+            if isinstance(builtins_vt, ConstDictVariable):
+                return lookup_const_dict(builtins_vt, name)
+
+            try:
+                builtins_value = builtins_vt.as_python_constant()
+            except NotImplementedError:
+                unimplemented(
+                    gb_type="Unsupported exec() dynamic builtins",
+                    context=f"exec() __builtins__ type: {typestr(builtins_vt)}",
+                    explanation="Dynamo only supports exec() with dict or module __builtins__.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if isinstance(builtins_value, dict):
+                if name not in builtins_value:
+                    return None
+                return VariableTracker.build(tx, builtins_value[name])
+            if isinstance(builtins_value, types.ModuleType):
+                if name not in builtins_value.__dict__:
+                    return None
+                return VariableTracker.build(tx, builtins_value.__dict__[name])
+            unimplemented(
+                gb_type="Unsupported exec() builtins type",
+                context=f"exec() __builtins__ type: {type(builtins_value).__name__}",
+                explanation="Dynamo only supports exec() with dict or module __builtins__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        def lookup_name(name: str) -> VariableTracker:
+            value = lookup_const_dict(scope, name)
+            if value is None:
+                value = lookup_builtin(name)
+                if value is not None:
+                    return value
+                raise_observed_exception(
+                    NameError, tx, args=[f"name '{name}' is not defined"]
+                )
+            return value
+
+        def eval_node(node: ast.AST) -> VariableTracker:
+            from .object_protocol import generic_contains, vt_getitem
+
+            if isinstance(node, ast.Name):
+                return lookup_name(node.id)
+            if isinstance(node, ast.Constant):
+                return ConstantVariable.create(node.value)
+            if isinstance(node, ast.Dict):
+                dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+                for key, value in zip(node.keys, node.values):
+                    if key is None:
+                        unimplemented(
+                            gb_type="Unsupported exec() dict unpack",
+                            context=source,
+                            explanation="Dynamo does not support dict unpacking inside exec().",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    dict_vt._setitem_const(tx, eval_node(key), eval_node(value))
+                return dict_vt
+            if isinstance(node, ast.Subscript):
+                return vt_getitem(tx, eval_node(node.value), eval_node(node.slice))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                obj = eval_node(node.func.value)
+                call_args = [eval_node(arg) for arg in node.args]
+                if node.keywords:
+                    unimplemented(
+                        gb_type="Unsupported exec() call keywords",
+                        context=source,
+                        explanation="Dynamo does not support keyword calls inside exec().",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                return obj.call_method(tx, node.func.attr, call_args, {})
+            if (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.In)
+                and len(node.comparators) == 1
+            ):
+                return generic_contains(
+                    tx, eval_node(node.comparators[0]), eval_node(node.left)
+                )
+            unimplemented(
+                gb_type="Unsupported exec() syntax",
+                context=source,
+                explanation=f"Dynamo does not support exec() syntax {type(node).__name__}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        def assign_target(target: ast.AST, value: VariableTracker) -> None:
+            if isinstance(target, ast.Name):
+                scope.call_method(
+                    tx,
+                    "__setitem__",
+                    [ConstantVariable.create(target.id), value],
+                    {},
+                )
+                return
+            if isinstance(target, ast.Subscript):
+                eval_node(target.value).call_method(
+                    tx, "__setitem__", [eval_node(target.slice), value], {}
+                )
+                return
+            unimplemented(
+                gb_type="Unsupported exec() assignment target",
+                context=source,
+                explanation=f"Dynamo does not support assignment to {type(target).__name__}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        for stmt in module.body:
+            if isinstance(stmt, ast.Expr):
+                eval_node(stmt.value)
+            elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                assign_target(stmt.targets[0], eval_node(stmt.value))
+            else:
+                unimplemented(
+                    gb_type="Unsupported exec() statement",
+                    context=source,
+                    explanation=f"Dynamo does not support exec() statement {type(stmt).__name__}.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        return ConstantVariable.create(None)
+
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslator") -> VariableTracker:
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
@@ -1653,6 +1838,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             frame_locals,
             dict,
             mutation_type=ValueMutationNew(),
+            is_locals_snapshot=True,
         )
 
     def _handle_insert_op_in_graph(
@@ -2126,10 +2312,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not torch._dynamo.config.enable_trace_load_build_class:
             fail(args, kwargs)
 
-        try:
-            fn = args[0].get_function()
-        except NotImplementedError:
-            fail(args, kwargs)
+        if isinstance(args[0], variables.NestedUserFunctionVariable):
+            try:
+                fn = args[0].get_function_for_build_class()
+            except (NotImplementedError, Unsupported):
+                fail(args, kwargs)
+        else:
+            try:
+                fn = args[0].get_function()
+            except (NotImplementedError, Unsupported):
+                fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
             r = builtins.__build_class__(
