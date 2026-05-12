@@ -268,17 +268,31 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   //   * Small sum_size (K) -- bmm catches up at K >= 64 on RTX 4080 (sm_89).
   //   * Bounded intermediate memory -- the elementwise product materializes
   //     lro_size * sum_size * itemsize bytes; cap at 256 MB to avoid OOM.
-  //   * Use TORCH_GUARD_OR_FALSE to be SymInt-safe -- if the sizes are
-  //     symbolic (torch.compile dynamic), fall back to bmm rather than baking
-  //     concrete values into the trace.
+  //   * Eager-only (no torch.compile) -- use maybe_as_int() to avoid baking
+  //     shape guards into the trace. For dynamic shapes, fall back to bmm.
   constexpr int64_t kSmallKBatchedDotThreshold = 32;
   constexpr int64_t kIntermediateMemoryBudgetBytes = 256 * 1024 * 1024;
-  const int64_t mem_budget_elems = kIntermediateMemoryBudgetBytes / std::max<int64_t>(left.element_size(), 1);
+
+  // For fp16/bf16, the fast path upcasts to fp32 before multiply, allocating:
+  //   - a (fp32): lro_size * sum_size * 4 bytes
+  //   - b (fp32): lro_size * sum_size * 4 bytes
+  //   - a * b (fp32): lro_size * sum_size * 4 bytes
+  // Total: 12 bytes per element. For other dtypes, only the product materializes.
+  bool is_low_precision = (left.scalar_type() == kHalf || left.scalar_type() == kBFloat16);
+  int64_t bytes_per_elem = is_low_precision ? 12 : std::max<int64_t>(left.element_size(), 1);
+  const int64_t mem_budget_elems = kIntermediateMemoryBudgetBytes / bytes_per_elem;
+
+  auto lo_int = lo_size.maybe_as_int();
+  auto ro_int = ro_size.maybe_as_int();
+  auto sum_int = sum_size.maybe_as_int();
+  auto lro_int = lro_size.maybe_as_int();
+
   bool small_k_batched_dot = left.is_cuda() &&
-      TORCH_GUARD_OR_FALSE(lo_size.sym_eq(1)) &&
-      TORCH_GUARD_OR_FALSE(ro_size.sym_eq(1)) &&
-      TORCH_GUARD_OR_FALSE(sum_size.sym_le(kSmallKBatchedDotThreshold)) &&
-      TORCH_GUARD_OR_FALSE((lro_size * sum_size).sym_le(mem_budget_elems));
+      lo_int.has_value() && *lo_int == 1 &&
+      ro_int.has_value() && *ro_int == 1 &&
+      sum_int.has_value() && *sum_int <= kSmallKBatchedDotThreshold &&
+      lro_int.has_value() && sum_int.has_value() &&
+      (*lro_int * *sum_int) <= mem_budget_elems;
 
   // now we can execute the operations above
   left = left.permute(lpermutation).reshape_symint({lro_size, std::move(lo_size), sum_size});

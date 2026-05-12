@@ -4779,17 +4779,43 @@ class TestLinalg(TestCase):
             self.assertEqual(got, ref, **tol, msg=f"i,i-> k={k} dtype={dtype}")
 
         # Memory-budget guard: very large lro_size * sum_size should fall back
-        # to bmm (no OOM). Sized to exceed the 256MB intermediate budget for
-        # fp32 (fp16/bf16 doubles the budget headroom). Skip if not enough VRAM.
-        if device == 'cuda' and dtype == torch.float32:
+        # to bmm (no OOM). fp16/bf16 allocate 12 bytes/elem (upcast overhead),
+        # fp32 allocates 4 bytes/elem. Test both to ensure budget accounts for
+        # upcasting. Skip if not enough VRAM.
+        if device == 'cuda':
             if torch.cuda.mem_get_info()[0] > 4 * 1024 * 1024 * 1024:  # >4GB free
-                large_N = 32 * 1024 * 1024  # 32M rows
-                a = make_tensor((large_N, 4), dtype=dtype, device=device)
-                b = make_tensor((large_N, 4), dtype=dtype, device=device)
-                ref = (a * b).sum(-1)
+                if dtype == torch.float32:
+                    # 256MB / 4 bytes = 64M elements, use 128M to exceed budget
+                    large_N = 32 * 1024 * 1024  # 32M rows × 4 cols = 128M elems
+                    a = make_tensor((large_N, 4), dtype=dtype, device=device)
+                    b = make_tensor((large_N, 4), dtype=dtype, device=device)
+                elif dtype in (torch.float16, torch.bfloat16):
+                    # 256MB / 12 bytes = 21M elements, use 42M to exceed budget
+                    large_N = 10 * 1024 * 1024  # 10M rows × 4 cols = 40M elems
+                    a = make_tensor((large_N, 4), dtype=dtype, device=device)
+                    b = make_tensor((large_N, 4), dtype=dtype, device=device)
+                else:
+                    return  # unsupported dtype
+                ref = (a.float() * b.float()).sum(-1).to(dtype)
                 got = torch.einsum('Nc,Nc->N', a, b)
                 self.assertEqual(got, ref, **tol,
-                                 msg=f"large-N memory budget fallback large_N={large_N}")
+                                 msg=f"large-N memory budget fallback dtype={dtype}")
+
+        # torch.compile dynamic shapes: fast path should fall back gracefully
+        # when sizes are symbolic, without inserting shape guards or crashing
+        # the ShapeEnv solver.
+        if device == 'cuda':
+            def einsum_wrapper(a, b):
+                return torch.einsum('Nc,Nc->N', a, b)
+
+            compiled = torch.compile(einsum_wrapper, dynamic=True)
+            for N, c in [(128, 2), (256, 4), (512, 8)]:
+                a = make_tensor((N, c), dtype=dtype, device=device)
+                b = make_tensor((N, c), dtype=dtype, device=device)
+                ref = (a.float() * b.float()).sum(-1).to(dtype)
+                got = compiled(a, b)
+                self.assertEqual(got, ref, **tol,
+                                 msg=f"torch.compile dynamic N={N} c={c} dtype={dtype}")
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
