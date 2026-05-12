@@ -21,7 +21,9 @@
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
+#if CUDNN_FRONTEND_VERSION > 10300
 #include <cudnn_frontend_shim.h>
+#endif
 #endif
 
 #if AT_MAGMA_ENABLED()
