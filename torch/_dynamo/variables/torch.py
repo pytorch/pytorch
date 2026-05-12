@@ -30,6 +30,7 @@ import functools
 import inspect
 import logging
 import math
+import os
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
@@ -243,6 +244,16 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
 
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
+
+
+@functools.cache
+def _is_tensorify_enabled() -> bool:
+    from torch._utils_internal import justknobs_check
+
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
+
 
 dispatch_key_set_functions = {
     torch._C._dispatch_keys,
@@ -1333,12 +1344,50 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_has_torch_function(
             self, tx: "InstructionTranslator", *args: VariableTracker
         ) -> ConstantVariable:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                tf_state.skip_next = False
+                return VariableTracker.build(tx, False)
             elems = (
                 args[0].unpack_var_sequence(tx)
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch._C._skip_one_hop_torch_function)
+        def handle_skip_one_hop_torch_function(
+            self,
+            tx: "InstructionTranslator",
+            func: VariableTracker,
+            types: VariableTracker,
+            args: VariableTracker,
+            kwargs: VariableTracker,
+        ) -> VariableTracker:
+            tf_state = tx.symbolic_torch_function_state
+            if tf_state.skip_next:
+                from torch._dynamo.exc import raise_observed_exception
+
+                raise_observed_exception(
+                    RuntimeError,
+                    tx,
+                    args=[
+                        "you cannot skip two levels of __torch_function__, "
+                        "you need to run one level of __torch_function__ "
+                        "before being able to skip again."
+                    ],
+                )
+            tf_state.skip_next = True
+            tx.skip_one_hop_torch_function_depth += 1
+            try:
+                return func.call_function(
+                    tx,
+                    args.unpack_var_sequence(tx),
+                    kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
+                )
+            finally:
+                tx.skip_one_hop_torch_function_depth -= 1
+                tf_state.skip_next = False
 
         @register(
             *dict.fromkeys(  # remove duplicates
@@ -2940,6 +2989,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and self.value.__name__ in bin_ops
             and any_symints_or_symfloats
             and all_ints_or_floats
+            and not _is_tensorify_enabled()
         ):
             msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
