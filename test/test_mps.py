@@ -9334,7 +9334,7 @@ class TestLargeTensors(TestCaseMPS):
         if torch.mps.recommended_max_memory() < 8_000_000_000:
             raise unittest.SkipTest("Needs at least 8Gb of RAM")
         sl = torch.randn(1_200_000, 464, dtype=torch.float32, device='mps')[:, 4:50]
-        assert (sl.size(0) - 1) * sl.stride(0) * sl.element_size() > (1 << 31) - 1
+        self.assertGreater((sl.size(0) - 1) * sl.stride(0) * sl.element_size(), (1 << 31) - 1)
         self.assertEqual(sl.neg().cpu(), sl.cpu().neg())
 
 
