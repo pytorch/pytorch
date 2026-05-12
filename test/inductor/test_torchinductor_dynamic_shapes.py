@@ -67,7 +67,7 @@ test_failures = {
     "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
+        ("cpu", "cuda", "xpu", "mps")
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
     "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
