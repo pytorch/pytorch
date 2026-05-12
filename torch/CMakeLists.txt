@@ -494,8 +494,14 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     )
   endif()
   # Install at the install prefix root, which maps to torch/ in the wheel
-  # via wheel.install-dir = "torch"
-  install(TARGETS _C DESTINATION ".")
+  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
+  # alongside the other import libs in torch/lib/, matching the layout that
+  # setup.py used before _C moved to CMake.
+  install(TARGETS _C
+    RUNTIME DESTINATION "."
+    LIBRARY DESTINATION "."
+    ARCHIVE DESTINATION "lib"
+  )
 endif()
 
 # Generate torch/version.py from the appropriate CMake cache variables.
