@@ -738,13 +738,21 @@ class CachingAutotuner(KernelInterface):
             if total_block <= max_blocks_per_sm * device_prop.multi_processor_count:
                 # no need to improve occupancy
                 continue
-            new_config = copy.deepcopy(triton_config)
 
             # Reduce the largest Rn_BLOCK by a factor of 2.
             largest_rkwarg: str = max(
                 reduction_kwargs, key=triton_config.kwargs.__getitem__
             )
-            new_config.kwargs[largest_rkwarg] //= 2
+            new_rblock = triton_config.kwargs[largest_rkwarg] // 2
+            min_rblock = self.inductor_meta.get("min_rblock")
+            if (
+                min_rblock is not None
+                and largest_rkwarg == "R0_BLOCK"
+                and new_rblock < min_rblock
+            ):
+                continue
+            new_config = copy.deepcopy(triton_config)
+            new_config.kwargs[largest_rkwarg] = new_rblock
 
             if seen_config_hashes is None:
                 seen_config_hashes = OrderedSet(
@@ -2853,9 +2861,16 @@ def cached_autotune(
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    if size_hints is not None and heuristic_type in (
+        HeuristicType.REDUCTION,
+        HeuristicType.PERSISTENT_REDUCTION,
+    ):
+        configs = _enforce_reduction_config_block_minimums(
+            configs, size_hints, inductor_meta
+        )
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
-    inductor_meta = {} if inductor_meta is None else inductor_meta
 
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
         configs, filename, inductor_meta
@@ -2965,6 +2980,65 @@ def check_max_block(cfg: dict[str, int]):
             assert val <= max_block, (
                 f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
             )
+
+
+def _enforce_reduction_config_block_minimums(
+    configs: list[Config],
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any],
+) -> list[Config]:
+    min_xblock = inductor_meta.get("min_xblock")
+    min_rblock = inductor_meta.get("min_rblock")
+    if min_xblock is None and min_rblock is None:
+        return configs
+
+    for cfg in configs:
+        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
+            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+        )
+        has_xblock = "XBLOCK" in cfg.kwargs
+        has_rblock = "R0_BLOCK" in cfg.kwargs
+        if not (has_xblock or has_rblock):
+            continue
+
+        x_floor = min_xblock if min_xblock is not None else 1
+        r_floor = min_rblock if min_rblock is not None else 1
+        target_tile_product = (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+            cfg.kwargs["R0_BLOCK"] if has_rblock else 1
+        )
+
+        if has_xblock:
+            cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], x_floor)
+        if has_rblock:
+            cfg.kwargs["R0_BLOCK"] = max(cfg.kwargs["R0_BLOCK"], r_floor)
+
+        def current_tile_product() -> int:
+            return (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
+                cfg.kwargs["R0_BLOCK"] if has_rblock else 1
+            )
+
+        def shrink_to_budget(name: str, floor: int) -> None:
+            while (
+                name in cfg.kwargs
+                and current_tile_product() > target_tile_product
+                and cfg.kwargs[name] > floor
+            ):
+                cfg.kwargs[name] //= 2
+
+        # Preserve the autotuner's original tile-size budget where possible:
+        # raising one block to satisfy a floor should shrink the other block.
+        shrink_to_budget("R0_BLOCK", r_floor)
+        shrink_to_budget("XBLOCK", x_floor)
+
+        check_max_block(cfg.kwargs)
+        check_config(
+            cfg.kwargs,
+            xnumel=size_hints.get("x") if "XBLOCK" in cfg.kwargs else None,
+            ynumel=size_hints.get("y") if "YBLOCK" in cfg.kwargs else None,
+            znumel=size_hints.get("z") if "ZBLOCK" in cfg.kwargs else None,
+        )
+
+    return configs
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -3185,13 +3259,12 @@ def triton_config_reduction(
 
     # shrink sizes to size hints
     x = min(x, size_hints["x"])
+    target = conditional_product(x, *rnumels.values())
+    if conditional_product(*size_hints.values()) < target:
+        target //= 8
 
     def total_numel() -> int:
         return conditional_product(x, *rnumels.values())
-
-    target = total_numel()
-    if conditional_product(*size_hints.values()) < target:
-        target //= 8
 
     # if we are below original block size, scale up where we can
     while x < size_hints["x"] and total_numel() < target:
@@ -3460,7 +3533,13 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
 
 def triton_config_tiled_reduction(
-    size_hints, x, y, r, num_stages=1, register_intensive=False, waves_per_eu=None
+    size_hints,
+    x,
+    y,
+    r,
+    num_stages=1,
+    register_intensive=False,
+    waves_per_eu=None,
 ):
     """
     Construct a tile reduction triton config with some adjustment
@@ -4403,7 +4482,10 @@ def _persistent_reduction_configs(
             )
             configs.append(
                 triton_config_tiled_reduction(
-                    size_hints, block_sizes["x"], block_sizes["y"], rnumel
+                    size_hints,
+                    block_sizes["x"],
+                    block_sizes["y"],
+                    rnumel,
                 )
             )
 

@@ -566,6 +566,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.initialize_range_tree(pid_cache)
 
         self.rsplit_size = 0
+        self.min_xblock: int | None = None
+        self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
 
     def codegen_template_body(
