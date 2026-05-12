@@ -364,9 +364,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
-        from torch._inductor.heuristics.template.registry import (
-            get_template_heuristic,
-        )
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
@@ -423,9 +421,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
-        from torch._inductor.heuristics.template.registry import (
-            get_template_heuristic,
-        )
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
