@@ -603,9 +603,16 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        return self.kernel.cse.generate(
+        result = self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
+        if (
+            isinstance(result, CuteDSLCSEVariable)
+            and isinstance(value, str)
+            and dtype in (torch.int32, torch.int64)
+        ):
+            result.index_expr = sympy_index_symbol(value)
+        return result
 
     def _emit_tensor_load_fragment(
         self,
@@ -867,16 +874,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         replacements: dict[sympy.Symbol, sympy.Expr] = dict(
             self._semantic_index_replacements
         )
-        for source_expr, var in self.kernel.cse._cache.items():
-            if isinstance(source_expr, str) and source_expr in (
-                "b_idx",
-                "h_idx",
-                "q_idx",
-                "kv_idx",
-            ):
-                replacements[sympy_index_symbol(var.name)] = sympy_index_symbol(
-                    source_expr
-                )
+        for var in self.kernel.cse._cache.values():
+            if isinstance(var, CuteDSLCSEVariable) and var.index_expr is not None:
+                replacements[sympy_index_symbol(var.name)] = var.index_expr
         return V.graph.sizevars.simplify(expr.xreplace(replacements))
 
     def _is_lane_uniform_expr(

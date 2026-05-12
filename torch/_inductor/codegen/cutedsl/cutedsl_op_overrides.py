@@ -113,11 +113,7 @@ class CuteDSLOpOverrides(OpOverrides):
     def _index_expr(arg: CuteDSLArg) -> sympy.Expr | None:
         cse_var = CuteDSLOpOverrides._get_cse_var(arg)
         if isinstance(cse_var, CuteDSLCSEVariable):
-            if cse_var.index_expr is not None:
-                return cse_var.index_expr
-            for expr, var in V.kernel.cse._cache.items():
-                if var is cse_var and expr in ("q_idx", "kv_idx"):
-                    return sympy.Symbol(expr, integer=True, nonnegative=True)
+            return cse_var.index_expr
         if isinstance(arg, (int, sympy.Integer)):
             return sympy.Integer(arg)
         if isinstance(arg, str) and arg.lstrip("-").isdigit():
