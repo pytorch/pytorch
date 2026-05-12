@@ -251,14 +251,19 @@ class Vectorized16 {
     if (count == size())
       return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
 
+    // The contract is 0 <= count <= size(), but the parameter type allows
+    // values that would overflow the fixed-size buffer below; clamp
+    // explicitly so the memcpy bound is provable to gcc-14 (#159962) and
+    // out-of-contract callers stay safe.
+    const int n = std::clamp(static_cast<int>(count), 0, size());
     __at_align__ int16_t tmp_values[size()];
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-    for (const auto i : c10::irange(count, size())) {
+    for (const auto i : c10::irange(n, size())) {
       tmp_values[i] = 0;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    std::memcpy(tmp_values, ptr, n * sizeof(int16_t));
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
   }
   void store(void* ptr, int count = size()) const {
@@ -267,7 +272,9 @@ class Vectorized16 {
     } else if (count > 0) {
       __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      // Clamp for the same reason as loadu above.
+      const int n = std::min(count, size());
+      std::memcpy(ptr, tmp_values, n * sizeof(int16_t));
     }
   }
   template <int64_t mask>

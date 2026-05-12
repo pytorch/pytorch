@@ -11,7 +11,15 @@ import collections
 import unittest
 import os
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_TORCHDYNAMO,
+)
+from torch.testing._internal.common_subclass import RedispatchTensor
+from torch._dynamo.utils import clone_input
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -23,8 +31,15 @@ from torch.overrides import (
     TorchFunctionMode,
     _get_current_function_mode,
     _get_current_function_mode_stack,
-    BaseTorchFunctionMode
+    BaseTorchFunctionMode,
+    redispatch_function
 )
+from torch.testing._internal.common_device_type import (
+    ops,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
@@ -49,7 +64,7 @@ def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""
     if has_torch_function((a, b, c)):
         return handle_torch_function(foo, (a, b, c), a, b, c=c)
-    if c:
+    if c is not None:
         return a + b + c
     return a + b
 
@@ -534,7 +549,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_tensor_subclass_propagation(self):
         """this test exercises the functionality described in
-        docs/source/notes/extending.rst#subclassing-torchtensor"""
+        docs/source/notes/extending.md#subclassing-torch-tensor"""
         t1 = torch.tensor([5])
         t2 = torch.tensor([6])
 
@@ -1450,6 +1465,7 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182317")
     def test_factory_override(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1804,6 +1820,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertFalse(called)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/182318")
     def test_disable_enable_subclass(self):
         class A(torch.Tensor):
             pass
@@ -1918,6 +1935,139 @@ class TestTorchFunctionMode(TestCase):
 
 
 
+class TestTorchFunctionRedispatch(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.assertFalse(
+            torch._C._peek_should_skip_torch_function(),
+            "skip_next TLS was set at test start",
+        )
+
+    def tearDown(self):
+        leaked = torch._C._peek_should_skip_torch_function()
+        if leaked:
+            torch._C._set_skip_next_torch_function(False)
+        super().tearDown()
+        self.assertFalse(leaked, "skip_next TLS leaked from test")
+
+    @staticmethod
+    def _filter_log(call_log, allowed_qualnames):
+        return [e for e in call_log if e[0] in allowed_qualnames]
+
+    def test_simple(self):
+        call_log = []
+        x = RedispatchTensor(torch.ones(1), call_log=call_log)
+        ret = bar(x)
+        self.assertIs(ret, x)
+        filtered = self._filter_log(call_log, {"bar"})
+        call_log_str = '\n'.join(f"{entry[0]}" for entry in filtered)
+        self.assertExpectedInline(call_log_str, """bar""")
+
+    def test_skip_to_inner(self):
+        call_log = []
+        x = RedispatchTensor(torch.full((1,), 1), call_log=call_log)
+        y = RedispatchTensor(torch.full((1,), 2), call_log=call_log)
+        z = RedispatchTensor(torch.full((1,), 3), call_log=call_log)
+        ret = foo(x, y, z)
+
+        # Key behavior: redispatch skips dispatch for foo once,
+        # but then the + operations inside foo DO dispatch to __torch_function__
+        # So we should see: foo, then add (from a+b), then add (from temp+c)
+        # Snapshot the log before assertEqual triggers more __torch_function__ calls.
+        filtered = self._filter_log(call_log, {"foo", "TensorBase.add"})
+        call_log_str = '\n'.join(f"{entry[0]}: {entry[1]}" for entry in filtered)
+        self.assertEqual(ret, torch.full((1,), 6))
+        self.assertExpectedInline(call_log_str, """\
+foo: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
+TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)
+TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTensor'>,)""")
+
+    def test_mode_with_redispatch(self):
+        call_log = []
+
+        class LoggingMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                call_log.append(func.__name__)
+                return redispatch_function(func, types, args, kwargs)
+
+        x = torch.tensor([1.0])
+        y = torch.tensor([2.0])
+        z = torch.tensor([3.0])
+
+        with LoggingMode():
+            ret = foo(x, y, z)
+
+        self.assertEqual(ret, torch.tensor([6.0]))
+        # Without 'with self:', mode only sees the outer call
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo'])
+
+    def test_mode_with_redispatch_reentrant(self):
+        call_log = []
+
+        class LoggingMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                call_log.append(func.__name__)
+                # Re-enable mode for inner calls
+                with self:
+                    return redispatch_function(func, types, args, kwargs)
+
+        x = torch.tensor([1.0])
+        y = torch.tensor([2.0])
+        z = torch.tensor([3.0])
+
+        with LoggingMode():
+            ret = foo(x, y, z)
+
+        self.assertEqual(ret, torch.tensor([6.0]))
+        # With 'with self:', mode sees outer call and inner add operations
+        filtered = [n for n in call_log if n in ("foo", "add")]
+        self.assertEqual(filtered, ['foo', 'add', 'add'])
+
+
+class TestTorchFunctionRedispatchOps(TestCase):
+    @ops(op_db)
+    def test_redispatch(self, device, dtype, op):
+        if op.has_nondeterministic_output:
+            self.skipTest("output is nondeterministic; not comparable across calls")
+
+        def clone_and_wrap(x):
+            if isinstance(x, torch.Tensor):
+                x = x.detach()
+                if x.layout == torch.strided:
+                    x = clone_preserve_strides_offset(x)
+                else:
+                    x = clone_input(x)
+                return RedispatchTensor(x)
+            return x
+
+        def clone_only(x):
+            if isinstance(x, torch.Tensor):
+                x = x.detach()
+                if x.layout == torch.strided:
+                    return clone_preserve_strides_offset(x)
+                return clone_input(x)
+            return x
+
+        for sample in op.sample_inputs(device=device, dtype=dtype):
+            # Wrap only sample.input in RedispatchTensor so
+            # __torch_function__ fires. Clone args/kwargs without wrapping
+            # because some ops pass auxiliary tensors (e.g. spacing, bins)
+            # through C++ arg parsing that rejects subclasses.
+            wrapped = SampleInput(
+                clone_and_wrap(sample.input),
+                args=tree_map(clone_only, sample.args),
+                kwargs=tree_map(clone_only, sample.kwargs),
+            )
+
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+            actual = op(wrapped.input, *wrapped.args, **wrapped.kwargs)
+
+            with torch._C.DisableTorchFunction():
+                self.assertEqual(expect, actual)
+
+
+instantiate_device_type_tests(TestTorchFunctionRedispatchOps, globals())
 
 
 if __name__ == '__main__':
