@@ -7,11 +7,6 @@
 #include <limits>
 
 TEST(TorchStableIValue, TestStableIValueUse) {
-
-
-   auto _ptr = new char[5000];
-  _ptr[0] = 30;
-
   StableIValue* a = nullptr;
   ASSERT_EQ(torch_new_stable_ivalue(&a), AOTI_TORCH_SUCCESS);
   // Check if it is now a valid pointer.
