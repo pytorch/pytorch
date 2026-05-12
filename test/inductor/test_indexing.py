@@ -87,6 +87,11 @@ class TestIndexingSimplification(InductorTestCase):
         result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i, 8)
         self.assertTrue(result.unknown)
 
+        result = sizevars.analyze_lane_contiguity(
+            2 * i - ModularIndexing(i, 1, 4), i, 8
+        )
+        self.assertTrue(result.unknown)
+
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)

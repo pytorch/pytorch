@@ -634,7 +634,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             f"{val_frag} = cute.make_rmem_tensor("
             f"cute.size({first_index_fragment.code}.shape), {cute_dtype})"
         )
-        if self._can_emit_contiguous_last_dim_load(idx_vars, buffer):
+        if self._can_emit_contiguous_last_dim_load(idx_vars, buffer, var_dtype):
             self._emit_contiguous_last_dim_load(
                 var, idx_vars, val_frag, cute_dtype, var_dtype
             )
@@ -645,9 +645,14 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return str(val_frag)
 
     def _can_emit_contiguous_last_dim_load(
-        self, idx_vars: list[CuteDSLIndexFragment], buffer: Any
+        self,
+        idx_vars: list[CuteDSLIndexFragment],
+        buffer: Any,
+        var_dtype: torch.dtype,
     ) -> bool:
         """Return true when vector lanes form a safe contiguous last-dim tile."""
+        if var_dtype is torch.bool:
+            return False
         if not idx_vars or not idx_vars[-1].is_contiguous_kv:
             return False
         if any(not (idx.is_static_int or idx.is_lane_uniform) for idx in idx_vars[:-1]):

@@ -629,12 +629,6 @@ class SizeVarAllocator:
                 result = arg_result
             elif arg_result.uniform:
                 continue
-            elif result.stride is not None and arg_result.stride is not None:
-                stride = result.stride + arg_result.stride
-                result = LaneContiguity(
-                    contiguous_width=requested_width if stride == 1 else None,
-                    stride=stride,
-                )
             else:
                 return LaneContiguity(unknown=True)
         return result
