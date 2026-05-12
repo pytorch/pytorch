@@ -788,7 +788,14 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_modified_bessel,
         supports_one_python_scalar=True,
         ref=(lambda x, nu: scipy.special.iv(nu, x)) if TEST_SCIPY else None,
-        decorators=(precisionOverride({torch.float32: 1e-03, torch.float64: 1e-05}),),
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=5e-06),
+                    torch.float64: tol(atol=1e-05, rtol=1e-07),
+                }
+            ),
+        ),
         lhs_make_tensor_kwargs=dict(low=0),
         rhs_make_tensor_kwargs=dict(low=-30, high=30),
     ),
