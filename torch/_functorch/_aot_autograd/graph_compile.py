@@ -2333,7 +2333,7 @@ def _aot_stage2b_bw_compile(
                     exc_str = "\n".join(
                         traceback.format_exception(type(exc), exc, exc.__traceback__)
                     )
-                    exc.__traceback__ = None
+                    e.__traceback__ = None
                     trace_structured(
                         "artifact",
                         metadata_fn=lambda: {
