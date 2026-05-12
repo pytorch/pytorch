@@ -143,7 +143,7 @@ def quack_rmsnorm_bwd(
     # allocation above), but pyrefly can't see the dependency.
     if dw_partial is not None:
         weight_dtype_for_sum = weight.dtype  # pyrefly: ignore[missing-attribute]
-        dw = dw_partial.sum(dim=0, dtype=weight_dtype_for_sum).reshape(normalized_shape)
+        dw = dw_partial.sum(dim=0).reshape(normalized_shape).to(weight_dtype_for_sum)
     else:
         dw = None
     return dx, dw
