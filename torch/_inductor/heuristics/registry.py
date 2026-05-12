@@ -22,15 +22,17 @@ if TYPE_CHECKING:
 
 
 _REGISTRY: dict[tuple[str | None, ...], Any] = {}
-_TEMPLATE_HEURISTIC_REGISTRY = _REGISTRY  # alias for test compatibility
+# Alias so tests can snapshot/restore the shared registry via the old name.
+# This intentionally covers both template and codegen entries.
+_TEMPLATE_HEURISTIC_REGISTRY = _REGISTRY
 _CACHE: dict[tuple[str | None, ...], Any] = {}
 
 log = logging.getLogger(__name__)
 
 
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Shared internals
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def _register(
@@ -54,9 +56,9 @@ def _lookup(name: str, device_type: str, op_name: str | None) -> Any | None:
     return None
 
 
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Template heuristic API
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def register_template_heuristic(
@@ -138,9 +140,9 @@ def get_registered_heuristic_class(
     return _lookup(template_name, device_type, op_name)
 
 
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Codegen heuristic API
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 class CodegenConfigHeuristics:
@@ -217,9 +219,9 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
     return instance
 
 
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Utilities
-# ──────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def clear_registry() -> None:
@@ -248,6 +250,8 @@ def override_template_heuristics(
         override_heuristic_class = _Base
     original_entries: dict[tuple[str | None, ...], Any] = {}
     new_keys: list[tuple[str | None, ...]] = []
+    # Clears the shared cache (both template and codegen instances).
+    # Codegen instances are stateless so re-creation is cheap.
     _CACHE.clear()
     try:
         for template_name, op_name in template_op_pairs:
@@ -263,4 +267,5 @@ def override_template_heuristics(
             _REGISTRY.pop(key, None)
             if key in original_entries:
                 _REGISTRY[key] = original_entries[key]
+        # Same shared-cache clear on exit; see entry comment above.
         _CACHE.clear()
