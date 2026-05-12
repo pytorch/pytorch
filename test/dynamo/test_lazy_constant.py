@@ -130,6 +130,41 @@ class LazyConstantVariableTests(TestCase):
         result = opt_fn(5)
         self.assertEqual(result, expected)
 
+    def test_dict_attr_swap_restore_in_hop(self):
+        """Swapping and restoring a dict attribute inside a HOP must not
+        graph-break.
+
+        The original dict has lazy constant values, so is_python_constant()
+        returns False.  snapshot_attr_mutation must use try_peek_constant()
+        to read the original value without realizing the lazy entries.
+        """
+
+        class Config:
+            def __init__(self):
+                self.options = {"mode": "fast", "level": 3}
+
+        cfg = Config()
+
+        class SwapRestore(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                old = cfg.options
+                cfg.options = {"mode": "slow", "level": 1}
+                cfg.options = old
+                return grad.clone()
+
+        def fn(x):
+            return SwapRestore.apply(x).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        out.backward()
+        self.assertEqual(x.grad.shape, x.shape)
+
     def test_slice_indices_unspecialized_ints(self):
         """Test that slice indices work with unspecialized ints.
 
