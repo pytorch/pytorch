@@ -852,6 +852,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             if (
                 width <= contiguous_width
                 and V.graph.sizevars.statically_known_multiple_of(start_expr, width)
+                and V.graph.sizevars.statically_known_geq(start_expr, 0)
             ):
                 return width
         return None
@@ -865,7 +866,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
         if isinstance(index_var, int | sympy.Integer):
+            if wrap_neg and index_var < 0:
+                return V.graph.sizevars.simplify(sympy.Integer(index_var) + size)
             return sympy.Integer(index_var)
+        if (
+            wrap_neg
+            and isinstance(index_var, CuteDSLCSEVariable)
+            and index_var.index_expr is not None
+            and not V.graph.sizevars.statically_known_geq(index_var.index_expr, 0)
+        ):
+            wrapped = self.kernel.cse.newvar(dtype=index_var.dtype)
+            size_expr = self.kernel.kexpr(size)
+            self.kernel.body.writeline(
+                f"{wrapped} = cute.where("
+                f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
+            )
+            return sympy_index_symbol(str(wrapped))
         symbol = sympy_index_symbol(self._cse_source_name(index_var) or str(index_var))
         if (
             isinstance(index_var, CuteDSLCSEVariable)

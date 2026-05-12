@@ -134,6 +134,8 @@ def _max_direct_aux_load_vec_size(
     if not V.graph.sizevars.statically_known_equals(strides[-1], 1):
         return None
 
+    # FlashAttention's score_mod loop groups consecutive flattened score entries.
+    # On SM100, those entries have consecutive KV coordinates for a fixed Q row.
     for vec_size in (8, 4, 2):
         if not V.graph.sizevars.statically_known_multiple_of(sizes[-1], vec_size):
             continue
@@ -144,6 +146,7 @@ def _max_direct_aux_load_vec_size(
             lane_contiguity.contiguous_width is not None
             and lane_contiguity.contiguous_width >= vec_size
             and _lane_group_start_is_aligned(last_expr, kv_idx, vec_size)
+            and _lane_group_start_is_nonnegative(last_expr, kv_idx)
         ):
             return vec_size
     return None
@@ -196,6 +199,11 @@ def _lane_group_start_is_aligned(
 ) -> bool:
     start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
     return V.graph.sizevars.statically_known_multiple_of(start_expr, vec_size)
+
+
+def _lane_group_start_is_nonnegative(expr: sympy.Expr, lane_var: sympy.Symbol) -> bool:
+    start_expr = V.graph.sizevars.simplify(expr.xreplace({lane_var: sympy.Integer(0)}))
+    return V.graph.sizevars.statically_known_geq(start_expr, 0)
 
 
 def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:

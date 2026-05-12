@@ -1196,6 +1196,7 @@ class TestFlexFlash(InductorTestCase):
             (130, "kv", 2, True),
             (128, "kv_plus_0", 8, True),
             (128, "kv_plus_8", 8, True),
+            (128, "kv_minus_8", 1, False),
             (128, "kv_mul_1", 8, True),
             (128, "kv_mod_4", 4, True),
             (128, "kv_stride_mix", 4, False),
@@ -1233,6 +1234,8 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias[kv_idx + 0]
                         case "kv_plus_8":
                             return score + bias[kv_idx + 8]
+                        case "kv_minus_8":
+                            return score + bias[kv_idx - 8]
                         case "kv_mul_1":
                             return score + bias[kv_idx * 1]
                         case "kv_mod_4":
@@ -1275,6 +1278,7 @@ class TestFlexFlash(InductorTestCase):
             ("kv", 8, True),
             ("kv_mod_4", 4, True),
             ("kv_plus_8", 8, True),
+            ("kv_minus_8", 1, False),
             ("kv_floor_div_2", 1, False),
             ("q", 8, False),
             ("q_kv", 8, True),
@@ -1310,6 +1314,8 @@ class TestFlexFlash(InductorTestCase):
                             return score + bias_mod[kv_idx % 4]
                         case "kv_plus_8":
                             return score + bias_offset[kv_idx + 8]
+                        case "kv_minus_8":
+                            return score + bias_kv[kv_idx - 8]
                         case "kv_floor_div_2":
                             return score + bias_floor[kv_idx // 2]
                         case "q":
