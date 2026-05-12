@@ -1,8 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
-import json
-import math
 import os
 import unittest
 from itertools import product
@@ -53,7 +51,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
-    TemporaryFileName,
     decorateIf,
 )
 
@@ -97,16 +94,6 @@ def rocm_group_gemm_ck_env(value):
         else:
             os.environ[var] = old
 
-
-@contextlib.contextmanager
-def sm_carveout(value: int | None):
-    torch._C._set_sm_carveout_experimental(value)
-    try:
-        yield
-    finally:
-        torch._C._set_sm_carveout_experimental(None)
-
-
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -115,82 +102,6 @@ class TestMatmulCuda(InductorTestCase):
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
-
-    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
-    def test_legacy_cublas_honors_sm_carveout(self, device):
-        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12:
-            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+")
-
-        torch._C._set_sm_carveout_experimental(None)
-        dtype = torch.float16
-        sm_count = torch.cuda.get_device_properties().multi_processor_count
-        carveout = max(1, sm_count // 2)
-        a = torch.empty(8192, 8192, device=device, dtype=dtype)
-        b = torch.empty(8192, 8192, device=device, dtype=dtype)
-
-        def mm_grid_size(carveout_value: int | None) -> int:
-            with sm_carveout(carveout_value), TemporaryFileName(mode="w+") as fname:
-                with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                    torch.mm(a, b)
-                prof.export_chrome_trace(fname)
-                with open(fname) as trace_file:
-                    total_grid_size = 0
-                    kernel_count = 0
-                    for evt in json.load(trace_file)["traceEvents"]:
-                        grid = evt.get("args", {}).get("grid")
-                        if evt.get("cat", "") == "kernel" and grid:
-                            total_grid_size += math.prod(grid)
-                            kernel_count += 1
-
-            self.assertNotEqual(0, kernel_count)
-            return total_grid_size
-
-        with blas_library_context("cublas"):
-            torch.mm(a, b)
-            torch.cuda.synchronize()
-
-            no_carveout = mm_grid_size(None)
-            carveout_0 = mm_grid_size(0)
-            carved_out = mm_grid_size(carveout)
-            no_carveout_again = mm_grid_size(None)
-
-        self.assertEqual(no_carveout, carveout_0)
-        self.assertNotEqual(no_carveout, carved_out)
-        self.assertEqual(no_carveout, no_carveout_again)
-
-    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
-    def test_sm_carveout_invalid_value_throws(self, device):
-        sm_count = torch.cuda.get_device_properties().multi_processor_count
-        a = torch.empty(64, 64, device=device, dtype=torch.float16)
-        b = torch.empty(64, 64, device=device, dtype=torch.float16)
-
-        with blas_library_context("cublas"):
-            with sm_carveout(sm_count):
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    r"SM carveout must be between 0 and \d+",
-                    torch.mm,
-                    a,
-                    b,
-                )
-
-            with sm_carveout(sm_count + 1):
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    r"SM carveout must be between 0 and \d+",
-                    torch.mm,
-                    a,
-                    b,
-                )
-
-            with sm_carveout(-1):
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    r"SM carveout must be between 0 and \d+",
-                    torch.mm,
-                    a,
-                    b,
-                )
 
     def cublas_addmm(
         self,
