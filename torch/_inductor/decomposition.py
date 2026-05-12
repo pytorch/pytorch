@@ -358,7 +358,11 @@ def bmm(
 
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
-    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
+    if config.coordinate_descent_tuning and self.device.type not in [
+        "cpu",
+        "mps",
+        "mtia",
+    ]:
         if statically_known_true(self.shape[1] == 1) or statically_known_true(
             batch2.shape[2] == 1
         ):
@@ -385,7 +389,7 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    if mat1.device.type not in ["cpu", "mps"]:
+    if mat1.device.type not in ["cpu", "mps", "mtia"]:
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
