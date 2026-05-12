@@ -25,7 +25,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch.fx.experimental._backward_state import BackwardState
 
-from .. import compiled_autograd
+from .. import compiled_autograd, config
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
@@ -162,6 +162,25 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
     ) -> "BackwardHookVariable":
+        if config.lazy_compile_backward_hooks:
+            module_obj = module.get_real_python_backed_value()
+            hooks = tuple(user_hooks.as_python_constant())
+            pre_hooks = tuple(user_pre_hooks.as_python_constant())
+            hook_id = torch.utils.hooks.register_lazy_backward_hook(
+                module_obj, hooks, pre_hooks
+            )
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                torch.utils.hooks.make_lazy_backward_hook,
+                (hook_id,),
+                {},
+            )
+            proxy.node.meta["example_value"] = torch.utils.hooks.BackwardHook(
+                None, (), ()
+            )
+            return BackwardHookVariable(proxy, module, user_hooks, user_pre_hooks)
+
         if not compiled_autograd.compiled_autograd_enabled:
             unimplemented(
                 gb_type="Module-level backwards hooks require compiled autograd.",

@@ -39,6 +39,116 @@ class ClassWithVal:
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(lazy_compile_backward_hooks=True)
+    def test_lazy_compile_module_backward_hooks(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() * 2
+
+        def backward_pre_hook(mod, grad_output):
+            return (grad_output[0] * 2,)
+
+        def backward_hook(mod, grad_input, grad_output):
+            return (grad_input[0] * 3,)
+
+        def make_fn():
+            mod = Mod()
+            mod.register_full_backward_pre_hook(backward_pre_hook)
+            mod.register_full_backward_hook(backward_hook)
+
+            def fn(x):
+                return mod(x).cos()
+
+            return fn
+
+        x_ref = torch.randn(4, requires_grad=True)
+        ref = make_fn()(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(make_fn(), backend=backend, fullgraph=True)(x)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertTrue(
+            any(
+                node.target is torch.utils.hooks.make_lazy_backward_hook
+                for node in backend.graphs[0].graph.nodes
+            )
+        )
+
+    @torch._dynamo.config.patch(lazy_compile_backward_hooks=True)
+    def test_lazy_compile_module_backward_hooks_multi_input(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x * y + z.sin()
+
+        def backward_hook(mod, grad_input, grad_output):
+            return (
+                grad_input[0] + 1,
+                grad_input[1] * 2,
+                grad_input[2] - 3,
+            )
+
+        def make_fn():
+            mod = Mod()
+            mod.register_full_backward_hook(backward_hook)
+
+            def fn(x, y, z):
+                return mod(x, y, z).cos()
+
+            return fn
+
+        ref_inputs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        ref = make_fn()(*ref_inputs)
+        ref.sum().backward()
+
+        inputs = [x.detach().clone().requires_grad_(True) for x in ref_inputs]
+        backend = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(make_fn(), backend=backend, fullgraph=True)(*inputs)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        for actual, expected in zip(inputs, ref_inputs, strict=True):
+            self.assertEqual(actual.grad, expected.grad)
+        self.assertTrue(
+            any(
+                node.target is torch.utils.hooks.make_lazy_backward_hook
+                for node in backend.graphs[0].graph.nodes
+            )
+        )
+
+    @torch._dynamo.config.patch(lazy_compile_backward_hooks=True)
+    def test_lazy_compile_module_backward_hooks_use_grad_input_and_output(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() * 2
+
+        def backward_hook(mod, grad_input, grad_output):
+            return (grad_input[0] + grad_output[0].sin() * 3,)
+
+        def make_fn():
+            mod = Mod()
+            mod.register_full_backward_hook(backward_hook)
+
+            def fn(x):
+                return mod(x).cos()
+
+            return fn
+
+        x_ref = torch.randn(4, requires_grad=True)
+        ref = make_fn()(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        res = torch.compile(make_fn(), backend="aot_eager", fullgraph=True)(x)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
     def test_tensor_only_register_hook_in_graph_lambda(self):
         def fn(x):
             x.register_hook(lambda grad: grad * 2)
