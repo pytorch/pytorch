@@ -85,7 +85,7 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
-    def test_fusable_read_and_write_broadcast_split(self):
+    def test_fusable_read_and_write_broadcast_split_requires_index_equivalence(self):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
 
@@ -95,16 +95,19 @@ class TestScheduler(TestCase):
 
         write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
         graph = Mock(sizevars=SizeVarAllocator())
+        broadcast_read = MemoryDep(
+            "buf",
+            32 * d0 + FloorDiv(d1, 128),
+            (d0, d1),
+            (128, 4096),
+        )
         with V.set_graph_handler(graph):
+            self.assertFalse(scheduler.fusable_read_and_write(broadcast_read, write))
             self.assertTrue(
                 scheduler.fusable_read_and_write(
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128),
-                        (d0, d1),
-                        (128, 4096),
-                    ),
+                    broadcast_read,
                     write,
+                    allow_index_equivalence=True,
                 )
             )
             self.assertFalse(
@@ -116,6 +119,7 @@ class TestScheduler(TestCase):
                         (128, 4096),
                     ),
                     write,
+                    allow_index_equivalence=True,
                 )
             )
 
