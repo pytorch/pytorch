@@ -10,11 +10,9 @@
 
 # torch.sparse
 
-```{eval-rst}
-.. warning::
-
-  The PyTorch API of sparse tensors is in beta and may change in the near future.
-  We highly welcome feature requests, bug reports and general suggestions as GitHub issues.
+```{warning}
+The PyTorch API of sparse tensors is in beta and may change in the near future.
+We highly welcome feature requests, bug reports and general suggestions as GitHub issues.
 ```
 
 ## Why and when to use sparsity
@@ -175,10 +173,8 @@ any given model.
 
 ## Sparse Semi-Structured Tensors
 
-```{eval-rst}
-.. warning::
-
-   Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
+```{warning}
+Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
 ```
 
 Semi-Structured sparsity is a sparse data layout that was first introduced in NVIDIA's Ampere architecture. It is also referred to as **fine-grained structured sparsity** or **2:4 structured sparsity**.
@@ -193,30 +189,28 @@ We can also store the tensor in it's compressed form inside the subclass to redu
 
 In this compressed form, the sparse tensor is stored by retaining only the *specified* elements and some metadata, which encodes the mask.
 
-```{eval-rst}
-.. note::
-    The specified elements and metadata mask of a semi-structured sparse tensor are stored together in a single
-    flat compressed tensor. They are appended to each other to form a contiguous chunk of memory.
+```{note}
+The specified elements and metadata mask of a semi-structured sparse tensor are stored together in a single
+flat compressed tensor. They are appended to each other to form a contiguous chunk of memory.
 
-    compressed tensor = [ specified elements of original tensor |   metadata_mask ]
+compressed tensor = [ specified elements of original tensor |   metadata_mask ]
 
-    For an original tensor of size `(r, c)` we expect the first `m * k // 2` elements to be the kept elements
-    and the rest of the tensor is metadata.
+For an original tensor of size `(r, c)` we expect the first `m * k // 2` elements to be the kept elements
+and the rest of the tensor is metadata.
 
-    In order to make it easier for the user to view the specified elements
-    and mask, one can use ``.indices()`` and ``.values()`` to access the mask and specified elements respectively.
+In order to make it easier for the user to view the specified elements
+and mask, one can use `.indices()` and `.values()` to access the mask and specified elements respectively.
 
 
-    - ``.values()`` returns the specified elements in a tensor of size `(r, c//2)` and with the same dtype as the dense matrix.
+- `.values()` returns the specified elements in a tensor of size `(r, c//2)` and with the same dtype as the dense matrix.
 
-    - ``.indices()`` returns the metadata_mask in a tensor of size `(r, c//2 )` and with element type ``torch.int16`` if dtype is torch.float16 or torch.bfloat16, and element type ``torch.int32`` if dtype is torch.int8.
+- `.indices()` returns the metadata_mask in a tensor of size `(r, c//2 )` and with element type `torch.int16` if dtype is torch.float16 or torch.bfloat16, and element type `torch.int32` if dtype is torch.int8.
 ```
 
 For 2:4 sparse tensors, the metadata overhead is minor - just 2 bits per specified element.
 
-```{eval-rst}
-.. note::
-  It's important to note that ``torch.float32`` is only supported for 1:2 sparsity. Therefore, it does not follow the same formula as above.
+```{note}
+It's important to note that `torch.float32` is only supported for 1:2 sparsity. Therefore, it does not follow the same formula as above.
 ```
 
 Here, we break down how to calculate the compression ratio ( size dense / size sparse) of a 2:4 sparse tensor.
@@ -358,22 +352,20 @@ of element indices and the corresponding values. In particular,
 where `ndim` is the dimensionality of the tensor and `nse` is the
 number of specified elements.
 
-```{eval-rst}
-.. note::
+```{note}
+The memory consumption of a sparse COO tensor is at least
+`(ndim * 8 + <size of element type in bytes>) * nse` bytes (plus a constant
+overhead from storing other tensor data).
 
-   The memory consumption of a sparse COO tensor is at least ``(ndim *
-   8 + <size of element type in bytes>) * nse`` bytes (plus a constant
-   overhead from storing other tensor data).
+The memory consumption of a strided tensor is at least
+`product(<tensor shape>) * <size of element type in bytes>`.
 
-   The memory consumption of a strided tensor is at least
-   ``product(<tensor shape>) * <size of element type in bytes>``.
-
-   For example, the memory consumption of a 10 000 x 10 000 tensor
-   with 100 000 non-zero 32-bit floating point numbers is at least
-   ``(2 * 8 + 4) * 100 000 = 2 000 000`` bytes when using COO tensor
-   layout and ``10 000 * 10 000 * 4 = 400 000 000`` bytes when using
-   the default strided tensor layout. Notice the 200 fold memory
-   saving from using the COO storage format.
+For example, the memory consumption of a 10 000 x 10 000 tensor
+with 100 000 non-zero 32-bit floating point numbers is at least
+`(2 * 8 + 4) * 100 000 = 2 000 000` bytes when using COO tensor
+layout and `10 000 * 10 000 * 4 = 400 000 000` bytes when using
+the default strided tensor layout. Notice the 200 fold memory
+saving from using the COO storage format.
 ```
 
 ### Construction
@@ -441,12 +433,10 @@ have:
     tensor of size `(nse, dense_dims)` and with an arbitrary integer
     or floating point number element type.
 
-```{eval-rst}
-.. note::
-
-   We use (M + K)-dimensional tensor to denote a N-dimensional sparse
-   hybrid tensor, where M and K are the numbers of sparse and dense
-   dimensions, respectively, such that M + K == N holds.
+```{note}
+We use (M + K)-dimensional tensor to denote a N-dimensional sparse
+hybrid tensor, where M and K are the numbers of sparse and dense
+dimensions, respectively, such that M + K == N holds.
 ```
 
 Suppose we want to create a (2 + 1)-dimensional tensor with the entry
@@ -486,22 +476,18 @@ invariants:
   - `s.values().layout == torch.strided` - values are stored as
     strided tensors.
 
-```{eval-rst}
-.. note::
-
-   Dense dimensions always follow sparse dimensions, that is, mixing
-   of dense and sparse dimensions is not supported.
+```{note}
+Dense dimensions always follow sparse dimensions, that is, mixing
+of dense and sparse dimensions is not supported.
 ```
 
-```{eval-rst}
-.. note::
-
-   To be sure that a constructed sparse tensor has consistent indices,
-   values, and size, the invariant checks can be enabled per tensor
-   creation via ``check_invariants=True`` keyword argument, or
-   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
-   context manager instance. By default, the sparse tensor invariants
-   checks are disabled.
+```{note}
+To be sure that a constructed sparse tensor has consistent indices,
+values, and size, the invariant checks can be enabled per tensor
+creation via `check_invariants=True` keyword argument, or
+globally using {class}`torch.sparse.check_sparse_tensor_invariants`
+context manager instance. By default, the sparse tensor invariants
+checks are disabled.
 ```
 
 (sparse-uncoalesced-coo-docs)=
@@ -538,18 +524,16 @@ sparse tensor with the following properties:
 - the indices are sorted in lexicographical order,
 - {meth}`torch.Tensor.is_coalesced()` returns `True`.
 
-```{eval-rst}
-.. note::
+```{note}
+For the most part, you shouldn't have to care whether or not a
+sparse tensor is coalesced or not, as most operations will work
+identically given a sparse coalesced or uncoalesced tensor.
 
-  For the most part, you shouldn't have to care whether or not a
-  sparse tensor is coalesced or not, as most operations will work
-  identically given a sparse coalesced or uncoalesced tensor.
+However, some operations can be implemented more efficiently on
+uncoalesced tensors, and some on coalesced tensors.
 
-  However, some operations can be implemented more efficiently on
-  uncoalesced tensors, and some on coalesced tensors.
-
-  For instance, addition of sparse COO tensors is implemented by
-  simply concatenating the indices and values tensors:
+For instance, addition of sparse COO tensors is implemented by
+simply concatenating the indices and values tensors:
 
     >>> a = torch.sparse_coo_tensor([[1, 1]], [5, 6], (2,))
     >>> b = torch.sparse_coo_tensor([[0, 0]], [7, 8], (2,))
@@ -558,13 +542,13 @@ sparse tensor with the following properties:
            values=tensor([7, 8, 5, 6]),
            size=(2,), nnz=4, layout=torch.sparse_coo)
 
-  If you repeatedly perform an operation that can produce duplicate
-  entries (e.g., :func:`torch.Tensor.add`), you should occasionally
-  coalesce your sparse tensors to prevent them from growing too large.
+If you repeatedly perform an operation that can produce duplicate
+entries (e.g., {func}`torch.Tensor.add`), you should occasionally
+coalesce your sparse tensors to prevent them from growing too large.
 
-  On the other hand, the lexicographical ordering of indices can be
-  advantageous for implementing algorithms that involve many element
-  selection operations, such as slicing or matrix products.
+On the other hand, the lexicographical ordering of indices can be
+advantageous for implementing algorithms that involve many element
+selection operations, such as slicing or matrix products.
 ```
 
 ### Working with sparse COO tensors
@@ -600,28 +584,27 @@ If `s` is a sparse COO tensor then its COO format data can be
 acquired using methods {meth}`torch.Tensor.indices()` and
 {meth}`torch.Tensor.values()`.
 
-```{eval-rst}
-.. note::
-
-  Currently, one can acquire the COO format data only when the tensor
-  instance is coalesced:
+```{note}
+Currently, one can acquire the COO format data only when the tensor
+instance is coalesced:
 
     >>> s.indices()
     RuntimeError: Cannot get indices on an uncoalesced tensor, please call .coalesce() first
 
-  For acquiring the COO format data of an uncoalesced tensor, use
-  :func:`torch.Tensor._values()` and :func:`torch.Tensor._indices()`:
+For acquiring the COO format data of an uncoalesced tensor, use
+{func}`torch.Tensor._values()` and {func}`torch.Tensor._indices()`:
 
     >>> s._indices()
     tensor([[0, 1, 1],
             [2, 0, 2]])
 
-  .. See https://github.com/pytorch/pytorch/pull/45695 for a new API.
+% See https://github.com/pytorch/pytorch/pull/45695 for a new API.
+```
 
-  .. warning::
-    Calling :meth:`torch.Tensor._values()` will return a *detached* tensor.
-    To track gradients, :meth:`torch.Tensor.coalesce().values()` must be
-    used instead.
+```{warning}
+Calling {meth}`torch.Tensor._values()` will return a *detached* tensor.
+To track gradients, {meth}`torch.Tensor.coalesce().values()` must be
+used instead.
 ```
 
 Constructing a new sparse COO tensor results a tensor that is not
@@ -686,64 +669,56 @@ multi-dimensional tensor values, and storing sparse tensor values in
 dense blocks.
 
 
-```{eval-rst}
-.. note::
-
-   We use (B + M + K)-dimensional tensor to denote a N-dimensional
-   sparse compressed hybrid tensor, where B, M, and K are the numbers
-   of batch, sparse, and dense dimensions, respectively, such that
-   ``B + M + K == N`` holds. The number of sparse dimensions for
-   sparse compressed tensors is always two, ``M == 2``.
+```{note}
+We use (B + M + K)-dimensional tensor to denote a N-dimensional
+sparse compressed hybrid tensor, where B, M, and K are the numbers
+of batch, sparse, and dense dimensions, respectively, such that
+`B + M + K == N` holds. The number of sparse dimensions for
+sparse compressed tensors is always two, `M == 2`.
 ```
 
-```{eval-rst}
-.. note::
+```{note}
+We say that an indices tensor `compressed_indices` uses CSR
+encoding if the following invariants are satisfied:
 
-   We say that an indices tensor ``compressed_indices`` uses CSR
-   encoding if the following invariants are satisfied:
+- `compressed_indices` is a contiguous strided 32 or 64 bit
+  integer tensor
+- `compressed_indices` shape is `(*batchsize, compressed_dim_size + 1)` where `compressed_dim_size` is the
+  number of compressed dimensions (e.g. rows or columns)
+- `compressed_indices[..., 0] == 0` where `...` denotes batch
+  indices
+- `compressed_indices[..., compressed_dim_size] == nse` where
+  `nse` is the number of specified elements
+- `0 <= compressed_indices[..., i] - compressed_indices[..., i - 1] <= plain_dim_size` for `i=1, ..., compressed_dim_size`,
+  where `plain_dim_size` is the number of plain dimensions
+  (orthogonal to compressed dimensions, e.g. columns or rows).
 
-   - ``compressed_indices`` is a contiguous strided 32 or 64 bit
-     integer tensor
-   - ``compressed_indices`` shape is ``(*batchsize,
-     compressed_dim_size + 1)`` where ``compressed_dim_size`` is the
-     number of compressed dimensions (e.g. rows or columns)
-   - ``compressed_indices[..., 0] == 0`` where ``...`` denotes batch
-     indices
-   - ``compressed_indices[..., compressed_dim_size] == nse`` where
-     ``nse`` is the number of specified elements
-   - ``0 <= compressed_indices[..., i] - compressed_indices[..., i -
-     1] <= plain_dim_size`` for ``i=1, ..., compressed_dim_size``,
-     where ``plain_dim_size`` is the number of plain dimensions
-     (orthogonal to compressed dimensions, e.g. columns or rows).
-
-   To be sure that a constructed sparse tensor has consistent indices,
-   values, and size, the invariant checks can be enabled per tensor
-   creation via ``check_invariants=True`` keyword argument, or
-   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
-   context manager instance. By default, the sparse tensor invariants
-   checks are disabled.
+To be sure that a constructed sparse tensor has consistent indices,
+values, and size, the invariant checks can be enabled per tensor
+creation via `check_invariants=True` keyword argument, or
+globally using {class}`torch.sparse.check_sparse_tensor_invariants`
+context manager instance. By default, the sparse tensor invariants
+checks are disabled.
 ```
 
-```{eval-rst}
-.. note::
-
-   The generalization of sparse compressed layouts to N-dimensional
-   tensors can lead to some confusion regarding the count of specified
-   elements. When a sparse compressed tensor contains batch dimensions
-   the number of specified elements will correspond to the number of such
-   elements per-batch. When a sparse compressed tensor has dense dimensions
-   the element considered is now the K-dimensional array. Also for block
-   sparse compressed layouts the 2-D block is considered as the element
-   being specified.  Take as an example a 3-dimensional block sparse
-   tensor, with one batch dimension of length ``b``, and a block
-   shape of ``p, q``. If this tensor has ``n`` specified elements, then
-   in fact we have ``n`` blocks specified per batch. This tensor would
-   have ``values`` with shape ``(b, n, p, q)``. This interpretation of the
-   number of specified elements comes from all sparse compressed layouts
-   being derived from the compression of a 2-dimensional matrix. Batch
-   dimensions are treated as stacking of sparse matrices, dense dimensions
-   change the meaning of the element from a simple scalar value to an
-   array with its own dimensions.
+```{note}
+The generalization of sparse compressed layouts to N-dimensional
+tensors can lead to some confusion regarding the count of specified
+elements. When a sparse compressed tensor contains batch dimensions
+the number of specified elements will correspond to the number of such
+elements per-batch. When a sparse compressed tensor has dense dimensions
+the element considered is now the K-dimensional array. Also for block
+sparse compressed layouts the 2-D block is considered as the element
+being specified.  Take as an example a 3-dimensional block sparse
+tensor, with one batch dimension of length `b`, and a block
+shape of `p, q`. If this tensor has `n` specified elements, then
+in fact we have `n` blocks specified per batch. This tensor would
+have `values` with shape `(b, n, p, q)`. This interpretation of the
+number of specified elements comes from all sparse compressed layouts
+being derived from the compression of a 2-dimensional matrix. Batch
+dimensions are treated as stacking of sparse matrices, dense dimensions
+change the meaning of the element from a simple scalar value to an
+array with its own dimensions.
 ```
 
 (sparse-csr-docs)=
@@ -772,14 +747,12 @@ consists of three 1-D tensors: `crow_indices`, `col_indices` and
   - The `values` tensor contains the values of the CSR tensor
     elements. This is a 1-D tensor of size `nse`.
 
-```{eval-rst}
-.. note::
-
-   The index tensors ``crow_indices`` and ``col_indices`` should have
-   element type either ``torch.int64`` (default) or
-   ``torch.int32``. If you want to use MKL-enabled matrix operations,
-   use ``torch.int32``. This is as a result of the default linking of
-   pytorch being with MKL LP64, which uses 32 bit integer indexing.
+```{note}
+The index tensors `crow_indices` and `col_indices` should have
+element type either `torch.int64` (default) or
+`torch.int32`. If you want to use MKL-enabled matrix operations,
+use `torch.int32`. This is as a result of the default linking of
+pytorch being with MKL LP64, which uses 32 bit integer indexing.
 ```
 
 In the general case, the (B + 2 + K)-dimensional sparse CSR tensor
@@ -797,40 +770,32 @@ while the shape of the sparse CSR tensor is `(*batchsize, nrows,
 ncols, *densesize)` where `len(batchsize) == B` and
 `len(densesize) == K`.
 
-```{eval-rst}
-.. note::
-
-   The batches of sparse CSR tensors are dependent: the number of
-   specified elements in all batches must be the same. This somewhat
-   artificial constraint allows efficient storage of the indices of
-   different CSR batches.
+```{note}
+The batches of sparse CSR tensors are dependent: the number of
+specified elements in all batches must be the same. This somewhat
+artificial constraint allows efficient storage of the indices of
+different CSR batches.
 ```
 
-```{eval-rst}
-.. note::
-
-   The number of sparse and dense dimensions can be acquired using
-   :meth:`torch.Tensor.sparse_dim` and :meth:`torch.Tensor.dense_dim`
-   methods. The batch dimensions can be computed from the tensor
-   shape: ``batchsize = tensor.shape[:-tensor.sparse_dim() -
-   tensor.dense_dim()]``.
+```{note}
+The number of sparse and dense dimensions can be acquired using
+{meth}`torch.Tensor.sparse_dim` and {meth}`torch.Tensor.dense_dim`
+methods. The batch dimensions can be computed from the tensor
+shape: `batchsize = tensor.shape[:-tensor.sparse_dim() - tensor.dense_dim()]`.
 ```
 
-```{eval-rst}
-.. note::
+```{note}
+The memory consumption of a sparse CSR tensor is at least
+`(nrows * 8 + (8 + <size of element type in bytes> * prod(densesize)) * nse) * prod(batchsize)` bytes (plus a constant
+overhead from storing other tensor data).
 
-   The memory consumption of a sparse CSR tensor is at least
-   ``(nrows * 8 + (8 + <size of element type in bytes> *
-   prod(densesize)) * nse) * prod(batchsize)`` bytes (plus a constant
-   overhead from storing other tensor data).
-
-   With the same example data of :ref:`the note in sparse COO format
-   introduction<sparse-coo-docs>`, the memory consumption of a 10 000
-   x 10 000 tensor with 100 000 non-zero 32-bit floating point numbers
-   is at least ``(10000 * 8 + (8 + 4 * 1) * 100 000) * 1 = 1 280 000``
-   bytes when using CSR tensor layout. Notice the 1.6 and 310 fold
-   savings from using CSR storage format compared to using the COO and
-   strided formats, respectively.
+With the same example data of {ref}`the note in sparse COO format
+introduction<sparse-coo-docs>`, the memory consumption of a 10 000
+x 10 000 tensor with 100 000 non-zero 32-bit floating point numbers
+is at least `(10000 * 8 + (8 + 4 * 1) * 100 000) * 1 = 1 280 000`
+bytes when using CSR tensor layout. Notice the 1.6 and 310 fold
+savings from using CSR storage format compared to using the COO and
+strided formats, respectively.
 ```
 
 #### Construction of CSR tensors
@@ -855,14 +820,12 @@ argument is optional and will be deduced from the `crow_indices` and
     tensor([[1., 2.],
             [3., 4.]], dtype=torch.float64)
 
-```{eval-rst}
-.. note::
-
-   The values of sparse dimensions in deduced ``size`` is computed
-   from the size of ``crow_indices`` and the maximal index value in
-   ``col_indices``. If the number of columns needs to be larger than
-   in the deduced ``size`` then the ``size`` argument must be
-   specified explicitly.
+```{note}
+The values of sparse dimensions in deduced `size` is computed
+from the size of `crow_indices` and the maximal index value in
+`col_indices`. If the number of columns needs to be larger than
+in the deduced `size` then the `size` argument must be
+specified explicitly.
 ```
 
 The simplest way of constructing a 2-D sparse CSR tensor from a
@@ -898,12 +861,10 @@ CSC format for storage of 2 dimensional tensors with an extension to
 supporting batches of sparse CSC tensors and values being
 multi-dimensional tensors.
 
-```{eval-rst}
-.. note::
-
-   Sparse CSC tensor is essentially a transpose of the sparse CSR
-   tensor when the transposition is about swapping the sparse
-   dimensions.
+```{note}
+Sparse CSC tensor is essentially a transpose of the sparse CSR
+tensor when the transposition is about swapping the sparse
+dimensions.
 ```
 
 Similarly to {ref}`sparse CSR tensors <sparse-csr-docs>`, a sparse CSC
@@ -946,11 +907,9 @@ argument is optional and will be deduced from the `row_indices` and
     tensor([[1., 3.],
             [2., 4.]], dtype=torch.float64)
 
-```{eval-rst}
-.. note::
-
-   The sparse CSC tensor constructor function has the compressed
-   column indices argument before the row indices argument.
+```{note}
+The sparse CSC tensor constructor function has the compressed
+column indices argument before the row indices argument.
 ```
 
 The (0 + 2 + 0)-dimensional sparse CSC tensors can be constructed from
@@ -1199,13 +1158,11 @@ backward with respect to sparse matrix argument. All PyTorch operations,
 except {func}`torch.smm`, support backward with respect to strided
 matrix arguments.
 
-```{eval-rst}
-.. note::
-
-   Currently, PyTorch does not support matrix multiplication with the
-   layout signature ``M[strided] @ M[sparse_coo]``. However,
-   applications can still compute this using the matrix relation ``D @
-   S == (S.t() @ D.t()).t()``.
+```{note}
+Currently, PyTorch does not support matrix multiplication with the
+layout signature `M[strided] @ M[sparse_coo]`. However,
+applications can still compute this using the matrix relation
+`D @ S == (S.t() @ D.t()).t()`.
 ```
 
 ### Tensor methods and sparse
