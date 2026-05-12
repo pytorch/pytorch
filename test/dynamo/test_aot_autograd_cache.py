@@ -3995,7 +3995,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         xnumel = 256
         inp = torch.randn(xnumel, device=GPU_TYPE)
         out = torch.empty_like(inp)
-        autotuner.run(inp, out, xnumel, stream=torch.accelerator.current_stream())
+        current_stream = torch.accelerator.current_stream()
+        stream = next(filter(lambda x:x,
+                             (getattr(current_stream, 'cuda_stream', None),
+                             getattr(current_stream, 'sycl_queue', None))), None)
+        autotuner.run(inp, out, xnumel, stream=stream)
         self.assertEqual(out, inp + 1.0)
 
         # Inject a launcher key into benchmark_failure_reasons — this is how
