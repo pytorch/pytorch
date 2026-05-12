@@ -196,18 +196,29 @@ def get_device_information(device_type: str) -> dict[str, str]:
     return metadata
 
 
+from torch.utils._functools import prefetchable_cache as torch_key_cache
+
+
+@torch_key_cache
+def triton_key() -> str | None:
+    from torch._inductor.runtime.triton_compat import (
+        HAS_TRITON,
+        triton_key as _triton_key_impl,
+    )
+
+    # Use triton_key instead of triton.__version__ as the version
+    # is not updated with each code change
+    if HAS_TRITON:
+        return _triton_key_impl()
+    return None
+
+
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
-
-        if HAS_TRITON:
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
+        with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
-        else:
-            triton_version = None
 
         try:
             system: dict[str, Any] = {
@@ -879,59 +890,6 @@ def build_code_hash(
         hasher.update(digest)
 
 
-_MISSING = object()
-
-
-def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
-    """
-    Like functools.cache but with a prefetch() method that starts computing
-    the value in a background thread, and a set() method for prepopulating.
-    """
-    _cache: T | object = _MISSING
-    _lock = threading.Lock()
-    _future: Future[T] | None = None
-
-    def wrapper() -> T:
-        nonlocal _cache, _future
-        with _lock:
-            if _cache is not _MISSING:
-                return _cache  # type: ignore[return-value]
-            if _future is not None:
-                _cache = _future.result()
-                _future = None
-                return _cache  # type: ignore[return-value]
-            _cache = func()
-            return _cache  # type: ignore[return-value]
-
-    def set_val(val: T) -> None:
-        nonlocal _cache
-        with _lock:
-            assert _cache is _MISSING
-            _cache = val
-
-    def clear() -> None:
-        nonlocal _cache, _future
-        with _lock:
-            _cache = _MISSING
-            _future = None
-
-    def prefetch() -> None:
-        nonlocal _future
-        from concurrent.futures import ThreadPoolExecutor
-
-        with _lock:
-            if _cache is not _MISSING or _future is not None:
-                return
-            executor = ThreadPoolExecutor(max_workers=1)
-            _future = executor.submit(func)
-            executor.shutdown(wait=False)
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
-    return wrapper
-
-
 @torch_key_cache
 def torch_key() -> bytes:
     """
@@ -1594,7 +1552,7 @@ class GuardedCache(Generic[T]):
             local, remote_cache, key
         ):
             assert hasattr(candidate, "guards_expr")
-            if not candidate.guards_expr:  # type: ignore[attr-defined]
+            if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
                 pickled_content = content
@@ -1605,7 +1563,7 @@ class GuardedCache(Generic[T]):
             # If there's not a cache hit, we don't want the evaluation to
             # affect the current env, e.g., cause the creation of new guards,
             # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
+            hit = bool(evaluate_guards(candidate.guards_expr, hints))
             if hit:
                 graph = candidate
                 pickled_content = content
@@ -3313,7 +3271,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
         result = [torch.tensor([]) if r is None else r for r in result]
         for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
-        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
+        return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)
 
     assert isinstance(result, torch.Tensor), op + " returns a non-tensor"
     return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
@@ -5037,7 +4995,7 @@ class StaticAutotunerFuture(CodeCacheFuture):
             self.static_autotuner.recheck_autotune_cache(
                 reload_kernel_from_src=self.reload_kernel_from_src
             )
-            self.static_autotuner.precompile(  # type: ignore[union-attr]
+            self.static_autotuner.precompile(
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
