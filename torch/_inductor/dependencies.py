@@ -176,6 +176,20 @@ class MemoryDep(Dep):
             self.mode,
         )
 
+    def normalize_without_broadcast(self) -> "MemoryDep":
+        ranges = {
+            var: size
+            for var, size in self.ranges.items()
+            if var in self.index.free_symbols
+        }
+        return MemoryDep(
+            self.name,
+            self.index,
+            tuple(ranges),
+            tuple(ranges.values()),
+            self.mode,
+        ).normalize()
+
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
         r"""
         Used to decide if two MemoryDep does not equal due to different loop orders.

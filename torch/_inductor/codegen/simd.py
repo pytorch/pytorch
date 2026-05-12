@@ -2419,7 +2419,10 @@ class SIMDScheduling(BaseScheduling):
             sn
             for sn, domain in nested_pointwise_domains
             if sn in outer_node.get_nodes()
-            and domain is scheduler.NestedReduction.PointwiseDomain.GROUPED_FULL
+            and (
+                domain
+                is scheduler.NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
+            )
         ]
         outer_grouped_full_pointwise_set = OrderedSet(outer_grouped_full_pointwise)
         outer_codegen_nodes = [
