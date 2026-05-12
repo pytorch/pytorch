@@ -41,6 +41,12 @@ class TestFakePG(TestCase):
         except AssertionError:
             pass
 
+    def test_invalid_rank(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot init process group where rank .* >= world_size"
+        ):
+            dist.init_process_group(backend="fake", rank=3, world_size=2)
+
     def test_all_reduce(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
