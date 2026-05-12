@@ -3,6 +3,7 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
+#ifndef CK_FMHA_BWD_DISABLED
 #include <mha_bwd.h>
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
@@ -453,3 +454,17 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     return { dq, dk, dv, softmax_d, dbias };
 }
 } // namespace pytorch_flash
+#else
+// Stub when backward FMHA is disabled (inference-only CK build)
+#include <ATen/native/transformers/hip/flash_attn/flash_api.h>
+namespace pytorch_flash {
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd_ck(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&,
+    const at::Tensor&, const at::Tensor&, std::optional<at::Tensor>&,
+    std::optional<at::Tensor>&, std::optional<at::Tensor>&, std::optional<at::Tensor>&,
+    bool, std::optional<at::Tensor>&, float, float, bool, int, int, bool,
+    const at::Tensor, const at::Tensor) {
+    TORCH_CHECK(false, "CK FMHA backward is not available in this build");
+}
+} // namespace pytorch_flash
+#endif // CK_FMHA_BWD_DISABLED
