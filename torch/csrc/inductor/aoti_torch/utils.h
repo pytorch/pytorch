@@ -13,6 +13,11 @@
 #include <torch/csrc/shim_exception_state.h>
 #include <optional>
 
+namespace torch::aot_inductor {
+TORCH_API const char* get_last_error();
+TORCH_API void set_last_error(const char* msg);
+} // namespace torch::aot_inductor
+
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)                     \
   try {                                                                     \
     __VA_ARGS__                                                             \

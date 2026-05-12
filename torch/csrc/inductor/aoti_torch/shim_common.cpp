@@ -76,6 +76,18 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 }
 } // namespace
 
+namespace torch::aot_inductor {
+const char* get_last_error() {
+  const auto& error_msg =
+      torch::csrc::shim::details::get_torch_exception_what();
+  return error_msg.empty() ? nullptr : error_msg.c_str();
+}
+
+void set_last_error(const char* msg) {
+  torch::csrc::shim::details::set_torch_exception_what(msg ? msg : "");
+}
+} // namespace torch::aot_inductor
+
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
 #define AOTI_TORCH_DEVICE_TYPE_IMPL(device_str, device_type) \

@@ -152,7 +152,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       get_num_outputs_func_(container_handle_, &num_outputs));
   std::vector<AtenTensorHandle> output_handles(num_outputs);
 
-  torch::csrc::shim::details::set_torch_exception_what("");
+  torch::aot_inductor::set_last_error(nullptr);
   auto run_result = run_func_(
       container_handle_,
       input_handles.data(),
@@ -162,8 +162,8 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
       proxy_executor_handle_);
   if (run_result != AOTI_RUNTIME_SUCCESS) {
-    const auto& err = torch::csrc::shim::details::get_torch_exception_what();
-    if (!err.empty()) {
+    const char* err = torch::aot_inductor::get_last_error();
+    if (err) {
       throw std::runtime_error(err);
     }
     if (get_last_error_func_) {
