@@ -922,29 +922,46 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "Tensor input, "
       "SymInt[] output_split_sizes, "
       "SymInt[] input_split_sizes, "
-      "str group_name) -> Tensor",
+      "Any group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, c10d::all_to_all_single),
-      {at::Tag::pt2_compliant_tag});
+          c10::DispatchKey::CompositeExplicitAutograd,
+          all_to_all_single_dispatch),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
   m.def(
       "reduce_scatter_tensor("
       "Tensor input, "
       "str reduce_op, "
       "int group_size, "
-      "str group_name) -> Tensor",
+      "Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          c10d::reduce_scatter_tensor),
-      {at::Tag::pt2_compliant_tag});
+          [](const at::Tensor& input,
+             std::string reduce_op,
+             int64_t group_size,
+             const c10::IValue& group) {
+            return c10d::reduce_scatter_tensor(
+                input,
+                std::move(reduce_op),
+                group_size,
+                get_process_group(group, "reduce_scatter_tensor"));
+          }),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
   m.def(
       "all_gather_into_tensor("
       "Tensor input, "
       "int group_size, "
-      "str group_name) -> Tensor",
+      "Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          c10d::all_gather_into_tensor),
-      {at::Tag::pt2_compliant_tag});
+          [](const at::Tensor& input,
+             int64_t group_size,
+             const c10::IValue& group) {
+            return c10d::all_gather_into_tensor(
+                input,
+                group_size,
+                get_process_group(group, "all_gather_into_tensor"));
+          }),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 }
 
 // DTensor comm op registry

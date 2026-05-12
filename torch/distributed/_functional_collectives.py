@@ -1229,7 +1229,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         return group.group_name
 
 
-
 @torch.library.custom_op(
     "_c10d_functional::_wrap_tensor_autograd",
     mutates_args=(),
@@ -1518,6 +1517,18 @@ lib_impl.impl(
 lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+# Backward compatibility: register Meta impls for _c10d_functional_autograd ops
+# These ops redirect to _c10d_functional but need their own Meta registration so
+# torch.compile / FakeTensor mode can dispatch them.
+lib_impl_autograd = torch.library.Library("_c10d_functional_autograd", "IMPL")
+lib_impl_autograd.impl(
+    "all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta"
+)
+lib_impl_autograd.impl(
+    "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
+)
+lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 
 # Mark these ops as side effectful so that DCE does not remove communication
 # whose result tensors are ignored by user code.
