@@ -325,6 +325,8 @@ class FxConverter:
         stride: tuple[Any, ...],
         offset: int | sympy.Expr,
     ) -> torch.fx.Node:
+        if isinstance(offset, sympy.Expr):
+            offset = replace_floor_div(offset)
         return self.gm.graph.call_function(
             torch.as_strided,
             args=(
