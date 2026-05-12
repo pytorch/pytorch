@@ -116,7 +116,7 @@
   },
   "torch/_inductor/codegen/wrapper.py": {
     "def PythonWrapperCodegen.benchmark_compiled_module()": 96,
-    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 269,
+    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 297,
     "def PythonWrapperCodegen.generate_example_arg_value()": 84,
     "def user_defined_kernel_grid_fn_code()": 108
   },
