@@ -262,10 +262,13 @@ struct FromImpl<std::optional<T>> {
       return torch::stable::detail::from(std::nullopt);
     }
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+    const StableIValue value = detail::FromImpl<T>::call(
+        val.value(), extension_build_version, is_internal);
+
     StableIValue* ivalue_ptr = nullptr;
     TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&ivalue_ptr));
-    *ivalue_ptr = detail::FromImpl<T>::call(
-        val.value(), extension_build_version, is_internal);
+    *ivalue_ptr = value;
     return torch::stable::detail::from(ivalue_ptr);
 #else
     return torch::stable::detail::from(
