@@ -135,9 +135,10 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = nullptr;
-      TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
-      *sivp = from_ivalue(inner_type, ivalue, extension_build_version);
+      StableIValue value = from_ivalue(inner_type, ivalue, extension_build_version);
+  	  StableIValue* sivp = nullptr;
+      TORCH_ERROR_CODE_CHECK(aoti_torch_new_stable_ivalue(&sivp));
+     *sivp = value;
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
