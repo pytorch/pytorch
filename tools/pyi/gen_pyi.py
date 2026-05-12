@@ -1704,7 +1704,6 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
-            "has_names": [defs("has_names", ["self"], "_bool")],
             "is_contiguous": [
                 defs(
                     "is_contiguous",

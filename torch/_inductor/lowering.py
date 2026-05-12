@@ -3964,14 +3964,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -3998,14 +3996,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])

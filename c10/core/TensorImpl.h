@@ -3111,7 +3111,6 @@ struct TargetTraits<
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    named tensor metadata pointer
 //    version counter pointer
 //    PyObjectSlot
 //    SizesAndStrides size/pointer
