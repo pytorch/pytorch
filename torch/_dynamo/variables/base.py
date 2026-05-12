@@ -1410,7 +1410,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rsub__`` instead of ``__sub__``).
         """
-        return self._nb_slot_not_implemented("nb_subtract_impl", other, reverse=reverse)
+        return variables.ConstantVariable(NotImplemented)
 
     def nb_inplace_subtract_impl(
         self,
@@ -1418,7 +1418,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
-        return self._nb_slot_not_implemented("nb_inplace_subtract", other)
+        return variables.ConstantVariable(NotImplemented)
 
     def __init__(
         self,
