@@ -12,6 +12,30 @@
 
 namespace at::native {
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+static int tma_scatter_add_single_chunk_rows_per_warp(
+    int row_bytes, int warps_per_block, int num_ind) {
+    // Rows <= 512 bytes don't benefit from intra-row pipelining. Let each warp
+    // process multiple rows to increase outstanding TMA ops (~35% win on GB200
+    // for bf16 D=128/256, 500K indices, 100K output rows, uniform distribution).
+    int rows_per_warp = row_bytes <= 512 ? 16 : 1;
+    int num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+    // Require at least 8 blocks per SM to ensure full occupancy before committing
+    // to multi-row. With too few indices the extra rows_per_warp starves SMs;
+    // the loop below halves rows_per_warp until the block count is sufficient.
+    int64_t min_blocks = 8L * num_sms;
+    while (rows_per_warp > 1) {
+        int64_t blocks =
+            at::ceil_div(num_ind, warps_per_block * rows_per_warp);
+        if (blocks >= min_blocks) {
+            break;
+        }
+        rows_per_warp /= 2;
+    }
+    return rows_per_warp;
+}
+#endif
+
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
@@ -104,33 +128,36 @@ __device__ __forceinline__ void wait_group_lt0() {
 
 #endif // !USE_ROCM && __CUDA_ARCH__ >= 900
 
-template <typename scalar_t, typename index_t>
+// multiple_rows_per_warp: compile-time specialization to flatten the nested
+// row/chunk loops into a single loop for each case, avoiding dead loop overhead.
+template <typename scalar_t, typename index_t, bool multiple_rows_per_warp>
 __global__ void tma_scatter_add_kernel(
     scalar_t* __restrict__ self_data,
     const scalar_t* __restrict__ src_data,
     const index_t* __restrict__ idx,
     int num_ind, int D, int64_t self_dim_size,
     int64_t self_stride, int64_t src_stride,
-    int entries_per_block, int chunk_elems) {
+    int chunk_elems, int rows_per_warp) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
 
     extern __shared__ char smem_raw[];
 
-    // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
+    // One warp per row (or multiple rows): lane 0 issues TMA commands.
     constexpr int threads_per_entry = C10_WARP_SIZE;
-    int entry_in_block = threadIdx.x / threads_per_entry;
-    int lane = threadIdx.x - entry_in_block * threads_per_entry;
+    int warp_in_block = threadIdx.x / threads_per_entry;
+    int lane = threadIdx.x - warp_in_block * threads_per_entry;
+    int warps_per_block = blockDim.x / threads_per_entry;
+    int entries_per_block = warps_per_block * rows_per_warp;
 
-    // smem layout: [data region: entries_per_block * 2 * chunk_elems scalars]
-    //              [mbarrier region: entries_per_block * 2 uint64_t, 8-byte aligned]
-    // Mbarrier memory must never alias with data targeted by TMA operations.
+    // smem layout: [data region: warps_per_block * 2 * chunk_elems scalars]
+    //              [mbarrier region: warps_per_block * 2 uint64_t, 8-byte aligned]
     int buf_elems = 2 * chunk_elems;
-    int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
+    int data_region_bytes = warps_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
     int mbar_offset = (data_region_bytes + 7) & ~7;
 
-    scalar_t* buf0 = reinterpret_cast<scalar_t*>(smem_raw) + entry_in_block * buf_elems;
-    uint64_t* mbar0 = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + entry_in_block * 2;
+    scalar_t* buf0 = reinterpret_cast<scalar_t*>(smem_raw) + warp_in_block * buf_elems;
+    uint64_t* mbar0 = reinterpret_cast<uint64_t*>(smem_raw + mbar_offset) + warp_in_block * 2;
     uint64_t* mbar1 = mbar0 + 1;
     uint64_t* mbars[2] = {mbar0, mbar1};
 
@@ -141,10 +168,47 @@ __global__ void tma_scatter_add_kernel(
     __syncwarp();
 
     int mbar_phase[2] = {0, 0};
+    int entry_base = blockIdx.x * entries_per_block + warp_in_block * rows_per_warp;
+    if (entry_base >= num_ind) return;
+    int global_phase = 0;
 
-    {
-        int entry_id = blockIdx.x * entries_per_block + entry_in_block;
-        if (entry_id >= num_ind) return;
+    if constexpr (multiple_rows_per_warp) {
+        // Single chunk per row, multiple rows per warp: loop over rows only.
+        int num_rows = min(rows_per_warp, num_ind - entry_base);
+        uint32_t cur_bytes = D * sizeof(scalar_t);
+
+        for (int row = 0; row < num_rows; row++, global_phase++) {
+            int entry_id = entry_base + row;
+            int cur = global_phase & 1;
+
+            int64_t ind = idx[entry_id];
+            CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter add index out of bounds",
+                "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
+
+            const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
+            scalar_t* dst_entry = self_data + ind * self_stride;
+
+            if (global_phase >= 2 && lane == 0) {
+                tma::wait_group_lt1();
+            }
+            __syncwarp();
+
+            if (lane == 0) {
+                tma::mbar_expect_tx(mbars[cur], cur_bytes);
+                tma::bulk_load(buf0 + cur * chunk_elems, src_entry, cur_bytes, mbars[cur]);
+            }
+            while (!tma::mbar_try_wait_parity(
+                mbars[cur], static_cast<uint32_t>(mbar_phase[cur] & 1))) {}
+            mbar_phase[cur]++;
+
+            if (lane == 0) {
+                tma::bulk_reduce_add<scalar_t>(dst_entry, buf0 + cur * chunk_elems, cur_bytes);
+                tma::commit_group();
+            }
+        }
+    } else {
+        // Single row per warp, possibly multiple chunks: loop over chunks only.
+        int entry_id = entry_base;
 
         int64_t ind = idx[entry_id];
         CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter add index out of bounds",
@@ -153,14 +217,13 @@ __global__ void tma_scatter_add_kernel(
         const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
         scalar_t* dst_entry = self_data + ind * self_stride;
 
-        int phase = 0;
         for (int off = blockIdx.y * chunk_elems; off < D;
-             off += gridDim.y * chunk_elems, phase++) {
-            int cur = phase & 1;
+             off += gridDim.y * chunk_elems, global_phase++) {
+            int cur = global_phase & 1;
             int cur_elems = min(chunk_elems, D - off);
             uint32_t cur_bytes = cur_elems * sizeof(scalar_t);
 
-            if (phase >= 2 && lane == 0) {
+            if (global_phase >= 2 && lane == 0) {
                 tma::wait_group_lt1();
             }
             __syncwarp();
@@ -178,12 +241,12 @@ __global__ void tma_scatter_add_kernel(
                 tma::commit_group();
             }
         }
-
-        if (lane == 0) {
-            tma::wait_group_lt0();
-        }
-        __syncwarp();
     }
+
+    if (lane == 0) {
+        tma::wait_group_lt0();
+    }
+    __syncwarp();
 
 #else
     CUDA_KERNEL_ASSERT(false && "tma_scatter_add_kernel requires sm_90+");
@@ -197,35 +260,53 @@ void tma_scatter_add_kernel_launch(
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     constexpr int max_threads = 256;
-    // One warp per entry: lane 0 issues TMA commands, __syncwarp() synchronizes.
     constexpr int threads_per_entry = C10_WARP_SIZE;
+    constexpr int warps_per_block = max_threads / threads_per_entry;
     int chunk_elems = std::min(D, static_cast<int>(512 / sizeof(scalar_t)));
     int num_chunks = at::ceil_div(D, chunk_elems);
 
-    int entries_per_block = max_threads / threads_per_entry;
+    int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
+    int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
+
+    int rows_per_warp = 1;
+    if (num_chunks == 1) {
+        int row_bytes = D * static_cast<int>(sizeof(scalar_t));
+        rows_per_warp = tma_scatter_add_single_chunk_rows_per_warp(
+            row_bytes, warps_per_block, num_ind);
+    }
+
+    TORCH_INTERNAL_ASSERT(rows_per_warp == 1 || num_chunks == 1,
+        "multi-row requires single chunk");
+    TORCH_INTERNAL_ASSERT(rows_per_warp == 1 || chunk_elems == D,
+        "multi-row requires chunk_elems == D");
+
+    int entries_per_block = warps_per_block * rows_per_warp;
     int grid_x = at::ceil_div(num_ind, entries_per_block);
     // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
     constexpr int min_chunks_per_block = 4;
     uint32_t grid_y = std::min(
         static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
         static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1]));
-    int block_size = entries_per_block * threads_per_entry;
 
-    int buf_elems = 2 * chunk_elems;
-    int data_region_bytes = entries_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
+    int data_region_bytes = warps_per_block * 2 * chunk_elems * static_cast<int>(sizeof(scalar_t));
     int mbar_offset = (data_region_bytes + 7) & ~7;
-    int smem = mbar_offset + entries_per_block * 2 * static_cast<int>(sizeof(uint64_t));
-
-    int64_t self_stride = self_stride_bytes / sizeof(scalar_t);
-    int64_t src_stride = src_stride_bytes / sizeof(scalar_t);
+    int smem = mbar_offset + warps_per_block * 2 * static_cast<int>(sizeof(uint64_t));
 
     dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
 
-    tma_scatter_add_kernel<scalar_t, index_t>
-        <<<grid, block_size, smem, at::cuda::getCurrentCUDAStream()>>>(
-        self_data, src_data, idx, num_ind, D, self_dim_size,
-        self_stride, src_stride,
-        entries_per_block, chunk_elems);
+    if (rows_per_warp > 1) {
+        tma_scatter_add_kernel<scalar_t, index_t, true>
+            <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
+            self_data, src_data, idx, num_ind, D, self_dim_size,
+            self_stride, src_stride,
+            chunk_elems, rows_per_warp);
+    } else {
+        tma_scatter_add_kernel<scalar_t, index_t, false>
+            <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
+            self_data, src_data, idx, num_ind, D, self_dim_size,
+            self_stride, src_stride,
+            chunk_elems, rows_per_warp);
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
     TORCH_CHECK(false, "TMA scatter_add requires CUDA 12.8+ and NVIDIA GPU");
