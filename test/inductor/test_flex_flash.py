@@ -107,24 +107,34 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
         flex_flash_attention_module._get_flex_flash_fwd_configs = original
 
 
+def _sm100_bias(*shape):
+    return torch.randn(*shape, device="cuda", dtype=torch.float16)
+
+
 SM100_VECTORIZED_AUX_SCORE_MOD_CASES = (
-    (128, "kv", 8, True),
-    (130, "kv", 2, True),
-    (128, "kv_plus_0", 8, True),
-    (128, "kv_plus_8", 8, True),
-    (128, "kv_minus_8", 1, False),
-    (128, "kv_mul_1", 8, True),
-    (128, "kv_mod_4", 4, True),
-    (128, "kv_mod_3", 1, False),
-    (128, "kv_stride_mix", 4, False),
-    (128, "kv_times_2", 1, False),
-    (128, "kv_floor_div_2", 1, False),
-    (128, "q", 8, False),
-    (128, "q_mod_4", 8, False),
-    (128, "q_kv", 8, True),
-    (128, "kv_q", 1, False),
-    (128, "q_kv_noncontig", 8, True),
-    (128, "relative_position", 1, False),
+    (128, "kv", lambda seq_len: _sm100_bias(seq_len), 8, True),
+    (130, "kv", lambda seq_len: _sm100_bias(seq_len), 2, True),
+    (128, "kv_plus_0", lambda seq_len: _sm100_bias(seq_len), 8, True),
+    (128, "kv_plus_8", lambda seq_len: _sm100_bias(seq_len + 8), 8, True),
+    (128, "kv_minus_8", lambda seq_len: _sm100_bias(seq_len), 1, False),
+    (128, "kv_mul_1", lambda seq_len: _sm100_bias(seq_len), 8, True),
+    (128, "kv_mod_4", lambda seq_len: _sm100_bias(seq_len), 4, True),
+    (128, "kv_mod_3", lambda seq_len: _sm100_bias(seq_len), 1, False),
+    (128, "kv_stride_mix", lambda seq_len: _sm100_bias(2 * seq_len), 4, False),
+    (128, "kv_times_2", lambda seq_len: _sm100_bias(2 * seq_len), 1, False),
+    (128, "kv_floor_div_2", lambda seq_len: _sm100_bias(seq_len // 2 + 1), 1, False),
+    (128, "q", lambda seq_len: _sm100_bias(seq_len), 8, False),
+    (128, "q_mod_4", lambda seq_len: _sm100_bias(seq_len), 8, False),
+    (128, "q_kv", lambda seq_len: _sm100_bias(seq_len, seq_len), 8, True),
+    (128, "kv_q", lambda seq_len: _sm100_bias(seq_len, seq_len), 1, False),
+    (
+        128,
+        "q_kv_noncontig",
+        lambda seq_len: _sm100_bias(seq_len, seq_len).t(),
+        8,
+        True,
+    ),
+    (128, "relative_position", lambda seq_len: _sm100_bias(2 * seq_len), 1, False),
 )
 
 SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
@@ -144,7 +154,7 @@ SM100_AUX_VEC_MATCHES_SCALAR_CASES = (
 
 
 def sm100_vectorized_aux_score_mod_case_name(case):
-    seq_len, index_dim, _expected_vec_size, _expect_autovec = case
+    seq_len, index_dim, _bias_factory, _expected_vec_size, _expect_autovec = case
     return f"{index_dim}_seq{seq_len}"
 
 
@@ -1242,7 +1252,7 @@ class TestFlexFlash(InductorTestCase):
         name_fn=sm100_vectorized_aux_score_mod_case_name,
     )
     def test_flash_attention_sm100_vectorized_aux_score_mod(self, case):
-        seq_len, index_dim, expected_vec_size, expect_autovec = case
+        seq_len, index_dim, bias_factory, expected_vec_size, expect_autovec = case
         q, k, v = create_test_tensors(
             batch_size=1,
             num_heads=1,
@@ -1251,21 +1261,7 @@ class TestFlexFlash(InductorTestCase):
             dtype=torch.float16,
             device="cuda",
         )
-        if index_dim in ("q_kv", "kv_q", "q_kv_noncontig"):
-            bias_shape = (seq_len, seq_len)
-        elif index_dim in ("kv_times_2", "relative_position"):
-            bias_shape = (2 * seq_len,)
-        elif index_dim == "kv_plus_8":
-            bias_shape = (seq_len + 8,)
-        elif index_dim == "kv_floor_div_2":
-            bias_shape = (seq_len // 2 + 1,)
-        elif index_dim == "kv_stride_mix":
-            bias_shape = (2 * seq_len,)
-        else:
-            bias_shape = (seq_len,)
-        bias = torch.randn(*bias_shape, device="cuda", dtype=torch.float16)
-        if index_dim == "q_kv_noncontig":
-            bias = bias.t()
+        bias = bias_factory(seq_len)
 
         def fn(q, k, v, bias):
             def score_mod(score, b, h, q_idx, kv_idx):
