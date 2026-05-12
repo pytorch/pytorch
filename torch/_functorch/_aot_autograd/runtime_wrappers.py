@@ -1789,7 +1789,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
-    base_groups: dict[int, list[int]] = field(default_factory=dict)
+    base_groups: dict[int, list[int]] = field(
+        default_factory=lambda: collections.defaultdict(list)
+    )
     other_arg_indices: list[int] = field(default_factory=list)
 
     def pre_compile(
@@ -1860,12 +1862,22 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         # Pre-compute base_groups and other_arg_map from synthetic_base_info.
         # We avoid storing the raw synthetic_base_info because it contains
         # torch.Tensors which are not picklable by the autograd cache.
+        #
+        # other_arg_entries collects (new_idx, orig_idx) pairs so we can
+        # sort by new_idx -- the position in the post-merge calling
+        # convention (bases ++ others).  merge_view_inputs puts
+        # non-tensor args before non-aliased tensor args, so iterating
+        # by orig_idx alone would produce a wrong order when non-tensors
+        # are interleaved with tensors.
+        other_arg_entries: list[tuple[int, int]] = []
         for orig_idx, entry in enumerate(synthetic_base_info):
             if isinstance(entry, int):
-                self.other_arg_indices.append(orig_idx)
+                other_arg_entries.append((entry, orig_idx))
             else:
                 base_idx, _ = entry
-                self.base_groups.setdefault(base_idx, []).append(orig_idx)
+                self.base_groups[base_idx].append(orig_idx)
+        other_arg_entries.sort()
+        self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations

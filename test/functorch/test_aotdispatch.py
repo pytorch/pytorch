@@ -3419,6 +3419,42 @@ def forward(self, primals_1, primals_2):
     return (as_strided_scatter, add, view_1)""",
         )
 
+    def test_input_aliased_with_mutation_nontensor_interleaved(self):
+        def f(a, scale, b):
+            b.mul_(2)
+            return a + scale
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            return [base], [x.view(-1), 3, x.view(-1)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
+    def test_input_aliased_with_mutation_multiple_nontensors(self):
+        def f(a, scale, b, offset, c):
+            c.mul_(2)
+            return a + scale + offset
+
+        def inp_callable(req_grad):
+            base = torch.ones(2, 2, requires_grad=req_grad)
+            x = base.add(1)
+            standalone = torch.ones(4, requires_grad=req_grad)
+            y = standalone.add(1)
+            return [base, standalone], [x.view(-1), 3, y, 5, x.view(-1)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
             # a and b alias, and we do a metadata mutation on a
