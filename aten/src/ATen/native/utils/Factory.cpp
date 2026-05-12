@@ -24,7 +24,7 @@ Tensor empty_with_tail_padding(
       DispatchKeySet{DispatchKey::CPU},
       dtype));
 
-  return tensor;
+  return tensor.resize_(size, memory_format);
 }
 
 Tensor allocate_padded_contiguous_if_needed(
