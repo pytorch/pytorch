@@ -1107,7 +1107,7 @@ if torch._C._has_mkldnn:
             )
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
-            if isinstance(bias_node, int):
+            if isinstance(bias_node, (int, float)):
                 # we only folding bias if it is a constant
                 return False
             bias_meta = add_node.args[1].meta.get("val")
