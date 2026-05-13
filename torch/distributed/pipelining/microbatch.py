@@ -561,7 +561,7 @@ def merge_chunks(
     # Stage 2 and 3: Rotate nesting order s.t. chunks are inner dimension and
     #                concatenate sharded operands
     # args_flattened : [num args]
-    args_flattened = []
+    args_flattened: list[Any] = []
     for arg_idx, arg in enumerate(spec_flattened):
         if isinstance(arg, TensorChunkSpec):
             partial_values = [

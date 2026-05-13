@@ -132,9 +132,7 @@ def clone_strategy(op_schema: OpSchema) -> StrategyType:
     ``nn.functional.cosine_similarity``).
     """
     if len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) != 1:
-        raise AssertionError(
-            "clone_strategy only works for single-tensor-input ops"
-        )
+        raise AssertionError("clone_strategy only works for single-tensor-input ops")
     first_input_strategy = op_schema.args_schema[0]
     if not isinstance(first_input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(first_input_strategy)}")
