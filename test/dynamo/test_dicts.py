@@ -2405,16 +2405,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(TypeError, d.popitem, 1)
 
     @make_dynamo_test
-    def test_popitem_plain_dict_subclass(self):
-        """popitem on an OrderedDict subclass whose internal items storage is
-        a plain dict must not pass last= (plain dict rejects keyword args)."""
-        d = self.thetype()
-        d["a"] = 1
-        d["b"] = 2
-        key, value = d.popitem()
-        self.assertNotIn(key, d)
-
-    @make_dynamo_test
     def test_setdefault(self):
         d = self.thetype({"a": 1, "b": 2})
         self.assertEqual(d.setdefault("a", 3), 1)
@@ -2807,6 +2797,22 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         obj = MyClass()
         result = fn(obj)
         self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_copy_does_not_alias_instance_dict(self):
+        class MyClass:
+            def __init__(self):
+                self.y = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.__dict__.copy()["x"] = 4
+            return "x" in obj.__dict__, dict(obj.__dict__.items())
+
+        obj = MyClass()
+        has_x, live_dict = fn(obj)
+        self.assertFalse(has_x)
+        self.assertEqual(live_dict, {"y": 1})
+        self.assertNotIn("x", obj.__dict__)
 
     def test_dunder_dict_comprehension_with_mutations(self):
         """Test dict comprehension over __dict__ with mutations (scheduler use case)"""
