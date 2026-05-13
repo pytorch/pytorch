@@ -172,13 +172,24 @@ def rocm_os_deps() -> list[Path]:
 
 
 def find_rocm_lib(rocm_home: Path, basename: str) -> Path | None:
-    """Locate a ROCm library, falling back from lib/ to lib64/ to a wider search."""
+    """Locate a ROCm library, falling back from lib/ to lib64/ to a wider search.
+
+    Matches `basename` exactly or a versioned variant `basename.X[.Y...]`.
+    The dot boundary avoids accidentally matching e.g. `libfoo.something.so`
+    when looking for `libfoo.so`.
+    """
+
+    def matches(hit: Path) -> bool:
+        return hit.is_file() and (
+            hit.name == basename or hit.name.startswith(basename + ".")
+        )
+
     for sub in ("lib", "lib64"):
         for hit in (rocm_home / sub).rglob(basename + "*"):
-            if hit.is_file() and hit.name.startswith(basename):
+            if matches(hit):
                 return hit
     for hit in rocm_home.rglob(basename + "*"):
-        if hit.is_file() and hit.name.startswith(basename):
+        if matches(hit):
             return hit
     return None
 
@@ -188,9 +199,18 @@ def rocm_arch_filter(arch_list: str) -> list[str]:
 
 
 def rocm_lib_kernels(
-    rocm_home: Path, lib_subdir: str, archs: list[str]
+    rocm_home: Path,
+    lib_subdir: str,
+    archs: list[str],
+    include_common: bool = True,
 ) -> list[AuxFile]:
-    """Per-gfx kernel files under $ROCM_HOME/lib/<lib_subdir>/library/ plus the non-gfx common files."""
+    """Per-gfx kernel files under $ROCM_HOME/lib/<lib_subdir>/library/.
+
+    When include_common is True, also picks up non-gfx common files in that
+    directory (rocblas, hipblaslt). hipsparselt historically ships only the
+    per-gfx files (the build_rocm.sh `HIPSPARSELT_OTHER_FILES` line was
+    commented out), so callers pass include_common=False there.
+    """
     src_dir = rocm_home / "lib" / lib_subdir / "library"
     if not src_dir.is_dir():
         return []
@@ -198,9 +218,11 @@ def rocm_lib_kernels(
     for entry in sorted(src_dir.iterdir()):
         if not entry.is_file():
             continue
-        # Pick gfx-specific files matching the arch set, plus common (non-gfx) files.
         name = entry.name
-        if "gfx" in name and not any(a in name for a in archs):
+        if "gfx" in name:
+            if not any(a in name for a in archs):
+                continue
+        elif not include_common:
             continue
         files.append(AuxFile(src=entry, rel_dest=f"lib/{lib_subdir}/library/{name}"))
     return files
@@ -223,31 +245,41 @@ def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
         # binaries in the wheel link against the bare .so SONAME.
         libs.append(BundledLib(src=path, dest_name=stem, needed_alias=stem))
     for os_lib in rocm_os_deps():
-        if os_lib.is_file():
-            libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
+        if not os_lib.is_file():
+            sys.exit(f"Required OS runtime dep not found: {os_lib}")
+        libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
 
     archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
+    if not archs:
+        sys.exit("PYTORCH_ROCM_ARCH must be set for ROCm wheel bundling")
     aux: list[AuxFile] = []
-    for sub in ("rocblas", "hipblaslt", "hipsparselt"):
-        aux += rocm_lib_kernels(rocm_home, sub, archs)
+    aux += rocm_lib_kernels(rocm_home, "rocblas", archs)
+    aux += rocm_lib_kernels(rocm_home, "hipblaslt", archs)
+    aux += rocm_lib_kernels(rocm_home, "hipsparselt", archs, include_common=False)
+
     miopen_db = rocm_home / "share/miopen/db"
-    if miopen_db.is_dir():
-        for entry in sorted(miopen_db.iterdir()):
-            if entry.is_file() and any(a in entry.name for a in archs):
-                aux.append(AuxFile(src=entry, rel_dest=f"share/miopen/db/{entry.name}"))
+    if not miopen_db.is_dir():
+        sys.exit(f"MIOpen kernel db not found at {miopen_db}")
+    for entry in sorted(miopen_db.iterdir()):
+        if entry.is_file() and any(a in entry.name for a in archs):
+            aux.append(AuxFile(src=entry, rel_dest=f"share/miopen/db/{entry.name}"))
+
     rccl_dir = rocm_home / "share/rccl/msccl-algorithms"
-    if rccl_dir.is_dir():
-        for entry in sorted(rccl_dir.iterdir()):
-            if entry.is_file():
-                aux.append(
-                    AuxFile(
-                        src=entry,
-                        rel_dest=f"share/rccl/msccl-algorithms/{entry.name}",
-                    )
+    if not rccl_dir.is_dir():
+        sys.exit(f"RCCL msccl-algorithms not found at {rccl_dir}")
+    for entry in sorted(rccl_dir.iterdir()):
+        if entry.is_file():
+            aux.append(
+                AuxFile(
+                    src=entry,
+                    rel_dest=f"share/rccl/msccl-algorithms/{entry.name}",
                 )
+            )
+
     amdgpu_ids = Path("/opt/amdgpu/share/libdrm/amdgpu.ids")
-    if amdgpu_ids.is_file():
-        aux.append(AuxFile(src=amdgpu_ids, rel_dest="share/libdrm/amdgpu.ids"))
+    if not amdgpu_ids.is_file():
+        sys.exit(f"amdgpu.ids not found at {amdgpu_ids}")
+    aux.append(AuxFile(src=amdgpu_ids, rel_dest="share/libdrm/amdgpu.ids"))
     return libs, aux
 
 
@@ -275,8 +307,16 @@ def pack_wheel(unpacked: Path, output_dir: Path) -> None:
     subprocess.run(["wheel", "pack", str(unpacked), "-d", str(output_dir)], check=True)
 
 
-def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> None:
-    """Rewrite NEEDED entries that match `original*` to `replacement` across the wheel."""
+def replace_needed_batch(unpacked_torch: Path, mapping: dict[str, str]) -> None:
+    """Rewrite NEEDED entries across the wheel in one pass.
+
+    For each `.so*` file, look up its NEEDED entries against `mapping` where
+    each key matches an entry exactly or a versioned variant (`key.X[.Y]`),
+    and rewrite all matches with a single patchelf invocation. This replaces
+    the prior O(libs * sofiles) loop with O(sofiles).
+    """
+    if not mapping:
+        return
     for sofile in unpacked_torch.rglob("*.so*"):
         if not sofile.is_file():
             continue
@@ -286,9 +326,18 @@ def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> Non
             ).splitlines()
         except subprocess.CalledProcessError:
             continue
+        rewrites: list[tuple[str, str]] = []
         for entry in needed:
-            if entry == original or entry.startswith(original + "."):
-                patchelf("--replace-needed", entry, replacement, str(sofile))
+            for original, replacement in mapping.items():
+                if entry == original or entry.startswith(original + "."):
+                    rewrites.append((entry, replacement))
+                    break
+        if not rewrites:
+            continue
+        args: list[str] = []
+        for entry, replacement in rewrites:
+            args += ["--replace-needed", entry, replacement]
+        patchelf(*args, str(sofile))
 
 
 def repair_wheel(
@@ -327,11 +376,13 @@ def repair_wheel(
         # Bundle GPU-specific shared libs (currently only ROCm uses this).
         # Copy follows symlinks so versioned sonames become real files we can
         # rename to their bare .so form to match what the wheel links against.
+        needed_rewrites: dict[str, str] = {}
         for lib in bundled_libs:
             dest = torch_lib / lib.dest_name
             shutil.copy(lib.src, dest)
             if lib.needed_alias:
-                replace_needed(torch_dir, lib.needed_alias, lib.dest_name)
+                needed_rewrites[lib.needed_alias] = lib.dest_name
+        replace_needed_batch(torch_dir, needed_rewrites)
 
         # Copy auxiliary content (gfx kernel files, MIOpen db, RCCL algos, ...)
         for aux in aux_files:
@@ -368,7 +419,7 @@ def main() -> None:
     use_cuda = os.environ.get("USE_CUDA", "0") == "1"
     gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
     gpu_arch_version = os.environ.get("GPU_ARCH_VERSION", "")
-    is_rocm = gpu_arch_type == "rocm" or "rocm" in os.environ.get("DESIRED_CUDA", "")
+    is_rocm = gpu_arch_type == "rocm"
 
     libgomp_path = detect_libgomp()
     if not libgomp_path.exists():

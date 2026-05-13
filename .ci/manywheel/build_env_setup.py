@@ -142,17 +142,12 @@ XPU_BUILD_ENV: dict[str, str] = {
     "INSTALL_TEST": "0",
 }
 
-# ROCm builds use static linking and skip debug info; mirror the original
-# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
+# ROCm build env. ROCM_HOME is also read by repair_wheel.py to discover libs.
 ROCM_BUILD_ENV_STATIC: dict[str, str] = {
     "ROCM_HOME": "/opt/rocm",
     "MAGMA_HOME": "/opt/rocm/magma",
     "BUILD_DEBUG_INFO": "0",
     "TH_BINARY_BUILD": "1",
-    "USE_STATIC_CUDNN": "1",
-    "USE_STATIC_NCCL": "1",
-    "ATEN_STATIC_CUDA": "1",
-    "USE_CUDA_STATIC_LINK": "1",
     "INSTALL_TEST": "0",
     "FORCE_RPATH": "--force-rpath",
 }
@@ -442,8 +437,11 @@ def main() -> None:
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
-        if desired and not desired.startswith("rocm"):
-            env_out["DESIRED_CUDA"] = f"rocm{desired}"
+        if not desired:
+            sys.exit("DESIRED_CUDA must be set for ROCm builds")
+        if not desired.startswith("rocm"):
+            desired = f"rocm{desired}"
+            env_out["DESIRED_CUDA"] = desired
         print(f"ROCm environment configured ({desired})")
 
     write_env_exports(env_out, args.env_out)
