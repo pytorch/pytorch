@@ -1074,7 +1074,7 @@ def create_functionalized_fn(
                         # pyrefly: ignore [no-matching-overload]
                         zip(
                             f_args_after_forward,  # type: ignore[arg-type]
-                            primals_before,  # type: ignore[arg-type]
+                            primals_before,
                             primals_after_forward,  # type: ignore[arg-type]
                             meta.input_info,
                         )
@@ -1341,7 +1341,7 @@ def aot_dispatch_subclass(
         )
 
         # Step 2: call the inner function, with our (maybe subclass) inputs
-        wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)  # type: ignore[arg-type]
+        wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)
 
         if use_trace_joint:
             # See Note: [Computing Subclass Metadata about grad_inputs]
@@ -1427,12 +1427,12 @@ def aot_dispatch_subclass(
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
-            meta.static_input_indices,  # type: ignore[arg-type]
+            meta.static_input_indices,
         )
 
-        primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]
-        primals_unwrapped_descs = args_descs_unwrapped[0]  # type: ignore[assignment]
-        fn_to_trace = joint_fn  # type: ignore[assignment]
+        primals_unwrapped = args_unwrapped[0]
+        primals_unwrapped_descs = args_descs_unwrapped[0]
+        fn_to_trace = joint_fn
     else:
         primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args)
         primals_wrapped_descs: list[AOTInput] = typing.cast(list[AOTInput], args_descs)
@@ -1444,7 +1444,7 @@ def aot_dispatch_subclass(
         )
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
             primals_wrapped,
-            meta.static_input_indices,  # type: ignore[arg-type]
+            meta.static_input_indices,
         )
 
         primals_unwrapped = args_unwrapped  # type: ignore[assignment]

@@ -1079,6 +1079,7 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
+            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1240,6 +1241,7 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1357,6 +1359,7 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1431,6 +1434,7 @@ class TestOperators(TestCase):
                 xfail("t_copy"),
                 xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1559,6 +1563,7 @@ class TestOperators(TestCase):
                 xfail("t_copy"),
                 xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1669,6 +1674,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -2056,6 +2062,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -2382,6 +2389,7 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            xfail("native_group_norm"),
         },
     )
     @opsToleranceOverride(
