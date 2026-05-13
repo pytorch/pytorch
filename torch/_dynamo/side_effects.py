@@ -229,9 +229,10 @@ class SideEffects:
                 original_vt = item.var_getattr(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
-            if not original_vt.is_python_constant():
+            can_peek, _, peeked_val = original_vt.try_peek_constant()
+            if not can_peek:
                 return False
-            original = original_vt.as_python_constant()
+            original = peeked_val
         self.deferred_attr_mutations[key] = (original, current)
         return True
 
