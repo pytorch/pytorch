@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # meant to be called only from the neighboring build.sh and build_cpu.sh scripts
-# NOTE: This script is only used for ROCm, XPU, and s390x builds.
+# NOTE: This script is only used for ROCm and s390x builds.
 #       CPU/CUDA x86 and aarch64 builds use build_wheel.sh + repair_wheel.sh.
 
 set -ex

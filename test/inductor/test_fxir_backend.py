@@ -324,6 +324,35 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
 
+    def test_reinterpret_view_floordiv_offset_dynamic(self):
+        """
+        Test that ReinterpretView with a FloorDiv offset emits valid FX IR
+        with SymInt metadata when dynamic shapes are enabled.
+        """
+
+        def foo(x):
+            n = x.shape[0]
+            return x.narrow(0, n // 2, n // 2).contiguous() + 1
+
+        args = [torch.randn(16, 4, device=self.device)]
+        (gm,) = self._compile_and_check(
+            foo, args, compile_kwargs={"dynamic": True}, metadata_only=True
+        )
+
+        as_strided_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.as_strided
+        )
+        for node in as_strided_nodes:
+            offset = node.args[3] if len(node.args) > 3 else None
+            if offset is not None and isinstance(offset, torch.fx.Node):
+                val = offset.meta.get("val")
+                if val is not None:
+                    self.assertNotIsInstance(
+                        val,
+                        torch.SymFloat,
+                        "ReinterpretView offset should be SymInt, not SymFloat",
+                    )
+
     def test_reshape_fallback(self):
         """
         Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
