@@ -47,7 +47,7 @@ REGISTER_BINARY_ALPHA_OP(shrink_backward, bfloat, bfloat, bfloat);
 struct relu_functor {
   template <typename T>
   inline T operator()(const T x) {
-    return x > T(0) ? x : T(0);
+    return x < T(0) ? T(0) : x;
   }
 };
 
