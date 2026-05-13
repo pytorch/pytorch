@@ -189,13 +189,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
 }
 
 static std::string sdpa_vector_mask_suffix(const std::optional<Tensor>& mask) {
-  if (!mask.has_value()) {
-    return "none";
-  }
-  if (mask.value().scalar_type() == kBool) {
-    return "bool_";
-  }
-  return mps::scalarToMetalTypeString(mask.value());
+  return mask.has_value() ? mps::scalarToMetalTypeString(mask.value()) : "none";
 }
 
 // Vector mode (One–pass variant)

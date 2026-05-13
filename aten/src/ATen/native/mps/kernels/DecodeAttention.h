@@ -423,7 +423,7 @@ template <typename T, int D>
 #define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)                                       \
   INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
   INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool_")        \
+  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
   INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
 
 #define INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE, NAME_SUFFIX) \
@@ -451,7 +451,7 @@ template <typename T, int D>
 #define INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, QK_DIM, VALUE_DIM)                                       \
   INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
   INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool_")        \
+  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
   INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
 
 #define INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, VALUE_DIM)                             \
