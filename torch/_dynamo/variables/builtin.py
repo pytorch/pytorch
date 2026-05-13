@@ -978,7 +978,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     # Builtins that have been promoted to their own VT classes. Creating a
     # BuiltinVariable for these is a bug; use the specialized class instead.
     MUST_USE_SPECIALIZED: frozenset[Any] = frozenset(
-        {dict, getattr, hasattr, isinstance, iter, list, setattr}
+        {dict, getattr, hasattr, isinstance, iter, list, setattr, str}
     )
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
@@ -1817,71 +1817,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return VariableTracker.build(tx, arg.debug_repr())
-        return None
-
-    def call_str(
-        self, tx: "InstructionTranslator", arg: VariableTracker
-    ) -> VariableTracker | None:
-        if isinstance(
-            arg,
-            (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
-        ):
-            if len(arg.args) == 0:
-                return VariableTracker.build(tx, "")
-            elif len(arg.args) == 1:
-                return BuiltinVariable(str).call_function(tx, [arg.args[0]], {})
-            else:
-                tuple_var = variables.TupleVariable(list(arg.args))
-                return BuiltinVariable(str).call_function(tx, [tuple_var], {})
-
-        # Handle `str` on a user defined function or object
-        if isinstance(arg, (variables.UserFunctionVariable)):
-            return VariableTracker.build(tx, str(arg.fn))
-        elif isinstance(arg, (variables.UserDefinedObjectVariable)):
-            # Check if object has __str__ method
-            if hasattr(arg.value, "__str__"):
-                str_method = arg.value.__str__
-            elif hasattr(arg.value, "__repr__"):
-                # account for __repr__ functions when __str__ is absent
-                str_method = arg.value.__repr__
-            else:
-                unimplemented(
-                    gb_type="failed to call str() on user defined object",
-                    context=str(arg),
-                    explanation="User defined object has no __str__ or __repr__ method",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-
-            if type(arg.value).__str__ is object.__str__:
-                # Rely on the object str method
-                try:
-                    # pyrefly: ignore [unbound-name]
-                    return VariableTracker.build(tx, str_method())
-                except AttributeError:
-                    # Graph break
-                    return None
-            elif is_wrapper_or_member_descriptor(str_method):
-                unimplemented(
-                    gb_type="Attempted to a str() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
-                    hints=["Write the str method in Python"],
-                )
-            else:
-                # Overrides for custom str method
-                # Pass method as function to call tx.inline_user_function_return
-                bound_method = str_method.__func__  # type: ignore[attr-defined]
-
-                try:
-                    # Only supports certain function types
-                    user_func_variable = VariableTracker.build(tx, bound_method)
-                except AssertionError:
-                    # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
-                    return None
-
-                # Inline the user function
-                return user_func_variable.call_function(tx, [arg], {})
         return None
 
     def call___build_class__(self, tx, *args, **kwargs):
@@ -3655,6 +3590,134 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                         return getattr_var
 
             obj.convert_to_unspecialized(tx)
+        return None
+
+
+class StrBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `str` builtin."""
+
+    _fn = str
+
+    def __init__(self, value: type = _fn, **kwargs: Any) -> None:
+        if value is not self._fn:
+            raise AssertionError(f"StrBuiltinVariable value must be str, got {value}")
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "StrBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+            ]
+        if len(args) == 0 and not kwargs:
+            return VariableTracker.build(tx, "")
+        result = self._call_str(tx, args, kwargs)
+        if result is not None:
+            return result
+        if check_unspec_or_constant_args(args, kwargs):
+            try:
+                res = str(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return VariableTracker.build(tx, res)
+        unimplemented(
+            gb_type="Failed to trace str()",
+            context=f"str({args})",
+            explanation=f"Dynamo does not know how to call str() on argument type "
+            f"{type(args[0]).__name__ if args else 'unknown'}",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        args = [a.realize() if isinstance(a, LazyVariableTracker) else a for a in args]
+        if len(args) >= 1:
+            resolved_fn = getattr(str, name, None)
+            if resolved_fn is not None and resolved_fn in str_methods:
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+        if name == "__len__" and len(args) == 1 and not kwargs:
+            return generic_len(tx, args[0])
+        if name == "__iter__" and len(args) == 1 and not kwargs:
+            return generic_getiter(tx, args[0])
+        return super().call_method(tx, name, args, kwargs)
+
+    def _call_str(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if len(args) != 1 or kwargs:
+            return None
+        arg = args[0]
+        if isinstance(
+            arg,
+            (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
+        ):
+            if len(arg.args) == 0:
+                return VariableTracker.build(tx, "")
+            elif len(arg.args) == 1:
+                return StrBuiltinVariable(str).call_function(tx, [arg.args[0]], {})
+            else:
+                tuple_var = variables.TupleVariable(list(arg.args))
+                return StrBuiltinVariable(str).call_function(tx, [tuple_var], {})
+        if isinstance(arg, variables.UserFunctionVariable):
+            return VariableTracker.build(tx, str(arg.fn))
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            if hasattr(arg.value, "__str__"):
+                str_method = arg.value.__str__
+            elif hasattr(arg.value, "__repr__"):
+                str_method = arg.value.__repr__
+            else:
+                unimplemented(
+                    gb_type="failed to call str() on user defined object",
+                    context=str(arg),
+                    explanation="User defined object has no __str__ or __repr__ method",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            if type(arg.value).__str__ is object.__str__:
+                try:
+                    # pyrefly: ignore [unbound-name]
+                    return VariableTracker.build(tx, str_method())
+                except AttributeError:
+                    return None
+            elif is_wrapper_or_member_descriptor(str_method):
+                if not check_unspec_or_constant_args(args, kwargs):
+                    unimplemented(
+                        gb_type="Attempted to a str() method implemented in C/C++",
+                        context="",
+                        explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
+                        hints=["Write the str method in Python"],
+                    )
+                return None
+            else:
+                bound_method = str_method.__func__  # type: ignore[attr-defined]
+                try:
+                    user_func_variable = VariableTracker.build(tx, bound_method)
+                except AssertionError:
+                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
+                    return None
+                return user_func_variable.call_function(tx, [arg], {})
         return None
 
 

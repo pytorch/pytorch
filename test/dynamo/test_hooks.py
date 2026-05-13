@@ -730,7 +730,7 @@ def forward(self, L_x_ : torch.Tensor):
         with compiled_autograd._enable(compiler_fn):
             dynamo_out = torch.compile(mod, backend="inductor", fullgraph=True)(x2, obj)
             with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "Failed to trace builtin operator"
+                torch._dynamo.exc.Unsupported, "Failed to trace str"
             ):
                 dynamo_out[0].backward(torch.ones(4))
 
