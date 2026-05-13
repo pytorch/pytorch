@@ -3,6 +3,7 @@
 set -ex
 
 install_ubuntu() {
+  ulimit -n 65535 # to solve error "too many open files" in "rustup self uninstall -y" below 
   echo "Installing pkg-config and libssl-dev"
   apt-get update && apt-get install -y pkg-config libssl-dev curl
   echo "Installing rust"

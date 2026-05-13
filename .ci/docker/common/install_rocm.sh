@@ -162,16 +162,15 @@ EOF
     # Add rocm repository
     apt-get update --allow-insecure-repositories
 
-    # following https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-on-debian-based-systems-ubuntu-debian-etc
-    export RELEASE_ID=20260511-25648442805
+    # following https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-on-debian-based-systems-ubuntu-debian-etc-1
+    export RELEASE_ID=20260512-25711157883
     export GFX_ARCH=gfx950
 
-    apt install -y ca-certificates
-    echo "deb [trusted=yes] https://rocm.nightlies.amd.com/packages-multi-arch/deb/${RELEASE_ID} stable main" \
-      | tee /etc/apt/sources.list.d/rocm-multiarch-nightly.list
-    apt update
-    apt install -y amdrocm
-    apt install -y amdrocm-core-sdk
+    apt-get install -y ca-certificates
+    echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} stable main" \
+      | tee /etc/apt/sources.list.d/rocm-nightly.list
+    apt-get update
+    apt-get install -y amdrocm-core-sdk-${GFX_ARCH}
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
