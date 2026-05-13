@@ -780,9 +780,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         def is_grouped(n: Any) -> bool:
-            meta_val = n.args[1].meta["val"]
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
             assert isinstance(meta_val, torch.Tensor)
-            return n.args[-1] > 1 and meta_val.size(1) > 1
+            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
             return (
@@ -999,6 +999,18 @@ class GraphLowering(torch.fx.Interpreter):
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
 
+    @property
+    def is_dual_wrapper_mode(self) -> bool:
+        """True when generating dual-wrapper-mode C++ for both JIT and AOTI.
+
+        Dual-wrapper mode emits a JIT pass that drives Triton autotune/compile
+        alongside the AOTI output, so it is needed iff at least one device in
+        the graph uses the Triton backend.
+        """
+        if not self.aot_mode or config.triton.autotune_at_compile_time:
+            return False
+        return any(ir.is_triton(d) for d in self.device_types)
+
     def try_get_buffer(
         self, buffer_name: str
     ) -> ir.TensorBox | ir.Buffer | ir.TorchBindObject | None:
@@ -1167,7 +1179,7 @@ class GraphLowering(torch.fx.Interpreter):
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
             f"{hash(data):x}"
         )
-        self.allocated_constant_name[name] = orig_name
+        self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
         return name
 
     def add_tensor_constant(self, data: Tensor, name: str | None = None) -> TensorBox:
@@ -1268,12 +1280,12 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.higher_order.invoke_subgraph,
             )
             gen = ir.GeneratorState(name=target, device=example.device)
-            self.graph_inputs[target] = gen
+            self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
         elif is_opaque_reference_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
-            self.graph_inputs[target] = opaque_obj
+            self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return opaque_obj
 
@@ -1407,7 +1419,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])
+            log.debug("  via %s", lowerings[target])  # type: ignore[index]
 
             n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
@@ -1568,7 +1580,7 @@ class GraphLowering(torch.fx.Interpreter):
         args: tuple[torch.fx.node.Argument, ...],
         kwargs: dict[str, object],
     ) -> None:
-        result = super().output(target, args, kwargs)
+        result = super().output(target, args, kwargs)  # type: ignore[arg-type]
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
             result = (result,)
@@ -1599,7 +1611,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = V.graph.current_node.args[0]
+        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
             fx_node_args = (fx_node_args,)
@@ -1897,9 +1909,9 @@ class GraphLowering(torch.fx.Interpreter):
                             inp_kwargs,
                         )
                     else:
-                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)
+                        args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
@@ -2716,7 +2728,7 @@ class GraphLowering(torch.fx.Interpreter):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,
-                linemap=linemap,
+                linemap=linemap,  # type: ignore[arg-type]
                 attrs={
                     **self.constants,
                     **self.torchbind_constants,
@@ -2725,7 +2737,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         self.cache_key = key
         self.cache_path = path
-        self.cache_linemap = linemap
+        self.cache_linemap = linemap  # type: ignore[assignment]
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info

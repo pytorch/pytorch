@@ -275,7 +275,7 @@ def get_pw_red_splits(
 
     assert get_hint(sympy_product(n._body.sizes[0])) == get_hint(
         pointwise_numel * red_numel
-    )
+    )  # type: ignore[operator]
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -680,10 +680,13 @@ class CoalesceVarAnalysis:
     suggested_split: VarTiling | None = None
 
 
-def analyze_memory_coalescing(
+def _analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> CoalesceVarAnalysis | None:
     """
+    Implementation for BaseSchedulerNode.get_coalesce_analysis().
+    Call that node method so loop-transform cache invalidation is honored.
+
     Find variables that coalesce the reads and writes and score the total size.
 
     If uncoalesced memory expressions are found, look for additionally tiling of variables
