@@ -5,6 +5,7 @@ import contextlib
 import re
 import unittest
 import unittest.mock as mock
+import warnings
 
 from parameterized import parameterized_class
 
@@ -116,6 +117,72 @@ class TestInvokeSubgraph(TestCase):
         res = aot_fn(x)
 
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_duplicate_backward_variants_warn_and_trace(self):
+        @nested_compile_region
+        def block(x):
+            return torch.sin(x) * 2.0
+
+        class Model(torch.nn.Module):
+            def forward(self, x, tail):
+                y0 = block(x)
+                y1 = block(y0)
+                z = torch.cat([y1, tail], dim=1)
+                return z.square().sum()
+
+        torch._dynamo.reset()
+        backend = AotEagerAndRecordGraphs()
+        with mock.patch("torch._logging.trace_structured") as trace_structured_mock:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                compiled = torch.compile(
+                    Model(),
+                    backend=backend,
+                    fullgraph=True,
+                )
+                x = torch.randn(4, 3, 5, requires_grad=True)
+                tail = torch.randn(4, 7, 5, requires_grad=True)
+                compiled(x, tail).backward()
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.assertTrue(
+            any(
+                "invoke_subgraph traced multiple backward graphs"
+                in str(warning.message)
+                for warning in caught
+            )
+        )
+
+        duplicate_payloads = []
+        for call in trace_structured_mock.call_args_list:
+            args, kwargs = call
+            if not args or args[0] != "artifact":
+                continue
+            metadata_fn = kwargs.get("metadata_fn")
+            if metadata_fn is None and len(args) > 1:
+                metadata_fn = args[1]
+            if metadata_fn is None:
+                continue
+            metadata = metadata_fn()
+            if metadata.get("name") != "invoke_subgraph_backward_duplicate":
+                continue
+            payload_fn = kwargs["payload_fn"]
+            duplicate_payloads.append(payload_fn())
+
+        self.assertEqual(len(duplicate_payloads), 1)
+        payload = duplicate_payloads[0]
+        self.assertEqual(payload["new_variant_suffix"], 1)
+        self.assertEqual(payload["num_variants_for_identifier"], 2)
+        self.assertEqual(
+            payload["new_variant"]["backward_identifier"],
+            payload["backward_identifier"],
+        )
+        tangent = payload["new_variant"]["tangents"][0]
+        self.assertIsInstance(tangent["backward_input_name"], str)
+        self.assertEqual(tangent["shape"], [4, 3, 5])
+        self.assertEqual(tangent["stride"], [15, 5, 1])
 
     def test_make_fx_without_shape_env(self):
         """Test that make_fx with invoke_subgraph works without a ShapeEnv.
