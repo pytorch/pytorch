@@ -247,14 +247,14 @@ class CudaInterface(DeviceInterface):
     stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
     synchronize = staticmethod(torch.cuda.synchronize)
-    get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
+    get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
-    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
+    exchange_device = staticmethod(torch.cuda._exchange_device)
+    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
-    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
+    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -341,19 +341,19 @@ class MtiaInterface(DeviceInterface):
             return caching_worker_device_properties["mtia"][device]
 
     current_device = staticmethod(torch.mtia.current_device)
-    set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
+    set_device = staticmethod(torch.mtia.set_device)
     device_count = staticmethod(torch.mtia.device_count)
-    stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
+    stream = staticmethod(torch.mtia.stream)
     current_stream = staticmethod(torch.mtia.current_stream)
-    set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
+    set_stream = staticmethod(torch.mtia.set_stream)
+    _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)
     synchronize = staticmethod(torch.mtia.synchronize)
-    get_device_properties = staticmethod(torch.mtia.get_device_properties)  # type: ignore[assignment]
+    get_device_properties = staticmethod(torch.mtia.get_device_properties)
     get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type, has-type]
-    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type, has-type]
-    memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
-    is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.mtia._exchange_device)
+    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)
+    memory_allocated = staticmethod(torch.mtia.memory_allocated)
+    is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -427,16 +427,16 @@ class XpuInterface(DeviceInterface):
 
     current_device = staticmethod(torch.xpu.current_device)
     set_device = staticmethod(torch.xpu.set_device)
-    device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
+    device_count = staticmethod(torch.xpu.device_count)
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)
     synchronize = staticmethod(torch.xpu.synchronize)
-    get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
+    get_device_properties = staticmethod(torch.xpu.get_device_properties)
     get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type, has-type]
-    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
+    exchange_device = staticmethod(torch.xpu._exchange_device)
+    maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
 
     # Can be mock patched by @patch decorator.
