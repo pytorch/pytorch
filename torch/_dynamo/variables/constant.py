@@ -490,27 +490,6 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def nb_subtract_impl(
-        self,
-        tx: Any,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex define nb_subtract; bool inherits int's.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3819-L3824 (long_sub_method)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L598-L606 (float_sub)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L494-L503 (COMPLEX_BINOP(sub, diff))
-        if not isinstance(self.value, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, v - w)
-        except (TypeError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
     def nb_negative_impl(
         self,
         tx: Any,
