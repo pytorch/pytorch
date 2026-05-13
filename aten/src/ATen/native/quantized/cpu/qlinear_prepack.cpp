@@ -329,7 +329,9 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
   dnnl::memory::desc w_desc;
 
 #if defined(__aarch64__)
-  // We construct the pd with f32 dst dtype to trigger optimized blocked layout
+// We manually construct primitive descriptor with dst dtype as f32, to ensure optimal blocked layout (e.g., BA24b8a)
+// for s8 weights is selected for the jit::int8 matmul. The default ideep::matmul_forward::expected_weights_desc()
+// enforces s32 dst dtype for s8 weights, which triggers suboptimal 'ab' layout on AArch64.
   auto engine = ideep::engine::cpu_engine();
   auto weights_dims = wei.get_dims();
   auto ndims = weights_dims.size();
@@ -337,12 +339,18 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
   // M is input_shape[ndims-2] if available, otherwise default to 1.
   x_dims[ndims-2] = input_dims.size() > 0 && input_dims.size() == ndims ? input_dims[ndims-2] : 1;
   x_dims[ndims - 1] = weights_dims[ndims - 2];
+  TORCH_CHECK(x_dims.size() == weights_dims.size(),
+              "Invalid dims for data and weights");
   auto y_dims = (ndims == 3) ? ideep::dims({x_dims[0], x_dims[1], weights_dims[2]})
-                               : ideep::dims({x_dims[0], weights_dims[1]});
-  auto tag = (ndims == 3) ? dnnl::memory::format_tag::abc : dnnl::memory::format_tag::ab;
+                              : ideep::dims({x_dims[0], weights_dims[1]});
+  auto y_data_type = (w_data_type != dnnl::memory::data_type::s8)
+        ? w_data_type
+        : dnnl::memory::data_type::f32;
+  auto tag = (ndims == 2) ? dnnl::memory::format_tag::ab : dnnl::memory::format_tag::abc;
   auto src_md = dnnl::memory::desc(x_dims, x_data_type, tag);
+  // Using wei tag::any allows oneDNN to select optimal layout for weights.
   auto wei_md = dnnl::memory::desc(weights_dims, w_data_type, dnnl::memory::format_tag::any);
-  auto dst_md = dnnl::memory::desc(y_dims, dnnl::memory::data_type::f32, tag);
+  auto dst_md = dnnl::memory::desc(y_dims, y_data_type, tag);
   auto pd = dnnl::matmul::primitive_desc(engine, src_md, wei_md, dst_md, op_attr);
   w_desc = pd.weights_desc();
 #else
