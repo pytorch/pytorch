@@ -11,17 +11,20 @@ log = logging.getLogger(__name__)
 
 
 def _get_collective_info(node):
-    """Return (is_ag, group_name) if node is an AG/RS collective, else None."""
+    """Return (coll_type, group_name) if node is an AG/RS/AR collective, else None."""
     from torch._inductor.fx_passes.bucketing import (
         is_all_gather_into_tensor,
+        is_all_reduce_tensor,
         is_reduce_scatter_tensor,
     )
     from torch._inductor.fx_passes.overlap_scheduling import get_group_name
 
     if is_all_gather_into_tensor(node):
-        return True, get_group_name(node)
+        return "ag", get_group_name(node)
     if is_reduce_scatter_tensor(node):
-        return False, get_group_name(node)
+        return "rs", get_group_name(node)
+    if is_all_reduce_tensor(node):
+        return "ar", get_group_name(node)
     return None
 
 
@@ -37,8 +40,8 @@ def replace_collectives_with_low_contention(
         info = _get_collective_info(node)
         if info is None:
             continue
-        is_ag, group_name = info
-        collectives.append((node, is_ag, group_name))
+        coll_type, group_name = info
+        collectives.append((node, coll_type, group_name))
         groups.add(group_name)
 
     if not collectives:
@@ -51,9 +54,7 @@ def replace_collectives_with_low_contention(
             valid_groups.add(group_name)
 
     # Filter to collectives whose groups we can actually resolve
-    collectives = [
-        (node, is_ag, gn) for node, is_ag, gn in collectives if gn in valid_groups
-    ]
+    collectives = [(node, ct, gn) for node, ct, gn in collectives if gn in valid_groups]
     if not collectives:
         return
 
@@ -68,12 +69,10 @@ def replace_collectives_with_low_contention(
     skipped_small = 0
     skipped_no_overlap = 0
     skipped_nvlink_contention = 0
-    for node, is_ag, group_name in collectives:
-        coll_type = "AG" if is_ag else "RS"
-
+    for node, coll_type, group_name in collectives:
         # Size filter: LC barrier overhead dominates for small messages
         if min_bytes > 0:
-            per_rank_bytes = _get_per_rank_bytes(node, is_ag)
+            per_rank_bytes = _get_per_rank_bytes(node, coll_type)
             if per_rank_bytes is not None and per_rank_bytes < min_bytes:
                 skipped_small += 1
                 log.debug(
@@ -104,7 +103,7 @@ def replace_collectives_with_low_contention(
                 )
                 continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name)
+        _replace_collective(node, graph, symm_mem, coll_type, group_name)
         replacements += 1
 
     log.info(
@@ -140,14 +139,18 @@ def _enable_symm_mem(group_name):
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name):
+def _replace_collective(node, graph, symm_mem, coll_type, group_name):
     input_node = node.args[0]
-    if is_ag:
+    if coll_type == "ag":
         target = symm_mem._low_contention_all_gather.default
         args = (input_node, group_name)
-    else:
+    elif coll_type == "rs":
         reduce_op = node.args[1]
         target = symm_mem._low_contention_reduce_scatter.default
+        args = (input_node, reduce_op, group_name)
+    else:
+        reduce_op = node.args[1]
+        target = symm_mem._low_contention_all_reduce.default
         args = (input_node, reduce_op, group_name)
 
     with graph.inserting_before(node):
@@ -157,13 +160,15 @@ def _replace_collective(node, graph, symm_mem, is_ag, group_name):
     graph.erase_node(node)
 
 
-def _get_per_rank_bytes(node, is_ag):
+def _get_per_rank_bytes(node, coll_type):
     """Return per-rank message bytes for a collective, or None if unknown."""
     input_val = node.args[0].meta.get("val") if node.args else None
     if not isinstance(input_val, torch.Tensor):
         return None
     total_bytes = input_val.nelement() * input_val.element_size()
-    if is_ag:
+    if coll_type == "ag":
+        return total_bytes
+    if coll_type == "ar":
         return total_bytes
     # For RS, input is the full tensor; per-rank = total / group_size
     group_size = node.args[2] if len(node.args) > 2 else None
