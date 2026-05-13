@@ -266,6 +266,7 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
     if constexpr (std::is_same_v<scalar_t, int64_t>) {
+      TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {
