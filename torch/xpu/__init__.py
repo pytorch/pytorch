@@ -1123,7 +1123,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
 
 
 def utilization(device: Device = None) -> float:
-    r"""Return the GPU utilization as a percentage.
+    r"""Return the GPU engine utilization as a percentage.
 
     Args:
         device (torch.device, str or int, optional): selected device. Uses the
