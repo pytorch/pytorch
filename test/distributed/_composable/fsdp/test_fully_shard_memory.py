@@ -5,6 +5,7 @@ import functools
 import gc
 import math
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -500,6 +501,204 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                         f"(see PR #140044, PR #180900)."
                     ),
                 )
+
+
+class TestFullyShardAllReduceBufferWindow(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.get_device_module(device_type).device_count())
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "All-reduce buffer window tests are CUDA-only"
+    )
+    def test_all_reduce_buffer_window_arg_validation(self):
+        model = nn.Linear(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "all_reduce_buffer_window must be None"
+        ):
+            fully_shard(model, all_reduce_buffer_window=0)
+        model = nn.Linear(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "all_reduce_buffer_window must be None"
+        ):
+            fully_shard(model, all_reduce_buffer_window=-1)
+        model = nn.Linear(4, 4)
+        with self.assertRaisesRegex(
+            ValueError, "all_reduce_buffer_window must be None"
+        ):
+            fully_shard(model, all_reduce_buffer_window=True)
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "All-reduce buffer window tests are CUDA-only"
+    )
+    def test_all_reduce_buffer_window_nested_mismatch(self):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard(model[0], mesh=mesh, all_reduce_buffer_window=1)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh, all_reduce_buffer_window=2)
+        inp = torch.randn(2, 8, device=device_type)
+        with self.assertRaisesRegex(
+            ValueError, "all_reduce_buffer_window is scoped to the root"
+        ):
+            model(inp)
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "All-reduce buffer window tests are CUDA-only"
+    )
+    def test_all_reduce_buffer_window_root_value(self):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard(model[0], mesh=mesh)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh, all_reduce_buffer_window=2)
+        model(torch.randn(2, 8, device=device_type)).sum().backward()
+        self.assertEqual(fully_shard.state(model)._comm_ctx.all_reduce_buffer_window, 2)
+        self.assertEqual(len(fully_shard.state(model)._comm_ctx.all_reduce_states), 0)
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "All-reduce buffer window tests are CUDA-only"
+    )
+    def test_all_reduce_buffer_window_liveness(self):
+        self.run_subtests(
+            {"window": [1, 2]},
+            self._test_all_reduce_buffer_window_liveness,
+        )
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_HPU or TEST_XPU, "All-reduce buffer window tests are CUDA-only"
+    )
+    def test_all_reduce_buffer_window_counts_same_dtype_layers(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+
+        torch.manual_seed(42)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        mp_mixed = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        mp_same = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+        )
+        dim = 64
+        model = nn.Sequential(
+            *[nn.Linear(dim, dim, bias=False, dtype=torch.bfloat16) for _ in range(4)]
+        ).to(device_type)
+        for i, layer in enumerate(model):
+            fully_shard(layer, mesh=mesh, mp_policy=mp_same if i < 2 else mp_mixed)
+        fully_shard(model, mesh=mesh, all_reduce_buffer_window=2)
+
+        pop_counts: list[int] = []
+        orig_pop = _fsdp_param_group.FSDPCommContext.pop_all_reduce_states_for_window
+
+        def tracking_pop(comm_ctx):
+            states = orig_pop(comm_ctx)
+            pop_counts.append(len(states))
+            return states
+
+        inp = torch.randn(
+            2,
+            dim,
+            device=device_type,
+            dtype=torch.bfloat16,
+        )
+        with mock.patch.object(
+            _fsdp_param_group.FSDPCommContext,
+            "pop_all_reduce_states_for_window",
+            tracking_pop,
+        ):
+            model(inp).sum().backward()
+
+        self.assertEqual(sum(pop_counts), 2)
+        self.assertEqual(pop_counts.count(1), 2)
+
+    def _test_all_reduce_buffer_window_liveness(self, window: int):
+        from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+
+        torch.manual_seed(42)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        dim, n_layers = 128, 6
+        model = nn.Sequential(
+            *[
+                nn.Linear(dim, dim, bias=False, dtype=torch.bfloat16)
+                for _ in range(n_layers)
+            ]
+        ).to(device_type)
+        for layer in model:
+            fully_shard(layer, mesh=mesh, mp_policy=mp)
+        fully_shard(model, mesh=mesh, mp_policy=mp, all_reduce_buffer_window=window)
+
+        alive = [0]
+        max_alive = [0]
+        finalizers: list[weakref.finalize] = []
+        orig_foreach_reduce = _fsdp_param_group.foreach_reduce
+
+        def tracking_foreach_reduce(*args, **kwargs):
+            result = orig_foreach_reduce(*args, **kwargs)
+            all_reduce_input = result[3]
+            if all_reduce_input is not None:
+                alive[0] += 1
+                max_alive[0] = max(max_alive[0], alive[0])
+
+                def _on_dealloc():
+                    alive[0] -= 1
+
+                finalizers.append(weakref.finalize(all_reduce_input, _on_dealloc))
+            return result
+
+        inp = torch.randn(
+            2,
+            dim,
+            device=device_type,
+            dtype=torch.bfloat16,
+        )
+        with mock.patch.object(
+            _fsdp_param_group, "foreach_reduce", tracking_foreach_reduce
+        ):
+            model(inp).sum().backward()
+        torch.get_device_module(device_type).synchronize()
+        gc.collect()
+
+        root_state = fully_shard.state(model)
+        self.assertEqual(len(root_state._comm_ctx.all_reduce_states), 0)
+        self.assertLessEqual(
+            max_alive[0],
+            window + 1,
+            f"All-reduce buffers exceeded window: max_alive={max_alive[0]}, "
+            f"window={window}, n_layers={n_layers}",
+        )
 
 
 if __name__ == "__main__":

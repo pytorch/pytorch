@@ -529,12 +529,14 @@ def foreach_reduce(
     reduce_dtype: torch.dtype | None,
     device: torch.device,
     gradient_divide_factor: float | None,
-    all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
+    all_reduce_group: dist.ProcessGroup | None,  # native all-reduce group, if any
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
-    partial_reduce_output: torch.Tensor | None,  # only used for HSDP
+    partial_reduce_output: torch.Tensor | None,  # when accumulating without AR
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
+    prev_all_reduce_release_events: list[torch.Event] | None = None,
+    record_all_reduce_input_release_event: bool = False,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -630,7 +632,7 @@ def foreach_reduce(
                 reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
-        if all_reduce_group is not None:  # HSDP or DDP/replicate
+        if all_reduce_group is not None:  # native all-reduce (e.g. HSDP/replicate)
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:
@@ -658,27 +660,33 @@ def foreach_reduce(
                     group=all_reduce_group,
                     op=all_reduce_op,
                 )
-                # Keep refs to the reduce-dtype AR buffer + completion
-                # event so FSDPParamGroup._all_reduce_state can hold them
-                # across layers. This keeps the buffer off the caching
-                # allocator's free list; otherwise the next layer's
-                # reduce-scatter can reuse the same physical block while
-                # this layer's AR is still in flight, causing cross-layer
-                # gradient aliasing under slow AR. See PR #140044,
-                # regression test PR #180900.
+                # Keep refs to the reduce-dtype AR buffer so AllReduceState
+                # can hold it across layers. This keeps the buffer off the
+                # caching allocator's free list; otherwise the next layer's RS
+                # can reuse the same physical block while this layer's AR is
+                # still in flight, causing cross-layer gradient aliasing under
+                # slow AR. See PR #140044, regression test PR #180900.
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
 
     if all_reduce_hook is not None:
         # Execute user-specified all reduce hook.
-        # If native HSDP is used, this is executed after the HSDP all reduce.
+        # If native all-reduce is used, this runs after that all-reduce.
         # If 1-d FSDP is used, this is executed post reduce-scatter.
         post_reduce_stream = all_reduce_stream
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with device_handle.stream(all_reduce_stream):
             all_reduce_hook(reduce_output)
     # -- END: ops post reduce_scatter
+
+    if prev_all_reduce_release_events is not None:
+        # Current RS work has already been queued. Gate later RS work on any
+        # old AR buffers that the caller will release after this function
+        # returns, so the allocator cannot reuse those blocks too early.
+        # Waiting directly avoids coupling future RS to current AR/post-reduce.
+        for event in prev_all_reduce_release_events:
+            reduce_scatter_stream.wait_event(event)
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
@@ -689,9 +697,18 @@ def foreach_reduce(
         # lands on the caching allocator's free list and the next layer's
         # RS on RS stream can reuse it without waiting for this layer's
         # AR to finish. The reduce-dtype buffer is held across layers by
-        # FSDPParamGroup._all_reduce_state (captured above) to prevent
-        # this. See PR #140044, regression test PR #180900.
+        # AllReduceState (captured above) to prevent this. See PR #140044,
+        # regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        if (
+            record_all_reduce_input_release_event
+            and all_reduce_input is not None
+            and reduce_output is not all_reduce_input
+        ):
+            # The cast created a new tensor. The old all_reduce_input must not
+            # be released until this stream finishes reading it. Store an event
+            # for a future queue pop; this call does not drop the input ref.
+            all_reduce_event = post_reduce_stream.record_event()
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(

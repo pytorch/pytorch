@@ -75,6 +75,7 @@ class FSDPState(_State):
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
+        self._all_reduce_buffer_window: int | None = None
 
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
@@ -108,6 +109,7 @@ class FSDPState(_State):
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
         auto_reshard_after_forward: bool,
+        all_reduce_buffer_window: int | None,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -116,6 +118,7 @@ class FSDPState(_State):
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
         self._auto_reshard_after_forward = auto_reshard_after_forward
+        self._all_reduce_buffer_window = all_reduce_buffer_window
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
                 self._pre_forward, prepend=True, with_kwargs=True
@@ -229,6 +232,22 @@ class FSDPState(_State):
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.lazy_init(self._device)
+        root_window = self._all_reduce_buffer_window
+        for state in self._state_ctx.all_states:
+            state_window = state._all_reduce_buffer_window
+            if (
+                state is not self
+                and state_window is not None
+                and state_window != root_window
+            ):
+                raise ValueError(
+                    "all_reduce_buffer_window is scoped to the root "
+                    "communication context. Set the value on the root "
+                    "fully_shard(...) call, or use the same value for all "
+                    "nested states. "
+                    f"Root value: {root_window}; nested value: {state_window}."
+                )
+        self._comm_ctx.set_all_reduce_buffer_window(root_window)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
@@ -474,6 +493,7 @@ class FSDPState(_State):
             if rs_state.event is not None:
                 current_stream.wait_event(rs_state.event)
         self._comm_ctx.reduce_scatter_states.clear()
+        self._comm_ctx.flush_all_reduce_states(current_stream)
         self._comm_ctx.post_forward_order.clear()
         for state in self._state_ctx.all_states:
             state._modules_to_run_forward.clear()

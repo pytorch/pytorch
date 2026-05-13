@@ -75,8 +75,15 @@ class _ReplicateState(FSDPState):
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
         auto_reshard_after_forward: bool = False,
+        all_reduce_buffer_window: int | None = None,
     ) -> None:
-        super().init(modules, device, mp_policy, auto_reshard_after_forward)
+        super().init(
+            modules,
+            device,
+            mp_policy,
+            auto_reshard_after_forward,
+            all_reduce_buffer_window,
+        )
 
 
 @overload
@@ -85,6 +92,7 @@ def replicate(
     module: nn.Module,
     *,
     mesh: DeviceMesh | None = ...,
+    all_reduce_buffer_window: int | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
@@ -98,6 +106,7 @@ def replicate(
     module: list[nn.Module],
     *,
     mesh: DeviceMesh | None = ...,
+    all_reduce_buffer_window: int | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
@@ -110,6 +119,7 @@ def replicate(
     module: nn.Module,
     *,
     mesh: DeviceMesh | None = None,
+    all_reduce_buffer_window: int | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: set[nn.Parameter] | None = None,
@@ -119,6 +129,11 @@ def replicate(
 
     Args:
         module (torch.nn.Module): module to replicate
+        all_reduce_buffer_window (Optional[int]): This controls how many extra
+            mixed-dtype all-reduce input buffers may remain outstanding during
+            backward. ``None`` preserves the legacy behavior. An integer
+            ``k >= 1`` releases a mixed-dtype buffer once it is ``k`` native
+            all-reduce layers behind the current all-reduce.
 
     Example::
         >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
@@ -126,6 +141,13 @@ def replicate(
         >>> replicate(module)
     """
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
+    if all_reduce_buffer_window is not None and (
+        isinstance(all_reduce_buffer_window, bool) or all_reduce_buffer_window < 1
+    ):
+        raise ValueError(
+            "all_reduce_buffer_window must be None or an integer >= 1, "
+            f"but got {all_reduce_buffer_window}"
+        )
     _validate_module(module)
     mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
     if dp_mesh_dims is not None:
@@ -153,7 +175,12 @@ def replicate(
         get_state_fn=_get_module_replicate_state,
     )
     state = replicate.state(modules[0])  # type: ignore[attr-defined]
-    state.init(modules, device, mp_policy)
+    state.init(
+        modules,
+        device,
+        mp_policy,
+        all_reduce_buffer_window=all_reduce_buffer_window,
+    )
 
     _init_param_group(
         state,
