@@ -57,6 +57,7 @@ jobs:
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
@@ -88,6 +89,7 @@ jobs:
       runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
@@ -126,6 +128,7 @@ jobs:
     with:
       build-environment: linux-jammy-rocm-py3_10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
