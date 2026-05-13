@@ -227,17 +227,13 @@ class TestTritonHeuristics(TestCase):
             autotuner._validate_launcher_args(
                 mock_launcher, [1, 2], "test_kernel"  # 2 args, expects 3
             )
-            
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
-        
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
         size_hints = (1024,)
         block_size = 256
-        
-        seen_num_elements_per_warp = set()
-        
+        seen_num_elements_per_warp = set() 
         def mock_triton_config(
             size_hints,
             x,
