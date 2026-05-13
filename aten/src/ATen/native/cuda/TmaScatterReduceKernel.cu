@@ -1,7 +1,7 @@
-// TMA-based scatter_add using cp.reduce.async.bulk (sm_90+, CUDA 12.8+)
+// TMA-based scatter reduce using cp.reduce.async.bulk (sm_90+, CUDA 12.8+)
+// Supports add (f32, f64, f16, bf16) and min/max (s32, s64, f16, bf16).
 // Uses inline PTX rather than cuda::ptx wrappers to avoid CCCL version
 // compatibility issues across different CUDA toolkit versions.
-// Requires CUDA 12.8+ for cp.async.bulk.shared::cta.global (PTX ISA 8.7).
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ceil_div.h>
@@ -12,17 +12,13 @@
 
 namespace at::native {
 
+enum class TmaReduceOp : int { ADD = 0, MIN = 1, MAX = 2 };
+
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-static int tma_scatter_add_single_chunk_rows_per_warp(
+static int tma_scatter_single_chunk_rows_per_warp(
     int row_bytes, int warps_per_block, int num_ind) {
-    // Rows <= 512 bytes don't benefit from intra-row pipelining. Let each warp
-    // process multiple rows to increase outstanding TMA ops (~35% win on GB200
-    // for bf16 D=128/256, 500K indices, 100K output rows, uniform distribution).
     int rows_per_warp = row_bytes <= 512 ? 16 : 1;
     int num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-    // Require at least 8 blocks per SM to ensure full occupancy before committing
-    // to multi-row. With too few indices the extra rows_per_warp starves SMs;
-    // the loop below halves rows_per_warp until the block count is sufficient.
     int64_t min_blocks = 8L * num_sms;
     while (rows_per_warp > 1) {
         int64_t blocks =
@@ -77,6 +73,8 @@ __device__ __forceinline__ void bulk_load(void* smem_dst, const void* global_src
         : : "l"(dst_addr), "l"(global_src), "r"(size), "l"(mbar_addr) : "memory");
 }
 
+// --- bulk_reduce_add ---
+
 template <typename scalar_t>
 __device__ __forceinline__ void bulk_reduce_add(void* global_dst, const void* smem_src, uint32_t size);
 
@@ -112,6 +110,93 @@ __device__ __forceinline__ void bulk_reduce_add<c10::BFloat16>(void* dst, const 
         : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
 }
 
+// --- bulk_reduce_min ---
+
+template <typename scalar_t>
+__device__ __forceinline__ void bulk_reduce_min(void* global_dst, const void* smem_src, uint32_t size);
+
+template <>
+__device__ __forceinline__ void bulk_reduce_min<int32_t>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.min.s32 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_min<int64_t>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.min.s64 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_min<c10::Half>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.min.f16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_min<c10::BFloat16>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.min.bf16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+// --- bulk_reduce_max ---
+
+template <typename scalar_t>
+__device__ __forceinline__ void bulk_reduce_max(void* global_dst, const void* smem_src, uint32_t size);
+
+template <>
+__device__ __forceinline__ void bulk_reduce_max<int32_t>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.max.s32 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_max<int64_t>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.max.s64 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_max<c10::Half>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.max.f16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+template <>
+__device__ __forceinline__ void bulk_reduce_max<c10::BFloat16>(void* dst, const void* src, uint32_t size) {
+    uint64_t src_addr;
+    asm volatile("cvta.to.shared::cta.u64 %0, %1;" : "=l"(src_addr) : "l"(reinterpret_cast<uint64_t>(src)));
+    asm volatile("cp.reduce.async.bulk.global.shared::cta.bulk_group.max.bf16 [%0], [%1], %2;"
+        : : "l"(dst), "l"(src_addr), "r"(size) : "memory");
+}
+
+// --- compile-time dispatch ---
+
+template <typename scalar_t, TmaReduceOp op>
+__device__ __forceinline__ void bulk_reduce(void* dst, const void* src, uint32_t size) {
+    if constexpr (op == TmaReduceOp::ADD) {
+        bulk_reduce_add<scalar_t>(dst, src, size);
+    } else if constexpr (op == TmaReduceOp::MIN) {
+        bulk_reduce_min<scalar_t>(dst, src, size);
+    } else {
+        bulk_reduce_max<scalar_t>(dst, src, size);
+    }
+}
+
 __device__ __forceinline__ void commit_group() {
     asm volatile("cp.async.bulk.commit_group;" ::: "memory");
 }
@@ -128,10 +213,8 @@ __device__ __forceinline__ void wait_group_lt0() {
 
 #endif // !USE_ROCM && __CUDA_ARCH__ >= 900
 
-// multiple_rows_per_warp: compile-time specialization to flatten the nested
-// row/chunk loops into a single loop for each case, avoiding dead loop overhead.
-template <typename scalar_t, typename index_t, bool multiple_rows_per_warp>
-__global__ void tma_scatter_add_kernel(
+template <typename scalar_t, typename index_t, TmaReduceOp op, bool multiple_rows_per_warp>
+__global__ void tma_scatter_reduce_kernel(
     scalar_t* __restrict__ self_data,
     const scalar_t* __restrict__ src_data,
     const index_t* __restrict__ idx,
@@ -143,15 +226,12 @@ __global__ void tma_scatter_add_kernel(
 
     extern __shared__ char smem_raw[];
 
-    // One warp per row (or multiple rows): lane 0 issues TMA commands.
     constexpr int threads_per_entry = C10_WARP_SIZE;
     int warp_in_block = threadIdx.x / threads_per_entry;
     int lane = threadIdx.x - warp_in_block * threads_per_entry;
     int warps_per_block = blockDim.x / threads_per_entry;
     int entries_per_block = warps_per_block * rows_per_warp;
 
-    // smem layout: [data region: warps_per_block * 2 * chunk_elems scalars]
-    //              [mbarrier region: warps_per_block * 2 uint64_t, 8-byte aligned]
     int buf_elems = 2 * chunk_elems;
     int data_region_bytes = warps_per_block * buf_elems * static_cast<int>(sizeof(scalar_t));
     int mbar_offset = (data_region_bytes + 7) & ~7;
@@ -173,7 +253,6 @@ __global__ void tma_scatter_add_kernel(
     int global_phase = 0;
 
     if constexpr (multiple_rows_per_warp) {
-        // Single chunk per row, multiple rows per warp: loop over rows only.
         int num_rows = min(rows_per_warp, num_ind - entry_base);
         uint32_t cur_bytes = D * sizeof(scalar_t);
 
@@ -182,7 +261,7 @@ __global__ void tma_scatter_add_kernel(
             int cur = global_phase & 1;
 
             int64_t ind = idx[entry_id];
-            CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter add index out of bounds",
+            CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter reduce index out of bounds",
                 "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
 
             const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
@@ -202,16 +281,15 @@ __global__ void tma_scatter_add_kernel(
             mbar_phase[cur]++;
 
             if (lane == 0) {
-                tma::bulk_reduce_add<scalar_t>(dst_entry, buf0 + cur * chunk_elems, cur_bytes);
+                tma::bulk_reduce<scalar_t, op>(dst_entry, buf0 + cur * chunk_elems, cur_bytes);
                 tma::commit_group();
             }
         }
     } else {
-        // Single row per warp, possibly multiple chunks: loop over chunks only.
         int entry_id = entry_base;
 
         int64_t ind = idx[entry_id];
-        CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter add index out of bounds",
+        CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "tma scatter reduce index out of bounds",
             "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
 
         const scalar_t* src_entry = src_data + static_cast<int64_t>(entry_id) * src_stride;
@@ -237,7 +315,7 @@ __global__ void tma_scatter_add_kernel(
             mbar_phase[cur]++;
 
             if (lane == 0) {
-                tma::bulk_reduce_add<scalar_t>(dst_entry + off, buf0 + cur * chunk_elems, cur_bytes);
+                tma::bulk_reduce<scalar_t, op>(dst_entry + off, buf0 + cur * chunk_elems, cur_bytes);
                 tma::commit_group();
             }
         }
@@ -249,12 +327,12 @@ __global__ void tma_scatter_add_kernel(
     __syncwarp();
 
 #else
-    CUDA_KERNEL_ASSERT(false && "tma_scatter_add_kernel requires sm_90+");
+    CUDA_KERNEL_ASSERT(false && "tma_scatter_reduce_kernel requires sm_90+");
 #endif
 }
 
-template <typename scalar_t, typename index_t>
-void tma_scatter_add_kernel_launch(
+template <typename scalar_t, typename index_t, TmaReduceOp op>
+static void tma_scatter_reduce_launch_impl(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int D, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
@@ -271,7 +349,7 @@ void tma_scatter_add_kernel_launch(
     int rows_per_warp = 1;
     if (num_chunks == 1) {
         int row_bytes = D * static_cast<int>(sizeof(scalar_t));
-        rows_per_warp = tma_scatter_add_single_chunk_rows_per_warp(
+        rows_per_warp = tma_scatter_single_chunk_rows_per_warp(
             row_bytes, warps_per_block, num_ind);
     }
 
@@ -282,7 +360,6 @@ void tma_scatter_add_kernel_launch(
 
     int entries_per_block = warps_per_block * rows_per_warp;
     int grid_x = at::ceil_div(num_ind, entries_per_block);
-    // Spread chunks across grid.y but keep at least 4 per block for pipeline benefit
     constexpr int min_chunks_per_block = 4;
     uint32_t grid_y = std::min(
         static_cast<uint32_t>(std::max(1, num_chunks / min_chunks_per_block)),
@@ -295,13 +372,13 @@ void tma_scatter_add_kernel_launch(
     dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
 
     if (rows_per_warp > 1) {
-        tma_scatter_add_kernel<scalar_t, index_t, true>
+        tma_scatter_reduce_kernel<scalar_t, index_t, op, true>
             <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
             self_data, src_data, idx, num_ind, D, self_dim_size,
             self_stride, src_stride,
             chunk_elems, rows_per_warp);
     } else {
-        tma_scatter_add_kernel<scalar_t, index_t, false>
+        tma_scatter_reduce_kernel<scalar_t, index_t, op, false>
             <<<grid, max_threads, smem, at::cuda::getCurrentCUDAStream()>>>(
             self_data, src_data, idx, num_ind, D, self_dim_size,
             self_stride, src_stride,
@@ -309,10 +386,39 @@ void tma_scatter_add_kernel_launch(
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
-    TORCH_CHECK(false, "TMA scatter_add requires CUDA 12.8+ and NVIDIA GPU");
+    TORCH_CHECK(false, "TMA scatter reduce requires CUDA 12.8+ and NVIDIA GPU");
 #endif
 }
 
+// scatter_add entry point (preserves existing API)
+template <typename scalar_t, typename index_t>
+void tma_scatter_add_kernel_launch(
+    scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
+    int D, int64_t self_dim_size,
+    int64_t self_stride_bytes, int64_t src_stride_bytes) {
+    tma_scatter_reduce_launch_impl<scalar_t, index_t, TmaReduceOp::ADD>(
+        self_data, src_data, idx, num_ind, D, self_dim_size,
+        self_stride_bytes, src_stride_bytes);
+}
+
+// scatter_reduce min/max entry point
+template <typename scalar_t, typename index_t>
+void tma_scatter_reduce_kernel_launch(
+    scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
+    int D, int64_t self_dim_size,
+    int64_t self_stride_bytes, int64_t src_stride_bytes, bool is_min) {
+    if (is_min) {
+        tma_scatter_reduce_launch_impl<scalar_t, index_t, TmaReduceOp::MIN>(
+            self_data, src_data, idx, num_ind, D, self_dim_size,
+            self_stride_bytes, src_stride_bytes);
+    } else {
+        tma_scatter_reduce_launch_impl<scalar_t, index_t, TmaReduceOp::MAX>(
+            self_data, src_data, idx, num_ind, D, self_dim_size,
+            self_stride_bytes, src_stride_bytes);
+    }
+}
+
+// scatter_add instantiations: f32, f64, f16, bf16
 #define INSTANTIATE_TMA_SCATTER_ADD(scalar_t) \
 template void tma_scatter_add_kernel_launch<scalar_t, int64_t>( \
     scalar_t*, const scalar_t*, int64_t*, int, int, int64_t, int64_t, int64_t); \
@@ -324,5 +430,18 @@ INSTANTIATE_TMA_SCATTER_ADD(double)
 INSTANTIATE_TMA_SCATTER_ADD(c10::Half)
 INSTANTIATE_TMA_SCATTER_ADD(c10::BFloat16)
 #undef INSTANTIATE_TMA_SCATTER_ADD
+
+// scatter_reduce min/max instantiations: s32, s64, f16, bf16
+#define INSTANTIATE_TMA_SCATTER_REDUCE(scalar_t) \
+template void tma_scatter_reduce_kernel_launch<scalar_t, int64_t>( \
+    scalar_t*, const scalar_t*, int64_t*, int, int, int64_t, int64_t, int64_t, bool); \
+template void tma_scatter_reduce_kernel_launch<scalar_t, int32_t>( \
+    scalar_t*, const scalar_t*, int32_t*, int, int, int64_t, int64_t, int64_t, bool);
+
+INSTANTIATE_TMA_SCATTER_REDUCE(int32_t)
+INSTANTIATE_TMA_SCATTER_REDUCE(int64_t)
+INSTANTIATE_TMA_SCATTER_REDUCE(c10::Half)
+INSTANTIATE_TMA_SCATTER_REDUCE(c10::BFloat16)
+#undef INSTANTIATE_TMA_SCATTER_REDUCE
 
 } // namespace at::native
