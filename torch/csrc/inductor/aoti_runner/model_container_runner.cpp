@@ -109,6 +109,7 @@ consider rebuild your model with the latest AOTInductor.");
   TRY_LOAD_SYMBOL(
       update_constants_from_blob_func_,
       "AOTInductorModelUpdateConstantsFromBlob")
+  TRY_LOAD_SYMBOL(get_last_error_func_, "AOTInductorGetLastError")
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -164,6 +165,13 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     const char* err = torch::aot_inductor::get_last_error();
     if (err) {
       throw std::runtime_error(err);
+    }
+    if (get_last_error_func_) {
+      const char* aoti_err = nullptr;
+      if (get_last_error_func_(&aoti_err) == AOTI_RUNTIME_SUCCESS && aoti_err &&
+          aoti_err[0]) {
+        throw std::runtime_error(aoti_err);
+      }
     }
     torch::headeronly::detail::throw_exception(
         "run_func_(...)", __FILE__, __LINE__);
