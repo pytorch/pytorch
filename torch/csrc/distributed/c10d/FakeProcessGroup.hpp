@@ -93,6 +93,8 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // See note in _allgather_base below.
+    at::AutoDispatchBelowAutograd guard;
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
@@ -128,6 +130,8 @@ class FakeProcessGroup : public Backend {
         ") must have the same length as input tensor list (",
         inputTensors.size(),
         ")");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < inputTensors.size(); ++i) {
       TORCH_CHECK(
           static_cast<int>(outputTensorLists[i].size()) == size_,
@@ -184,6 +188,8 @@ class FakeProcessGroup : public Backend {
           ". Output list size should be ",
           size_,
           ", same as size of the process group.");
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
       }

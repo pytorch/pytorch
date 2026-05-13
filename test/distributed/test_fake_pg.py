@@ -253,6 +253,17 @@ class TestFakePG(TestCase):
         for out in output_tensors:
             self.assertEqual(out, input_tensor)
 
+    def test_allgather_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        input_tensor = torch.ones(3, 3).requires_grad_(True)
+        output_tensors = [torch.empty(3, 3) for _ in range(2)]
+        dist.all_gather(output_tensors, input_tensor)
+        for out in output_tensors:
+            self.assertEqual(out, input_tensor)
+            self.assertFalse(out.requires_grad)
+
     @parametrize("rank", [0, 1])
     def test_gather_copy_semantics(self, rank):
         store = FakeStore()
@@ -267,6 +278,17 @@ class TestFakePG(TestCase):
         else:
             dist.gather(input_tensor, None, dst=0)
 
+    def test_gather_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        input_tensor = torch.ones(3, 3).requires_grad_(True)
+        gather_list = [torch.empty(3, 3) for _ in range(2)]
+        dist.gather(input_tensor, gather_list)
+        for out in gather_list:
+            self.assertEqual(out, input_tensor)
+            self.assertFalse(out.requires_grad)
+
     @parametrize("rank", [0, 1])
     def test_allgather_coalesced_copy_semantics(self, rank):
         store = FakeStore()
@@ -278,6 +300,21 @@ class TestFakePG(TestCase):
         for i, output_list in enumerate(output_lists):
             for out in output_list:
                 self.assertEqual(out, inputs[i])
+
+    def test_allgather_coalesced_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        inputs = [
+            torch.ones(3, 3).requires_grad_(True),
+            (torch.ones(3, 3) * 2).requires_grad_(True),
+        ]
+        output_lists = [[torch.empty(3, 3) for _ in range(2)] for _ in inputs]
+        dist.all_gather_coalesced(output_lists, inputs)
+        for i, output_list in enumerate(output_lists):
+            for out in output_list:
+                self.assertEqual(out, inputs[i])
+                self.assertFalse(out.requires_grad)
 
     def test_error_on_collective(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
