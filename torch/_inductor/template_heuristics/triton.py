@@ -2073,10 +2073,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ) -> dict[str, Any]:
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
-        # Calculate allow_tf32
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+        )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+            size_threshold
         )
 
         return {
