@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -1273,7 +1273,7 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
         if isinstance(node.meta.get("val"), torch.Tensor)
     )
 
-    out_arg = output_node(gm).args[0]
+    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
     out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
@@ -3025,7 +3025,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(val, sympy.Expr), (
         "only support sympy.Expr as input to get_sympy_Expr_dtype"
     )
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -3755,7 +3755,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
     # Allow for unhinted e as long as we can still statically prove
@@ -4147,7 +4147,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     # Check for cudagraph_unsafe tag
     if (
         isinstance(target, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in target.tags
+        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
     ):
         return True
 

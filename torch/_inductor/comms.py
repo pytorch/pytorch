@@ -1547,7 +1547,7 @@ def _calculate_potential_peak_memory_sink_waits(
     _post_alloc_update[candidate] = candidate_post_alloc
     potential_peak = candidate_post_alloc
     candidate_size_free_to_move = sum(
-        buf.mpi_buffer.size_free
+        buf.mpi_buffer.size_free  # type: ignore[attr-defined]
         for buf in itertools.chain.from_iterable(
             group_n_to_bufs_after_swap_dealloc_instead_of_candidate.values()
         )

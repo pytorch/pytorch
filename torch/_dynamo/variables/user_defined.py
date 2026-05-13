@@ -174,8 +174,7 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
     # in independent try blocks so that one missing symbol doesn't drop the others.
     try:
-        # pyrefly: ignore [missing-import]
-        from _pytest.raises import RaisesExc, RaisesGroup
+        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
 
         f_ctxs.append(RaisesExc)
         f_ctxs.append(RaisesGroup)
@@ -190,8 +189,7 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         pass
 
     try:
-        # pyrefly: ignore [missing-import]
-        from _pytest.recwarn import WarningsChecker
+        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
 
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -1031,7 +1029,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 [],
             )
-            var.call_method(tx, "__init__", list(args), kwargs)
+            var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
 
         if (
@@ -1044,7 +1042,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             try:
                 return VariableTracker.build(
                     tx,
-                    self.as_python_constant()(
+                    self.as_python_constant()(  # type: ignore[operator]
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     ),
@@ -1639,7 +1637,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def python_type(self) -> type:
-        return self.value_type
+        return self.value_type  # type: ignore[return-value]
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -2180,17 +2178,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     method = unpatched_nn_module_init
                 return UserMethodVariable(
                     method, self, source_fn=source_fn, source=source
-                ).call_function(tx, args, kwargs)
+                ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return VariableTracker.build(tx, len(self.value))  # type: ignore[arg-type]
 
-            if trace_rules.is_polyfilled_callable(method):
+            if trace_rules.is_polyfilled_callable(method):  # type: ignore[arg-type]
                 from .functions import PolyfilledFunctionVariable
 
                 polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
-                wrapped: Any = polyfill_handlers.get(method)
+                wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
                     return variables.UserMethodVariable(
@@ -2792,7 +2790,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         variables.NNModuleVariable,
                     ),
                 ):
-                    out.set_nn_module_stack_source(
+                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
                         AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
                     )
             return out
@@ -2944,7 +2942,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         elif isinstance(type_attr, types.FunctionType):
             while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline
+                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
@@ -3352,7 +3350,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         args: list[object] = []
         kwargs: dict[str, object] = {}
-        for field in fields(self.value):
+        for field in fields(self.value):  # type: ignore[arg-type]
             if field.init:
                 data = self._get_field_vt(field.name).as_python_constant()
                 if getattr(field, "kw_only", False):
@@ -3868,8 +3866,8 @@ class OrderedDictVariable(UserDefinedDictVariable):
             if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
                 last = kwargs["last"].as_python_constant()
 
-            if isinstance(self._base_vt.items, collections.OrderedDict):
-                k, v = self._base_vt.items.popitem(last=last)
+            if isinstance(self._base_vt.items, collections.OrderedDict):  # type: ignore[union-attr]
+                k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
             else:
                 k, v = self._base_vt.items.popitem()  # type: ignore[union-attr]
             self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
@@ -4177,7 +4175,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(
+                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
         else:
@@ -4261,7 +4259,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return StructSequenceVariable
         return NamedTupleVariable
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
         from .lists import TupleVariable
 
         tx = kwargs.pop("tx", None)
@@ -4499,19 +4497,19 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             # We emulate _tuplegetter.__get__ by indexing into the tracked
             # tuple items, because self.value may not hold actual runtime values.
             _, (idx, _) = type_attr.__reduce__()
-            return self.items[idx]
+            return self.items[idx]  # type: ignore[union-attr]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def get_construct_fn(self) -> Callable[..., Any]:
-        return self.tuple_cls._make
+        return self.tuple_cls._make  # type: ignore[attr-defined]
 
     def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
-        return self.tuple_cls(*items)
+        return self.tuple_cls(*items)  # type: ignore[arg-type]
 
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
-        return self.tuple_cls(*items)
+        return self.tuple_cls(*items)  # type: ignore[arg-type]
 
 
 class StructSequenceVariable(UserDefinedTupleVariable):

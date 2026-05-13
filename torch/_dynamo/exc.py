@@ -453,7 +453,7 @@ def raise_observed_exception(
     if not isinstance(exception_vt, ExceptionVals):
         raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack.set_current_exception(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages
     if args:
@@ -686,7 +686,7 @@ def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
     if hasattr(exc, "_hop_name"):
         lines = msg.partition("\n  Explanation:")
         msg = (
-            f"{lines[0]}\n  Higher Order Operator: {exc._hop_name}{lines[1]}{lines[2]}"
+            f"{lines[0]}\n  Higher Order Operator: {exc._hop_name}{lines[1]}{lines[2]}"  # type: ignore[attr-defined]
         )
 
     return msg

@@ -680,7 +680,7 @@ def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     for src, fs in code_state.automatic_dynamic.items():
         dynamic = False
         if isinstance(fs.size, tuple):
-            dynamic = auto_dynamic in fs.size
+            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
         elif fs.scalar == auto_dynamic:
             dynamic = True
         if dynamic:
@@ -795,7 +795,7 @@ def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
     trace_structured_artifact(
         f"get_{ty}_code_state",
         "string",
-        lambda: render_code_state(_CODE_STATE),
+        lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
     )
     set_feature_use("pgo", True)
     _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)

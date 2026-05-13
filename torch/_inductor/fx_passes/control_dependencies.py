@@ -264,7 +264,7 @@ def _create_subgraph_for_node(
     result = subgraph.call_function(
         node.target,
         tuple(new_args),
-        new_kwargs,
+        new_kwargs,  # type: ignore[arg-type]
     )
 
     # Copy metadata from the original node
