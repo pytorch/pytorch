@@ -209,7 +209,10 @@ class TestCommMode(TestCase):
 
         # tests c10d alltoall_
         with comm_mode:
-            dist.all_to_all([inp], [inp])
+            dist.all_to_all(
+                [torch.empty_like(inp) for _ in range(self.world_size)],
+                [inp.clone() for _ in range(self.world_size)],
+            )
 
         self.checksAssert(comm_mode, c10d_ops.alltoall_, 1, 1)
 

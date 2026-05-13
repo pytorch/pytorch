@@ -172,12 +172,12 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        out_tensor = torch.ones(3, 3)
-        in_tensor = torch.ones(3, 3)
-        output_split = [1, 1]
-        input_split = [1, 1]
+        out_tensor = torch.ones(4, 3)
+        in_tensor = torch.ones(4, 3)
+        output_split = [2, 2]
+        input_split = [2, 2]
         dist.all_to_all_single(out_tensor, in_tensor, output_split, input_split)
-        self.assertEqual(tuple(out_tensor.shape), (3, 3))
+        self.assertEqual(tuple(out_tensor.shape), (4, 3))
 
     def test_send(self):
         store = FakeStore()
@@ -405,6 +405,149 @@ class TestFakePG(TestCase):
             for i, out in enumerate(output_list):
                 self.assertEqual(out, inputs[i])
                 self.assertFalse(out.requires_grad)
+
+    @parametrize("rank", [0, 1])
+    def test_alltoall_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        input_list = [torch.ones(3, 3) * i for i in range(2)]
+        output_list = [torch.empty(3, 3) for _ in range(2)]
+        dist.all_to_all(output_list, input_list)
+        for i in range(2):
+            self.assertEqual(output_list[i], input_list[i])
+
+    def test_alltoall_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        input_list = [
+            torch.ones(3, 3).requires_grad_(True),
+            (torch.ones(3, 3) * 2).requires_grad_(True),
+        ]
+        output_list = [torch.empty(3, 3) for _ in range(2)]
+        dist.all_to_all(output_list, input_list)
+        for i in range(2):
+            self.assertEqual(output_list[i], input_list[i])
+
+    @parametrize("rank", [0, 1])
+    def test_alltoall_base_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
+
+    @parametrize("rank", [0, 1])
+    def test_alltoall_base_split_sizes_repeat(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        # Slot 1 (size 6) is larger than the input buffer (size 4),
+        # so the input is repeated to fill it.
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(8, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[2, 6],
+            input_split_sizes=[1, 3],
+        )
+        expected = torch.tensor(
+            [[0.0], [1.0], [0.0], [1.0], [2.0], [3.0], [0.0], [1.0]]
+        )
+        self.assertEqual(out_tensor, expected)
+
+    @parametrize("rank", [0, 1])
+    def test_alltoall_base_split_sizes_truncate(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        # Each output slot is smaller than the input buffer, so input is
+        # truncated to slot size.
+        in_tensor = torch.arange(8.0).reshape(8, 1)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[1, 3],
+            input_split_sizes=[4, 4],
+        )
+        expected = torch.tensor([[0.0], [0.0], [1.0], [2.0]])
+        self.assertEqual(out_tensor, expected)
+
+    def test_alltoall_base_split_size_validation(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not divide equally across group size"
+        ):
+            dist.all_to_all_single(torch.empty(3, 2), torch.ones(3, 2))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Number of tensor splits not equal to group size"
+        ):
+            dist.all_to_all_single(
+                torch.empty(4, 2),
+                torch.ones(4, 2),
+                output_split_sizes=[4],
+                input_split_sizes=[4],
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Split sizes doesn't match total dim 0 size"
+        ):
+            dist.all_to_all_single(
+                torch.empty(4, 2),
+                torch.ones(4, 2),
+                output_split_sizes=[1, 1],
+                input_split_sizes=[2, 2],
+            )
+
+    def test_alltoall_base_empty_input_with_output(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "inputBuffer is empty"):
+            dist.all_to_all_single(
+                torch.empty(2, 1),
+                torch.empty(0, 1),
+                output_split_sizes=[1, 1],
+                input_split_sizes=[0, 0],
+            )
+
+    def test_alltoall_list_size_validation(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "does not match world size"):
+            dist.all_to_all(
+                [torch.empty(3, 3)],
+                [torch.ones(3, 3), torch.ones(3, 3)],
+            )
+
+    def test_alltoall_base_requires_grad(self):
+        # Real backends write into output from C++ kernels autograd never sees.
+        # Without AutoDispatchBelowAutograd, copy_ into a narrow()/chunk() view
+        # would fail when input requires grad.
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(out_tensor, in_tensor)
+
+        in_tensor2 = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
+        out_tensor2 = torch.empty(8, 1)
+        dist.all_to_all_single(
+            out_tensor2,
+            in_tensor2,
+            output_split_sizes=[2, 6],
+            input_split_sizes=[1, 3],
+        )
 
     def test_error_on_collective(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
