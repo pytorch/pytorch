@@ -39,12 +39,17 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType
+from typing import Any, Literal, NewType, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
+
+
+if TYPE_CHECKING:
+    from torch.fx import Proxy
+    from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 
 from .fake_class_registry import register_fake_class
 
@@ -81,6 +86,15 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
+# Type for reconstruct_fn: called by PythonKeyTracer.create_arg when make_fx
+# encounters an untracked opaque reference (e.g. a backward closure capture).
+# Should derive the object from existing graph inputs or return None to fall
+# back to get_attr.  Args: (obj, get_tracked_proxy, tracer).
+ReconstructFn: TypeAlias = Callable[
+    [OpaqueBase, Callable[[OpaqueBase], "Proxy | None"], "PythonKeyTracer"],
+    "Proxy | None",
+]
+
 
 @dataclass
 class _OpaqueTypeInfo:
@@ -91,6 +105,7 @@ class _OpaqueTypeInfo:
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
     hoist: bool
+    reconstruct_fn: ReconstructFn | None
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -141,6 +156,7 @@ def register_opaque_type(
     hoist=False,
     guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
+    reconstruct_fn: ReconstructFn | None = None,
 ) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
@@ -243,7 +259,9 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {}, hoist)
+    type_info = _OpaqueTypeInfo(
+        name, typ, guard_fn, members or {}, hoist, reconstruct_fn
+    )
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
@@ -255,7 +273,13 @@ register_opaque_type(Enum, typ="value")
 
 
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
-    return is_opaque_type(type(value))
+    if is_opaque_type(type(value)):
+        return True
+    from torch._library.fake_class_registry import FakeScriptObject
+
+    if isinstance(value, FakeScriptObject):
+        return is_opaque_type(type(value.real_obj))
+    return False
 
 
 def should_hoist(cls: Any) -> bool:
@@ -263,6 +287,13 @@ def should_hoist(cls: Any) -> bool:
     if info is None:
         return False
     return info.hoist
+
+
+def get_reconstruct_fn(cls: type[OpaqueBase]) -> ReconstructFn | None:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return None
+    return info.reconstruct_fn
 
 
 def has_members(cls: Any) -> bool:

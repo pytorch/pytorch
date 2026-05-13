@@ -237,7 +237,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
               D,
               H,
               W,
-              src_contig.data_ptr<scalar_t>(),
+              src_contig.const_data_ptr<scalar_t>(),
               dst.data_ptr<scalar_t>());
         });
   }
@@ -353,7 +353,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
               D,
               H,
               W,
-              src_contig.data_ptr<scalar_t>(),
+              src_contig.const_data_ptr<scalar_t>(),
               dst.data_ptr<scalar_t>());
         });
     return dst;

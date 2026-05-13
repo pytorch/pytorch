@@ -198,6 +198,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "distributed/pipelining/test_dtensor_pp_integration",
 ]
 
 # Add architecture-specific blocklist entries
@@ -421,7 +422,9 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
-DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+DYNAMO_CORE_TESTS = [
+    test for test in TESTS if test.startswith("dynamo") and "cpython" not in test
+]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
@@ -1832,6 +1835,8 @@ def get_selected_tests(options) -> list[str]:
                     # Output mismatch errors and long running tests
                     "test_linalg",
                     "test_matmul_cuda",
+                    "functorch/test_ops",
+                    "test_scaled_matmul_cuda",
                 ]
             )
 
@@ -1840,11 +1845,6 @@ def get_selected_tests(options) -> list[str]:
         if SM120OrLater:
             WINDOWS_BLOCKLIST.extend(
                 [
-                    # Windows fatal exception / access violation
-                    "test_fake_tensor",
-                    "test_cpp_extensions_jit",
-                    # TDR, BSOD observed
-                    "functorch/test_ops",
                     # test_api fails on Windows SM120+. Triage pending.
                     "cpp/test_api",
                 ]

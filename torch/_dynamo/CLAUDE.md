@@ -47,7 +47,7 @@ Key fields: `source` (where the value came from, for guards) and
 
 Key subclass families in `variables/`: `TensorVariable` / `SymNodeVariable`
 (tensor.py), `ConstantVariable` (constant.py), `ListVariable` /
-`TupleVariable` (lists.py), `ConstDictVariable` / `SetVariable` (dicts.py),
+`TupleVariable` (lists.py), `ConstDictVariable` (dicts.py), `SetVariable` (sets.py),
 `UserFunctionVariable` (functions.py), `BuiltinVariable` (builtin.py),
 `NNModuleVariable` (nn_module.py), `UserDefinedObjectVariable`
 (user_defined.py), `TorchHigherOrderOperatorVariable` (higher_order_ops.py),

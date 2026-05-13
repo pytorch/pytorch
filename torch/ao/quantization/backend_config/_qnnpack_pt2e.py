@@ -53,20 +53,20 @@ def get_linear_configs():
 
     # linear_configs.append(
     #     BackendPatternConfig((torch.ops.aten.addmm.default, MatchAllNode, MatchAllNode, torch.ops.aten.t.default))
-    #     .set_observation_type(observation_type)  # noqa: E131
+    #     .set_observation_type(observation_type)
     #     .set_dtype_configs(dtype_configs)
     #     ._set_root_node_getter(root_node_getter))
 
     linear_configs.append(
         BackendPatternConfig(torch.ops.aten.addmm.default)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 0})
     )
     # linear is decomposed to `t - mm` if bias is not present
     linear_configs.append(
         BackendPatternConfig(torch.ops.aten.mm.default)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1})
     )
@@ -79,7 +79,7 @@ def get_conv_configs():
     dtype_configs = [weighted_op_quint8_dtype_config]
     conv_configs.append(
         BackendPatternConfig(torch.ops.aten.convolution.default)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
@@ -87,7 +87,7 @@ def get_conv_configs():
         BackendPatternConfig(
             (torch.ops.aten.convolution.default, torch.ops.aten.relu.default)
         )
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
@@ -96,7 +96,7 @@ def get_conv_configs():
         BackendPatternConfig(
             (torch.ops.aten.convolution.default, torch.ops.aten.relu_.default)
         )
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
@@ -117,7 +117,7 @@ def get_pooling_configs():
         ._set_pattern_complex_format(
             (operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0)
         )
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
         ._set_root_node_getter(root_node_getter)
     )
@@ -131,7 +131,7 @@ def get_relu_configs():
     dtype_configs = [weighted_op_quint8_dtype_config]
     backend_pattern_configs.append(
         BackendPatternConfig(torch.ops.aten.relu.default)
-        .set_observation_type(observation_type)  # noqa: E131
+        .set_observation_type(observation_type)
         .set_dtype_configs(dtype_configs)
     )
     return backend_pattern_configs
@@ -160,7 +160,7 @@ def get_binary_op_configs():
         ]
         binary_op_configs.extend(
             BackendPatternConfig(bop_pattern)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             ._set_num_tensor_args_to_observation_type(
                 num_tensor_args_to_observation_type_mapping
             )
