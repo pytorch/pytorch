@@ -22,7 +22,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -743,20 +743,10 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
                     num_init_leaves,
                 )
-                # Shape padding can produce same-sized carry values with padded strides.
-                # while_loop requires loop-carried metadata to remain stable.
                 next_carry = [
-                    (
-                        next_carry_elem
-                        if next_carry_elem.stride() == carry_elem.stride()
-                        else torch.empty_strided(
-                            next_carry_elem.size(),
-                            carry_elem.stride(),
-                            device=next_carry_elem.device,
-                            dtype=next_carry_elem.dtype,
-                            layout=next_carry_elem.layout,
-                            requires_grad=next_carry_elem.requires_grad,
-                        ).copy_(next_carry_elem)
+                    inductor_prims.force_exact_strides(
+                        next_carry_elem,
+                        carry_elem.stride(),
                     )
                     for next_carry_elem, carry_elem in zip(next_carry, carry)
                 ]
