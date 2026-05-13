@@ -675,7 +675,7 @@ def make_pointwise(
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: TensorBox | BaseView, alpha) -> TensorBox | _T:  # noqa: docstring_linter
+    def inner(*inputs: TensorBox | BaseView, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
@@ -8574,9 +8574,7 @@ def with_effects(token, op, *args, **kwargs):
                 op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
-        V.graph.effectful_ops[effect_type] = (
-            new_op  # pyrefly: ignore[unsupported-operation]
-        )
+        V.graph.effectful_ops[effect_type] = new_op  # pyrefly: ignore[unsupported-operation]
 
     try:
 
