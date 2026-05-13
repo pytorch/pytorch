@@ -138,6 +138,11 @@ Follow these rules for all code changes in this repository:
 
 If uncertain, choose the simpler, more concise implementation.
 
+# cuda.bindings Error Checking
+
+Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
+runtime calls. Do not write inline error-checking helpers.
+
 # Dynamo Config
 
 Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
