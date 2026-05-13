@@ -139,7 +139,10 @@ half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False`.
 
-(bf16reducedprecision)=
+```{eval-rst}
+.. _fp16reducedprecision:
+   :noindex:
+```
 
 A similar flag exists for BF16 GEMM operations and is turned on by default. If BF16
 reduced-precision reductions are problematic, they can be turned off with
