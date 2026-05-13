@@ -2790,6 +2790,15 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
+        """Codegen a user-defined Triton kernel and return its cache entry.
+
+        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        name (with a leading dunder stripped to avoid Python class-based name
+        mangling at the call site), and records the kernel in
+        ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
+        inductor_meta, extra_launcher_call_args)``; subsequent calls with the
+        same ``cache_key`` reuse the previously assigned name.
+        """
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -3020,6 +3029,11 @@ class PythonWrapperCodegen(CodeGen):
             )
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+        # when the generated call site is inside a class body.
+        # See https://github.com/pytorch/pytorch/issues/170398
+        if name.startswith("__") and not name.endswith("__"):
+            name = name[1:]
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
