@@ -172,7 +172,7 @@ def maybe_handle_backward_generation(
         assert manager is not None
 
         def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
-            manager.set_to_running_backward()
+            manager.set_to_running_backward()  # type: ignore[union-attr]
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -1018,24 +1018,30 @@ class CompiledAOTI(OutputCode):
             return
 
         if self.device_type.startswith("cuda"):
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
-                current_callable,
-                1,
-                self.device_type,
-                "",
-                True,
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         elif self.device_type.startswith("xpu"):
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerXpu(
-                current_callable,
-                1,
-                self.device_type,
-                "",
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         elif self.device_type == "cpu":
-            current_callable = torch._C._aoti.AOTIModelContainerRunnerCpu(
-                current_callable, 1
-            ).run
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
         else:
             raise RuntimeError(f"unsupported device type {self.device_type}")
         self.current_callable = current_callable
