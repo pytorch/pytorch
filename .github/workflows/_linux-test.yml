@@ -132,11 +132,12 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix.
-    # Experiment (https://github.com/pytorch/pytorch/issues/183242): on
-    # pull_request events, always run the EC2 route so that callers passing
-    # use-arc=true execute OSDC in shadow mode alongside EC2. Pushed commits
-    # and scheduled workflows continue to honor use-arc as usual.
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && (!inputs.use-arc || github.event_name == 'pull_request')
+    # Experiment (https://github.com/pytorch/pytorch/issues/183242): always run
+    # the EC2 route on pull_request events and on ciflow/* tag pushes so that
+    # callers passing use-arc=true execute OSDC in shadow mode alongside EC2.
+    # Direct pushes to main/release branches and scheduled workflows continue
+    # to honor use-arc as usual (exactly one route).
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && (!inputs.use-arc || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/ciflow/'))
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
