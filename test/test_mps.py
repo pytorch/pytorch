@@ -1107,9 +1107,8 @@ class TestMPS(TestCaseMPS):
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
-            eps = 1e-6
             x.requires_grad = True
-            d = torch.cdist(x, y)
+            d = torch.cdist(x, y, p=p)
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
@@ -6204,6 +6203,33 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
+    def test_fold_invalid_input_raises(self):
+        # F.fold/col2im on MPS must raise the same shape errors as CPU. See #170639.
+        cases = [
+            # (shape, output_size, kernel_size, padding, stride, error_regex)
+            # dim-2 mismatch (the issue's exact repro: 3*3=9 expected, got 10)
+            ((1, 6, 10), (4, 5), (2, 3), 0, 1,
+             r"expected size of input's dimension 2 to match the calculated number of sliding blocks"),
+            # input channels not divisible by kernel product (5 not divisible by 2*3=6)
+            ((1, 5, 9), (4, 5), (2, 3), 0, 1,
+             r"Expected size of input's dimension 1 to be divisible"),
+            # zero kernel size
+            ((1, 6, 9), (4, 5), (0, 3), 0, 1,
+             r"kernel size should be greater than zero"),
+            # negative padding
+            ((1, 6, 9), (4, 5), (2, 3), (-1, 0), 1,
+             r"padding should be non-negative"),
+        ]
+        for shape, output_size, kernel_size, padding, stride, regex in cases:
+            x_cpu = torch.randn(*shape)
+            x_mps = x_cpu.to('mps')
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_cpu, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_mps, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
@@ -9300,6 +9326,16 @@ class TestLargeTensors(TestCaseMPS):
         tail = x[-1024:]
         self.assertGreater(tail.unique().numel(), 50)
         del x
+
+    @serialTest()
+    def test_64bit_strided_unary(self):
+        # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
+        # extent > INT32_MAX forces TensorIterator to split the iter
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        sl = torch.randn(1_200_000, 464, dtype=torch.float32, device='mps')[:, 4:50]
+        self.assertGreater((sl.size(0) - 1) * sl.stride(0) * sl.element_size(), (1 << 31) - 1)
+        self.assertEqual(sl.neg().cpu(), sl.cpu().neg())
 
 
 class TestLogical(TestCaseMPS):
