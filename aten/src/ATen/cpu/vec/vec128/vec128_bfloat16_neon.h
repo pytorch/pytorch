@@ -247,8 +247,16 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
 
   Vectorized() = default;
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ <= 13
+  // GCC <= 13 lowers vdupq_n_bf16 of a constant to `fmov v?.8h, #imm`, which
+  // is an FP16 broadcast (1.0 -> 0x3C00, ~0.00781 as bf16) rather than a bf16
+  // broadcast (1.0 -> 0x3F80). Fixed in gcc-14. Go through u16 bits to bypass.
+  Vectorized(c10::BFloat16 val)
+      : Vectorized16(at_vreinterpretq_bf16_u16(vdupq_n_u16(val.x))) {}
+#else
   Vectorized(c10::BFloat16 val)
       : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
+#endif
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
