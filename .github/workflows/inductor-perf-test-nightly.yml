@@ -132,6 +132,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       disable-monitor: false
       monitor-log-interval: 15
@@ -154,6 +155,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 1440
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
@@ -177,6 +179,7 @@ jobs:
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       disable-monitor: false
       monitor-log-interval: 15

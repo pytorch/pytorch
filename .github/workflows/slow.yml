@@ -77,6 +77,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -112,6 +113,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: clang18
@@ -149,6 +151,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix-osdc }}
       sync-tag: asan-test
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
