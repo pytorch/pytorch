@@ -2,9 +2,111 @@ import unittest
 from collections.abc import Sequence
 
 import torch
+from torch.testing._comparison import default_tolerances
 
 from .common_utils import MACOS_VERSION
 from .opinfo.core import DecorateInfo, OpInfo
+
+
+_DRIFT_FALLBACK_DTYPES = (torch.float16, torch.bfloat16)
+_DRIFT_SLACK = 2.0
+
+
+def assert_mps_match_or_drift(
+    test_case,
+    cpu_outs,
+    mps_outs,
+    fp32_outs_fn,
+    *,
+    atol,
+    rtol,
+    dtype,
+    label="",
+    **assertEqual_kwargs,
+):
+    """Compare MPS vs CPU at the target dtype. For fp16/bf16, fall back to a
+    drift check against a shared fp32 reference when assertEqual fails.
+    Accepts a single tensor pair or aligned sequences of tensors.
+
+    `fp32_outs_fn` runs only on failure. For each failing tensor: if CPU met
+    the fixed tolerance vs fp32 everywhere, raise (real regression); otherwise
+    require mps_drift <= _DRIFT_SLACK * cpu_drift + atol.
+    """
+    try:
+        test_case.assertEqual(
+            cpu_outs, mps_outs, atol=atol, rtol=rtol, **assertEqual_kwargs
+        )
+        return
+    except AssertionError:
+        if dtype not in _DRIFT_FALLBACK_DTYPES:
+            raise
+
+    if atol is None or rtol is None:
+        d_rtol, d_atol = default_tolerances(dtype)
+        atol = atol if atol is not None else d_atol
+        rtol = rtol if rtol is not None else d_rtol
+
+    def as_seq(x):
+        return (x,) if isinstance(x, torch.Tensor) else tuple(x)
+
+    cpu_seq, mps_seq, fp32_seq = (
+        as_seq(cpu_outs),
+        as_seq(mps_outs),
+        as_seq(fp32_outs_fn()),
+    )
+
+    for i, (c, m, f) in enumerate(zip(cpu_seq, mps_seq, fp32_seq, strict=True)):
+        if c is None or m is None or f is None:
+            continue
+        try:
+            test_case.assertEqual(c, m, atol=atol, rtol=rtol, **assertEqual_kwargs)
+            continue
+        except AssertionError:
+            pass
+
+        tag = label if len(cpu_seq) == 1 else f"{label}[{i}]"
+        m_cpu = m.detach().cpu()
+        finite_c = torch.isfinite(c)
+        finite_m = torch.isfinite(m_cpu)
+
+        # Non-finite mismatches would silently pass the drift math (nan contamination).
+        if not torch.equal(finite_c, finite_m):
+            raise AssertionError(
+                f"{tag}: finite/non-finite positions differ between CPU and MPS -- real regression."
+            )
+        nonfinite = ~finite_c
+        if nonfinite.any():
+            # At aligned non-finite positions, values must match exactly.
+            nf_c, nf_m = c[nonfinite], m_cpu[nonfinite]
+            both_nan = torch.isnan(nf_c) & torch.isnan(nf_m)
+            if not (both_nan | (nf_c == nf_m)).all().item():
+                raise AssertionError(
+                    f"{tag}: non-finite values differ between CPU and MPS -- real regression."
+                )
+
+        # Drift math only applies to positions where all three tensors are finite.
+        finite = finite_c & torch.isfinite(f)
+        if not finite.all():
+            c, m_cpu, f = c[finite], m_cpu[finite], f[finite]
+
+        cpu_err = (c.float() - f).abs()
+        mps_err = (m_cpu.float() - f).abs()
+
+        if (cpu_err <= atol + rtol * f.abs()).all().item():
+            raise AssertionError(
+                f"{tag}: CPU met the fixed tolerance vs fp32 but MPS did not "
+                f"-- real regression, not cross-implementation drift."
+            )
+
+        cpu_drift = cpu_err.max().item()
+        mps_drift = mps_err.max().item()
+        bound = _DRIFT_SLACK * cpu_drift + atol
+        if mps_drift > bound:
+            raise AssertionError(
+                f"{tag}: MPS drift {mps_drift:.4g} from fp32 exceeds "
+                f"{_DRIFT_SLACK:g} * CPU drift {cpu_drift:.4g} + atol "
+                f"{atol:.4g} (bound {bound:.4g})."
+            )
 
 
 if torch.backends.mps.is_available():
@@ -646,7 +748,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv2d": [torch.int64],
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
-            "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
+            "nn.functional.conv_transpose2d": [torch.int64],
             "nn.functional.conv_transpose3d": [
                 torch.int64,
                 torch.bfloat16,
@@ -972,12 +1074,7 @@ if torch.backends.mps.is_available():
             # draws, so we skip rather than xfail.
             "topk": [torch.float16],
             "nn.functional.pairwise_distance": [torch.float16],
-            # failed assertion `destination datatype must be fp32'
-            "nn.functional.conv1d": [torch.float16],
-            "nn.functional.conv2d": [torch.float16],
             "nn.functional.conv3d": [torch.float16],
-            "nn.functional.conv_transpose1d": [torch.float16],
-            "nn.functional.conv_transpose2d": [torch.float16],
             "nn.functional.conv_transpose3d": [torch.float16],
         }
 
