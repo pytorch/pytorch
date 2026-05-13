@@ -3998,10 +3998,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         current_stream = torch.accelerator.current_stream()
         stream = next(
             filter(
-                lambda x:x,
+                lambda x: x,
                 (
-                    getattr(current_stream, 'cuda_stream', None),
-                    getattr(current_stream, 'sycl_queue', None),
+                    getattr(current_stream, "cuda_stream", None),
+                    getattr(current_stream, "sycl_queue", None),
                 ),
             ),
             None,
