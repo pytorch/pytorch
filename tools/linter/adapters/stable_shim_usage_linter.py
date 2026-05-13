@@ -15,7 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-
 # Add repo root to sys.path so we can import from tools
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
@@ -25,7 +24,6 @@ from tools.linter.adapters._stable_shim_utils import (
     LintSeverity,
     PreprocessorTracker,
 )
-
 
 LINTER_CODE = "STABLE_SHIM_USAGE"
 
@@ -67,7 +65,7 @@ def get_shim_functions(
             "Ensure all shim header files exist in the repository."
         )
 
-    functions: dict[str, tuple[int, int]] = {}
+    identifiers: dict[str, tuple[int, int]] = {}
 
     # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
     function_pattern = re.compile(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\(")
@@ -95,34 +93,34 @@ def get_shim_functions(
                     func_match = function_pattern.search(stripped)
                     if func_match:
                         func_name = func_match.group(1)
-                        functions[func_name] = version_of_block
+                        identifiers[func_name] = version_of_block
                         continue
 
                     typedef_match = typedef_pattern.search(stripped)
                     if typedef_match:
-                        func_name = typedef_match.group(1)
-                        functions[func_name] = version_of_block
+                        typedef_name = typedef_match.group(1)
+                        identifiers[typedef_name] = version_of_block
                         continue
 
                     using_match = using_pattern.search(stripped)
                     if using_match:
-                        type_name = using_match.group(1)
-                        functions[type_name] = version_of_block
+                        using_name = using_match.group(1)
+                        identifiers[using_name] = version_of_block
                         continue
 
                     struct_class_match = struct_class_pattern.search(stripped)
                     if struct_class_match:
-                        type_name = struct_class_match.group(1)
-                        functions[type_name] = version_of_block
+                        struct_class_name = struct_class_match.group(1)
+                        identifiers[struct_class_name] = version_of_block
                         continue
 
-    if not functions:
+    if not identifiers:
         raise RuntimeError(
             "Could not find any versioned shim functions. "
             "Ensure at least one of the shim files exists and contains versioned functions."
         )
 
-    return functions
+    return identifiers
 
 
 def write_shim_function_versions(
