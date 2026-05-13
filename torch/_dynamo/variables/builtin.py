@@ -1477,18 +1477,17 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ) -> VariableTracker | None:
                     # Peek at all args/kwargs as constants.
                     # is_python_constant() is the fast path (simple bool).
-                    # try_peek_constant() is only for lazy variables.
-                    # Everything else bails immediately.
+                    # try_peek_constant() is needed for lazy variables and
+                    # containers with lazy items (e.g., ListVariable with
+                    # LazyConstantVariable entries).
                     peeked_args = []
                     any_unrealized = False
 
                     for arg in args:
                         if arg.is_python_constant():
                             peeked_args.append(arg.as_python_constant())
-                        elif isinstance(arg, LazyVariableTracker):
-                            can_peek, is_unrealized, value = (
-                                arg.try_peek_constant()
-                            )
+                        elif isinstance(arg, (LazyVariableTracker, BaseListVariable)):
+                            can_peek, is_unrealized, value = arg.try_peek_constant()
                             if not can_peek:
                                 break
                             peeked_args.append(value)
@@ -1502,10 +1501,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                         for k, v in kwargs.items():
                             if v.is_python_constant():
                                 peeked_kwargs[k] = v.as_python_constant()
-                            elif isinstance(v, LazyVariableTracker):
-                                can_peek, is_unrealized, value = (
-                                    v.try_peek_constant()
-                                )
+                            elif isinstance(v, (LazyVariableTracker, BaseListVariable)):
+                                can_peek, is_unrealized, value = v.try_peek_constant()
                                 if not can_peek:
                                     break
                                 peeked_kwargs[k] = value
@@ -1518,10 +1515,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                             try:
                                 res = fn(*peeked_args, **peeked_kwargs)
                             except Exception as exc:
-                                if (
-                                    isinstance(exc, TypeError)
-                                    and "unsupported operand type" in str(exc)
-                                ):
+                                if isinstance(
+                                    exc, TypeError
+                                ) and "unsupported operand type" in str(exc):
                                     raise_observed_exception(
                                         TypeError,
                                         tx,
@@ -1539,9 +1535,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 )
                             else:
                                 if any_unrealized:
-                                    LazyVariableTracker.realize_all(
-                                        (args, kwargs)
-                                    )
+                                    LazyVariableTracker.realize_all((args, kwargs))
                                 return VariableTracker.build(tx, res)
 
                     # Fall back to the original check for UnspecializedPythonVariable
