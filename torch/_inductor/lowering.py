@@ -8574,7 +8574,9 @@ def with_effects(token, op, *args, **kwargs):
                 op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
-        V.graph.effectful_ops[effect_type] = new_op  # pyrefly: ignore[unsupported-operation]
+        V.graph.effectful_ops[effect_type] = (
+            new_op  # pyrefly: ignore[unsupported-operation]
+        )
 
     try:
 
