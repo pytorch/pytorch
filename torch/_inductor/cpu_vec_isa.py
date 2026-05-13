@@ -124,17 +124,36 @@ cdll.LoadLibrary("__lib_path__")
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
-                # Check build result
-                subprocess.check_call(
-                    [
-                        sys.executable,
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    cwd=output_dir,
-                    stderr=subprocess.DEVNULL,
-                    env=python_subprocess_env(),
-                )
+                # Bound the dlopen probe and retry on hang. A stuck
+                # `import torch` in the child has been observed in CI to
+                # hang the parent test process for the whole 30-minute
+                # outer timeout. Only retry on TimeoutExpired (transient);
+                # CalledProcessError means the .so genuinely can't load and
+                # falls through to the broad except below.
+                probe_cmd = [
+                    sys.executable,
+                    "-c",
+                    VecISA._avx_py_load.replace("__lib_path__", output_path),
+                ]
+                for attempt in range(2):
+                    try:
+                        subprocess.check_call(
+                            probe_cmd,
+                            cwd=output_dir,
+                            stderr=subprocess.DEVNULL,
+                            env=python_subprocess_env(),
+                            timeout=60,
+                        )
+                        break
+                    except subprocess.TimeoutExpired:
+                        remaining = 1 - attempt
+                        warnings.warn(
+                            f"VecISA dlopen probe for {self} hung after 60s; "
+                            f"retries remaining: {remaining}",
+                            stacklevel=2,
+                        )
+                        if remaining == 0:
+                            return False
             except Exception:
                 return False
 

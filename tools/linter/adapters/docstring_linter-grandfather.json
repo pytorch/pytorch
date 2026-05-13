@@ -125,7 +125,7 @@
     "def ConstantFolder.run_node()": 94
   },
   "torch/_inductor/cpu_vec_isa.py": {
-    "class VecISA": 119
+    "class VecISA": 141
   },
   "torch/_inductor/debug.py": {
     "class DebugContext": 154,
