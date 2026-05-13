@@ -680,10 +680,13 @@ class CoalesceVarAnalysis:
     suggested_split: VarTiling | None = None
 
 
-def analyze_memory_coalescing(
+def _analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> CoalesceVarAnalysis | None:
     """
+    Implementation for BaseSchedulerNode.get_coalesce_analysis().
+    Call that node method so loop-transform cache invalidation is honored.
+
     Find variables that coalesce the reads and writes and score the total size.
 
     If uncoalesced memory expressions are found, look for additionally tiling of variables
