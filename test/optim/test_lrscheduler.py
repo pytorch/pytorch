@@ -2680,6 +2680,19 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_polylr_closed_form_total_iters_zero_division(self):
+        model = torch.nn.Linear(1, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        # When total_iters=0, closed form stepping should immediately return
+        # the final learning rate instead of dividing by zero internally.
+        scheduler = PolynomialLR(optimizer, total_iters=0, power=1.0)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            scheduler.step(epoch=0)
+
+        self.assertEqual(optimizer.param_groups[0]["lr"], 0.0)
 
 instantiate_parametrized_tests(TestLRScheduler)
 
