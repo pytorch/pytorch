@@ -158,27 +158,6 @@ def _is_sym_arith_operand(vt: VariableTracker) -> bool:
     return isinstance(vt, ConstantVariable) and isinstance(vt.value, (float, int, bool))
 
 
-def _tensor_debug_repr(value: torch.Tensor, type_name: str = "Tensor") -> str:
-    if torch._C._functorch.is_batchedtensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        bdim = torch._C._functorch.maybe_get_bdim(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return (
-            "BatchedTensor("
-            f"lvl={level}, bdim={bdim}, value={_tensor_debug_repr(unwrapped)}"
-            ")"
-        )
-    if torch._C._functorch.is_gradtrackingtensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return f"GradTrackingTensor(lvl={level}, value={_tensor_debug_repr(unwrapped)})"
-    if torch._C._functorch.is_functionaltensor(value):
-        level = torch._C._functorch.maybe_get_level(value)
-        unwrapped = torch._C._functorch.get_unwrapped(value)
-        return f"FunctionalTensor(lvl={level}, value={_tensor_debug_repr(unwrapped)})"
-    return f"{type_name}(shape={tuple(value.shape)}, dtype={value.dtype})"
-
-
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -300,12 +279,8 @@ class TensorVariable(VariableTracker):
             tx.output.check_input_mutation_on_current_stream(tx)
 
     def debug_repr(self) -> str:
-        return _tensor_debug_repr(
-            self.proxy.node.meta["example_value"], self.python_type_name()
-        )
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        return VariableTracker.build(tx, self.debug_repr())
+        # TODO: strip off fake tensor from repr here
+        return repr(self.proxy.node.meta["example_value"])
 
     def as_proxy(self) -> torch.fx.Proxy:
         return self.proxy
@@ -845,9 +820,6 @@ class TensorVariable(VariableTracker):
                 f"({name}) invocation in strict mode.",
                 hints=[],
             )
-
-        if name == "__repr__" and not args and not kwargs:
-            return self.repr_impl(tx)
 
         if name == "__deepcopy__":
             unimplemented(

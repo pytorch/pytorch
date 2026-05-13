@@ -720,10 +720,6 @@ class ExceptionVariable(VariableTracker):
         args = ", ".join(self._debug_format_arg(arg) for arg in self.args)
         return f"{self.python_type_name()}({args})"
 
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
-        return VariableTracker.build(tx, self.debug_repr())
-
 
 class UnknownVariable(VariableTracker):
     """

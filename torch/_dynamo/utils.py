@@ -1394,18 +1394,6 @@ def is_wrapper_or_member_descriptor(
     )
 
 
-def tracked_repr(tx: InstructionTranslator, vt: VariableTracker) -> str:
-    from .variables.object_protocol import generic_repr
-
-    return generic_repr(tx, vt).as_python_constant()
-
-
-def _item_debug_repr(vt: VariableTracker) -> str:
-    if vt.is_python_constant():
-        return repr(vt.as_python_constant())
-    return vt.debug_repr()
-
-
 def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 

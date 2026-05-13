@@ -239,11 +239,6 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
-        mod = tx.output.get_submodule(self.module_key)
-        return VariableTracker.build(tx, repr(mod))
-
     def _wrap_submodule(
         self,
         tx: "InstructionTranslator",

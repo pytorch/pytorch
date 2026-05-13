@@ -41,14 +41,12 @@ from ..source import (
     is_from_local_source,
 )
 from ..utils import (
-    _item_debug_repr,
     cmp_name_to_op_mapping,
     dict_items,
     dict_keys,
     dict_values,
     istype,
     raise_args_mismatch,
-    tracked_repr,
 )
 from .base import (
     AttributeMutationExisting,
@@ -161,8 +159,8 @@ class ConstDictVariable(VariableTracker):
     def debug_repr(self) -> str:
         items: list[str] = []
         for k, v in self.items.items():
-            key_str = _item_debug_repr(k.vt)
-            val_str = _item_debug_repr(v)
+            key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+            val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
@@ -171,13 +169,6 @@ class ConstDictVariable(VariableTracker):
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
         }
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        items = [
-            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-            for key, value in self.items.items()
-        ]
-        return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
         self.install_dict_keys_match_guard()
@@ -985,18 +976,16 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        if self.kv == "keys":
-            items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            return VariableTracker.build(tx, f"dict_keys([{items}])")
-        if self.kv == "values":
-            items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            return VariableTracker.build(tx, f"dict_values([{items}])")
-        items = ", ".join(
-            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-            for key, value in self.view_items
-        )
-        return VariableTracker.build(tx, f"dict_items([{items}])")
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__repr__":
+            return VariableTracker.build(tx, self.debug_repr())
+        return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for dict view objects."""
@@ -1057,9 +1046,11 @@ class DictKeysVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k in self.view_items:
-                key_str = _item_debug_repr(k.vt)
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
                 items.append(key_str)
-            return "dict_keys([" + ", ".join(items) + "])"
+            return "dict_keys([" + ",".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -1154,9 +1145,9 @@ class DictValuesVariable(DictViewVariable):
         else:
             items: list[str] = []
             for v in self.view_items:
-                val_str = _item_debug_repr(v)
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
                 items.append(val_str)
-            return "dict_values([" + ", ".join(items) + "])"
+            return "dict_values([" + ",".join(items) + "])"
 
 
 class DictItemsVariable(DictViewVariable):
@@ -1186,10 +1177,12 @@ class DictItemsVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k, v in self.view_items:
-                key_str = _item_debug_repr(k.vt)
-                val_str = _item_debug_repr(v)
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
                 items.append(f"({key_str}, {val_str})")
-            return "dict_items([" + ", ".join(items) + "])"
+            return "dict_items([" + ",".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
