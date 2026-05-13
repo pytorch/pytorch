@@ -89,6 +89,7 @@ jobs:
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -132,6 +133,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       disable-monitor: false
       monitor-log-interval: 15
@@ -140,6 +142,8 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
@@ -154,6 +158,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 1440
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
@@ -163,6 +168,8 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
 
   test:
@@ -177,6 +184,7 @@ jobs:
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       disable-monitor: false
       monitor-log-interval: 15
@@ -185,4 +193,6 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+      export-profiler-trace: "1"
+      enable-torch-trace: "1"
     secrets: inherit
