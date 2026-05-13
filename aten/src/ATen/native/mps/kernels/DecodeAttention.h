@@ -7,7 +7,7 @@
 //   https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scaled_dot_product_attention.metal
 #pragma once
 
-template <typename T, int D, int V = D, bool is_causal = false>
+template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = false, typename MaskType = float>
 [[kernel]] void sdpa_vector(const device T* queries [[buffer(0)]],
                             const device T* keys [[buffer(1)]],
                             const device T* values [[buffer(2)]],
@@ -17,10 +17,9 @@ template <typename T, int D, int V = D, bool is_causal = false>
                             const constant uint3& qkv_head_strides [[buffer(6)]],
                             const constant uint3& qkv_seq_strides [[buffer(7)]],
                             const constant float& scale [[buffer(8)]],
-                            const device bool* mask [[buffer(9)]],
+                            const device MaskType* mask [[buffer(9)]],
                             const constant uint3& mask_strides [[buffer(10)]],
-                            const constant bool& has_mask [[buffer(11)]],
-                            const constant uint4& qkv_batch_strides_heads [[buffer(12)]],
+                            const constant uint4& qkv_batch_strides_heads [[buffer(11)]],
                             uint3 tid [[threadgroup_position_in_grid]],
                             uint3 tpg [[threadgroups_per_grid]],
                             uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -29,6 +28,8 @@ template <typename T, int D, int V = D, bool is_causal = false>
   constexpr uint BD = 32;
   constexpr uint qk_per_thread = D / BD;
   constexpr uint v_per_thread = V / BD;
+  constexpr bool is_bool_mask = HAS_MASK && is_same_v<MaskType, bool>;
+  constexpr bool is_additive_mask = HAS_MASK && !is_bool_mask;
   const uint q_head_stride = qkv_head_strides.x;
   const uint q_seq_stride = qkv_seq_strides.x;
   const uint q_batch_stride = qkv_batch_strides_heads.x;
@@ -68,7 +69,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
   keys += batch_idx * k_batch_stride + kv_head_idx * k_head_stride + simd_gid * k_seq_stride + simd_lid * qk_per_thread;
   values +=
       batch_idx * v_batch_stride + kv_head_idx * v_head_stride + simd_gid * v_seq_stride + simd_lid * v_per_thread;
-  if (has_mask) {
+  if IF_CONSTEXPR (HAS_MASK) {
     mask += bh_idx * mask_head_stride + simd_gid * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
   }
 
@@ -90,7 +91,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
     bool use_key = true;
     if (is_causal) {
       use_key = int(i) <= q_seq_idx;
-    } else if (has_mask) {
+    } else if IF_CONSTEXPR (is_bool_mask) {
       use_key = mask[0];
     }
     if (use_key) {
@@ -106,10 +107,21 @@ template <typename T, int D, int V = D, bool is_causal = false>
       }
       score = simd_sum(score);
 
-      // Update the accumulators
+      if IF_CONSTEXPR (is_additive_mask) {
+        score += static_cast<U>(mask[0]);
+      }
+
+      // Guard the (max,score)==(-inf,-inf) case: max - max is NaN otherwise.
       U new_max = max(max_score, score);
-      U factor = metal::fast::exp(max_score - new_max);
-      U exp_score = metal::fast::exp(score - new_max);
+      U factor;
+      U exp_score;
+      if (new_max == -INFINITY) {
+        factor = U(1);
+        exp_score = U(0);
+      } else {
+        factor = metal::fast::exp(max_score - new_max);
+        exp_score = metal::fast::exp(score - new_max);
+      }
 
       max_score = new_max;
       sum_exp_score = sum_exp_score * factor + exp_score;
@@ -123,7 +135,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
     // Move the pointers to the next kv
     keys += inner_k_stride;
     values += inner_v_stride;
-    if (has_mask) {
+    if IF_CONSTEXPR (HAS_MASK) {
       mask += BN * mask_kv_seq_stride;
     }
   }
@@ -138,7 +150,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
   threadgroup_barrier(mem_flags::mem_threadgroup);
   max_score = max_scores[simd_lid];
   U new_max = simd_max(max_score);
-  U factor = metal::fast::exp(max_score - new_max);
+  U factor = (new_max == -INFINITY) ? U(1) : metal::fast::exp(max_score - new_max);
   sum_exp_score = simd_sum(sum_exp_scores[simd_lid] * factor);
 
   // Now we need to aggregate all the outputs
@@ -158,7 +170,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
   }
 }
 
-template <typename T, int D, int V = D, bool is_causal = false>
+template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = false, typename MaskType = float>
 [[kernel]] void sdpa_vector_2pass_1(const device T* queries [[buffer(0)]],
                                     const device T* keys [[buffer(1)]],
                                     const device T* values [[buffer(2)]],
@@ -170,10 +182,9 @@ template <typename T, int D, int V = D, bool is_causal = false>
                                     const constant uint3& qkv_head_strides [[buffer(8)]],
                                     const constant uint3& qkv_seq_strides [[buffer(9)]],
                                     const constant float& scale [[buffer(10)]],
-                                    const device bool* mask [[buffer(11)]],
+                                    const device MaskType* mask [[buffer(11)]],
                                     const constant uint3& mask_strides [[buffer(12)]],
-                                    const constant bool& has_mask [[buffer(13)]],
-                                    const constant uint4& qkv_batch_strides_heads [[buffer(14)]],
+                                    const constant uint4& qkv_batch_strides_heads [[buffer(13)]],
                                     uint3 tid [[threadgroup_position_in_grid]],
                                     uint3 tpg [[threadgroups_per_grid]],
                                     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -182,6 +193,8 @@ template <typename T, int D, int V = D, bool is_causal = false>
   constexpr int BD = 32;
   constexpr int qk_per_thread = D / BD;
   constexpr int v_per_thread = V / BD;
+  constexpr bool is_bool_mask = HAS_MASK && is_same_v<MaskType, bool>;
+  constexpr bool is_additive_mask = HAS_MASK && !is_bool_mask;
   const int q_head_stride = qkv_head_strides.x;
   const int q_seq_stride = qkv_seq_strides.x;
   const int q_batch_stride = qkv_batch_strides_heads.x;
@@ -224,7 +237,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
   values += batch_idx * v_batch_stride + kv_head_idx * v_head_stride + (block_idx * BN + simd_gid) * v_seq_stride +
       simd_lid * v_per_thread;
   out += o_offset * blocks * V + block_idx * V + simd_lid * v_per_thread;
-  if (has_mask) {
+  if IF_CONSTEXPR (HAS_MASK) {
     mask +=
         bh_idx * mask_head_stride + (block_idx * BN + simd_gid) * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
   }
@@ -247,7 +260,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
     bool use_key = true;
     if (is_causal) {
       use_key = int(i) <= q_seq_idx;
-    } else if (has_mask) {
+    } else if IF_CONSTEXPR (is_bool_mask) {
       use_key = mask[0];
     }
     if (use_key) {
@@ -263,10 +276,20 @@ template <typename T, int D, int V = D, bool is_causal = false>
       }
       score = simd_sum(score);
 
-      // Update the accumulators
+      if IF_CONSTEXPR (is_additive_mask) {
+        score += static_cast<U>(mask[0]);
+      }
+
       U new_max = max(max_score, score);
-      U factor = fast::exp(max_score - new_max);
-      U exp_score = fast::exp(score - new_max);
+      U factor;
+      U exp_score;
+      if (new_max == -INFINITY) {
+        factor = U(1);
+        exp_score = U(0);
+      } else {
+        factor = fast::exp(max_score - new_max);
+        exp_score = fast::exp(score - new_max);
+      }
 
       max_score = new_max;
       sum_exp_score = sum_exp_score * factor + exp_score;
@@ -280,7 +303,7 @@ template <typename T, int D, int V = D, bool is_causal = false>
     // Move the pointers to the next kv
     keys += blocks * inner_k_stride;
     values += blocks * inner_v_stride;
-    if (has_mask) {
+    if IF_CONSTEXPR (HAS_MASK) {
       mask += BN * blocks * mask_kv_seq_stride;
     }
   }
@@ -377,55 +400,59 @@ template <typename T, int D>
   }
 }
 
-#define INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, NAME_SUFFIX)                            \
-  template[[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void             \
-  sdpa_vector<DTYPE, QK_DIM, VALUE_DIM, CAUSAL>(const device DTYPE* queries [[buffer(0)]],                    \
-                                                const device DTYPE* keys [[buffer(1)]],                       \
-                                                const device DTYPE* values [[buffer(2)]],                     \
-                                                device DTYPE* out [[buffer(3)]],                              \
-                                                const constant uint& gqa_factor [[buffer(4)]],                \
-                                                const constant uint& N [[buffer(5)]],                         \
-                                                const constant uint3& qkv_head_strides [[buffer(6)]],         \
-                                                const constant uint3& qkv_seq_strides [[buffer(7)]],          \
-                                                const constant float& scale [[buffer(8)]],                    \
-                                                const device bool* mask [[buffer(9)]],                        \
-                                                const constant uint3& mask_strides [[buffer(10)]],            \
-                                                const constant bool& has_mask [[buffer(11)]],                 \
-                                                const constant uint4& qkv_batch_strides_heads [[buffer(12)]], \
-                                                uint3 tid [[threadgroup_position_in_grid]],                   \
-                                                uint3 tpg [[threadgroups_per_grid]],                          \
-                                                uint simd_gid [[simdgroup_index_in_threadgroup]],             \
-                                                uint simd_lid [[thread_index_in_simdgroup]]);
+#define INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE, NAME_SUFFIX) \
+  template[[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void       \
+  sdpa_vector<DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE>(                                   \
+      const device DTYPE* queries [[buffer(0)]],                                                        \
+      const device DTYPE* keys [[buffer(1)]],                                                           \
+      const device DTYPE* values [[buffer(2)]],                                                         \
+      device DTYPE* out [[buffer(3)]],                                                                  \
+      const constant uint& gqa_factor [[buffer(4)]],                                                    \
+      const constant uint& N [[buffer(5)]],                                                             \
+      const constant uint3& qkv_head_strides [[buffer(6)]],                                             \
+      const constant uint3& qkv_seq_strides [[buffer(7)]],                                              \
+      const constant float& scale [[buffer(8)]],                                                        \
+      const device MASK_TYPE* mask [[buffer(9)]],                                                       \
+      const constant uint3& mask_strides [[buffer(10)]],                                                \
+      const constant uint4& qkv_batch_strides_heads [[buffer(11)]],                                     \
+      uint3 tid [[threadgroup_position_in_grid]],                                                       \
+      uint3 tpg [[threadgroups_per_grid]],                                                              \
+      uint simd_gid [[simdgroup_index_in_threadgroup]],                                                 \
+      uint simd_lid [[thread_index_in_simdgroup]]);
 
-#define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)           \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, ""); \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, true, "_causal");
+#define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)                                       \
+  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
+  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
+  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
+  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
 
-#define INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, NAME_SUFFIX)                            \
-  template[[host_name("sdpa_vector_2pass_1_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void             \
-  sdpa_vector_2pass_1<DTYPE, QK_DIM, VALUE_DIM, CAUSAL>(const device DTYPE* queries [[buffer(0)]],                    \
-                                                        const device DTYPE* keys [[buffer(1)]],                       \
-                                                        const device DTYPE* values [[buffer(2)]],                     \
-                                                        device DTYPE* out [[buffer(3)]],                              \
-                                                        device float* sums [[buffer(4)]],                             \
-                                                        device float* maxs [[buffer(5)]],                             \
-                                                        const constant uint& gqa_factor [[buffer(6)]],                \
-                                                        const constant uint& N [[buffer(7)]],                         \
-                                                        const constant uint3& qkv_head_strides [[buffer(8)]],         \
-                                                        const constant uint3& qkv_seq_strides [[buffer(9)]],          \
-                                                        const constant float& scale [[buffer(10)]],                   \
-                                                        const device bool* mask [[buffer(11)]],                       \
-                                                        const constant uint3& mask_strides [[buffer(12)]],            \
-                                                        const constant bool& has_mask [[buffer(13)]],                 \
-                                                        const constant uint4& qkv_batch_strides_heads [[buffer(14)]], \
-                                                        uint3 tid [[threadgroup_position_in_grid]],                   \
-                                                        uint3 tpg [[threadgroups_per_grid]],                          \
-                                                        uint simd_gid [[simdgroup_index_in_threadgroup]],             \
-                                                        uint simd_lid [[thread_index_in_simdgroup]]);
+#define INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE, NAME_SUFFIX) \
+  template[[host_name("sdpa_vector_2pass_1_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void       \
+  sdpa_vector_2pass_1<DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE>(                                   \
+      const device DTYPE* queries [[buffer(0)]],                                                                \
+      const device DTYPE* keys [[buffer(1)]],                                                                   \
+      const device DTYPE* values [[buffer(2)]],                                                                 \
+      device DTYPE* out [[buffer(3)]],                                                                          \
+      device float* sums [[buffer(4)]],                                                                         \
+      device float* maxs [[buffer(5)]],                                                                         \
+      const constant uint& gqa_factor [[buffer(6)]],                                                            \
+      const constant uint& N [[buffer(7)]],                                                                     \
+      const constant uint3& qkv_head_strides [[buffer(8)]],                                                     \
+      const constant uint3& qkv_seq_strides [[buffer(9)]],                                                      \
+      const constant float& scale [[buffer(10)]],                                                               \
+      const device MASK_TYPE* mask [[buffer(11)]],                                                              \
+      const constant uint3& mask_strides [[buffer(12)]],                                                        \
+      const constant uint4& qkv_batch_strides_heads [[buffer(13)]],                                             \
+      uint3 tid [[threadgroup_position_in_grid]],                                                               \
+      uint3 tpg [[threadgroups_per_grid]],                                                                      \
+      uint simd_gid [[simdgroup_index_in_threadgroup]],                                                         \
+      uint simd_lid [[thread_index_in_simdgroup]]);
 
-#define INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, QK_DIM, VALUE_DIM)           \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, ""); \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, true, "_causal");
+#define INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, QK_DIM, VALUE_DIM)                                       \
+  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
+  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
+  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
+  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
 
 #define INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, VALUE_DIM)                             \
   template [[host_name("sdpa_vector_2pass_2_" #DTYPE "_" #VALUE_DIM)]] kernel void        \

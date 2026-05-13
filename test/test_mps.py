@@ -10740,6 +10740,58 @@ class TestSDPA(TestCaseMPS):
         self.assertEqual(out_mps, out_cpu, atol=1e-3, rtol=1e-6)
         self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
 
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector(self, dtype, s_len):
+        # Float additive mask matching the Q dtype should route to the
+        # templated vector decode kernel
+        torch.manual_seed(0)
+        q = torch.randn(1, 32, 1, 128, dtype=dtype)
+        k = torch.randn(1, 2, s_len, 128, dtype=dtype)
+        v = torch.randn(1, 2, s_len, 128, dtype=dtype)
+        mask = torch.randn(1, 1, 1, s_len, dtype=dtype) * 0.1
+
+        out_cpu = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, enable_gqa=True
+        )
+        out_mps = F.scaled_dot_product_attention(
+            q.to("mps"), k.to("mps"), v.to("mps"),
+            attn_mask=mask.to("mps"), enable_gqa=True,
+        )
+        tol = 0.01 if dtype == torch.bfloat16 else 0.00001
+        self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector_strided(self, dtype, layout, s_len):
+        torch.manual_seed(0)
+        batch, NH_kv, q_len, head_dim = 1, 2, 1, 128
+        NH_q = NH_kv * 4  # GQA path
+        q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
+        # Broadcast mask over B/H/qL — the layout exercised by transformers.
+        mask = torch.randn(1, 1, 1, s_len, dtype=dtype, device="mps") * 0.1
+
+        out_mps = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, enable_gqa=True
+        )
+        out_cpu = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), enable_gqa=True
+        )
+        tol = 0.01 if dtype == torch.bfloat16 else 0.00001
+        self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector_fully_masked_row(self, dtype, s_len):
+        # Every key masked out via additive -inf shouldn't return nans
+        q = torch.randn(1, 32, 1, 128, dtype=dtype, device="mps")
+        k = torch.randn(1, 2, s_len, 128, dtype=dtype, device="mps")
+        v = torch.randn(1, 2, s_len, 128, dtype=dtype, device="mps")
+        mask = torch.full((1, 1, 1, s_len), float("-inf"), dtype=dtype, device="mps")
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=True)
+        self.assertFalse(torch.isnan(out).any())
+
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
