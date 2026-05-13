@@ -603,6 +603,7 @@ class LazyConstantVariable(LazyVariableTracker):
             return True
         return self.realize().is_python_equal(other)
 
+
 class ComputedLazyConstantVariable(LazyVariableTracker):
     """
     A lazy variable tracker for computed constants (results of operations between
