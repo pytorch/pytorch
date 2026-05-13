@@ -3332,9 +3332,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     def test_qlinear_unary_with_dynamic_x_scale(self):
         """
         Test that qlinear_pointwise (unary) can enter GEMM template when x_scale
-        is dynamically computed (ReinterpretView) at runtime.
+        has shape [1, 1] and needs to be converted to 0D.
         This simulates TorchAO's Int8DynamicActivationInt8WeightConfig where
-        x_scale is computed via choose_qparams or similar dynamic operations.
+        x_scale is computed via _choose_qparams_affine.
         """
         torch._dynamo.reset()
 
@@ -3350,11 +3350,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.output_zp = 0
 
             def forward(self, x):
-                # Dynamically compute x_scale from input (simulates choose_qparams)
                 x_max = torch.max(torch.abs(x.to(torch.float32)))
                 x_scale = x_max / 127.0
-                # Reshape to create a ReinterpretView
-                x_scale = x_scale.reshape(1, 1).squeeze()
+                x_scale = torch.clamp(x_scale, min=torch.finfo(torch.float32).eps)
+                x_scale = x_scale.reshape(1, 1)
 
                 x_zp = torch.zeros([], dtype=torch.int32)
 
@@ -3409,7 +3408,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     def test_qlinear_binary_with_dynamic_x_scale(self):
         """
         Test that qlinear_pointwise.binary can enter GEMM template when x_scale
-        is dynamically computed (ReinterpretView) at runtime.
+        has shape [1, 1] and needs to be converted to 0D.
         This simulates TorchAO's Int8DynamicActivationInt8WeightConfig for binary ops.
         """
         torch._dynamo.reset()
@@ -3426,11 +3425,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.output_zp = 0
 
             def forward(self, x, other):
-                # Dynamically compute x_scale from input (simulates choose_qparams)
                 x_max = torch.max(torch.abs(x.to(torch.float32)))
                 x_scale = x_max / 127.0
-                # Reshape to create a ReinterpretView
-                x_scale = x_scale.reshape(1, 1).squeeze()
+                x_scale = torch.clamp(x_scale, min=torch.finfo(torch.float32).eps)
+                x_scale = x_scale.reshape(1, 1)
 
                 x_zp = torch.zeros([], dtype=torch.int32)
 

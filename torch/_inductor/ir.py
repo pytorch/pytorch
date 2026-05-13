@@ -2978,9 +2978,6 @@ class BaseView(IRNode):
     def get_name(self) -> str:
         return self.data.get_name()
 
-    def get_stride(self) -> Sequence[_IntLike]:
-        return self.data.get_stride()
-
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.get_size()
 
@@ -3108,10 +3105,6 @@ class ExpandView(BaseView):
     def get_size(self) -> Sequence[Expr]:
         return self.size
 
-    def get_stride(self) -> Sequence[Expr]:
-        # ExpandView uses reindexing; return contiguous strides for the expanded size
-        return FlexibleLayout.contiguous_strides(self.size)
-
     def make_reindexer(
         self,
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
@@ -3167,10 +3160,6 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
-    def get_stride(self) -> Sequence[Expr]:
-        # PermuteView uses reindexing; return contiguous strides for the permuted size
-        return FlexibleLayout.contiguous_strides(self.get_size())
-
     def make_reindexer(
         self,
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
@@ -3188,10 +3177,6 @@ class PermuteView(BaseView):
 
 @ir_dataclass
 class SqueezeView(BaseView):
-    def get_stride(self) -> Sequence[Expr]:
-        # SqueezeView uses reindexing; return contiguous strides for the squeezed size
-        return FlexibleLayout.contiguous_strides(self.get_size())
-
     @classmethod
     def create(cls, x: IRNode, *, dim: int | None = None) -> IRNode:
         if is_storage_and_layout(x):
@@ -3294,11 +3279,6 @@ class GenericView(BaseView):
 
     def get_size(self) -> Sequence[Expr]:
         return self.size
-
-    def get_stride(self) -> Sequence[Expr]:
-        # GenericView uses reindexing rather than strides
-        # Return contiguous strides based on the view's size
-        return FlexibleLayout.contiguous_strides(self.size)
 
 
 @ir_dataclass
