@@ -1374,10 +1374,6 @@ test_inductor_set_cpu_affinity(){
   thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
   cores=$((cpus / thread_per_core))
 
-  # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
-    cores=16
-  fi
   export OMP_NUM_THREADS=$cores
 
   # Handle cgroups slice start and end CPU
