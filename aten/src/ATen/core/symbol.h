@@ -118,7 +118,7 @@ private:
   unique_t value;
 };
 
-static inline bool operator==(Symbol lhs, Symbol rhs) {
+inline bool operator==(Symbol lhs, Symbol rhs) {
   return static_cast<unique_t>(lhs) == static_cast<unique_t>(rhs);
 }
 
