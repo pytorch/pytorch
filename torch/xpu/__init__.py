@@ -944,8 +944,6 @@ def clock_rate(device: Device = None) -> float:
         device (torch.device, str or int, optional): selected device. Uses the
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
-
-    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU clock information.
     """
     frequency_handle = _get_zes_frequency_handle(device)
 
@@ -953,10 +951,6 @@ def clock_rate(device: Device = None) -> float:
 
     freq_state = pyzes.zes_freq_state_t()
     rc = pyzes.zesFrequencyGetState(frequency_handle, byref(freq_state))
-    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
-        raise RuntimeError(
-            "GPU clock rate querying is not available. Try running with elevated privileges (e.g. sudo)."
-        )
     if rc != pyzes.ZE_RESULT_SUCCESS:
         raise RuntimeError(f"Can't get Level Zero Sysman GPU clock rate (rc={rc}).")
     return freq_state.actual
