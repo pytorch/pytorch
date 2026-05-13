@@ -361,6 +361,16 @@ torch.compile with fullgraph=True found no compiled frames. Skipped frames:
   - my_function (test_compile.py:N): Dynamo tracing is disabled""",
                 )
 
+    def test_fullgraph_no_error_with_non_default_stance(self):
+        @torch.compile(fullgraph=True, backend="eager", dynamic=False)
+        def fn(x, n):
+            return x + n
+
+        fn(torch.ones(3), 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            result = fn(torch.ones(3), 2)
+        self.assertEqual(result, torch.ones(3) + 2)
+
     def test_fullgraph_exported_module_no_error(self):
         class M(torch.nn.Module):
             def forward(self, x):
