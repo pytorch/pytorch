@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -8,6 +8,8 @@ from ._dim_entry import DimEntry
 
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from . import Dim, Tensor
 
 
@@ -63,7 +65,12 @@ class EnableAllLayers:
                 self.levels_start = level
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Clean up dynamic layers in reverse order."""
         to_remove = self.levels_start + len(self.levels_to_dim) - 1
         for i in range(len(self.levels_to_dim)):

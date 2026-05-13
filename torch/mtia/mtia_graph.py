@@ -1,9 +1,14 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
+
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 _POOL_HANDLE = tuple[int, int]
@@ -92,9 +97,14 @@ class graph:
         pool_arg = self.pool[0] if self.pool else (0, 0)
         self.mtia_graph.capture_begin(pool_arg)
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.mtia_graph.capture_end()
-        self.stream_ctx.__exit__(*args)
+        self.stream_ctx.__exit__(exc_type, exc_value, traceback)
 
 
 __all__ = [

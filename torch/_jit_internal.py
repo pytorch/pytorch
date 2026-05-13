@@ -791,7 +791,7 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
     def __init__(self, **kwargs):
         pass
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         pass
 
 

@@ -14,7 +14,6 @@ import torch
 
 from .. import device as _device
 from . import amp
-import types
 
 
 __all__ = [
@@ -204,7 +203,7 @@ class StreamContext(AbstractContextManager):
         self.prev_stream = _current_stream
         _current_stream = cur_stream
 
-    def __exit__(self, type: type[BaseException] | None, value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(self, type, value, traceback) -> None:
         cur_stream = self.stream
         if cur_stream is None:
             return

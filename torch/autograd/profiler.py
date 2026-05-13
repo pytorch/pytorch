@@ -40,7 +40,6 @@ from torch.autograd.profiler_util import (
     OUT_OF_MEMORY_EVENT_NAME,
 )
 from torch.futures import Future
-import types
 
 
 __all__ = [
@@ -876,7 +875,7 @@ class record_function(_ContextDecorator):
         )
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None):
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         if not self.run_callbacks_on_exit:
             return
 

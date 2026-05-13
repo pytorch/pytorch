@@ -1,9 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Any
 
 import torch
 from torch.utils._contextlib import (
-import types
     _DecoratorContextManager,
     _NoParamDecoratorContextManager,
     F,
@@ -83,7 +81,12 @@ class no_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch.set_grad_enabled(self.prev)
 
 
@@ -138,7 +141,12 @@ class enable_grad(_NoParamDecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch._C._set_grad_enabled(self.prev)
 
 
@@ -195,7 +203,12 @@ class set_grad_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         torch._C._set_grad_enabled(self.mode)
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch._C._set_grad_enabled(self.prev)
 
     def __str__(self) -> str:
@@ -292,7 +305,12 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_context = torch._C._InferenceMode(self.mode)
         self._inference_mode_context.__enter__()
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
@@ -344,7 +362,12 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
@@ -398,7 +421,12 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch._C._set_grad_layout_enforcement_enabled(self.prev)
 
     def clone(self) -> "enforce_grad_layout_policy":
@@ -442,7 +470,12 @@ class _force_original_view_tracking(_DecoratorContextManager):
     def __enter__(self) -> None:
         torch._C._set_view_replay_enabled(self.mode)
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> None:
         torch._C._set_view_replay_enabled(self.prev)
 
     def clone(self):

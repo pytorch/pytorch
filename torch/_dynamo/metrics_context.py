@@ -24,10 +24,10 @@ from typing_extensions import Self
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Iterator
 
 from torch.utils._traceback import CapturedTraceback
-import types
 
 
 log = logging.getLogger(__name__)
