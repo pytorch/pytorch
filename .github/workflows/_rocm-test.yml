@@ -282,9 +282,15 @@ jobs:
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Change permissions (only needed for kubernetes runners for now)
-        if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'gfx942') || contains(matrix.runner, 'gfx950') || contains(matrix.runner, 'mi210')) }}
+        if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'gfx942') || contains(matrix.runner, 'gfx950') || contains(matrix.runner, 'mi210') || contains(matrix.runner, 'gfx1100')) }}
+        shell: bash
         run: |
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
+          runner="${{ matrix.runner }}"
+          if [[ "${runner}" == *gfx1100* ]]; then
+            docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R root:root test"
+          else
+            docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
+          fi
 
       - name: Print remaining test logs
         shell: bash
