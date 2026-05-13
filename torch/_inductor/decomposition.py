@@ -322,6 +322,7 @@ def convolution_backward(
     if statically_known_true(input.size(1) == 0) and statically_known_true(
         bias_sizes[0] != 0
     ):
+        # deal with the `input_channel=0` case
         grad_bias = grad_output.new_zeros(bias_sizes)
     else:
         grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
