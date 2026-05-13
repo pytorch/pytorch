@@ -97,6 +97,11 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
     return sympy.simplify(new_index - index)
 
 
+def _is_multiple_of_vec_length(expr: sympy.Expr, vec_length: int) -> bool:
+    """Cheap syntactic check that ``expr`` is a multiple of ``vec_length``."""
+    return sympy.gcd(expr, vec_length) == vec_length
+
+
 @functools.lru_cache
 def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
     """
@@ -127,7 +132,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     def visit_indexing_div(divisor):
         nonlocal div_freevar_id
         result = FloorDiv(var, divisor)
-        if sympy.gcd(divisor, vec_length) == vec_length:
+        if _is_multiple_of_vec_length(divisor, vec_length):
             result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
             div_freevar_id += 1
         return result
@@ -135,10 +140,10 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     def visit_modular_indexing(divisor, modulus):
         nonlocal mod_freevar_id
         result = ModularIndexing(var, divisor, modulus)
-        if sympy.gcd(divisor, vec_length) == vec_length:
+        if _is_multiple_of_vec_length(divisor, vec_length):
             result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
-        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+        elif divisor == 1 and _is_multiple_of_vec_length(modulus, vec_length):
             result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
         return result
