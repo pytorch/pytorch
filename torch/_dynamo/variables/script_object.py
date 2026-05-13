@@ -22,7 +22,7 @@ import enum
 import functools
 import inspect
 import types
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -177,7 +177,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the

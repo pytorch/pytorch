@@ -17,7 +17,6 @@ variable tracking system.
 import collections
 import operator
 import sys
-from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch
@@ -220,7 +219,7 @@ class BaseListVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if not isinstance(self, (ListVariable, TupleVariable)):
@@ -264,7 +263,7 @@ class BaseListVariable(VariableTracker):
         tx: "InstructionTranslator",
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
@@ -455,11 +454,11 @@ class BaseListVariable(VariableTracker):
             ):
                 if name == "__eq__":
                     return SourcelessBuilder.create(tx, operator.is_).call_function(
-                        tx, (left, right), {}
+                        tx, [left, right], {}
                     )
                 elif name == "__ne__":
                     return SourcelessBuilder.create(tx, operator.is_not).call_function(
-                        tx, (left, right), {}
+                        tx, [left, right], {}
                     )
                 else:
                     op_str = cmp_name_to_op_str_mapping[name]
@@ -490,7 +489,7 @@ class RangeVariable(BaseListVariable):
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
 
-    def __init__(self, items: Sequence[VariableTracker], **kwargs: Any) -> None:
+    def __init__(self, items: list[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -1860,7 +1859,7 @@ class SliceVariable(VariableTracker):
 
     def __init__(
         self,
-        items: Sequence[VariableTracker],
+        items: list[VariableTracker],
         tx: Optional["InstructionTranslator"] = None,
         **kwargs: Any,
     ) -> None:

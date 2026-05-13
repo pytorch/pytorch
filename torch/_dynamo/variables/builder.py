@@ -1213,7 +1213,7 @@ class VariableBuilder:
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
                 ).call_function(
                     self.tx,
-                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    [self.tx.output.side_effects.get_ca_final_callbacks_var()],
                     {},
                 )
             )

@@ -22,8 +22,6 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
@@ -91,7 +89,9 @@ class ConstantVariable(VariableTracker):
             return variables.FrozensetVariable(items, **kwargs)
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
-            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            slice_args_vars: list[VariableTracker] = [
+                ConstantVariable.create(arg) for arg in slice_args
+            ]
             return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
@@ -356,7 +356,7 @@ class ConstantVariable(VariableTracker):
         tx: InstructionTranslator,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.value is None:
