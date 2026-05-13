@@ -2736,12 +2736,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 found_mm = True
         self.assertTrue(found_mm)
         if use_cuda:
-            from torch._C import _get_privateuse1_backend_name
-
-            device_type_enum = getattr(DeviceType, device.upper(), None)
-            if device_type_enum is None and device == _get_privateuse1_backend_name():
-                device_type_enum = DeviceType.PrivateUse1
-            gpu_events = [e for e in events if e.device_type == device_type_enum]
+            gpu_events = [e for e in events if e.device_type == DeviceType.CUDA]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
