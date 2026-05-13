@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
 
@@ -629,9 +630,9 @@ class NestedReduction:
         outer_node: BaseSchedulerNode,
         grouped_node: BaseSchedulerNode,
         domain_context: PointwiseDomainContext,
-    ) -> list[tuple[BaseSchedulerNode, PointwiseDomain]] | None:
+    ) -> list[tuple[SchedulerNode, PointwiseDomain]] | None:
         outer_pointwise_domains: list[
-            tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]
+            tuple[SchedulerNode, NestedReduction.PointwiseDomain]
         ] = []
         # Use ancestor names to find pointwise subnodes inside the outer fused
         # node that consume an outer reduction result.
@@ -646,6 +647,8 @@ class NestedReduction:
             if sn.is_reduction():
                 continue
             if outer_reduction_names & sn.ancestors:
+                if not isinstance(sn, SchedulerNode):
+                    return None
                 outer_pointwise_domains.append(
                     (sn, cls.PointwiseDomain.LOCAL_REDUCTION_INPUT)
                 )
@@ -663,7 +666,7 @@ class NestedReduction:
         cls,
         domain_context: PointwiseDomainContext,
         nodes: Sequence[BaseSchedulerNode],
-    ) -> list[tuple[BaseSchedulerNode, PointwiseDomain]] | None:
+    ) -> list[tuple[SchedulerNode, PointwiseDomain]] | None:
         """Classify pointwise nodes relative to the grouped reduction.
 
         A node must be on exactly one side of the grouped reduction: either a
@@ -677,16 +680,24 @@ class NestedReduction:
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
         pointwise_domains: list[
-            tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]
+            tuple[SchedulerNode, NestedReduction.PointwiseDomain]
         ] = []
         for sn in nodes:
             if sn.is_reduction():
                 continue
+            if not isinstance(sn, SchedulerNode):
+                return None
 
             sn_names = sn.get_operation_names()
             is_producer = bool(sn_names & grouped_reduction.ancestors)
             is_consumer = bool(reduction_names & sn.ancestors)
-            if is_producer == is_consumer:
+            if is_producer and is_consumer:
+                # Supportable by splitting/modeling a multi-stage pointwise,
+                # but not as one nested pipeline stage today.
+                return None
+            if not is_producer and not is_consumer:
+                # Supportable as a sidecar, but nested codegen does not yet
+                # model an insertion point for unrelated pointwise nodes.
                 return None
 
             full_domain = (
@@ -710,7 +721,7 @@ class NestedReduction:
     def _pointwise_domains_are_compatible(
         cls,
         domain_context: PointwiseDomainContext,
-        pointwise_domains: Sequence[tuple[BaseSchedulerNode, PointwiseDomain]],
+        pointwise_domains: Sequence[tuple[SchedulerNode, PointwiseDomain]],
     ) -> bool:
         return all(
             cls._pointwise_domain_is_compatible(sn, domain, domain_context)
@@ -720,7 +731,7 @@ class NestedReduction:
     @classmethod
     def _pointwise_domain_is_compatible(
         cls,
-        sn: BaseSchedulerNode,
+        sn: SchedulerNode,
         domain: PointwiseDomain,
         domain_context: PointwiseDomainContext,
     ) -> bool:
@@ -744,9 +755,7 @@ class NestedReduction:
             expected_groups = domain_context.parent_full_domain
         return V.graph.sizevars.statically_known_equals(
             sn_numel, expected_numel
-        ) and SIMDKernel.is_compatible(
-            expected_groups, typing.cast(SchedulerNode, sn).get_ranges()
-        )
+        ) and SIMDKernel.is_compatible(expected_groups, sn.get_ranges())
 
     @classmethod
     def _min_block_unprofitable_for_kernel(
@@ -758,14 +767,12 @@ class NestedReduction:
         grouped_axis: GroupedAxis,
         group_size: int,
     ) -> bool:
-        from torch._inductor.tiling_utils import analyze_memory_coalescing
-
         from .codegen.simd import SIMDScheduling
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
         coalesce_analysis = (
-            analyze_memory_coalescing(outer_node)
+            outer_node.get_coalesce_analysis()
             if config.triton.coalesce_tiling_analysis
             else None
         )
@@ -861,6 +868,13 @@ class NestedReduction:
             return False
         group_size_int = int(group_size)
         if not (1 <= group_size_int and is_power_of_2(group_size_int)):
+            return False
+        grouped_parent_extent = (
+            outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
+        )
+        if not V.graph.sizevars.statically_known_equals(
+            sympy.Mod(grouped_parent_extent, group_size), 0
+        ):
             return False
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
@@ -1187,7 +1201,19 @@ class BaseSchedulerNode:
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
+        self.clear_read_writes_dependent_caches()
         self.prune_deps()
+
+    def clear_read_writes_dependent_caches(self) -> None:
+        self.get_coalesce_analysis.clear_cache(self)
+
+    @cache_on_self
+    def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
+        from .tiling_utils import _analyze_memory_coalescing
+
+        if not isinstance(self, (SchedulerNode, FusedSchedulerNode)):
+            return None
+        return _analyze_memory_coalescing(self)
 
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
@@ -2133,6 +2159,10 @@ class SchedulerNode(BaseSchedulerNode):
             .rename(self.mutation_renames)
         )
 
+        self.clear_loop_body_dependent_caches(need_clear_tiling_cache)
+
+    def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
+        self.clear_read_writes_dependent_caches()
         self.pointwise_read_writes.clear_cache(self)
 
         if need_clear_tiling_cache:
@@ -2158,8 +2188,6 @@ class SchedulerNode(BaseSchedulerNode):
 
     def restore_loop_state(self, state: tuple[Any, ...]) -> None:
         """Restore state from snapshot_loop_state."""
-        from .codegen.simd import SIMDScheduling
-
         (
             self._body,
             self._sizes,
@@ -2167,8 +2195,7 @@ class SchedulerNode(BaseSchedulerNode):
             self.read_writes,
             self.unmet_dependencies,
         ) = state
-        self.pointwise_read_writes.clear_cache(self)
-        SIMDScheduling.candidate_tilings.cache_clear()
+        self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
@@ -2836,7 +2863,7 @@ class FusedNestedReductions(FusedSchedulerNode):
         # from node1 are not mistaken for external intermediate deps.
         self.ancestors -= self.get_operation_names()
         grouped_node = node2
-        _, (_, grouped_rnumel) = grouped_node.group
+        _, (grouped_numel, grouped_rnumel) = grouped_node.group
         grouped_reduction_info = NestedReduction._get_grouped_reduction_and_size(
             grouped_node, grouped_rnumel
         )
@@ -2854,7 +2881,6 @@ class FusedNestedReductions(FusedSchedulerNode):
         assert grouped_axis is not None
         self.grouped_axis: NestedReduction.GroupedAxis = grouped_axis
         self.group_size_in_r: bool = self.grouped_axis is NestedReduction.GroupedAxis.R
-        _, (grouped_numel, grouped_rnumel) = grouped_node.group
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
         self.domain_context: NestedReduction.PointwiseDomainContext = (
             NestedReduction.PointwiseDomainContext(
@@ -2880,7 +2906,7 @@ class FusedNestedReductions(FusedSchedulerNode):
             return False
 
         pointwise_domains: (
-            list[tuple[BaseSchedulerNode, NestedReduction.PointwiseDomain]] | None
+            list[tuple[SchedulerNode, NestedReduction.PointwiseDomain]] | None
         ) = NestedReduction._classify_grouped_pointwise_nodes(
             self.domain_context,
             other.get_nodes(),
