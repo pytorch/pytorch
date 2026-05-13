@@ -544,6 +544,13 @@ hop_db = [
         # passthrough autograd stub (CompositeExplicitAutograd-style) that
         # is not sufficient for HOP-level backward tests.
         supports_autograd=False,
+        # Export serialization needs SwitchOp.gen_schema, which lands in
+        # PR 4. Remove this xfail once that PR merges.
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_serialize_export"
+            ),
+        ),
     ),
     OpInfo(
         name="invoke_quant",
