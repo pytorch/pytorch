@@ -2850,10 +2850,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_reversed(
         self, tx: "InstructionTranslator", obj: VariableTracker
     ) -> VariableTracker | None:
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
-        return None
+        # TODO(dynamo-team): Implement a reverse iterator + proper support for __reverse__
+        items = list(reversed(unpack_iterable(tx, obj)))
+        return variables.TupleVariable(items, mutation_type=ValueMutationNew())
 
     def call_sorted(
         self,
