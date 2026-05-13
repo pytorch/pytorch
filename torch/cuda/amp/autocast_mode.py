@@ -20,16 +20,18 @@ class autocast(torch.amp.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
-    # TODO: remove this conditional once we stop supporting Python < 3.13
+    # TODO: remove this conditional once we stop supporting Python < 3.13,
     # and `torch.jit.script` supports classes decorated with `deprecated`.
+    #
     # Prior to Python 3.13, inspect.signature could not retrieve the correct
     # signature information for classes decorated with @deprecated (unless
     # the __new__ static method was explicitly defined);
-    #
     # However, this issue has been fixed in Python 3.13 and later versions.
-    # `torch.jit.script` fails, because with the decorator __new__ is no
-    # longer a builtin but getting the source via `inspect`fails, as that
-    # looks up the underlying method, not the wrapper, which is a builtin
+    #
+    # `torch.jit.script` fails, because with the decorator `__new__` is no
+    # longer a builtin (as determined by `inspect.isbuiltin`) but getting
+    # the source via `inspect`fails, as that looks up the underlying method,
+    # not the wrapper, and that is a builtin for which there is no source.
     def __new__(
         cls,
         enabled: bool = True,
