@@ -26,9 +26,11 @@ from ..ir import (
 )
 from ..utils import (
     cache_on_self,
+    DeferredLineBase,
     get_gpu_type,
     GPU_ALIGN_BYTES,
     IndentedBuffer,
+    make_codegen_buffer,
     XPU_KERNEL_FORMAT,
 )
 from ..virtualized import V
@@ -95,6 +97,18 @@ def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
     return result
 
 
+class _LazyTritonCompileKickoffLine(DeferredLineBase):
+    def __init__(self, lazy_kernel_names: list[str], line: str):
+        super().__init__(line)
+        self.lazy_kernel_names = lazy_kernel_names
+
+    def __call__(self) -> str | None:
+        return self.line if self.lazy_kernel_names else None
+
+    def _new_line(self, line: str) -> Self:
+        return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
+
+
 @dataclasses.dataclass
 class DeferredTritonCallWrapper:
     """
@@ -159,41 +173,40 @@ class DeferredTritonCallWrapper:
         if arg_types is None:
             arg_types = self.arg_types
 
-        # Generate template types for tensor arguments
         template_types = [
             f"typename {name}_type_"
             for name, arg_type in zip(arg_names, arg_types)
             if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
         ]
-        if V.graph.aot_mode:
-            template_types.append("typename kernels_type_")
-
         if template_types:
-            prefix.writeline(f"template <{', '.join(template_types)}>")
+            prefix.writeline_jit(f"template <{', '.join(template_types)}>")
+        prefix.writeline_aot(
+            f"template <{', '.join([*template_types, 'typename kernels_type_'])}>"
+        )
 
-        # Build parameter list
-        param_lines = [
+        cubin_dir_param = "const std::optional<std::string>& cubin_dir_ = std::nullopt"
+        kernels_param = "kernels_type_& kernels_"
+
+        shared_params = [
             self._get_cpp_param_type(name, arg_type, signature)
             for name, arg_type in zip(arg_names, arg_types)
         ]
-        param_lines.append("int32_t device_idx_")
-        param_lines.append(
+        shared_params.append("int32_t device_idx_")
+        shared_params.append(
             maybe_hipify_code_wrapper(
                 f"{wrapper.device_codegen.cpp_stream_type()} stream_"
             )
         )
-        if V.graph.aot_mode:
-            param_lines.append("kernels_type_& kernels_")
-        param_lines.append(
-            "const std::optional<std::string>& cubin_dir_ = std::nullopt"
-        )
 
-        # Write function signature
+        def emit(writer, params):
+            for p in params[:-1]:
+                writer(f"{p},")
+            writer(params[-1])
+
         prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
         with prefix.indent():
-            for i, param in enumerate(param_lines):
-                comma = "," if i < len(param_lines) - 1 else ""
-                prefix.writeline(f"{param}{comma}")
+            emit(prefix.writeline_jit, [*shared_params, cubin_dir_param])
+            emit(prefix.writeline_aot, [*shared_params, kernels_param, cubin_dir_param])
         prefix.writeline("){")
 
     def generate(self, wrapper: CppWrapperGpu):
@@ -205,7 +218,8 @@ class DeferredTritonCallWrapper:
             # MultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        # Defer compilation to runtime if autotune_at_compile_time is False (JIT only)
+        # Defer compilation to runtime if autotune_at_compile_time is False (JIT only).
+        # AOTI lazy-compile emission is wired up later in the stack.
         if not V.graph.aot_mode and config.triton.autotune_at_compile_time is False:
             return self.generate_lazy(wrapper)
 
@@ -467,27 +481,28 @@ class DeferredTritonCallWrapper:
         )
         call_args_str = self._generate_lazy_scratch(prefix, wrapper, call_args_str)
 
-        launch_args = (
-            f"{kernel_name}, grid_0, grid_1, grid_2,"
+        common_launch_args = (
+            f"grid_0, grid_1, grid_2,"
             f" {kernel_name}_result.num_warps,"
             f" {kernel_name}_result.shared_mem,"
             f" kernel_args_, stream_"
         )
 
-        prefix.splice(
-            f"""\
-            void* kernel_args_[] = {{{call_args_str}}};
-            launchKernel({launch_args});
-            """
-        )
+        prefix.writeline_jit(f"void* kernel_args_[] = {{{call_args_str}}};")
+        prefix.writeline_jit(f"launchKernel({kernel_name}, {common_launch_args});")
 
     def generate_lazy(self, wrapper: CppWrapperGpu):
         """
         Generate C++ code that embeds Triton source and compiles it at runtime.
+
+        Writes JIT-side content via writeline_jit/splice_jit; on a plain
+        IndentedBuffer those are equivalent to writeline/splice. AOTI-side
+        emission for dual-wrapper mode is added later in the stack.
         """
         prefix = wrapper.prefix
         kernel_name = self.kernel_name
-        # Track kernel names for parallel initialization
+
+        # Track kernel names for parallel initialization (JIT only)
         wrapper._lazy_kernel_names.append(kernel_name)
 
         # Include TMA helpers if any args use TMA descriptors
@@ -495,20 +510,29 @@ class DeferredTritonCallWrapper:
         if tma_signature_types:
             wrapper.write_tma_descriptor_helpers_once()
 
-        kernel_var_decl = maybe_hipify_code_wrapper(
-            f"static {wrapper.device_codegen.cpp_kernel_type()} {kernel_name} = nullptr;"
+        kernel_type = maybe_hipify_code_wrapper(
+            wrapper.device_codegen.cpp_kernel_type()
         )
-        prefix.writeline(kernel_var_decl)
-        # Use delimited raw string to handle )" in kernel source
+
+        # JIT-only: static CUfunction and embedded Triton source
+        prefix.writeline_jit(f"static {kernel_type} {kernel_name} = nullptr;")
         kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
         kernel_body = f'R"TRITON(\n{kernel_source_str}\n)TRITON"'
-        prefix.writeline(f"static const char* {kernel_name}_source = {kernel_body};")
-        prefix.writeline(f"static LazyKernelCompileResult {kernel_name}_result;")
+        prefix.writeline_jit(
+            f"static const char* {kernel_name}_source = {kernel_body};"
+        )
+
+        prefix.writeline_jit(f"static LazyKernelCompileResult {kernel_name}_result;")
 
         wrapper_arg_names, kernel_arg_names = self._resolve_lazy_arg_names()
         signature = (self.triton_meta or {}).get("signature", {})
+
         self._write_wrapper_signature(
-            prefix, wrapper, wrapper_arg_names, self.arg_types, signature
+            prefix,
+            wrapper,
+            wrapper_arg_names,
+            self.arg_types,
+            signature,
         )
 
         # Build autotune args - for TMA, pass tensors instead of descriptors.
@@ -531,15 +555,18 @@ class DeferredTritonCallWrapper:
             else:
                 autotune_arg_list.append(name)
         autotune_args = ", ".join(autotune_arg_list)
-        # Lazy compile with autotuning on first invocation
+
+        # Lazy compile with autotuning on first invocation.
+        # Build into temp buffer to avoid DualIndentedBuffer dispatch.
         with prefix.indent():
-            prefix.writeline(f"if ({kernel_name} == nullptr) {{")
-            with prefix.indent():
+            jit_init = IndentedBuffer(initial_indent=prefix._indent)
+            jit_init.writeline(f"if ({kernel_name} == nullptr) {{")
+            with jit_init.indent():
                 for tensor_name, scalar_var, dtype in scalar_extractions:
                     wrapper.codegen_tensor_item(
-                        dtype, tensor_name, scalar_var, indented_buffer=prefix
+                        dtype, tensor_name, scalar_var, indented_buffer=jit_init
                     )
-                prefix.splice(
+                jit_init.splice(
                     f"""\
                     {kernel_name}_result = runTritonKernelWithAutotune(
                         _module_pending_kernels, "{kernel_name}", stream_, {autotune_args});
@@ -553,7 +580,8 @@ class DeferredTritonCallWrapper:
                     return;
                     """
                 )
-            prefix.writeline("}")
+            jit_init.writeline("}")
+            prefix.splice_jit(jit_init)
 
             self._generate_lazy_grid(prefix)
             self._generate_lazy_launch(
@@ -828,14 +856,18 @@ class CppWrapperGpu(CppWrapperCpu):
         return CppWrapperGpu()
 
     def write_header(self):
-        if V.graph.is_const_graph:
+        if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:
             # We do not write header for constant graph, it will be written by main module.
             return
 
         super().write_header()
-        self.header.splice(
-            maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
-        )
+        kernel_driver = maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
+        if V.graph.is_const_graph and V.graph.is_dual_wrapper_mode:
+            # const_graph's AOTI variant merges into main (which has its own
+            # kernel_driver) — JIT-only emission avoids the duplicate.
+            self.header.splice_jit(kernel_driver)
+        else:
+            self.header.splice(kernel_driver)
 
     @cache_on_self
     def write_tma_descriptor_helpers_once(self):
@@ -882,8 +914,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     "but it is not aligned at run time. Copying to an aligned tensor "
                     "to guarantee correctness, but expect a performance hit."
                 )
-                self.prefix.splice(
-                    f"""
+                alignment_check = f"""
                     if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
@@ -891,7 +922,7 @@ class CppWrapperGpu(CppWrapperCpu):
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
-                )
+                self.prefix.splice_aot(alignment_check)
 
         super().codegen_inputs()
 
@@ -919,6 +950,13 @@ class CppWrapperGpu(CppWrapperCpu):
         with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             return super().generate(is_inference)
 
+    def _codegen_entry_impl_prologue(self):
+        self.prefix.writeline(
+            _LazyTritonCompileKickoffLine(
+                self._lazy_kernel_names, "ensure_triton_kernel_compiles_started();"
+            )
+        )
+
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
@@ -926,43 +964,49 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generating triton kernel callers can modify the prefix (cached dtypes),
         # so do this before running finalize_prefix(), but put the generated code
         # after the finalize_prefix() code.
-        self.prefix = IndentedBuffer()
-        for kernel in self._triton_call_wrappers.values():
-            self.prefix.writeline("\n")
-            kernel.generate(self)
+        triton_prefix = make_codegen_buffer()
+        with self._target_buf("prefix", triton_prefix):
+            for kernel in self._triton_call_wrappers.values():
+                self.prefix.writeline("\n")
+                kernel.generate(self)
 
-        # Generate parallel kernel compilation initialization function
-        if self._lazy_kernel_names:
-            start_compile_calls = "\n    ".join(
-                f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
-                for name in self._lazy_kernel_names
-            )
-            self.prefix.splice(
-                f"""\
-// Start parallel compilation of all Triton kernels
+            # Generate parallel kernel compilation initialization function.
+            # JIT-only since AOTI has no Python dependency.
+            if self._lazy_kernel_names:
+                start_compile_body = (
+                    "loadLazyCompileFuncs();\n"
+                    "    _module_pending_kernels = PyDict_New();\n"
+                    '    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");\n'
+                    "    "
+                    + "\n    ".join(
+                        f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
+                        for name in self._lazy_kernel_names
+                    )
+                )
+                self.include_extra_header("mutex")
+                self.prefix.writeline_jit("")
+                self.prefix.splice_jit(
+                    f"""\
+// Start parallel compilation of all Triton kernels.
 static inline void start_all_triton_kernel_compiles() {{
-    loadLazyCompileFuncs();
-    _module_pending_kernels = PyDict_New();
-    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");
-    {start_compile_calls}
+    {start_compile_body}
 }}
 
-// Static initializer to start kernel compilation on module load
-static struct TritonKernelCompileInit {{
-    TritonKernelCompileInit() {{
+// inductor_entry_impl calls this on every forward;
+// std::call_once makes the first call do the work.
+static std::once_flag _triton_kernel_compile_init_flag;
+static inline void ensure_triton_kernel_compiles_started() {{
+    std::call_once(_triton_kernel_compile_init_flag, [] {{
         start_all_triton_kernel_compiles();
-    }}
-}} __triton_kernel_compile_init;
+    }});
+}}
 """
-            )
+                )
 
-        triton_prefix = self.prefix
-
-        self.prefix = IndentedBuffer()
+        self.prefix = make_codegen_buffer()
         super().finalize_prefix()
 
         self.prefix.splice(triton_prefix)
-
         self.prefix.writeline("\n")
         self.prefix.splice(old_prefix)
 
@@ -1235,9 +1279,7 @@ static struct TritonKernelCompileInit {{
 
             # For lazy compile mode with TMA, extract underlying tensor names
             tma_tensor_args: dict[str, str] = {}
-            is_lazy_compile = (
-                not V.graph.aot_mode and config.triton.autotune_at_compile_time is False
-            )
+            is_lazy_compile = config.triton.autotune_at_compile_time is False
             if is_lazy_compile and raw_args and triton_meta:
                 signature = triton_meta.get("signature", {})
                 raw_keys_list = raw_keys or []

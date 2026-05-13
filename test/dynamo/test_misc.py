@@ -5020,6 +5020,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(loc.x is x)
 
+    def test_setattr_wrong_args_raises(self):
+        # setattr() with wrong arg count should raise TypeError during tracing,
+        # not silently graph-break (a graph break would just defer the same
+        # failure to eager execution).
+        @torch.compile(backend="eager")
+        def fn(x):
+            setattr(x, "foo")
+            return x
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(4))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -8302,6 +8314,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
+
+    def test_torch_distributions_gamma_dynamic(self):
+        def fn(n: int):
+            distribution = torch.distributions.Gamma(
+                concentration=torch.tensor(2.0),
+                rate=torch.tensor(1.0),
+            )
+            return distribution.sample((n,))
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+
+        torch.manual_seed(42)
+        expected = fn(5)
+
+        torch.manual_seed(42)
+        result = opt_fn(5)
+
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result, expected)
 
     def test_guard_failure_fn(self):
         def fn(x, y, k):
@@ -14797,6 +14828,103 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            obj = NonTensor(t)
+            return obj.compute()
+
+        t = torch.randn(2)
+        res = fn(t)
+        self.assertEqual(res, t.sin())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_return___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            return NonTensor, t.sin()
+
+        t = torch.randn(2)
+        cls, res = fn(t)
+        self.assertEqual(res, t.sin())
+        self.assertEqual(cls.__name__, "NonTensor")
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_return_obj___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            # class is created with an EphemeralSource and
+            # UserDefinedClassVariable has no `reconstruct` method
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            return NonTensor(t)
+
+        t = torch.randn(2)
+        obj = fn(t)
+        self.assertEqual(obj.compute(), t.sin())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=False)
+    def test___build_class___disabled(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            obj = NonTensor(t)
+            return obj.compute()
+
+        t = torch.randn(2)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(t)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamically_created_class_object_escape_unimplemented(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class DynamicClass:
+                def __init__(self, tensor):
+                    self.tensor = tensor
+
+                def compute(self):
+                    return self.tensor.sin()
+
+            obj = DynamicClass(t)
+            # The object escapes the compiled region (implicitly by being returned)
+            return obj
+
+        t = torch.randn(2)
+        # Should raise Unsupported with the unimplemented error about
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Reconstruct user defined class without a source",
+        ):
+            fn(t)
+
     def test_dunder_weakref(self):
         class Foo:
             pass
@@ -15254,7 +15382,7 @@ fn
                     "this error is if we have y = custom_op(x) and y and x are the same "
                     "Tensor. Please instead return a clone of the offending output "
                     "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
-                    "to not return y. This is deprecated and will become an error in PyTorch 2.12.",
+                    "to not return y. This is deprecated and will become an error in a future version of PyTorch.",
                 )
 
     def test_make_contiguous_strides_for_under_compile(self):
@@ -15601,6 +15729,85 @@ def forward(self, L_x_ : torch.Tensor):
         r9 = h(torch.tensor(1), MyStr("abc"))
         self.assertEqual(r9.item(), 4)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_re_module_constant_fold(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_search(x):
+            m = re.search(r"(\d+)", "abc123def")
+            if m:
+                return x + int(m.group(1))
+            return x
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_match(x):
+            m = re.match(r"hello", "hello world")
+            if m:
+                return x + 1
+            return x
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_no_match(x):
+            m = re.search(r"xyz", "hello world")
+            if m:
+                return x + 1
+            return x
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_sub(x):
+            s = re.sub(r"\d+", "0", "abc123def456")
+            if s == "abc0def0":
+                return x + 1
+            return x
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_findall(x):
+            matches = re.findall(r"\d+", "abc123def456")
+            return x + len(matches)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_split(x):
+            parts = re.split(r"\s+", "hello world foo")
+            return x + len(parts)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_compile_and_search(x):
+            pattern = re.compile(r"(\w+)")
+            m = pattern.search("hello world")
+            if m:
+                return x + len(m.group(0))
+            return x
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn_escape(x):
+            s = re.escape("hello.world")
+            if s == r"hello\.world":
+                return x + 1
+            return x
+
+        t = torch.tensor(10)
+
+        self.assertEqual(fn_search(t), torch.tensor(133))
+        self.assertEqual(fn_match(t), torch.tensor(11))
+        self.assertEqual(fn_no_match(t), torch.tensor(10))
+        self.assertEqual(fn_sub(t), torch.tensor(11))
+        self.assertEqual(fn_findall(t), torch.tensor(12))
+        self.assertEqual(fn_split(t), torch.tensor(13))
+        self.assertEqual(fn_compile_and_search(t), torch.tensor(15))
+        self.assertEqual(fn_escape(t), torch.tensor(11))
+
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_compile_exec_function_no_cache_thrash(self):
+        # Issue #124269: exec'd functions must not go through wrap_inline,
+        # else they share one `inner` code object and hit recompile_limit.
+        code = "def op(x):\n    return torch.mean(x)"
+        x = torch.zeros(3)
+        for _ in range(5):  # > recompile_limit
+            scope: dict = {"torch": torch}
+            exec(code, scope)
+            compiled = torch.compile(scope["op"], fullgraph=True)
+            self.assertEqual(compiled(x), torch.tensor(0.0))
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
