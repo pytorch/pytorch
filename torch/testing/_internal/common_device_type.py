@@ -1133,6 +1133,34 @@ def _serialize_sample(sample_input):
     return str(sample_input)
 
 
+SkipSpec = namedtuple(
+    "SkipSpec",
+    [
+        "op_name",
+        "variant_name",
+        "device_type",
+        "dtypes",
+        "expected_failure",
+    ],
+)
+
+
+def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, True)
+
+
+def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return SkipSpec(op_name, variant_name, device_type, dtypes, False)
+
+
+def skipOps(to_skip):
+    def wrapped(fn):
+        fn._skipops = tuple(to_skip)
+        return fn
+
+    return wrapped
+
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -1189,6 +1217,62 @@ class ops(_TestParametrizer):
         )
         self.skip_if_dynamo = skip_if_dynamo
 
+    def _apply_skipops(self, test, generic_cls):
+        from torch.testing._internal.opinfo.core import DecorateInfo
+
+        skipops = getattr(test, "_skipops", None)
+        if skipops is None:
+            return
+        cls_name = generic_cls.__name__
+        test_name = test.__name__
+        for skip_spec in skipops:
+            # Handle multiple formats:
+            # 1. functorch's DecorateMeta: has 'decorator' attribute (any callable)
+            # 2. SkipSpec: has 'expected_failure' attribute (boolean)
+            # 3. Regular tuple: (op_name, variant_name, device_type, dtypes, expected_failure)
+            if hasattr(skip_spec, "op_name"):
+                op_name = skip_spec.op_name
+                variant_name = skip_spec.variant_name
+                device_type = skip_spec.device_type
+                dtypes = skip_spec.dtypes
+                if hasattr(skip_spec, "decorator"):
+                    # functorch's DecorateMeta format
+                    decorator_callable = skip_spec.decorator
+                else:
+                    # SkipSpec format (must have expected_failure)
+                    expected_failure = skip_spec.expected_failure
+                    decorator_callable = (
+                        unittest.expectedFailure
+                        if expected_failure
+                        else unittest.skip("Skipped!")
+                    )
+            else:
+                # Regular tuple: (op_name, variant_name, device_type, dtypes, expected_failure)
+                op_name, variant_name, device_type, dtypes, expected_failure = skip_spec
+                decorator_callable = (
+                    unittest.expectedFailure
+                    if expected_failure
+                    else unittest.skip("Skipped!")
+                )
+            matching_opinfos = [
+                o
+                for o in self.op_list
+                if o.name == op_name and o.variant_test_name == variant_name
+            ]
+            if len(matching_opinfos) < 1:
+                raise AssertionError(f"Couldn't find OpInfo for {skip_spec}")
+            for op in matching_opinfos:
+                decorators = list(op.decorators)
+                decorator = DecorateInfo(
+                    decorator_callable,
+                    cls_name,
+                    test_name,
+                    device_type=device_type,
+                    dtypes=dtypes,
+                )
+                decorators.append(decorator)
+                op.decorators = tuple(decorators)
+
     def _parametrize_test(self, test, generic_cls, device_cls):
         """Parameterizes the given test function across each op and its associated dtypes."""
         if device_cls is None:
@@ -1202,6 +1286,7 @@ class ops(_TestParametrizer):
         # This ensures op_overrides only applies to ops that passed the op_allowlist filter
         device_cls._apply_op_allowlist(self)
         device_cls._apply_op_overrides(self)
+        self._apply_skipops(test, generic_cls)
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
