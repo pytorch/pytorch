@@ -82,7 +82,7 @@ class AotAutograd:
                 return disable(
                     disable(
                         bw_compiler_fn, reason="do not trace backward compiler function"
-                    )(*args, **kwargs),
+                    )(*args, **kwargs),  # type: ignore[misc]
                     reason="do not trace generated backwards pass",
                 )
 
