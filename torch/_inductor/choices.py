@@ -21,9 +21,11 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
+    _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
@@ -234,15 +236,7 @@ class InductorChoices:
         adjusted_choices: list[KernelTemplateChoice],
         op_name: str,
     ) -> bool:
-        """
-        Check if we need to fix the layout instead of keeping it flexible
-
-        Args:
-            ktc: KernelTemplateChoice object
-
-        Returns:
-            True if we need to fix the layout, False otherwise
-        """
+        """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -253,6 +247,11 @@ class InductorChoices:
             ]:
                 return True
 
+        # Origami requires fixed layouts (grid/workgroup mappings depend on exact
+        # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
+        # doesn't disable flexible layouts unnecessarily.
+        if _origami_enabled() and IS_ROCM:
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
@@ -417,7 +416,7 @@ class InductorChoices:
             lower = next_power_of_2(int(lower))
             upper = next_power_of_2(int(upper))
 
-            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # If we are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
             # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
@@ -442,7 +441,7 @@ class InductorChoices:
 
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
-        )  # type: ignore[arg-types]
+        )
 
     @staticmethod
     def reduction_split_factor(
@@ -475,7 +474,12 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            if reduction_numel_hint <= 8192:
+            # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
+            # TODO: test more hardwares
+            no_split_threshold = (
+                524288 if props.major is not None and props.major >= 10 else 8192
+            )
+            if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
                 split_size = min_elements_per_thread

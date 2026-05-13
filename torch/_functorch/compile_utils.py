@@ -63,7 +63,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         same_mutation_regions,
     )
 
-    compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
+    compute_mutation_region_ids(fx_g)
 
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have
@@ -219,7 +219,7 @@ def strip_overloads(gm: fx.GraphModule) -> None:
     gm.recompile()
 
 
-def get_placeholders(graph: fx.Graph) -> fx.graph._node_list:
+def get_placeholders(graph: fx.Graph) -> list[Any]:
     return graph.find_nodes(op="placeholder")
 
 

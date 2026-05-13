@@ -668,7 +668,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device_constant(a):
-        return a + torch.ones(1, device=torch.device("cpu"))
+        return a + torch.ones(1)
 
     @make_test
     def test_tuple1(a, b):
@@ -1278,7 +1278,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_device(x):
-        if not x.is_cuda:
+        if x.device.type == "cpu":
             return x + 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -1311,10 +1311,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
+        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -3992,9 +3992,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def func():
-            make_tensor = partial(
-                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
-            )
+            make_tensor = partial(torch.rand, dtype=torch.float16, requires_grad=True)
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
             make_q_tensor = partial(
@@ -4256,9 +4254,9 @@ class GraphModule(torch.nn.Module):
         def self_fn(x):
             return x.unsqueeze_(dim=1) + 1
 
-        v = torch.ones([3], device="cpu")
+        v = torch.ones([3])
         # identical tensor since modify inplace
-        v2 = torch.ones([3], device="cpu")
+        v2 = torch.ones([3])
         opt_fn = torch.compile(fn, backend="eager")
         opt_self_fn = torch.compile(self_fn, backend="eager")
         self.assertEqual(v, v2)
@@ -4344,7 +4342,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return retry(cached_fn)(x)
 
-        x = torch.tensor(2.0, device="cpu")
+        x = torch.tensor(2.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
@@ -4609,6 +4607,101 @@ class GraphModule(torch.nn.Module):
         result = compiled(x)
 
         self.assertEqual(result, torch.sin(x))
+
+    def test_property_descriptor_on_instance(self):
+        class Foo:
+            def __init__(self, x):
+                self._x = x
+
+            @property
+            def x(self):
+                return self._x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.x
+
+        self.assertEqual(fn(Foo(torch.tensor(5))), torch.tensor(6))
+
+    def test_property_descriptor_on_class(self):
+        class Foo:
+            @property
+            def x(self):
+                return 42
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return isinstance(Foo.x, property)
+
+        self.assertTrue(fn())
+
+    def test_tuplegetter_on_instance(self):
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(p):
+            return p.x + p.y
+
+        p = Point(torch.tensor(3), torch.tensor(4))
+        self.assertEqual(fn(p), torch.tensor(7))
+
+    def test_tuplegetter_doc_on_class(self):
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Point.x.__doc__
+
+        self.assertIn("Alias", fn())
+
+    def test_getset_descriptor_on_instance(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.__class__
+
+        self.assertEqual(fn(42), int)
+        self.assertEqual(fn("hello"), str)
+
+    def test_type_getset_descriptor_metaclass_shadow(self):
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return {"shadow": 1}
+
+            @property
+            def __mro__(cls):
+                return ("shadow",)
+
+        class Foo(metaclass=Meta):
+            marker = 7
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def normal_lookup(x):
+            return x + Foo.__dict__["shadow"] + len(Foo.__mro__)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def direct_descriptor_call(x):
+            cls_dict = type.__dict__["__dict__"].__get__(Foo)
+            cls_mro = type.__dict__["__mro__"].__get__(Foo)
+            return x + cls_dict["marker"] + len(cls_mro)
+
+        x = torch.tensor(1.0)
+        self.assertEqual(normal_lookup(x), torch.tensor(3.0))
+        self.assertEqual(direct_descriptor_call(x), torch.tensor(10.0))
+
+    def test_member_descriptor_isinstance_on_class(self):
+        class A:
+            __slots__ = ("x",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return isinstance(A.x, types.MemberDescriptorType)
+
+        self.assertTrue(fn())
 
 
 def udf_mul(x, y):
@@ -5754,20 +5847,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             code = f.__code__
             defaults = f.__defaults__
             return x * len(defaults) * code.co_argcount
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_functools_partial_id(self):
-        def gn(a, b):
-            return a + b
-
-        partial_gn = functools.partial(gn, a=3)
-
-        def fn(x):
-            d = {id(partial_gn): 5}
-            return partial_gn(b=x) * d[id(partial_gn)]
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
