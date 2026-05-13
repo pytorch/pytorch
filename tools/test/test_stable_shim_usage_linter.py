@@ -73,6 +73,8 @@ class TestStableShimUsageLinter(unittest.TestCase):
             "secondary_path": (2, 9),
             # Function with a return type made up of two words.
             "function_that_returns_constchar": (2, 12),
+            # Function that has its declaration over two lines.
+            "this_is_a_very_long_function": (2, 12),
         }
 
         self.assertEqual(result, expected)

@@ -104,6 +104,14 @@ AOTI_TORCH_EXPORT int secondary_path(int arg);
 AOTI_TORCH_EXPORT const char* function_that_returns_constchar();
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
+// Test a function where the name is longer and the linter
+// places the function name on the next line, this resulted in
+// 'AOTI_TORCH_EXPORT AOTITorchError' being gobbled up by the
+// parser.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT AOTITorchError
+this_is_a_very_long_function(StableIValue** ret_value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 #ifdef __cplusplus
 } // extern "C"
