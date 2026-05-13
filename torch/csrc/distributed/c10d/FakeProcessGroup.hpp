@@ -123,26 +123,17 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
-    TORCH_CHECK(
-        outputTensorLists.size() == inputTensors.size(),
-        "allgather_coalesced: output tensor lists (",
-        outputTensorLists.size(),
-        ") must have the same length as input tensor list (",
-        inputTensors.size(),
-        ")");
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::allgather_coalesced: ", msg);
+    };
+    assertNonEmptyInputTensorList(invalidArgument, inputTensors.size());
+    assertAllgatherCoalescedOutputTensorLists(
+        invalidArgument, outputTensorLists, inputTensors.size(), size_);
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
-    for (size_t i = 0; i < inputTensors.size(); ++i) {
-      TORCH_CHECK(
-          static_cast<int>(outputTensorLists[i].size()) == size_,
-          "allgather_coalesced: output tensor list ",
-          i,
-          " has size ",
-          outputTensorLists[i].size(),
-          ", but expected world size ",
-          size_);
-      for (auto& tensor : outputTensorLists[i]) {
-        tensor.copy_(inputTensors[i]);
+    for (auto& outputTensorList : outputTensorLists) {
+      for (size_t i = 0; i < inputTensors.size(); ++i) {
+        outputTensorList[i].copy_(inputTensors[i]);
       }
     }
     return c10::make_intrusive<FakeWork>();
@@ -176,27 +167,14 @@ class FakeProcessGroup : public Backend {
     assertSingleElementInput(invalidArgument, inputTensors);
 
     if (rank_ == opts.rootRank) {
-      TORCH_CHECK(
-          outputTensors.size() == 1,
-          "FakeProcessGroup::gather: requires a single-element output list containing a list with ",
-          size_,
-          " tensors.");
-      TORCH_CHECK(
-          static_cast<int>(outputTensors[0].size()) == size_,
-          "FakeProcessGroup::gather: Incorrect output list size ",
-          outputTensors[0].size(),
-          ". Output list size should be ",
-          size_,
-          ", same as size of the process group.");
+      assertGatherOutputTensorList(invalidArgument, outputTensors, size_);
       // See note in _allgather_base above.
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
       }
     } else {
-      TORCH_CHECK(
-          outputTensors.empty(),
-          "FakeProcessGroup::gather: requires empty output on non-root");
+      assertEmptyOutputTensorList(invalidArgument, outputTensors);
     }
     return c10::make_intrusive<FakeWork>();
   }
