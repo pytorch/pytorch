@@ -5402,6 +5402,31 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_nested_tensor_inputs_error(self, device):
+        def make_nt(lengths, heads=2, dim=8):
+            elems = [
+                torch.randn(s, heads, dim, device=device, dtype=torch.float32)
+                for s in lengths
+            ]
+            return torch.nested.nested_tensor(elems, layout=torch.jagged).transpose(
+                1, 2
+            )
+
+        q = make_nt([3, 2])
+        k = make_nt([3, 2])
+        v = make_nt([3, 2])
+        msg = "flex_attention does not support NestedTensor inputs"
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            flex_attention(q, k, v)
+
+        compiled_flex = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            compiled_flex(q, k, v)
+
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
         class TestModule(torch.nn.Module):

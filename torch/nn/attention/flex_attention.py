@@ -54,6 +54,11 @@ if typing.TYPE_CHECKING:
 _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
 
 _WARNINGS_SHOWN: set[str] = set()
+_NESTED_TENSOR_INPUT_ERROR = (
+    "flex_attention does not support NestedTensor inputs, including "
+    "torch.compile(flex_attention) with jagged NestedTensor inputs. "
+    "Convert inputs to dense tensors before calling flex_attention."
+)
 
 
 def _warn_once(
@@ -1805,6 +1810,11 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         )
 
 
+def _validate_no_nested_tensors(query: Tensor, key: Tensor, value: Tensor) -> None:
+    if query.is_nested or key.is_nested or value.is_nested:
+        raise NotImplementedError(_NESTED_TENSOR_INPUT_ERROR)
+
+
 def _enforce_mem_layouts(
     query: Tensor, key: Tensor, value: Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2012,6 +2022,7 @@ def flex_attention(
 
     """
     # Some basic input validation
+    _validate_no_nested_tensors(query, key, value)
     _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
