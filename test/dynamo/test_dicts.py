@@ -2643,10 +2643,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
-    @unittest.expectedFailure
-    def test_fromkeys(self):
-        return super().test_fromkeys()
-
 
 class OrderedDictMethodsTests(DictMethodsTests):
     thetype = OrderedDict
