@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,6 +24,12 @@
 
 namespace at::native {
 namespace mps {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/ReplicationPad_metallib.h>
+#endif
 
 // Pad operations (1D/2D/3D forward and backward)
 static Tensor& pad_out_template(Tensor& output,
@@ -322,6 +329,103 @@ static Tensor& pad_out_template(Tensor& output,
   }
   return output;
 }
+
+static MTLSize replication_pad1d_threadgroup(id<MTLComputePipelineState> pso,
+                                             NSUInteger gx,
+                                             NSUInteger gy,
+                                             NSUInteger gz) {
+  const auto maxTPG = [pso maxTotalThreadsPerThreadgroup];
+  const auto tg_x = std::min<NSUInteger>(maxTPG, gx);
+  const auto tg_y = std::min<NSUInteger>(maxTPG / tg_x, gy);
+  const auto tg_z = std::min<NSUInteger>(maxTPG / (tg_x * tg_y), gz);
+  return MTLSizeMake(tg_x, tg_y, tg_z);
+}
+
+static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef padding, const Tensor& output) {
+  if (output.numel() == 0 || input_.numel() == 0) {
+    return;
+  }
+  auto input = input_.contiguous();
+  const bool output_needs_copy = !output.is_contiguous();
+  auto output_buf = output_needs_copy ? at::empty(output.sizes(), output.options()) : output;
+  auto output_c = output_buf;
+  if (input.dim() == 2) {
+    input = input.unsqueeze(0);
+    output_c = output_c.unsqueeze(0);
+  }
+  TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
+
+  const auto nbatch = c10::checked_convert<int32_t>(input.size(0), "int32_t");
+  const auto nplane = c10::checked_convert<int32_t>(input.size(1), "int32_t");
+  const auto input_W = c10::checked_convert<int32_t>(input.size(2), "int32_t");
+  const auto output_W = c10::checked_convert<int32_t>(output_c.size(2), "int32_t");
+  const std::array<int32_t, 4> sizes_pad = {input_W,
+                                            output_W,
+                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
+                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+
+  auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_forward", {input, output_c});
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, output_c, sizes_pad);
+      [encoder dispatchThreads:MTLSizeMake(output_W, nplane, nbatch)
+          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, output_W, nplane, nbatch)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+  if (output_needs_copy) {
+    output.copy_(output_buf);
+  }
+}
+
+static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
+                                                  const Tensor& input,
+                                                  IntArrayRef padding,
+                                                  const Tensor& grad_input) {
+  if (grad_input.numel() == 0 || grad_output_.numel() == 0) {
+    return;
+  }
+  auto grad_output = grad_output_.contiguous();
+  const bool grad_input_needs_copy = !grad_input.is_contiguous();
+  auto grad_input_buf = grad_input_needs_copy ? at::empty(grad_input.sizes(), grad_input.options()) : grad_input;
+  auto grad_input_c = grad_input_buf;
+  if (input.dim() == 2) {
+    grad_output = grad_output.unsqueeze(0);
+    grad_input_c = grad_input_c.unsqueeze(0);
+  }
+  TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
+
+  const auto nbatch = c10::checked_convert<int32_t>(grad_input_c.size(0), "int32_t");
+  const auto nplane = c10::checked_convert<int32_t>(grad_input_c.size(1), "int32_t");
+  const auto input_W = c10::checked_convert<int32_t>(grad_input_c.size(2), "int32_t");
+  const auto output_W = c10::checked_convert<int32_t>(grad_output.size(2), "int32_t");
+  const std::array<int32_t, 4> sizes_pad = {input_W,
+                                            output_W,
+                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
+                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+
+  auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "replication_pad1d_backward", {grad_output, grad_input_c});
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, grad_output, grad_input_c, sizes_pad);
+      [encoder dispatchThreads:MTLSizeMake(input_W, nplane, nbatch)
+          threadsPerThreadgroup:replication_pad1d_threadgroup(pso, input_W, nplane, nbatch)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+  if (grad_input_needs_copy) {
+    grad_input.copy_(grad_input_buf);
+  }
+}
+
 } // namespace mps
 
 // 1D Reflection and Replication Padding
@@ -350,25 +454,12 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_mps)
 
 TORCH_IMPL_FUNC(replication_pad1d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  mps::pad_out_template(const_cast<Tensor&>(output),
-                        input,
-                        padding,
-                        std::nullopt,
-                        MPSGraphPaddingModeClampToEdge,
-                        0.0,
-                        "replication_pad1d_out_mps");
+  mps::replication_pad1d_kernel_mps(input, padding, output);
 }
 
 TORCH_IMPL_FUNC(replication_pad1d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input),
-                        input,
-                        padding,
-                        grad_output,
-                        MPSGraphPaddingModeClampToEdge,
-                        0.0,
-                        "replication_pad1d_backward_out_mps");
+  mps::replication_pad1d_backward_kernel_mps(grad_output, input, padding, grad_input);
 }
 
 // 2D Reflection and Replication Padding

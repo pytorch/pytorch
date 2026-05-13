@@ -10275,6 +10275,17 @@ class TestPad(TestCaseMPS):
         output_mps = torch.constant_pad_nd(input_mps, [])
         self.assertEqual(output_mps, input_mps)
 
+    def test_replication_pad1d_non_contig_out(self):
+        x = torch.randn(2, 3, 5, device="mps")
+        out = torch.empty(2, 7, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d.out(x, (1, 1), out=out)
+        self.assertEqual(out.cpu(), F.pad(x.cpu(), (1, 1), mode="replicate"))
+        go = torch.randn(2, 3, 7, device="mps")
+        gi = torch.empty(2, 5, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d_backward.grad_input(go, x, (1, 1), grad_input=gi)
+        gi_ref = torch.ops.aten.replication_pad1d_backward(go.cpu(), x.cpu(), (1, 1))
+        self.assertEqual(gi.cpu(), gi_ref)
+
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
