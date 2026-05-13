@@ -1511,7 +1511,15 @@ class _DerivedIterationFamily:
 
 @dataclasses.dataclass(frozen=True)
 class _GroupedReductionVars:
-    """Grouped-body vars and the subset that need reduced-family rewrites."""
+    """Variables used to call the grouped-reduction body.
+
+    ``iter_remapped`` and ``reduce_remapped`` are the iteration/reduction
+    arguments passed to the grouped reduction's loop body. ``passthrough`` is
+    the non-grouped axis, while ``group_index`` and ``local_reduction`` are
+    the two pieces of the grouped parent axis after it is split into
+    [num_groups, local_reduction_size]. ``group_index_var`` is None only for
+    the single-group case, where the group index is the constant 0.
+    """
 
     iter_remapped: list[sympy.Expr]
     reduce_remapped: list[sympy.Expr]
@@ -1635,6 +1643,9 @@ class _GroupedReductionLayout:
                 [self.num_groups, self.local_reduction_size]
             )
             group_index_expr = group_index_var
+        # The passthrough axis is not split; it is reconstructed as a single
+        # loop variable so the grouped body can still address the unchanged
+        # parent-tile dimension.
         passthrough_var = self.passthrough_tree.construct(
             [self.passthrough_tree.numel]
         )[0]
@@ -1692,6 +1703,8 @@ class _GroupedReductionLayout:
             reduced_x_tree.full_range().symbol()
         )
         if group_reduction_vars.group_index_var is not None:
+            # The single-group case uses constant 0 for the group lane, so
+            # there is no constructed group-index symbol to rewrite.
             index_subs[group_reduction_vars.group_index_var] = (
                 reduced_r_tree.full_range().symbol()
             )
@@ -1714,13 +1727,16 @@ class _GroupedReductionLayout:
     ) -> CSEVariable:
         assert value.dtype is not None
         if value.shape is None or len(value.shape) < 2:
+            # Some scalar or opaque CSE values do not carry block-shape
+            # metadata. Pointwise consumers can still rely on Triton
+            # broadcasting, unlike grouped-reduction reshape inputs.
             return value
 
-        parent_dim = str(value.shape[self.parent_axis])
-        if parent_dim == self.parent_block or parent_dim == "1":
-            return value
-
-        return self._broadcast_value_to_parent_resolution(kernel, value, parent_dim)
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=False,
+        )
 
     def ensure_parent_tile_resolution(
         self,
@@ -1732,19 +1748,27 @@ class _GroupedReductionLayout:
             "grouped reduction input must have a known parent-tile shape"
         )
 
-        parent_dim = str(value.shape[self.parent_axis])
-        if parent_dim == self.parent_block:
-            return value
-
-        return self._broadcast_value_to_parent_resolution(kernel, value, parent_dim)
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=True,
+        )
 
     def _broadcast_value_to_parent_resolution(
         self,
         kernel: TritonKernel,
         value: CSEVariable,
-        parent_dim: str,
+        *,
+        materialize_singleton: bool,
     ) -> CSEVariable:
         assert value.dtype is not None
+        assert value.shape is not None and len(value.shape) >= 2
+        parent_dim = str(value.shape[self.parent_axis])
+        if parent_dim == self.parent_block or (
+            parent_dim == "1" and not materialize_singleton
+        ):
+            return value
+
         passthrough_extent = self.passthrough_block
         parent_extent = self.parent_block
         if parent_dim == "1":
@@ -1815,6 +1839,8 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = self._inner.load(name, index)
         if self._load_transform is not None:
+            # Used when a nested stage reads reduced values that must be lifted
+            # back to parent-tile resolution before this body consumes them.
             value = self._load_transform.apply(value)
         return value
 
@@ -1932,8 +1958,9 @@ class SIMDScheduling(BaseScheduling):
                 reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
-                # Nested reduction legality has already run in the scheduler.
-                # The regular numel/rnumel checks reject it because the two
+                # Scheduler legality creates the fused nested node, but SIMD
+                # still runs this backend fusion gate. The regular
+                # numel/rnumel checks reject nested reductions because the two
                 # reductions intentionally use different iteration spaces.
                 from torch._inductor.scheduler import NestedReduction
 
@@ -2515,6 +2542,9 @@ class SIMDScheduling(BaseScheduling):
 
         kernel.min_rblock = local_reduction_size_hint
 
+        # Emit the first stage through the normal scheduler path so its loads,
+        # stores, CSE state, masks, and reduction setup are identical to an
+        # ordinary SIMD reduction kernel. Nested handlers append later stages.
         self.codegen_node_schedule_with_kernel(combined_schedule, kernel)
 
         with kernel:
