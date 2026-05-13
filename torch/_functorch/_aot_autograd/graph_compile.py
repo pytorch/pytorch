@@ -207,7 +207,7 @@ def aot_stage1_graph_capture(
         out = orig_flat_fn(*args)
         out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
             PlainAOTOutput(i)  # type: ignore[misc]
-            for i in range(len(out))  # type: ignore[misc]
+            for i in range(len(out))
         )
         return out, out_descs
 
@@ -309,28 +309,6 @@ def aot_stage2_export(
     return compiled_fn, aot_state.fw_metadata
 
 
-def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
-    return AOTConfig(
-        fw_compiler=None,
-        bw_compiler=None,
-        partition_fn=None,
-        decompositions={},
-        inference_compiler=None,
-        num_params_buffers=input.num_params_buffers,
-        aot_id=input.aot_id,
-        keep_inference_input_mutations=input.keep_inference_input_mutations,
-        is_export=input.is_export,
-        no_tangents=input.no_tangents,
-        aot_autograd_arg_pos_to_source=input.aot_autograd_arg_pos_to_source,
-        dynamic_shapes=input.dynamic_shapes,
-        enable_log=input.enable_log,
-        static_input_indices=input.static_input_indices,
-        pre_dispatch=input.pre_dispatch,
-        cache_info=None,
-        precompile_backend_id=input.precompile_backend_id,
-    )
-
-
 def _get_inner_meta(
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
@@ -424,7 +402,7 @@ def _aot_stage2b_inference_compile(
 ) -> Callable:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
-        updated_flat_args,  # type: ignore[arg-type]
+        updated_flat_args,
         maybe_subclass_meta,
         fw_metadata,
         aot_config,
@@ -471,6 +449,21 @@ def aot_stage2_inference(
         )
 
         fw_module = remat_using_tags_for_fwd_loss_bwd_graph(fw_module)
+
+    if _has_invoke_subgraph_node(fw_module):
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_inference_graph_after_hop_passes",
+                "encoding": "string",
+            },
+            payload_fn=lambda: fw_module.print_readable(
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
+            ),
+        )
 
     compiled_fw = _aot_stage2b_inference_compile(
         fw_module,
@@ -527,7 +520,7 @@ def _cache_inference_info(
             indices_of_inps_to_detach=[],
             forward_time_taken_ns=time_taken_ns,
             backward_time_taken_ns=0,
-            sanitized_aot_config=sanitize_aot_config(aot_config),
+            sanitized_aot_config=aot_config.to_cacheable(),
             guards_expr=guards_expr,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
@@ -785,6 +778,15 @@ def _get_partition_fn(
     if aot_config.partition_fn is None:
         raise AssertionError("aot_config.partition_fn must not be None")
     return used_hop_custom_partition, aot_config.partition_fn
+
+
+def _has_invoke_subgraph_node(gm: torch.fx.GraphModule):
+    from torch._higher_order_ops import invoke_subgraph
+
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and node.target is invoke_subgraph:
+            return True
+    return False
 
 
 def run_joint_graph_passes_on_hops(
@@ -1375,11 +1377,11 @@ def maybe_inline_graph_saved_tensors_hooks(
     bw_g_inputs = bw_g.find_nodes(op="placeholder")
 
     fw_out_n = fw_g.output_node()
-    fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
+    fw_outs = fw_out_n.args[0]
     fw_outs_inner_set = set(fw_outs[:num_inner_fwd_outputs])  # type: ignore[index]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]  # type: ignore[index]
-    fw_outs_packed_tensors = []  # type: ignore[var-annotated]
-    fw_outs_packed_syms = []  # type: ignore[var-annotated]
+    fw_outs_packed_tensors = []
+    fw_outs_packed_syms = []
 
     # The main use case for saved_tensors_hooks is activation quantization,
     # for memory usage optimization.
@@ -2605,7 +2607,7 @@ def _cache_autograd_info(
                     _indices_of_inps_to_detach,
                     forward_time_taken_ns,
                     backward_time_taken_ns,
-                    sanitized_aot_config=sanitize_aot_config(aot_config),
+                    sanitized_aot_config=aot_config.to_cacheable(),
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
@@ -2630,7 +2632,7 @@ def _cache_autograd_info(
                 compiled_bw_func,
                 bw_module,
                 fw_metadata,
-                aot_config,  # type: ignore[arg-type]
+                aot_config,
             )
             try_save_cache_entry = None
 
@@ -2717,7 +2719,7 @@ def _aot_stage2b_compile_forward_or_inference(
                 get_cuda_generator_meta_val(index)
                 for _ in range(fw_metadata.num_graphsafe_rng_states)
             ]
-            adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
+            adjusted_flat_args.extend(rng_states)
 
         functionalized_rng_wrapper.pre_compile(
             fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata

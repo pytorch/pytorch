@@ -18,7 +18,7 @@ import collections
 import operator
 import sys
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -82,8 +82,10 @@ class BaseListVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(items, list)
-        assert all(isinstance(x, VariableTracker) for x in items)
+        if not isinstance(items, list):
+            raise AssertionError(f"items must be a list, got {type(items).__name__}")
+        if not all(isinstance(x, VariableTracker) for x in items):
+            raise AssertionError("all items must be VariableTracker instances")
         self.items: list[VariableTracker] = items
 
     def _as_proxy(self) -> list[Any]:
@@ -104,8 +106,51 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def is_python_constant(self) -> bool:
+        """Check if this container is a python constant without realizing lazy constants.
+
+        Uses try_peek_constant() to check each item without realizing lazy constants.
+        Returns False if any item is an unrealized lazy constant - this forces
+        the codegen path to use reconstruct() instead of loading as a constant,
+        which avoids installing guards on the lazy constants.
+        """
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        # Return False if any item is unrealized to avoid as_python_constant()
+        # being called, which would realize lazy constants and install guards
+        return can_peek and not is_unrealized
+
+    def _try_peek_items(
+        self,
+    ) -> tuple[bool, bool, list[Any]]:
+        """Peek at items without triggering realization.
+
+        Returns (can_peek, any_unrealized, values). Subclasses use this
+        in try_peek_constant() and apply their own constructor.
+        """
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            if item is self:
+                return (False, False, [])
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, [])
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        return (True, any_unrealized, values)
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, self.python_type()(values))
+
     def as_proxy(self) -> Any:
-        assert self.python_type() is not SizeVariable
+        if self.python_type() is SizeVariable:
+            raise AssertionError(
+                "SizeVariable should not use BaseListVariable.as_proxy"
+            )
         return self.python_type()(self._as_proxy())
 
     def getitem_const(
@@ -132,7 +177,10 @@ class BaseListVariable(VariableTracker):
                 mutation_type=ValueMutationNew() if self.mutation_type else None,
             )
         else:
-            assert isinstance(index, (int, torch.SymInt))
+            if not isinstance(index, (int, torch.SymInt)):
+                raise AssertionError(
+                    f"index must be int or SymInt, got {type(index).__name__}"
+                )
             try:
                 return self.items[index]
             except IndexError:
@@ -146,6 +194,14 @@ class BaseListVariable(VariableTracker):
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
+
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
+        # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
+        # implement PyObject_RichCompare
+        return iter_contains(self.unpack_var_sequence(tx), item, tx)
 
     def call_tree_map_branch(
         self,
@@ -274,16 +330,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name == "__contains__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
-        elif name == "index":
+        if name == "index":
             if not len(args):
                 raise_args_mismatch(
                     tx,
@@ -458,7 +505,8 @@ class RangeVariable(BaseListVariable):
         step = maybe_as_int(step)
         stop = maybe_as_int(stop)
 
-        assert stop is not None
+        if stop is None:
+            raise AssertionError("stop must not be None after parsing range arguments")
         super().__init__([start, stop, step], **kwargs)
 
     def debug_repr(self) -> str:
@@ -485,7 +533,8 @@ class RangeVariable(BaseListVariable):
         hi = self.stop()
         step = self.step()
 
-        assert step != 0
+        if step == 0:
+            raise AssertionError("step must not be zero")
         if step > 0 and lo < hi:
             return 1 + (hi - 1 - lo) // step
         elif step < 0 and lo > hi:
@@ -580,6 +629,12 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        return (True, any_unrealized, range(*values))
+
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
@@ -614,7 +669,8 @@ class RangeVariable(BaseListVariable):
         return VariableTracker.build(tx, length)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert "range" not in codegen.tx.f_globals
+        if "range" in codegen.tx.f_globals:
+            raise AssertionError("'range' must not be shadowed in f_globals")
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(range))  # type: ignore[arg-type]
         )
@@ -629,17 +685,18 @@ class RangeVariable(BaseListVariable):
         return super().call_obj_hasattr(tx, name)
 
     def range_equals(self, other: "RangeVariable") -> bool:
+        # ref: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/rangeobject.c#L514-L553  (range_equals)
         r0, r1 = self, other
-        if (
-            self.range_length() != r1.range_length()
-            or self.range_length() == 0
-            or r0.start() != r1.start()
-        ):
-            return False
-
-        if self.range_length() == 1:
+        if r0 is r1:
             return True
-
+        if r0.range_length() != r1.range_length():
+            return False
+        if r0.range_length() == 0:
+            return True
+        if r0.start() != r1.start():
+            return False
+        if r0.range_length() == 1:
+            return True
         return r0.step() == r1.step()
 
     def range_count(self, x: VariableTracker) -> int:
@@ -668,6 +725,12 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         # range_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/rangeobject.c#L729-L748
         return self.getitem_const(tx, key)
+
+    def sq_contains(
+        self, tx: "InstructionTranslator", item: VariableTracker
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L482-L490
+        return VariableTracker.build(tx, self.range_count(item))
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
@@ -700,7 +763,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        if name in ("count", "__contains__"):
+        if name == "count":
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
             x = args[0].as_python_constant()
@@ -745,14 +808,9 @@ class RangeVariable(BaseListVariable):
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        l = self.range_length()
-        start = self.start()
-        step = self.step()
-        return hash((l, start, step))
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
+        return hash(self.as_python_constant()), False
 
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, variables.RangeVariable):
@@ -1080,12 +1138,15 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if not all(k.is_python_constant() for k in keys):
+            if not all(k.try_peek_constant()[0] for k in keys):
                 first_non_constant_key = None
                 for k in keys:
-                    if not k.is_python_constant():
+                    if not k.try_peek_constant()[0]:
                         first_non_constant_key = k
-                assert first_non_constant_key is not None
+                if first_non_constant_key is None:
+                    raise AssertionError(
+                        "expected at least one non-constant key when not all keys are constant"
+                    )
 
                 try:
                     python_type = str(first_non_constant_key.python_type())
@@ -1120,7 +1181,11 @@ class ListVariable(CommonListMethodsVariable):
                 )
                 self.items[:] = [x for x, *_ in sorted_items_with_keys]
             except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=[VariableTracker.build(tx, a) for a in e.args],
+                )
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1153,13 +1218,27 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr([], name))
 
-    def is_python_hashable(self) -> bool:
+    def is_hashable(self) -> bool:
         return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
 
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
+    # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def __init__(
         self,
@@ -1169,9 +1248,10 @@ class DequeVariable(CommonListMethodsVariable):
     ) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert maxlen.is_python_constant(), (
-            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
-        )
+        if not maxlen.is_python_constant():
+            raise AssertionError(
+                f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+            )
         self.maxlen = maxlen
         items = list(items)
         if self.maxlen.as_python_constant() is not None:
@@ -1207,6 +1287,20 @@ class DequeVariable(CommonListMethodsVariable):
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
         )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        can_peek, any_unrealized, values = self._try_peek_items()
+        if not can_peek:
+            return (False, False, None)
+        # Also check maxlen
+        can_peek_maxlen, is_unrealized_maxlen, maxlen_value = (
+            self.maxlen.try_peek_constant()
+        )
+        if not can_peek_maxlen:
+            return (False, False, None)
+        if is_unrealized_maxlen:
+            any_unrealized = True
+        return (True, any_unrealized, self.python_type()(values, maxlen=maxlen_value))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
@@ -1263,8 +1357,12 @@ class DequeVariable(CommonListMethodsVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             key, value = args
-            assert key.is_python_constant()
-            assert isinstance(key.as_python_constant(), int)
+            if not key.is_python_constant():
+                raise AssertionError("deque __setitem__ key must be a Python constant")
+            if not isinstance(key.as_python_constant(), int):
+                raise AssertionError(
+                    f"deque __setitem__ key must be an int, got {type(key.as_python_constant()).__name__}"
+                )
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -1377,6 +1475,12 @@ class TupleVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
 
+    def reconstruct_pycode(self, codegen):
+        if len(self.items) == 0:
+            return "()"
+        else:
+            return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
@@ -1391,12 +1495,21 @@ class TupleVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return VariableTracker.build(tx, hasattr((), name))
 
-    def is_python_hashable(self) -> bool:
-        return all(item.is_python_hashable() for item in self.items)
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # CPython tuplehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L321
+        # Collect per-item hashes and feed them through tuplehash.  We wrap
+        # each hash in RawHash to bypass int.__hash__'s modular reduction,
+        # so tuplehash sees the original hash values — matching CPython exactly.
+        from .hashable import RawHash
+        from .object_protocol import generic_hash_impl
 
-    def get_python_hash(self) -> int:
-        items = tuple(x.get_python_hash() for x in self.items)
-        return hash(items)
+        is_fake = False
+        raw_hashes = []
+        for item in self.items:
+            h, fake = generic_hash_impl(tx, item)
+            is_fake = is_fake or fake
+            raw_hashes.append(RawHash(h))
+        return hash(tuple(raw_hashes)), is_fake
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.TupleVariable) and all(
@@ -1413,6 +1526,32 @@ class SizeVariable(TupleVariable):
         "proxy",
         *TupleVariable._nonvar_fields,
     }
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        # torch.Size items may be TensorVariables wrapping scalar tensors with
+        # known constant values (node.meta["example_value"].constant).  Extract
+        # the actual int values so the hash matches eager torch.Size hashing.
+        from .tensor import TensorVariable
+
+        int_items: list[int] = []
+        for item in self.items:
+            if item.is_python_constant():
+                int_items.append(item.as_python_constant())
+                continue
+            if isinstance(item, TensorVariable):
+                proxy = getattr(item, "proxy", None)
+                node = getattr(proxy, "node", None)
+                meta = getattr(node, "meta", None) if node is not None else None
+                example_value = (
+                    meta.get("example_value") if isinstance(meta, dict) else None
+                )
+                constant = getattr(example_value, "constant", None)
+                if isinstance(constant, torch.Tensor) and constant.numel() == 1:
+                    int_items.append(int(constant.item()))
+                    continue
+            # Can't extract a concrete int — fall back to TupleVariable
+            return super().hash_impl(tx)
+        return hash(torch.Size(int_items)), False
 
     def __init__(
         self,
@@ -1499,7 +1638,10 @@ class SizeVariable(TupleVariable):
             if v.is_python_constant():
                 const_result *= v.as_python_constant()
             else:
-                assert isinstance(v, SymNodeVariable), type(v)
+                if not isinstance(v, SymNodeVariable):
+                    raise AssertionError(
+                        f"expected SymNodeVariable, got {type(v).__name__}"
+                    )
                 # Delay proxy calls  until we know it will be necessary
                 sym_sizes.append(v)
 
@@ -1582,7 +1724,10 @@ class SizeVariable(TupleVariable):
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:
-            assert isinstance(index, (int, torch.SymInt))
+            if not isinstance(index, (int, torch.SymInt)):
+                raise AssertionError(
+                    f"index must be int or SymInt, got {type(index).__name__}"
+                )
             return self.items[index]
 
     def call_obj_hasattr(
@@ -1616,19 +1761,22 @@ class SliceVariable(VariableTracker):
         # Convert TensorVariable to SymIntVariable by calling .item()
         # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
         if start.is_tensor():
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
-            )
+            if tx is None:
+                raise AssertionError(
+                    "tx is required when slice indices are TensorVariables"
+                )
             start = start.call_method(tx, "item", [], {})
         if stop.is_tensor():
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
-            )
+            if tx is None:
+                raise AssertionError(
+                    "tx is required when slice indices are TensorVariables"
+                )
             stop = stop.call_method(tx, "item", [], {})
         if step.is_tensor():
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
-            )
+            if tx is None:
+                raise AssertionError(
+                    "tx is required when slice indices are TensorVariables"
+                )
             step = step.call_method(tx, "item", [], {})
 
         self.items = (start, stop, step)
@@ -1647,12 +1795,27 @@ class SliceVariable(VariableTracker):
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
+    def is_hashable(self) -> bool:
+        # Slices became hashable in Python 3.12 (CPython slicehash).
+        return sys.version_info >= (3, 12)
+
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+        if sys.version_info < (3, 12):
+            raise_type_error(tx, "unhashable type: 'slice'")
+        # CPython slicehash: https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667
+        s = self.as_python_constant()
+        try:
+            h = hash(s)
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=[str(e)])
+        return h, False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
+        if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(slice, name))
             )
@@ -1666,6 +1829,40 @@ class SliceVariable(VariableTracker):
                 hints=[*graph_break_hints.USER_ERROR],
             )
         return self.items[fields.index(name)]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "indices":
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            length_var = args[0].nb_index_impl(tx)
+            length = length_var.as_python_constant()
+            items: list[int | None] = []
+            for item in self.items:
+                if item.is_constant_none():
+                    items.append(None)
+                else:
+                    idx_var = item.nb_index_impl(tx)
+                    items.append(idx_var.as_python_constant())
+
+            try:
+                result = slice(*items).indices(length)
+            except (ValueError, TypeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, result)
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ListIteratorVariable(IteratorVariable):
@@ -1681,7 +1878,8 @@ class ListIteratorVariable(IteratorVariable):
         self, items: list[VariableTracker], index: int = 0, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(items, list)
+        if not isinstance(items, list):
+            raise AssertionError(f"items must be a list, got {type(items).__name__}")
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
 
@@ -1695,7 +1893,8 @@ class ListIteratorVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/listobject.c#L4110-L4133
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("ListIteratorVariable must be mutable to iterate")
         old_index = self.index
         if old_index >= len(self.items) or self.is_exhausted:
             self.is_exhausted = True
