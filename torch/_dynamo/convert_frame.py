@@ -904,7 +904,7 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
-    speculation_log.restart()
+    speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
     tracer = InstructionTranslator(
         instructions,
@@ -920,9 +920,9 @@ def trace_frame(
         export,
         export_constraints,
         frame_state=frame_state,
-        speculation_log=speculation_log,
+        speculation_log=speculation_log,  # type: ignore[has-type]
         exn_vt_stack=exn_vt_stack,
-        distributed_state=distributed_state,
+        distributed_state=distributed_state,  # type: ignore[has-type]
         package=package,
     )
 
@@ -932,7 +932,7 @@ def trace_frame(
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
-            speculation_log.clear()
+            speculation_log.clear()  # type: ignore[has-type]
             raise
         except (
             exc.SpeculationRestartAnalysis,
@@ -1473,7 +1473,7 @@ def _fullgraph_capture_frame(
             frame.closure,
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
-            export_constraints=constraints,
+            export_constraints=constraints,  # type: ignore[arg-type]
             one_graph=True,
             restart_reasons=set(),
         )
@@ -1766,7 +1766,7 @@ def _compile(
                 ) from None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
-        if distributed_state is not None and distributed_state.all_states is None:
+        if distributed_state is not None and distributed_state.all_states is None:  # type: ignore[has-type]
             raise AssertionError(
                 "compiler collective wasn't run before compilation completed"
             )
@@ -2361,7 +2361,7 @@ class ConvertFrame:
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
                 if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
-                    with compile_context(CompileContext(e.compile_id)):
+                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
                         user_stack = e.real_stack
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)

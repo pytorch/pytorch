@@ -9,7 +9,7 @@ maintaining type safety through the compilation process.
 from __future__ import annotations
 
 import operator
-from typing import Any, cast, Literal, overload, TYPE_CHECKING
+from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -85,10 +85,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -162,7 +162,7 @@ class ConstantVariable(VariableTracker):
             container_name = "string" if isinstance(self.value, str) else "bytes"
             arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
-            cast(Any, self.value)[arg.as_python_constant()],
+            self.value[arg.as_python_constant()],
         )
 
     def sq_item_impl(
@@ -174,7 +174,7 @@ class ConstantVariable(VariableTracker):
         # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
         index = key.as_python_constant()
         try:
-            return ConstantVariable.create(cast(Any, self.value)[index])
+            return ConstantVariable.create(self.value[index])
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
 
@@ -209,7 +209,7 @@ class ConstantVariable(VariableTracker):
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
-            return ConstantVariable.create(len(cast(Any, self.value)))
+            return ConstantVariable.create(len(self.value))
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
@@ -345,7 +345,7 @@ class ConstantVariable(VariableTracker):
         if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
-                    round(cast(Any, self.value), args[0].as_python_constant())
+                    round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
@@ -418,14 +418,10 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        if isinstance(other, ConstantVariable):
-            return self.as_python_constant() == other.as_python_constant()
-        # Delegate to other's is_python_equal - this handles cases like
-        # StringFormatVariable which can compare against constants and
-        # install guards for any lazy constants it contains.
-        if isinstance(other, VariableTracker):
-            return other.is_python_equal(self)
-        return False
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
     def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
@@ -457,7 +453,7 @@ class ConstantVariable(VariableTracker):
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
         # float defines nb_int (truncates toward zero via PyLong_FromDouble).
-        return ConstantVariable.create(int(cast(Any, self.value)))
+        return ConstantVariable.create(int(self.value))
 
     def nb_float_impl(
         self,
@@ -466,7 +462,7 @@ class ConstantVariable(VariableTracker):
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
         # bool inherits nb_float from int via slot inheritance.
-        return ConstantVariable.create(float(cast(Any, self.value)))
+        return ConstantVariable.create(float(self.value))
 
     def nb_or_impl(
         self,

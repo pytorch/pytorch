@@ -913,7 +913,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                 from ..graph import may_get_constant_buffer_dtype
 
-                dtype = may_get_constant_buffer_dtype(V.graph.graph_inputs[input_key])
+                dtype = may_get_constant_buffer_dtype(
+                    V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
+                )
                 assert dtype is not None, "Fails to get the dtype of the sympy.Expr"
                 self.codegen_tensor_item(
                     dtype, f"inputs[{idx}]", input_key, self.prefix
@@ -1305,7 +1307,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
                 if name in V.graph.const_output_index:
-                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
             assert None not in const_index_mapping, (
                 "Not all constant gets mapped for constant folding graph."
             )
@@ -2171,9 +2173,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
-    # is_uninitialized accepted for API compatibility with AllocateLine.codegen
-    # but unused — the C++ wrapper doesn't do deterministic fills in codegen.
-    def make_buffer_allocation(self, buffer, is_uninitialized=False):
+    def make_buffer_allocation(self, buffer):
         return self.make_allocation(
             buffer.get_name(),
             buffer.get_device(),
@@ -2182,29 +2182,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
             buffer.get_is_pinned(),
-            is_uninitialized=is_uninitialized,
         )
 
     def make_allocation(
-        self,
-        name,
-        device,
-        dtype,
-        shape,
-        stride,
-        allocation_shape=None,
-        is_pinned=False,
-        is_uninitialized=False,
-    ):  # noqa: docstring_linter
-        if (
-            is_uninitialized
-            and torch.are_deterministic_algorithms_enabled()
-            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        ):
-            raise RuntimeError(
-                "torch.use_deterministic_algorithms(True) with fill_uninitialized_memory "
-                "is not supported with cpp_wrapper. Use the default Python wrapper instead."
-            )
+        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+    ):
         if allocation_shape is None:
             allocation_shape = shape
 
@@ -2693,14 +2675,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     assert isinstance(
                         arg_type.getElementType(),
-                        static_arg_types,
+                        static_arg_types,  # type: ignore[arg-type]
                     ), (
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
             else:
                 assert isinstance(
                     arg_type,
-                    static_arg_types,
+                    static_arg_types,  # type: ignore[arg-type]
                 ), (
                     f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                 )
@@ -2747,7 +2729,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
@@ -2896,7 +2878,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
             return
@@ -2909,7 +2891,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             python_kernel_name,
             op_overload,
             raw_args,
-            output_args,
+            output_args,  # type: ignore[arg-type]
             outputs,
         )
 
@@ -3091,14 +3073,14 @@ if (!custom_op_wrapper) {
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
 
@@ -3248,14 +3230,14 @@ if (!custom_op_wrapper) {
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
         scope_gil_acquire = self.generate_scoped_gil_acquire(

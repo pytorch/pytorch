@@ -1079,7 +1079,7 @@ class DictKeysVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1106,7 +1106,7 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement nb_or and nb_inplace_or
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None
+    nb_inplace_or = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1253,7 +1253,7 @@ class DictItemsVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1297,6 +1297,9 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     def get_value___dict__(
         tx: "InstructionTranslator", vt: VariableTracker
     ) -> dict[str, VariableTracker]:
+        # GENERIC_SETATTR on "__dict__" means the whole instance dict was
+        # replaced through the __dict__ getset descriptor (obj.__dict__ = ...).
+        # Per-key obj.__dict__[name] mutations are tracked as INSTANCE_DICT.
         if isinstance(
             vt, variables.UserDefinedObjectVariable
         ) and tx.output.side_effects.has_pending_mutation_of_attr(
