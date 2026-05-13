@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
-from torch._inductor.template_heuristics.nv_universal_gemm import (
+from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )

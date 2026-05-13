@@ -12,14 +12,13 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
-from .. import config
-from ..kernel.bmm import bmm_template
-from ..kernel.mm import (
+from ... import config
+from ...kernel.bmm import bmm_template
+from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     get_scaling_options,
     get_tile_size,
@@ -29,9 +28,9 @@ from ..kernel.mm import (
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
-from ..kernel.mm_plus_mm import mm_plus_mm_template
-from ..kernel_inputs import KernelInputs, MMKernelInputs
-from ..utils import (
+from ...kernel.mm_plus_mm import mm_plus_mm_template
+from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...utils import (
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
@@ -39,9 +38,10 @@ from ..utils import (
     TMA_DESCRIPTOR_SIZE,
     using_b200,
 )
-from ..virtualized import V
+from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
+from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
@@ -910,7 +910,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         if not self.should_scale_configs:
             return configs
-        from ..runtime.runtime_utils import next_power_of_2
+        from ...runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
@@ -2615,7 +2615,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
         bias = bias[0] if bias else None
         # Prepare triton input nodes and create kernel_inputs at the top
-        from ..lowering import lowerings as L
+        from ...lowering import lowerings as L
 
         aten = torch.ops.aten
         if bias and len(mat_b.get_size()) == len(bias.get_size()) + 1:
@@ -2702,7 +2702,7 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         op_name: str,
     ) -> dict[str, Any]:
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
-        from ..kernel.mm_common import scale_mm_epilogue
+        from ...kernel.mm_common import scale_mm_epilogue
 
         return {
             **kwargs,
