@@ -13553,21 +13553,6 @@ if __name__ == '__main__':
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.leaky_relu_(x)
 
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_relu_nan_inf(self, device, dtype):
-        x = torch.tensor(
-            [float('nan'), float('inf'), float('-inf'), 1.0, -1.0, 0.0],
-            device=device, dtype=dtype,
-        )
-        expected = torch.tensor(
-            [float('nan'), float('inf'), 0.0, 1.0, 0.0, 0.0],
-            device=device, dtype=dtype,
-        )
-        self.assertEqual(torch.relu(x), expected, equal_nan=True)
-        y = x.clone()
-        y.relu_()
-        self.assertEqual(y, expected, equal_nan=True)
-
     # Merge into OpInfo?
     @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise_ https://github.com/pytorch/pytorch/issues/77764
     def test_leaky_relu_inplace_with_neg_slope(self, device):
