@@ -360,6 +360,18 @@ class _NestedReductionBase:
         self.check_numeric(f, (x, w))
         self.check_fusion()
 
+    def test_grouped_reduction_input_broadcast_parent_axis(self):
+        B, D, G = 16, 1024, 16
+
+        def f(x):
+            s = x.sum(dim=-1, keepdim=True)
+            y = torch.ops._inductor_test.realize(s.expand_as(x))
+            return y.reshape(B, D // G, G).amax(dim=-1)
+
+        x = torch.randn(B, D, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.check_fusion()
+
     @parametrize("pointwise_kind", ["full", "row_broadcast", "col_broadcast"])
     @parametrize("epilogue_resolution", ["reduced", "full"])
     def test_reduction_fusion_pointwise_prologue_epilogue(
