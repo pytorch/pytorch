@@ -22,7 +22,10 @@ class LazyCache:
 
     def __init__(self, value: Any, source: Any) -> None:
         if not isinstance(value, LazySymNodeFormatString):
-            assert source
+            if not source:
+                raise AssertionError(
+                    "source is required for non-LazySymNodeFormatString values"
+                )
         self.value = value
         self.source = source
         self.name_hint: str | None = None
@@ -30,7 +33,8 @@ class LazyCache:
         self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
-        assert self.vt is None
+        if self.vt is not None:
+            raise AssertionError("LazyCache.realize() called but vt is already set")
         from ..symbolic_convert import InstructionTranslator
         from . import builder
 
@@ -58,6 +62,78 @@ class LazyCache:
         del self.source_location
 
 
+class ComputedLazyCache:
+    """Container to cache the real VariableTracker for computed lazy constants.
+
+    Unlike LazyCache, this doesn't use VariableBuilder since computed lazy
+    constants have no source. It creates a ConstantVariable directly.
+
+    Stores the operands (`args`), `op` (the operator function), and `reconstruct_fn`
+    (bytecode generator) to allow recomputing the value at runtime. This enables
+    calling functions with different input values without recompiling.
+    """
+
+    def __init__(
+        self,
+        value: Any,
+        lazy_vars: list[LazyConstantVariable],
+        args: list[VariableTracker],
+        op: Callable[..., Any],
+        reconstruct_fn: Callable[[Any, list[VariableTracker]], None],
+    ) -> None:
+        self.value = value
+        self.lazy_vars = lazy_vars
+        self.args = args
+        self.op = op
+        self.reconstruct_fn = reconstruct_fn
+        self.name_hint: str | None = None
+        self.source_location: SourceLocation | None = None
+        self.vt: VariableTracker | None = None
+
+    def realize(self) -> None:
+        if self.vt is not None:
+            raise AssertionError(
+                "ComputedLazyCache.realize() called but vt is already set"
+            )
+        from ..symbolic_convert import InstructionTranslator
+        from .builtin import BuiltinVariable
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # Realize all source LazyConstantVariables (this installs their guards)
+        # and check if any became symbolic
+        any_symbolic = False
+        for lazy_var in self.lazy_vars:
+            realized = lazy_var.realize()
+            if isinstance(realized, SymNodeVariable):
+                any_symbolic = True
+
+        if any_symbolic:
+            # One of the sources became symbolic (due to automatic_dynamic_shapes).
+            # We need to recompute the result symbolically instead of using
+            # the pre-computed constant value.
+            tx = InstructionTranslator.current_tx()
+            realized_args = [arg.realize() for arg in self.args]
+            self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
+        else:
+            # All sources are constants, use the pre-computed value
+            self.vt = ConstantVariable.create(self.value)
+
+        if self.name_hint is not None and self.vt is not None:
+            self.vt.set_name_hint(self.name_hint)
+
+        if self.source_location is not None and self.vt.source_location is None:
+            self.vt.set_source_location(self.source_location)
+
+        del self.value
+        del self.lazy_vars
+        del self.args
+        del self.op
+        del self.reconstruct_fn
+        del self.name_hint
+        del self.source_location
+
+
 class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     """
     A structure that defers the creation of the actual VariableTracker
@@ -80,25 +156,13 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def create(value: Any, source: Any, **options: Any) -> VariableTracker:
         if type(value) in LazyConstantVariable.supported_types:
             return LazyConstantVariable.create(value, source, **options)
-
-        # Cache based on source when no extra options are passed
-        if source is not None and not options:
-            from ..symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
-            if tx is not None:
-                cache = tx.output.variable_tracker_cache
-                cached = cache.get(source)
-                if cached is not None:
-                    return cached
-                vt = LazyVariableTracker(LazyCache(value, source), source=source)
-                cache[source] = vt
-                return vt
-
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
-    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
-        assert isinstance(_cache, LazyCache)
+    def __init__(self, _cache: LazyCache | ComputedLazyCache, **kwargs: Any) -> None:
+        if not isinstance(_cache, (LazyCache, ComputedLazyCache)):
+            raise AssertionError(
+                f"_cache must be a LazyCache or ComputedLazyCache instance, got {type(_cache).__name__}"
+            )
         super().__init__(**kwargs)
         self._cache = _cache
 
@@ -106,7 +170,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
             self._cache.realize()
-            assert self._cache.vt is not None
+            if self._cache.vt is None:
+                raise AssertionError("LazyCache.realize() did not set vt")
         return self._cache.vt
 
     def lazy_isinstance(self, cls: type) -> bool:
@@ -116,7 +181,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
-            assert self._cache.vt is not None
+            if self._cache.vt is None:
+                raise AssertionError("is_realized() returned True but vt is None")
             return self._cache.vt
         return self
 
@@ -124,17 +190,26 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         return self._cache.vt is not None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
-        assert kwargs.get("_cache", self._cache) is self._cache
+        if kwargs.get("_cache", self._cache) is not self._cache:
+            raise AssertionError(
+                "cannot clone LazyVariableTracker with a different _cache"
+            )
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
     def peek_type(self) -> type[Any]:
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "peek_type() called on an already realized LazyVariableTracker"
+            )
         return type(self._cache.value)
 
     def peek_value(self) -> Any:
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "peek_value() called on an already realized LazyVariableTracker"
+            )
         return self._cache.value
 
     def set_name_hint(self, name: str) -> None:
@@ -196,10 +271,30 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
         value_cls = type(value)
         if issubclass(value_cls, LazyVariableTracker):
-            # Allow LazyConstantVariable to stay lazy when returning from a frame
-            keep_lazy = allow_lazy_constant and isinstance(value, LazyConstantVariable)
+            # Allow LazyConstantVariable and ComputedLazyConstantVariable to stay
+            # lazy when returning from a frame
+            keep_lazy = allow_lazy_constant and isinstance(
+                value, (LazyConstantVariable, ComputedLazyConstantVariable)
+            )
             if keep_lazy:
-                result = value
+                if isinstance(value, ComputedLazyConstantVariable):
+                    # Check if already realized (attributes deleted after realization)
+                    if value._cache.vt is not None:
+                        # Already realized - recurse on the realized value
+                        result = cls.realize_all(
+                            value.realize(),
+                            cache,
+                            allow_lazy_constant=allow_lazy_constant,
+                        )
+                    else:
+                        # Not yet realized - install TYPE_MATCH guards on source lazy vars.
+                        # The reconstruct_fn will regenerate the value from the inputs at runtime.
+                        # pyrefly: ignore[missing-attribute]
+                        for lazy_var in value._cache.lazy_vars:
+                            lazy_var._ensure_type_guard()
+                        result = value
+                else:
+                    result = value
             else:
                 result = cls.realize_all(
                     value.realize(), cache, allow_lazy_constant=allow_lazy_constant
@@ -207,7 +302,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         elif issubclass(value_cls, VariableTracker):
             # update value in-place
             result = value
-            # update cache now to prevent infinite recursion
+            # cache early to handle self-referential structures
             cache[idx] = (result, value)
             value_dict = value.__dict__
             nonvars = value._nonvar_fields
@@ -238,10 +333,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def is_hashable(self) -> bool:
+    def is_hashable_lazy(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
-        # This is used by ConstDictVariable tracker to find if the key LazyVT
-        # can be hashed.
+        # This is used by the is_hashable() function in hashable.py as a fast
+        # path for unrealized LazyVTs.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
             return (
@@ -250,7 +345,10 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 or is_function_or_wrapper(value)
             )
 
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "is_hashable() called on an already realized LazyVariableTracker"
+            )
         value = self._cache.value
         if isinstance(value, tuple):
             return all(_helper(v) for v in value)
@@ -258,12 +356,19 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     def original_value(self) -> Any:
         # Returns the value without realizing the VT.
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "original_value() called on an already realized LazyVariableTracker"
+            )
         return self._cache.value
 
     def original_source(self) -> Any:
         # Returns the source without realizing the VT.
-        assert not self.is_realized()
+        if self.is_realized():
+            raise AssertionError(
+                "original_source() called on an already realized LazyVariableTracker"
+            )
+        # pyrefly: ignore[missing-attribute]
         return self._cache.source
 
 
@@ -292,7 +397,7 @@ class LazyConstantVariable(LazyVariableTracker):
     }
 
     @staticmethod
-    def create(
+    def create(  # pyrefly: ignore[bad-override]
         value: Any,
         source: Any,
         **options: Any,
@@ -300,8 +405,12 @@ class LazyConstantVariable(LazyVariableTracker):
         from ..source import is_constant_source
         from .constant import ConstantVariable
 
-        assert type(value) in LazyConstantVariable.supported_types
-        assert source is not None
+        if type(value) not in LazyConstantVariable.supported_types:
+            raise AssertionError(
+                f"unsupported type {type(value).__name__} for LazyConstantVariable"
+            )
+        if source is None:
+            raise AssertionError("source must not be None for LazyConstantVariable")
 
         # If the source doesn't support guards (e.g., ConstantSource), fall back
         # to creating a regular ConstantVariable directly
@@ -323,7 +432,8 @@ class LazyConstantVariable(LazyVariableTracker):
 
         from ..guards import GuardBuilder, install_guard
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError("source must not be None when installing type guard")
         guard = self.source.make_guard(GuardBuilder.TYPE_MATCH)
         install_guard(guard)
         self._type_guard_installed = True
@@ -339,7 +449,10 @@ class LazyConstantVariable(LazyVariableTracker):
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
-        assert self.source is not None
+        if self.source is None:
+            raise AssertionError(
+                "source must not be None when realizing LazyConstantVariable"
+            )
 
         result = super().realize()
 
@@ -420,32 +533,242 @@ class LazyConstantVariable(LazyVariableTracker):
         """Check isinstance without triggering realization when possible.
 
         LazyConstantVariable only wraps primitive types (int, float, bool, str)
-        which always realize to ConstantVariable, so we can answer isinstance
-        checks by checking if the target class is ConstantVariable or a parent.
-
-        However, when specialize_int=False or specialize_float=False, integers
-        and floats may realize to SymNodeVariable instead of ConstantVariable,
-        so we must fall back to full realization for those cases.
+        which usually realize to ConstantVariable. However, when specialize_int
+        or specialize_float is False, int/float values may realize to
+        SymNodeVariable instead, so we must realize in those cases.
         """
         from .constant import ConstantVariable
         from .tensor import SymNodeVariable
 
-        # If already realized, delegate to the parent which does the regular check
+        # If already realized, just check the realized type
         if self.is_realized():
-            return super().lazy_isinstance(cls)
+            return type.__instancecheck__(cls, self.realize())
 
-        # LazyConstantVariable can only realize to ConstantVariable or SymNodeVariable.
-        # If cls is not a parent of either, we can answer False without realization.
-        if not issubclass(ConstantVariable, cls) and not issubclass(
-            SymNodeVariable, cls
-        ):
-            self._ensure_type_guard()
-            return False
+        # Check if this lazy variable might realize to SymNodeVariable
+        # instead of ConstantVariable due to specialize_int/specialize_float
+        value_type = self.peek_type()
+        might_be_symnode = (value_type is int and not config.specialize_int) or (
+            value_type is float and not config.specialize_float
+        )
 
-        realized_type = self._maybe_realize_for_type()
-        if realized_type is not None:
-            return issubclass(realized_type, cls)
+        if might_be_symnode:
+            # We don't know if this will become ConstantVariable or SymNodeVariable.
+            # Check if we can answer without realizing:
+            const_match = issubclass(ConstantVariable, cls)
+            sym_match = issubclass(SymNodeVariable, cls)
+
+            if const_match and sym_match:
+                # Both types would match, so answer is True
+                self._ensure_type_guard()
+                return True
+            if not const_match and not sym_match:
+                # Neither type would match, so answer is False
+                return False
+            # Only one would match - must realize to know which type we get
+            return type.__instancecheck__(cls, self.realize())
+
+        self._ensure_type_guard()
         return issubclass(ConstantVariable, cls)
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the constant value without triggering realization.
+
+        LazyConstantVariable wraps primitive constants, so we can always peek
+        at the underlying value without installing guards.
+
+        Note: If already realized, the realized variable might be a SymNodeVariable
+        (when specialize_int=False), which is not a constant. In that case, we
+        delegate to the realized variable's try_peek_constant.
+        """
+        if self.is_realized():
+            realized = self.realize()
+            return realized.try_peek_constant()
+        return (True, True, self.peek_value())
+
+
+class ComputedLazyConstantVariable(LazyVariableTracker):
+    """
+    A lazy variable tracker for computed constants (results of operations between
+    LazyConstantVariable/ConstantVariable operands) that defers guard installation
+    until the value is actually needed.
+
+    The value is computed eagerly at creation time (using peek_value() on lazy
+    operands), but guard installation is deferred. This allows chains of operations
+    on lazy constants to remain "unguarded" until the final result is used in a way
+    that requires guards (e.g., control flow, comparison, or tensor operations).
+
+    When realized, it realizes all referenced LazyConstantVariables (which installs
+    their CONSTANT_MATCH guards) and returns a ConstantVariable with the pre-computed
+    value.
+
+    Unlike LazyConstantVariable, ComputedLazyConstantVariable has no source or guards
+    of its own - it derives guards from the LazyConstantVariables it references.
+    """
+
+    _cache: ComputedLazyCache  # pyrefly: ignore[bad-override]
+
+    @staticmethod
+    def create(  # pyrefly: ignore[bad-param-name-override, bad-override]
+        op: Callable[..., Any],
+        args: list[VariableTracker],
+        reconstruct_fn: Callable[[Any, list[VariableTracker]], None],
+    ) -> ComputedLazyConstantVariable:
+        """Create a ComputedLazyConstantVariable for the given operation.
+
+        Args:
+            op: The operator function (e.g., operator.add)
+            args: The operands (LazyConstantVariable, ConstantVariable, or
+                  ComputedLazyConstantVariable)
+            reconstruct_fn: Function that generates bytecode to recompute the result
+                  at runtime from the source operands.
+
+        Returns:
+            A ComputedLazyConstantVariable that will defer guard installation.
+        """
+        # Collect all LazyConstantVariables that need to be realized
+        lazy_vars: list[LazyConstantVariable] = []
+
+        def get_value(arg: VariableTracker) -> Any:
+            if isinstance(arg, ComputedLazyConstantVariable) and not arg.is_realized():
+                # pyrefly: ignore[missing-attribute]
+                lazy_vars.extend(arg._cache.lazy_vars)
+                return arg._cache.value
+            elif isinstance(arg, LazyConstantVariable):
+                lazy_vars.append(arg)
+                if arg.is_realized():
+                    return arg.realize().as_python_constant()
+                return arg.peek_value()
+            else:
+                # ConstantVariable or other constant-like types
+                return arg.as_python_constant()
+
+        # Compute the value eagerly
+        value = op(*[get_value(arg) for arg in args])
+
+        # Verify the result is a valid constant type that ConstantVariable can handle.
+        # If not, raise an exception so the caller can fall back to realizing args.
+        from .constant import ConstantVariable
+
+        if not ConstantVariable.is_base_literal(value):
+            raise TypeError(
+                f"ComputedLazyConstantVariable cannot wrap value of type {type(value)}"
+            )
+
+        return ComputedLazyConstantVariable(
+            ComputedLazyCache(value, lazy_vars, args, op, reconstruct_fn)
+        )
+
+    def __init__(self, _cache: ComputedLazyCache, **kwargs: Any) -> None:
+        if not isinstance(_cache, ComputedLazyCache):
+            raise TypeError(f"Expected ComputedLazyCache, got {type(_cache).__name__}")
+        # Call VariableTracker.__init__ directly with no source
+        VariableTracker.__init__(self, **kwargs)
+        self._cache = _cache
+
+    def python_type(self) -> type:
+        """Return the Python type of the computed result."""
+        if self.is_realized():
+            return self._cache.vt.python_type()  # pyrefly: ignore[missing-attribute]
+        return type(self._cache.value)
+
+    def is_tensor(self) -> bool:
+        """Computed constants are never tensors."""
+        return False
+
+    def is_constant_none(self) -> bool:
+        if self.is_realized():
+            return (
+                self._cache.vt.is_constant_none()  # pyrefly: ignore[missing-attribute]
+            )
+        return self._cache.value is None
+
+    def lazy_isinstance(self, cls: type) -> bool:
+        """Check isinstance without triggering realization."""
+        from .constant import ConstantVariable
+
+        return issubclass(ConstantVariable, cls)
+
+    def is_python_constant(self) -> bool:
+        return True
+
+    def as_python_constant(self) -> Any:
+        """Return the computed constant value.
+
+        If this ComputedLazyConstantVariable has a reconstruct_fn, the value
+        depends on the source lazy variables. In that case, we must realize
+        the source lazy variables to install their guards. This ensures that
+        if the source values change, recompilation will be triggered.
+
+        Without this, operations like f-strings that use as_python_constant()
+        would return stale cached values without installing any guards.
+        """
+        if self.is_realized():
+            return (
+                self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
+            )
+
+        # The value depends on source lazy vars. Realize them to install guards.
+        for lazy_var in self._cache.lazy_vars:
+            lazy_var.realize()
+
+        return self._cache.value
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the constant value without triggering realization.
+
+        ComputedLazyConstantVariable stores its computed value eagerly,
+        so we can always peek without installing guards.
+        """
+        if self.is_realized():
+            can_peek, _is_unrealized, value = (
+                self._cache.vt.try_peek_constant()  # pyrefly: ignore[missing-attribute]
+            )
+            if not can_peek:
+                return (False, False, None)
+            return (True, False, value)
+        return (True, True, self._cache.value)
+
+    def reconstruct(self, codegen: Any) -> None:
+        """Generate bytecode to reconstruct the computed value.
+
+        This uses the reconstruct_fn provided at creation time to generate
+        bytecode that recomputes the value from the operands. This allows
+        the function to be called with different input values without
+        recompiling.
+        """
+        if self.is_realized():
+            # If realized, just load the constant
+            codegen.append_output(
+                codegen.create_load_const(
+                    self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
+                )
+            )
+        else:
+            # Use the reconstruct function to generate bytecode
+            self._cache.reconstruct_fn(codegen, self._cache.args)
+
+    def original_source(self) -> Any:
+        # ComputedLazyConstantVariable has no source
+        return None
+
+    def get_handler_type_for_dispatch(self) -> type:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        For ComputedLazyConstantVariable, we return this class itself so that
+        the handler lookup in _make_handler can recognize it as constant-like
+        and handle it lazily. This is similar to LazyConstantVariable.
+        """
+        if self.is_realized():
+            return type(self.realize())
+        return ComputedLazyConstantVariable
+
+    def __repr__(self) -> str:
+        if self.is_realized():
+            return f"ComputedLazyConstantVariable(realized: {self._cache.vt})"
+        return f"ComputedLazyConstantVariable(value={self._cache.value!r})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 class LazySymNodeFormatString:
