@@ -5,6 +5,7 @@ import logging
 import textwrap
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import patch
 
 import sympy
 
@@ -128,6 +129,33 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
+
+        # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
+        # reinterpret_tensor for view captures in the python_argdefs loop.
+        self._capture_input_nodes: dict[str, Any] = {}
+
+    def set_capture_input_nodes(self, nodes_by_name: dict[str, Any]) -> None:
+        """Set captured inputs collected while rendering the CuteDSL template."""
+        self._capture_input_nodes = nodes_by_name
+
+    def _get_capture_input_node(self, name: str) -> Any | None:
+        """Return the IR node for a captured input name, if known."""
+        graph_captures = getattr(V.graph, "_cutedsl_capture_nodes", {})
+        return self._capture_input_nodes.get(name, graph_captures.get(name))
+
+    @contextlib.contextmanager
+    def _patch_get_dtype_for_captures(self):
+        """Teach python_argdefs to resolve synthetic captured input names."""
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name: str) -> torch.dtype:
+            capture = self._get_capture_input_node(name)
+            if capture is not None:
+                return capture.get_dtype()
+            return original_get_dtype(name)
+
+        with patch.object(V.graph, "get_dtype", get_dtype):
+            yield
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
@@ -294,7 +322,8 @@ class CuteDSLTemplateKernel(Kernel):
             params = [arg_name for arg_name, _ in self._template_input_args]
 
             # Get additional args from python_argdefs (output, sizevars, etc.)
-            arg_defs, _, _, _ = self.args.python_argdefs()
+            with self._patch_get_dtype_for_captures():
+                arg_defs, _, _, _ = self.args.python_argdefs()
             for arg_def in arg_defs:
                 if arg_def.full_name() not in self._seen_input_args:
                     params.append(arg_def.full_name())
@@ -380,14 +409,23 @@ class CuteDSLTemplateKernel(Kernel):
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         # Add additional args from python_argdefs (output, sizevars, ..)
-        orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
+        with self._patch_get_dtype_for_captures():
+            orig_arg_defs, orig_call_args, _, orig_arg_types = (
+                self.args.python_argdefs()
+            )
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
         ):
-            # dedupe
-            if arg_def.full_name() not in self._seen_input_args:
+            if arg_def.full_name() in self._seen_input_args:
+                continue
+            capture = self._get_capture_input_node(call_arg)
+            if isinstance(capture, ReinterpretView):
+                # Pass the original view expression so stride/offset metadata is
+                # preserved at the kernel call site.
+                call_args.append(capture.codegen_reference())
+            else:
                 call_args.append(call_arg)
-                arg_types.append(arg_type)
+            arg_types.append(arg_type)
 
         # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
@@ -496,7 +534,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         if name not in self.fixed_inputs:
             var = self._add_kernel_input(name)
-            buffer = V.graph.get_buffer(name)
+            buffer = self.kernel._get_capture_input_node(name)
+            if buffer is None:
+                buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
