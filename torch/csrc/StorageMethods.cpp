@@ -195,7 +195,10 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
         "_resize_with_addr_ expects an int addr, "
         "but got ",
         THPUtils_typename(addr_arg));
-    void* addr = reinterpret_cast<void*>(THPUtils_unpackLong(addr_arg));
+    void* addr = PyLong_AsVoidPtr(addr_arg);
+    if (addr == nullptr && PyErr_Occurred()) {
+      throw python_error();
+    }
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i),

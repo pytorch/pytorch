@@ -1658,23 +1658,6 @@ class DeviceCachingAllocator {
     return context_recorder_.load()();
   }
 
-  Block* get_free_block_by_exact_address(
-      BlockPool& pool,
-      size_t size,
-      cudaStream_t stream,
-      void* addr) {
-    Block search_key(device_id, stream, 0);
-    search_key.ptr = addr;
-    auto it = pool.blocks_by_addr.lower_bound(&search_key);
-    if (it != pool.blocks_by_addr.end() && (*it)->stream == stream &&
-        (*it)->ptr == addr && (*it)->size >= size) {
-      Block* block = *it;
-      pool.erase_from_blocks(block);
-      return block;
-    }
-    return nullptr;
-  }
-
   Block* get_free_block_containing_address(
       BlockPool& pool,
       size_t size,
@@ -1693,23 +1676,22 @@ class DeviceCachingAllocator {
     }
     Block* block = *it;
     const auto block_begin = reinterpret_cast<uintptr_t>(block->ptr);
-    const auto block_end = block_begin + block->size;
-    if (block_begin <= requested_addr && requested_addr + size <= block_end) {
-      return block;
+    // check block_begin <= requested_addr < requested_addr + size <=
+    // block_begin + block->size
+    if (requested_addr < block_begin) {
+      return nullptr;
     }
-    return nullptr;
+    // use offset to avoid overflow or underflow
+    const auto offset = requested_addr - block_begin;
+    if ((offset > block->size) || (size > block->size - offset)) {
+      return nullptr;
+    }
+    return block;
   }
 
-  // All public methods (except the above) acquire the allocator mutex.
-  // Thus, do not call a public method from another public method.
-
-  Block* malloc(size_t orig_size, cudaStream_t stream, void* addr = nullptr) {
-    // done outside the lock because we don't know what locks the recorder needs
-    // to have...
-    auto context = maybeGatherContext(RecordContext::STATE);
-
-    std::unique_lock<std::recursive_mutex> lock(mutex);
-
+  void prepare_for_malloc(
+      const std::shared_ptr<GatheredContext>& context,
+      cudaStream_t stream) {
     if (C10_LIKELY(!is_capture_context())) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
@@ -1731,6 +1713,20 @@ class DeviceCachingAllocator {
         free_safe_blocks_in_capture(context, stream);
       }
     }
+  }
+
+  // All public methods (except the above) acquire the allocator mutex.
+  // Thus, do not call a public method from another public method.
+
+  Block* malloc(size_t orig_size, cudaStream_t stream) {
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have...
+    auto context = maybeGatherContext(RecordContext::STATE);
+
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    prepare_for_malloc(context, stream);
+
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
@@ -1748,23 +1744,12 @@ class DeviceCachingAllocator {
         is_expandable_segments_active);
     params.stat_types = get_stat_types_for_pool(pool);
 
-    // First, try to get a block from the existing pool.
-    bool block_found = false;
-    if (addr != nullptr) {
-      // Exact-address mode must either reuse this address or fail. Do not
-      // silently fall back to a different cached block.
-      params.block = get_free_block_by_exact_address(pool, size, stream, addr);
-      if (!params.block) {
-        return nullptr;
-      }
-      block_found = true;
-    } else {
-      block_found =
-          // Search pool
-          get_free_block(params)
-          // Trigger callbacks and retry search
-          || (trigger_free_memory_callbacks(params) && get_free_block(params));
-    }
+    // try to get a block from the existing pool.
+    bool block_found =
+        // Search pool
+        get_free_block(params)
+        // Trigger callbacks and retry search
+        || (trigger_free_memory_callbacks(params) && get_free_block(params));
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
@@ -1974,26 +1959,11 @@ class DeviceCachingAllocator {
   }
 
   Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have.
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(num_active_captures_ == 0)) {
-      // Processes end-of-life events for outstanding allocations used on
-      // multiple streams (checks if their GPU-side uses are complete and
-      // recycles their memory if so)
-      //
-      // Q. Why skip process_events if a capture might be underway?
-      // A. process_events involves cudaEventQueries, illegal during CUDA graph
-      //    capture.
-      //    Dumb simple solution: defer reclaiming these allocations until after
-      //    capture. Cross-stream memory use is uncommon, so the deferral's
-      //    effect on memory use during capture should be small.
-      process_events(context);
-    } else {
-      if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-        // We check if there is some block that is safe to reuse on this stream
-        free_safe_blocks_in_capture(context, stream);
-      }
-    }
+    prepare_for_malloc(context, stream);
 
     const size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -2003,30 +1973,54 @@ class DeviceCachingAllocator {
       return nullptr;
     }
 
+    const bool active_user_pool =
+        pool.owner_PrivatePool && pool.owner_PrivatePool->allocator();
+    const bool is_expandable_segments_active =
+        CUDAAllocatorConfig::expandable_segments() && !active_user_pool;
+    const auto stat_types = get_stat_types_for_pool(pool);
     const auto block_begin = reinterpret_cast<uintptr_t>(containing_block->ptr);
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     const size_t prefix_size = requested_addr - block_begin;
 
     Block* prefix_block = nullptr;
+    Block* requested_source = containing_block;
     if (prefix_size > 0) {
-      prefix_block = malloc(prefix_size, stream, containing_block->ptr);
-      if (!prefix_block) {
-        return nullptr;
-      }
+      AllocParams prefix_params(
+          device_id,
+          prefix_size,
+          stream,
+          &pool,
+          get_allocation_size(prefix_size),
+          is_expandable_segments_active);
+      prefix_params.stat_types = stat_types;
+      prefix_params.block = containing_block;
+      pool.erase_from_blocks(containing_block);
+      prefix_block = alloc_found_block(
+          prefix_params,
+          prefix_size,
+          context,
+          true /* always split for prefix */);
+      requested_source = prefix_block->next;
+      TORCH_INTERNAL_ASSERT(requested_source != nullptr);
     }
 
-    Block* requested_block = malloc(orig_size, stream, addr);
-    if (!requested_block) {
-      if (prefix_block) {
-        free(prefix_block);
-      }
-      return nullptr;
-    }
-
+    pool.erase_from_blocks(requested_source);
+    AllocParams requested_params(
+        device_id,
+        size,
+        stream,
+        &pool,
+        get_allocation_size(size),
+        is_expandable_segments_active);
+    requested_params.stat_types = stat_types;
+    requested_params.block = requested_source;
+    bool split_remainder =
+        should_split(requested_source, size, is_expandable_segments_active);
+    Block* requested_block = alloc_found_block(
+        requested_params, orig_size, std::move(context), split_remainder);
     if (prefix_block) {
-      free(prefix_block);
+      free_locked(prefix_block, nullptr);
     }
-    TORCH_INTERNAL_ASSERT(requested_block->ptr == addr);
     return requested_block;
   }
 
@@ -2391,11 +2385,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  void free(Block* block) {
-    std::shared_ptr<GatheredContext> context =
-        maybeGatherContext(RecordContext::ALL);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-
+  void free_locked(Block* block, std::shared_ptr<GatheredContext> context) {
     block->allocated = false;
 
     // following logic might modifying underlying Block, causing the size
@@ -2454,6 +2444,13 @@ class DeviceCachingAllocator {
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, block->device));
+  }
+
+  void free(Block* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    free_locked(block, std::move(context));
   }
 
   void* getBaseAllocation(Block* block, size_t* outSize) {
@@ -4615,7 +4612,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     Block* block =
         device_allocator[device]->mallocWithAddress(size, stream, addr);
     TORCH_CHECK(
-        block != nullptr && block->ptr == addr,
+        block != nullptr,
         "Could not allocate CUDA storage at exact address ",
         addr);
     add_allocated_block(block);

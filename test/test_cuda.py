@@ -4749,6 +4749,8 @@ class TestResizeStorageWithAddr(TestCase):
         t.untyped_storage().resize_(0)
         other.untyped_storage().resize_(0)
 
+        # `resize_(0)` does not record mempool information. We still need `use_mem_pool`
+        # when resizing it back.
         with torch.cuda.use_mem_pool(pool):
             t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
             other = torch.empty(294, dtype=torch.uint8, device="cuda")
@@ -4794,7 +4796,12 @@ class TestResizeStorageWithAddr(TestCase):
 
         with torch.cuda.use_mem_pool(pool):
             t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
+            self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
 
+        # when `original_ptr` is in the middle of an empty block, `_resize_with_addr_`
+        # should still allocate a tensor with exactly `original_size` at `original_ptr`.
+        # It should also keep prefix and suffix blocks inactive. These assertions
+        # check that the block state matches expectations.
         blocks, idx = self._find_pool_block(pool, original_ptr)
         self.assertGreater(idx, 0)
         self.assertLess(idx + 1, len(blocks))
@@ -4850,6 +4857,8 @@ class TestResizeStorageWithAddr(TestCase):
         with torch.cuda.use_mem_pool(pool):
             storage._resize_with_addr_(original_size, original_ptr)
 
+        # This test mimics a state offloading pattern where we offload a large
+        # tensor and keep many small tensors as slices of the large tensor.
         self.assertEqual(base.untyped_storage().data_ptr(), original_ptr)
         self.assertEqual(view1.untyped_storage().data_ptr(), original_ptr)
         self.assertEqual(view2.untyped_storage().data_ptr(), original_ptr)
@@ -4857,6 +4866,10 @@ class TestResizeStorageWithAddr(TestCase):
         self.assertEqual(view1.untyped_storage().nbytes(), original_size)
         self.assertEqual(view2.untyped_storage().nbytes(), original_size)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
     def test_resize_storage_with_addr_requires_zero_sized_source(self):
         pool = torch.cuda.MemPool()
         with torch.cuda.use_mem_pool(pool):
@@ -4869,6 +4882,10 @@ class TestResizeStorageWithAddr(TestCase):
             with torch.cuda.use_mem_pool(pool):
                 t.untyped_storage()._resize_with_addr_(original_size, original_ptr)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
     def test_resize_storage_with_size_zero_ignores_addr(self):
         t = torch.empty(4096, dtype=torch.uint8, device="cuda")
         t.untyped_storage()._resize_with_addr_(0, 1)
