@@ -594,17 +594,6 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
-# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
-# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
-# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
-# that triton does not use TF32 wherever cublas would not use TF32
-# DEPRECATED. cuBLAS no longer has the above alignment requirements. will remove in the future.
-force_same_precision: bool = Config(
-    justknob="pytorch/compiler:force_same_precision",
-    env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
-    default=False,
-)
-
 # Size hints for multi-kernel dispatch.
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
@@ -1236,9 +1225,9 @@ class aten_distributed_optimizations:
     bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
-    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
-    # as atomic units with memory-bound runtime estimates.
-    enable_fusion_regions: bool | None = None
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) have their
+    # I/O costs corrected to exclude intermediates that inductor will not materialize.
+    enable_fusion_regions: bool = True
 
     # Default bucketing mode for auto and manual overlap scheduling
     # "default": traced bucketing, fully lowered by inductor during compilation
@@ -1652,7 +1641,7 @@ class cpp:
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
-    )  # type: ignore[assignment]
+    )
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
@@ -2571,6 +2560,33 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    #
+    # When True, the rocm-origami pip package is consulted at GEMM compile time
+    # to pre-select a top-K of Triton configs from the DEFAULT search space,
+    # reducing autotuning cost while keeping runtime within ~5% of full
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
+    # toggling at runtime via config.patch has no effect because the rocm-origami
+    # module import is cached at template_heuristics/triton.py load time.
+    #
+    # Active only when all of these hold:
+    #   - IS_ROCM (torch.version.hip is not None)
+    #   - config.max_autotune
+    #   - config.rocm.origami (this knob)
+    #   - config.max_autotune_gemm_search_space == "DEFAULT"
+    #   - rocm-origami is installed (else the import gate sets it inert)
+    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
+    # one-time warning; the regular config generator runs instead.
+    #
+    # Side-effect: when this is True, choices._need_to_fix_layout() returns True
+    # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
+    # on exact strides and would mis-compile under flexible layouts.
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+
+    # Number of top configs origami selects per GEMM. Read once from
+    # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile
+    # time and runtime within the validated 4-8 range).
+    origami_topk: int = int(os.environ.get("TORCHINDUCTOR_ORIGAMI_TOPK", "6"))
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)

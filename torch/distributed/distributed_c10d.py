@@ -2990,9 +2990,16 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is
-            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
-            matters and it needs to match with corresponding isend/irecv on the
-            remote end.
+            ``torch.distributed.P2POp``). All operations in the list are treated as
+            a single batch -- the relative ordering of sends vs. receives in the
+            list does not matter and will not cause deadlocks. For example,
+            ``[recv_from_1, send_to_1]`` is equivalent to ``[send_to_1, recv_from_1]``.
+
+            The ordering **does** matter for multiple operations between the same
+            pair of ranks in the same direction: if rank 0 calls
+            ``[send_to_1(A), send_to_1(B)]``, rank 1 must call
+            ``[recv_from_0(A), recv_from_0(B)]`` in the same order to ensure
+            the correct tensors are matched.
 
     Returns:
         A list of distributed request objects returned by calling the corresponding
