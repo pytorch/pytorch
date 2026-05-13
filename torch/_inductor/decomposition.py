@@ -959,6 +959,13 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
 
+@functools.cache
+def fallback_random_decomps_for_fractional_pool() -> dict[Any, Callable[..., Any]]:
+    result = dict(decompositions)
+    result.pop(aten.bernoulli.default, None)
+    return result
+
+
 # TODO(aakhundov): replace this (and the above) Any by more
 # specific type and fix all the cascading mypy errors
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:

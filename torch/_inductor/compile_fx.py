@@ -113,11 +113,15 @@ from ..utils._triton import has_triton
 from . import config, distributed_autotune, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
-from .decomposition import select_decomp_table
+from .decomposition import (
+    fallback_random_decomps_for_fractional_pool,
+    select_decomp_table,
+)
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
+from .fx_passes.random_utils import has_fractional_pool_implicit_random
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -2889,6 +2893,11 @@ def _compile_fx_main(
         num_example_inputs = len(example_inputs_)
 
         compiler_config_extra = create_compiler_config_extra(model_)
+
+        if isinstance(model_, GraphModule) and has_fractional_pool_implicit_random(
+            model_.graph
+        ):
+            get_decomp_fn = fallback_random_decomps_for_fractional_pool
 
         decompositions = get_decomp_fn()
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)

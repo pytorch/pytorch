@@ -57,11 +57,11 @@ from ..utils import (
 )
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
-from .control_dependencies import preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
+from .random_utils import chain_random_ops_for_ordering, has_fractional_pool_sample_rand
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -110,32 +110,20 @@ def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
-def _is_nondeterministic_seeded_node(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and isinstance(node.target, torch._ops.OpOverload)
-        and torch.Tag.nondeterministic_seeded in node.target.tags
-    )
-
-
 def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     """Chain nondeterministic_seeded ops with control_deps to preserve program order.
 
-    When fallback_random=True, random ops use the global CUDA RNG and must
-    execute in their original program order.
+    When fallback_random=True or fractional max pool uses aten.rand samples,
+    random ops use the global CUDA RNG and must execute in their original
+    program order.
     """
-    if not config.fallback_random:
+    fallback_for_fractional_pool = has_fractional_pool_sample_rand(graph)
+    if not (config.fallback_random or fallback_for_fractional_pool):
         return
 
-    random_nodes = [n for n in graph.nodes if _is_nondeterministic_seeded_node(n)]
-    if len(random_nodes) < 2:
-        return
-
-    additional_deps_map: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
-    for i in range(1, len(random_nodes)):
-        additional_deps_map[random_nodes[i]] = OrderedSet([random_nodes[i - 1]])
-
-    preserve_node_ordering(graph, additional_deps_map)
+    chain_random_ops_for_ordering(
+        graph, mark_fallback_random=fallback_for_fractional_pool
+    )
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -254,7 +242,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_post_pass
         )
 
-    if config.fallback_random:
+    if config.fallback_random or has_fractional_pool_sample_rand(gm.graph):
         GraphTransformObserver(gm, "chain_random_ops_ordering").apply_graph_pass(
             _chain_random_ops_for_ordering
         )
