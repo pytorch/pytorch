@@ -1107,9 +1107,17 @@ collect_tlparse_output() {
     return
   fi
 
-  echo "Collecting tlparse output from $trace_dir"
+  echo "Collecting torch trace output from $trace_dir"
 
-  # Install tlparse if not already available
+  # Always preserve raw trace logs (gzipped) for downstream analysis
+  mkdir -p "$test_reports_dir/tlparse_output"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    gzip -c "$f" > "$test_reports_dir/tlparse_output/$(basename "$f").gz"
+  done
+  echo "Raw trace logs saved to $test_reports_dir/tlparse_output/"
+
+  # Try to generate HTML report via tlparse (best-effort)
   if ! command -v tlparse &>/dev/null; then
     pip install tlparse 2>/dev/null || {
       echo "Warning: failed to install tlparse, skipping HTML generation"
@@ -1117,14 +1125,12 @@ collect_tlparse_output() {
     }
   fi
 
-  # Run tlparse to generate HTML report
-  mkdir -p "$test_reports_dir/tlparse_output"
-  tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$trace_dir" 2>&1 || {
-    echo "Warning: tlparse failed to generate HTML output"
-    return
-  }
-
-  echo "TLParse output generated in $test_reports_dir/tlparse_output/"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$f" 2>&1 || {
+      echo "Warning: tlparse failed on $(basename "$f")"
+    }
+  done
 }
 
 test_dynamo_benchmark() {
