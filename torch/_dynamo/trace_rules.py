@@ -73,6 +73,7 @@ from .variables import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
+    SetAttrBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
     TorchInGraphFunctionVariable,
@@ -4039,6 +4040,7 @@ BUILTIN_CALLABLES = {
     getattr: GetAttrBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
+    setattr: SetAttrBuiltinVariable,
 }
 
 
