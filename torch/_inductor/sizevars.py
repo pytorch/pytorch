@@ -677,21 +677,22 @@ class SizeVarAllocator:
     def _analyze_lane_contiguity_mul(
         self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
-        """Propagate lane stride through constant multiplication."""
-        if len(args) != 2:
+        """Propagate lane stride through lane-uniform multiplication."""
+        uniform_factor: Expr = sympy.S.One
+        lane_factors = []
+        for arg in args:
+            if lane_var in arg.free_symbols:
+                lane_factors.append(arg)
+            else:
+                uniform_factor *= arg
+        if len(lane_factors) != 1:
             return LaneContiguity(unknown=True)
-        lhs, rhs = args
-        lhs_int = int(lhs) if isinstance(lhs, (int, sympy.Integer)) else None
-        rhs_int = int(rhs) if isinstance(rhs, (int, sympy.Integer)) else None
-        if lhs_int is None and rhs_int is None:
-            return LaneContiguity(unknown=True)
-        factor = lhs_int if lhs_int is not None else rhs_int
-        assert factor is not None
-        child = rhs if lhs_int is not None else lhs
-        child_result = self.analyze_lane_contiguity(child, lane_var, requested_width)
+        child_result = self.analyze_lane_contiguity(
+            lane_factors[0], lane_var, requested_width
+        )
         if child_result.unknown or child_result.stride is None:
             return LaneContiguity(unknown=True)
-        stride = factor * child_result.stride
+        stride = self.simplify(uniform_factor * child_result.stride)
         return LaneContiguity(
             contiguous_width=requested_width
             if self.statically_known_equals(stride, 1)
