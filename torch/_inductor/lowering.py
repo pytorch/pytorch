@@ -96,6 +96,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
+    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -569,7 +570,7 @@ def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
-) -> Sequence[_T | BaseView]:
+) -> Sequence[_T | BaseView | BaseConstant]:
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -674,7 +675,7 @@ def make_pointwise(
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: TensorBox | BaseView, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
+    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
