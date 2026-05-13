@@ -272,9 +272,7 @@ class TestControlDeps(InductorTestCase):
         other consumers of additional_buffer_deps could reorder the wait
         before the record.
         """
-        from unittest.mock import patch
-
-        from torch._inductor import ir, scheduler
+        from torch._inductor import ir
         from torch._inductor.virtualized import V
 
         def fn(x):
@@ -291,22 +289,21 @@ class TestControlDeps(InductorTestCase):
             return z
 
         captured: list[dict] = []
-        orig_init = scheduler.Scheduler._init
 
-        def capture_init(self, nodes):
+        def capture(nodes):
             void_names = {
                 op.get_name()
                 for op in V.graph.operations
-                if hasattr(op, "layout") and isinstance(op.layout, ir.NoneLayout)
+                if isinstance(op, ir.Buffer) and isinstance(op.layout, ir.NoneLayout)
             }
             referenced: set[str] = set()
             for deps in V.graph.additional_buffer_deps.values():
                 referenced.update(deps)
             captured.append({"void_names": void_names, "referenced": referenced})
-            return orig_init(self, nodes)
+            return nodes
 
         torch._dynamo.reset()
-        with patch.object(scheduler.Scheduler, "_init", capture_init):
+        with config.patch(_pre_fusion_custom_pass=capture):
             x = torch.ones(2, 2, device=GPU_TYPE)
             torch.compile(fn)(x)
 

@@ -1394,7 +1394,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
-        # the fake_device of the tensor so that code such as as `if x.is_cuda`
+        # the fake_device of the tensor so that code such as `if x.is_cuda`
         # or torch.zeros([10, 10], device=x.device) continues to execute as if
         # the FakeTensor were real. However, within kernel execution, we return
         # the `Meta` device because all computation within the kernels should
@@ -1798,7 +1798,7 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             FunctionalCallableWithEpilogue,
         )
-        from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
+        from torch._higher_order_ops.utils import SubgraphCallableWrapper
 
         if isinstance(args, (list, tuple, dict)):
             result.append(type(args))
@@ -1835,12 +1835,8 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(id(arg))
                 id_hashed_objects.append(arg)
-            elif isinstance(arg, FunctionalizeCtxWrapper):
-                # Special case for AOT Dispatcher first pass, where the fake
-                # tensor is called on the functional wrapper of the subgraph.
+            elif isinstance(arg, SubgraphCallableWrapper):
                 result.append(hash(arg))
-                # functional wrapper is destroyed after fake tensor prop. We
-                # need to put the finalizer on the subgraph.
                 id_hashed_objects.append(arg.subgraph)
             elif isinstance(arg, FunctionalCallableWithEpilogue):
                 result.append(type(arg))
@@ -2935,11 +2931,14 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_run_unsafe_fallback(
             error: RuntimeError | None = None,
         ) -> FakeTensor | None:
-            # We infer the meta of a custom ops that return None to just
-            # return None. custom ops are not allowed to mutate metadata
-            # of their inputs, so this is safe.
+            # We infer the meta of custom ops that return None to just
+            # return None, and Tag.out ops to return their out= args.
+            # Custom ops are not allowed to mutate metadata of their
+            # inputs, so this is safe.
             if torch._library.utils.can_generate_trivial_fake_impl(func):
-                return None
+                return torch._library.utils.generate_trivial_fake_impl(
+                    func, *args, **kwargs
+                )
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)

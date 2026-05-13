@@ -490,7 +490,7 @@ void cpu_adaptive_max_pool3d(
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -507,7 +507,7 @@ void cpu_adaptive_max_pool3d(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_depth * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_depth * output_height * output_width;
 
@@ -569,7 +569,7 @@ cpu_adaptive_max_pool3d_channels_last(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -632,7 +632,7 @@ cpu_adaptive_max_pool3d_channels_last(
       for (int64_t id = id0; id < id1; id ++) {
         for (int64_t ih = ih0; ih < ih1; ih ++) {
           for (int64_t iw = iw0; iw < iw1; iw ++) {
-            scalar_t* in = input_data + n * input_depth * input_height * input_width * channels +
+            const scalar_t* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
             int64_t d2 = 0;
@@ -694,7 +694,7 @@ cpu_adaptive_max_pool3d_channels_last(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<BFloat16>();
+  auto input_data = input.const_data_ptr<BFloat16>();
   auto output_data = output.data_ptr<BFloat16>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -758,7 +758,7 @@ cpu_adaptive_max_pool3d_channels_last(
       for (int64_t id = id0; id < id1; id ++) {
         for (int64_t ih = ih0; ih < ih1; ih ++) {
           for (int64_t iw = iw0; iw < iw1; iw ++) {
-            BFloat16* in = input_data + n * input_depth * input_height * input_width * channels +
+            const BFloat16* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
             int64_t d2 = 0;

@@ -111,7 +111,7 @@ class _FlatLayout:
         - The composition only generates indices that the left layout could originally produce,
           but the right layout determines which indices to be picked.
         - The stride of the composition layout will not be smaller than the stride of the right layout,
-          because when picking the indices the composition will at least follow the the right layout's stride
+          because when picking the indices the composition will at least follow the right layout's stride
           to move forward.
 
         Example:

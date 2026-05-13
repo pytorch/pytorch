@@ -252,10 +252,6 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   });
 }
 
-static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
-  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
-}
-
 static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
@@ -298,6 +294,55 @@ static void gcd_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "gcd");
 }
 
+static void bitwise_and_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_and");
+}
+
+static void bitwise_or_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_or");
+}
+
+static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_xor");
+}
+
+static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_left_shift");
+}
+
+static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "bitwise_right_shift");
+}
+
+// Comparison kernels naturally produce bool; passing kBool tells the
+// dispatcher to allocate a bool temp when the user's `out=` is non-bool.
+// The ILP threshold matches the floating-point default (256K) -- benchmark
+// shows float inputs gain ~4x at 1M; int inputs are neutral.
+static constexpr uint32_t kCmpILPThreshold = 1u << 18;
+static void eq_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void ne_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void lt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "lt", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void le_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "le", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void gt_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "gt", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void ge_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -334,4 +379,15 @@ REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
+REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
+REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
+REGISTER_DISPATCH(lshift_stub, &bitwise_left_shift_mps_kernel)
+REGISTER_DISPATCH(rshift_stub, &bitwise_right_shift_mps_kernel)
+REGISTER_DISPATCH(eq_stub, &eq_mps_kernel)
+REGISTER_DISPATCH(ne_stub, &ne_mps_kernel)
+REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
+REGISTER_DISPATCH(le_stub, &le_mps_kernel)
+REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
+REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
 } // namespace at::native

@@ -560,7 +560,7 @@ def _check_reduction_value(reduction: str):
         raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
-# This helper function maps depreciated arguments, "size_average" and "reduce"
+# This helper function maps deprecated arguments, "size_average" and "reduce"
 # to their corresponding "reduction" string argument
 def _get_string_reduction_arg(*, size_average: bool | None, reduce: bool | None) -> str:
     if size_average is None:
