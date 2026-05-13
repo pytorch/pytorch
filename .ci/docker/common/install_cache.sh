@@ -21,7 +21,7 @@ install_ubuntu() {
   cd ..
   rm -rf sccache
   rustup self uninstall -y
-  apt-get remove -y pkg-config libssl-dev
+  apt-get remove -y libssl-dev
   apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
