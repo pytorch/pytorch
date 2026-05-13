@@ -915,7 +915,7 @@ class PallasKernel(SIMDKernel):
     compiled and loaded via async_compile.pallas.
     """
 
-    overrides = PallasKernelOverrides
+    overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pallas_pexpr  # Use Pallas expression printer
 
     def __init__(self, *args, **kwargs):
@@ -3279,7 +3279,7 @@ class PallasKernel(SIMDKernel):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> CSEVariable | tuple[CSEVariable, ...]:
+    ) -> CSEVariable | tuple[CSEVariable, ...]:  # type: ignore[override]
         """
         Generate code for reduction operations in JAX/Pallas.
 
@@ -3588,7 +3588,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def codegen_kernel(self, name: str | None = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
 
@@ -4883,7 +4883,7 @@ from torch._inductor.runtime.runtime_utils import (
 
 
 class PallasScheduling(SIMDScheduling):
-    kernel_type = PallasKernel
+    kernel_type = PallasKernel  # type: ignore[assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
@@ -4891,7 +4891,7 @@ class PallasScheduling(SIMDScheduling):
         # without requiring split reductions
         return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
-    def can_fuse(self, node1, node2):
+    def can_fuse(self, node1, node2):  # type: ignore[override]
         if not super().can_fuse(node1, node2):
             return False
         # Pallas partial reductions use keepdims, so fusing two reductions
@@ -4912,15 +4912,15 @@ class PallasScheduling(SIMDScheduling):
                         return False
         return True
 
-    can_fuse_vertical = can_fuse
-    can_fuse_horizontal = can_fuse
+    can_fuse_vertical = can_fuse  # type: ignore[assignment]
+    can_fuse_horizontal = can_fuse  # type: ignore[assignment]
 
     def define_kernel(
         self,
         src_code: str,
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
-    ) -> str:
+    ) -> str:  # type: ignore[override]
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
