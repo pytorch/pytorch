@@ -457,7 +457,7 @@ def _suggest_or_raise_constraint_violation(
         forced_specializations = dim_constraints.forced_specializations()
 
         msg = dim_constraints.prettify_results(
-            inspect.signature(orig_callable),
+            inspect.signature(orig_callable),  # type: ignore[attr-defined]
             dynamic_shapes,
             constraint_violation_error,
             forced_specializations,
@@ -704,7 +704,7 @@ def create_fx_graph_from_captured_output(
         argument_names(inspect.signature(mod), args, kwargs),
         dynamo_bytecode_flatten,
         dynamo_bytecode_unflatten,
-    )
+    )  # type: ignore[attr-defined]
     normalize_graph_module(graph_module)
     if hasattr(graph_module, "_dynamo_bytecode_flatten"):
         raise AssertionError(
@@ -725,10 +725,10 @@ def create_fx_graph_from_captured_output(
     )
     if out.backend_input is None:
         raise AssertionError("out.backend_input must not be None for fake_mode")
-    graph_module.meta["fake_mode"] = out.backend_input.fake_mode
+    graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
     graph_module.meta["fake_mode"].allow_non_fake_inputs = True
     tracing_context = TracingContext(graph_module.meta["fake_mode"])
-    tracing_context.tensor_to_context = out.backend_input.tensor_to_context
+    tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
     graph_module.meta["tracing_context"] = tracing_context
     return graph_module
 
@@ -902,7 +902,7 @@ def _dynamo_graph_capture_for_export(
                 _dynamic_shapes
             )
 
-            from . import reset
+            from . import reset  # type: ignore[attr-defined]
 
             reset()
 
@@ -1009,7 +1009,7 @@ def _dynamo_graph_capture_for_export(
             # Set up PyTree codegen for proper input/output handling
             transformed_graph.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(
-                    argument_names(inspect.signature(orig_callable), args, kwargs),
+                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
                     in_spec,
                     out_spec,
                 )
