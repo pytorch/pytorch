@@ -2184,9 +2184,7 @@ class TensorVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1139 (PyNumber_Add)
         from .builder import wrap_fx_proxy
 
-        if not (
-            isinstance(other, TensorVariable) or _is_sym_arith_operand(other)
-        ):
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
             return VariableTracker.build(tx, NotImplemented)
         args = [other, self] if reverse else [self, other]
         proxy = tx.output.create_proxy(
