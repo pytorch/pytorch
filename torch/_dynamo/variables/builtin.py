@@ -1475,65 +1475,63 @@ class BuiltinVariable(BaseBuiltinVariable):
                     args: Sequence[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
-                    # First try to peek at all args as constants without realizing
-                    # This allows us to constant-fold through lazy constants
+                    # Peek at all args/kwargs as constants.
+                    # is_python_constant() is the fast path (simple bool).
+                    # try_peek_constant() is only for lazy variables.
+                    # Everything else bails immediately.
                     peeked_args = []
                     any_unrealized = False
-                    all_can_peek = True
 
                     for arg in args:
-                        can_peek, is_unrealized, value = arg.try_peek_constant()
-                        if not can_peek or (
-                            not is_unrealized and not arg.is_python_constant()
-                        ):
-                            all_can_peek = False
-                            break
-                        peeked_args.append(value)
-                        if is_unrealized:
-                            any_unrealized = True
-
-                    peeked_kwargs = {}
-                    if all_can_peek:
-                        for k, v in kwargs.items():
-                            can_peek, is_unrealized, value = v.try_peek_constant()
+                        if arg.is_python_constant():
+                            peeked_args.append(arg.as_python_constant())
+                        elif isinstance(arg, LazyVariableTracker):
+                            can_peek, is_unrealized, value = arg.try_peek_constant()
                             if not can_peek:
-                                all_can_peek = False
                                 break
-                            peeked_kwargs[k] = value
+                            peeked_args.append(value)
                             if is_unrealized:
                                 any_unrealized = True
-
-                    if all_can_peek:
-                        try:
-                            res = fn(*peeked_args, **peeked_kwargs)
-                        except TypeError as exc:
-                            # Check if this is an "unsupported operand type" error
-                            # that should be propagated as an observed exception.
-                            # Errors like "unsupported operand type(s) for -: 'tuple' and 'set'"
-                            # are definitive and no other handler can help.
-                            exc_str = str(exc)
-                            if "unsupported operand type" in exc_str:
-                                raise_observed_exception(
-                                    TypeError,
-                                    tx,
-                                    args=list(map(ConstantVariable.create, exc.args)),
-                                )
-                            # For other TypeErrors (e.g., operator.le(torch.device, str)),
-                            # fall through to let polyfill handlers try.
-                            all_can_peek = False
-                        except Exception:
-                            # Other exceptions - fall through to let other handlers try.
-                            all_can_peek = False
-
-                    if all_can_peek:
-                        if any_unrealized:
-                            # Realize all lazy constants to install guards
-                            from .lazy import LazyVariableTracker
-
-                            LazyVariableTracker.realize_all((args, kwargs))
-
-                        # pyrefly: ignore [unbound-name]
-                        return VariableTracker.build(tx, res)
+                        else:
+                            break
+                    else:
+                        # All args peeked — now check kwargs
+                        peeked_kwargs: dict[str, Any] = {}
+                        for k, v in kwargs.items():
+                            if v.is_python_constant():
+                                peeked_kwargs[k] = v.as_python_constant()
+                            elif isinstance(v, LazyVariableTracker):
+                                can_peek, is_unrealized, value = v.try_peek_constant()
+                                if not can_peek:
+                                    break
+                                peeked_kwargs[k] = value
+                                if is_unrealized:
+                                    any_unrealized = True
+                            else:
+                                break
+                        else:
+                            # All args and kwargs peeked — try folding
+                            try:
+                                res = fn(*peeked_args, **peeked_kwargs)
+                            except TypeError as exc:
+                                exc_str = str(exc)
+                                if "unsupported operand type" in exc_str:
+                                    raise_observed_exception(
+                                        TypeError,
+                                        tx,
+                                        args=list(
+                                            map(
+                                                ConstantVariable.create,
+                                                exc.args,
+                                            )
+                                        ),
+                                    )
+                            except Exception:
+                                pass
+                            else:
+                                if any_unrealized:
+                                    LazyVariableTracker.realize_all((args, kwargs))
+                                return VariableTracker.build(tx, res)
 
                     # Fall back to the original check for UnspecializedPythonVariable
                     if check_unspec_or_constant_args(args, kwargs):

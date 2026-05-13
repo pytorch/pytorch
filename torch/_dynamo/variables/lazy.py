@@ -585,25 +585,9 @@ class LazyConstantVariable(LazyVariableTracker):
             return realized.try_peek_constant()
         return (True, True, self.peek_value())
 
-    def is_python_hashable(self) -> bool:
-        """LazyConstantVariable wraps primitive types which are all hashable."""
-        # Primitive types (int, float, bool, str) are always hashable
-        return True
-
     def is_hashable_lazy(self) -> bool:
         # Primitive types are always hashable — no need to realize.
         return True
-
-    def get_python_hash(self) -> int:
-        """Get hash without triggering realization.
-
-        We can compute the hash from the peeked value. This installs a TYPE_MATCH
-        guard since the hash behavior depends on the type.
-        """
-        if self.is_realized():
-            return self.realize().get_python_hash()
-        self._ensure_type_guard()
-        return hash(self.peek_value())
 
     def is_python_equal(self, other: object) -> bool:
         """Check equality with proper guard handling.
@@ -702,7 +686,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def python_type(self) -> type:
         """Return the Python type of the computed result."""
         if self.is_realized():
-            return self._cache.vt.python_type()  # pyrefly: ignore[missing-attribute]
+            return self.realize().python_type()
         return type(self._cache.value)
 
     def is_tensor(self) -> bool:
@@ -711,9 +695,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
     def is_constant_none(self) -> bool:
         if self.is_realized():
-            return (
-                self._cache.vt.is_constant_none()  # pyrefly: ignore[missing-attribute]
-            )
+            return self.realize().is_constant_none()
         return self._cache.value is None
 
     def lazy_isinstance(self, cls: type) -> bool:
@@ -737,9 +719,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         would return stale cached values without installing any guards.
         """
         if self.is_realized():
-            return (
-                self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
-            )
+            return self.realize().as_python_constant()
 
         # The value depends on source lazy vars. Realize them to install guards.
         for lazy_var in self._cache.lazy_vars:
@@ -754,9 +734,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         so we can always peek without installing guards.
         """
         if self.is_realized():
-            can_peek, _is_unrealized, value = (
-                self._cache.vt.try_peek_constant()  # pyrefly: ignore[missing-attribute]
-            )
+            can_peek, _is_unrealized, value = self.realize().try_peek_constant()
             if not can_peek:
                 return (False, False, None)
             return (True, False, value)
@@ -773,9 +751,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         if self.is_realized():
             # If realized, just load the constant
             codegen.append_output(
-                codegen.create_load_const(
-                    self._cache.vt.as_python_constant()  # pyrefly: ignore[missing-attribute]
-                )
+                codegen.create_load_const(self.realize().as_python_constant())
             )
         else:
             # Use the reconstruct function to generate bytecode
