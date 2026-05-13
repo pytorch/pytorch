@@ -1082,7 +1082,9 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman engine group count.",
     )
     if engine_count.value == 0:
-        raise RuntimeError("No Level Zero Sysman engine groups found.")
+        raise RuntimeError(
+            "No Level Zero Sysman engine groups found. The GPU may not support engine monitoring, or try running with elevated privileges (e.g. sudo)."
+        )
     engine_handles = (pyzes.zes_engine_handle_t * engine_count.value)()
     _zes_check(
         pyzes.zesDeviceEnumEngineGroups(
