@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
 
@@ -726,7 +727,19 @@ class BaseSchedulerNode:
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
+        self.clear_read_writes_dependent_caches()
         self.prune_deps()
+
+    def clear_read_writes_dependent_caches(self) -> None:
+        self.get_coalesce_analysis.clear_cache(self)
+
+    @cache_on_self
+    def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
+        from .tiling_utils import _analyze_memory_coalescing
+
+        if not isinstance(self, (SchedulerNode, FusedSchedulerNode)):
+            return None
+        return _analyze_memory_coalescing(self)
 
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
@@ -1673,6 +1686,10 @@ class SchedulerNode(BaseSchedulerNode):
             .rename(self.mutation_renames)
         )
 
+        self.clear_loop_body_dependent_caches(need_clear_tiling_cache)
+
+    def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
+        self.clear_read_writes_dependent_caches()
         self.pointwise_read_writes.clear_cache(self)
 
         if need_clear_tiling_cache:
@@ -1698,8 +1715,6 @@ class SchedulerNode(BaseSchedulerNode):
 
     def restore_loop_state(self, state: tuple[Any, ...]) -> None:
         """Restore state from snapshot_loop_state."""
-        from .codegen.simd import SIMDScheduling
-
         (
             self._body,
             self._sizes,
@@ -1707,8 +1722,7 @@ class SchedulerNode(BaseSchedulerNode):
             self.read_writes,
             self.unmet_dependencies,
         ) = state
-        self.pointwise_read_writes.clear_cache(self)
-        SIMDScheduling.candidate_tilings.cache_clear()
+        self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
