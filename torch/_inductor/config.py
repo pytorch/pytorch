@@ -1277,6 +1277,9 @@ class aten_distributed_optimizations:
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
 
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
+
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024

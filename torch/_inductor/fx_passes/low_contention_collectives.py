@@ -60,8 +60,9 @@ def replace_collectives_with_low_contention(
     from torch._inductor import config
 
     min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
-
-    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    skip_overlap_check = (
+        config.aten_distributed_optimizations.low_contention_skip_overlap_check
+    )
 
     replacements = 0
     skipped_small = 0
@@ -84,21 +85,24 @@ def replace_collectives_with_low_contention(
                 )
                 continue
 
-        # Skip collectives with no compute to hide behind
-        if not _has_compute_bound_overlap(node, graph, node_positions):
-            skipped_no_overlap += 1
-            log.debug("LC skip %s %s: no compute-bound overlap", coll_type, node.name)
-            continue
+        if not skip_overlap_check:
+            # Skip collectives with no compute to hide behind
+            if not _has_compute_bound_overlap(node, graph):
+                skipped_no_overlap += 1
+                log.debug(
+                    "LC skip %s %s: no compute-bound overlap", coll_type, node.name
+                )
+                continue
 
-        # Skip if other groups' NCCL collectives overlap on NVLink
-        if _has_other_group_collectives(node, group_name, graph, node_positions):
-            skipped_nvlink_contention += 1
-            log.debug(
-                "LC skip %s %s: overlaps other-group collectives (NVLink contention)",
-                coll_type,
-                node.name,
-            )
-            continue
+            # Skip if other groups' NCCL collectives overlap on NVLink
+            if _has_other_group_collectives(node, group_name, graph):
+                skipped_nvlink_contention += 1
+                log.debug(
+                    "LC skip %s %s: overlaps other-group collectives (NVLink contention)",
+                    coll_type,
+                    node.name,
+                )
+                continue
 
         _replace_collective(node, graph, symm_mem, is_ag, group_name)
         replacements += 1
@@ -106,13 +110,14 @@ def replace_collectives_with_low_contention(
     log.info(
         "Replaced %d/%d FSDP collectives "
         "(skipped_small=%d, skipped_no_overlap=%d, "
-        "skipped_nvlink_contention=%d, min_bytes=%d)",
+        "skipped_nvlink_contention=%d, min_bytes=%d, skip_overlap_check=%s)",
         replacements,
         len(collectives),
         skipped_small,
         skipped_no_overlap,
         skipped_nvlink_contention,
         min_bytes,
+        skip_overlap_check,
     )
 
 
@@ -167,38 +172,59 @@ def _get_per_rank_bytes(node, is_ag):
     return total_bytes // group_size
 
 
-def _has_compute_bound_overlap(start_node, graph, node_positions):
-    """Check if compute-bound ops exist between collective start and wait."""
+def _is_compute_or_contains_compute(node, graph_module):
+    """Check if a node is compute, including inside control_deps subgraphs."""
     from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
 
+    if is_compute_node(node):
+        return True
+    from torch._inductor.fx_passes.control_dependencies import ControlDeps
+
+    if node.op == "call_function" and isinstance(node.target, ControlDeps):
+        subgraph_node = node.args[1] if len(node.args) > 1 else None
+        if isinstance(subgraph_node, torch.fx.Node) and subgraph_node.op == "get_attr":
+            assert isinstance(subgraph_node.target, str)
+            subgraph = getattr(graph_module, subgraph_node.target, None)
+            if isinstance(subgraph, torch.fx.GraphModule):
+                for n in subgraph.graph.nodes:
+                    if is_compute_node(n):
+                        return True
+    return False
+
+
+def _has_compute_bound_overlap(start_node, graph):
+    """Check if compute-bound ops exist between collective start and wait."""
     wait_node = _find_wait_for_collective(start_node)
     if wait_node is None:
         return False
 
-    start_pos = node_positions[start_node]
-    wait_pos = node_positions[wait_node]
-
+    graph_module = graph.owning_module
+    in_range = False
     for node in graph.nodes:
-        pos = node_positions[node]
-        if pos <= start_pos or pos >= wait_pos:
+        if node is start_node:
+            in_range = True
             continue
-        if is_compute_node(node):
+        if node is wait_node:
+            break
+        if in_range and _is_compute_or_contains_compute(node, graph_module):
             return True
     return False
 
 
-def _has_other_group_collectives(start_node, group_name, graph, node_positions):
+def _has_other_group_collectives(start_node, group_name, graph):
     """Check if other groups' collectives overlap, competing for NVLink."""
     wait_node = _find_wait_for_collective(start_node)
     if wait_node is None:
         return False
 
-    start_pos = node_positions[start_node]
-    wait_pos = node_positions[wait_node]
-
+    in_range = False
     for node in graph.nodes:
-        pos = node_positions[node]
-        if pos <= start_pos or pos >= wait_pos:
+        if node is start_node:
+            in_range = True
+            continue
+        if node is wait_node:
+            break
+        if not in_range:
             continue
         info = _get_collective_info(node)
         if info is not None:
