@@ -323,6 +323,7 @@ def repair_wheel(
         for dep in aarch64_deps:
             shutil.copy(dep, torch_lib / dep.name)
 
+        # TODO: Remove when switching to ROCm wheels
         # Bundle GPU-specific shared libs (currently only ROCm uses this).
         # Copy follows symlinks so versioned sonames become real files we can
         # rename to their bare .so form to match what the wheel links against.
