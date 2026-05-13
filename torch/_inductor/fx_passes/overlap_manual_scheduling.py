@@ -157,7 +157,8 @@ class ManualOverlapScheduler(OverlapScheduler):
         insert_overlap_deps: bool,
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
         bucket_mode: BucketMode | None = None,
-        custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None = None,
+        custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+        | None = None,
         collective_estimator: Literal["analytical", "benchmark"] = "analytical",
         compute_estimator: Literal["analytical", "benchmark"] = "analytical",
         log_runtime_estimations: bool = False,
@@ -165,7 +166,11 @@ class ManualOverlapScheduler(OverlapScheduler):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
         if custom_runtime_estimation is None:
-            custom_runtime_estimation = lambda node, size: 0.0
+
+            def default_custom_runtime_estimation(node, size):
+                return 0.0
+
+        custom_runtime_estimation = default_custom_runtime_estimation
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
@@ -385,7 +390,8 @@ def manual_overlap_bucketing(
     insert_overlap_deps: bool = False,
     module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
     bucket_mode: BucketMode | None = None,
-    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     compute_estimator: Literal["analytical", "benchmark"] = "analytical",
     log_runtime_estimations: bool = False,
