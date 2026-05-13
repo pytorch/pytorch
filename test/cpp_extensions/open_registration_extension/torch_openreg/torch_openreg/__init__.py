@@ -19,8 +19,13 @@ torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
 
 if torch.distributed.is_available():
     try:
+        from torch_openreg._C import ProcessGroupOCCL
+
+        def _create_occl_backend(store, rank, size, timeout):
+            return ProcessGroupOCCL(store, rank, size, timeout)
+
         torch.distributed.Backend.register_backend(
-            "occl", torch_openreg._C._createProcessGroupOCCL, devices=["openreg"]
+            "occl", _create_occl_backend, devices=["openreg"]
         )
     except Exception as e:
         raise RuntimeError("Failed to register 'occl' process group backend.") from e
