@@ -25,7 +25,7 @@
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool
-    url = https://github.com/Maratyszcza/pthreadpool.git
+    url = https://github.com/google/pthreadpool.git
 [submodule "third_party/NNPACK_deps/FXdiv"]
     ignore = dirty
     path = third_party/FXdiv
@@ -66,6 +66,10 @@
     ignore = dirty
     path = third_party/fbgemm
     url = https://github.com/pytorch/fbgemm
+[submodule "android/libs/fbjni"]
+    ignore = dirty
+    path = android/libs/fbjni
+    url = https://github.com/facebookincubator/fbjni.git
 [submodule "third_party/XNNPACK"]
     ignore = dirty
     path = third_party/XNNPACK

@@ -1107,9 +1107,8 @@ class TestMPS(TestCaseMPS):
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
-            eps = 1e-6
             x.requires_grad = True
-            d = torch.cdist(x, y)
+            d = torch.cdist(x, y, p=p)
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
@@ -9327,6 +9326,16 @@ class TestLargeTensors(TestCaseMPS):
         tail = x[-1024:]
         self.assertGreater(tail.unique().numel(), 50)
         del x
+
+    @serialTest()
+    def test_64bit_strided_unary(self):
+        # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
+        # extent > INT32_MAX forces TensorIterator to split the iter
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        sl = torch.randn(1_200_000, 464, dtype=torch.float32, device='mps')[:, 4:50]
+        self.assertGreater((sl.size(0) - 1) * sl.stride(0) * sl.element_size(), (1 << 31) - 1)
+        self.assertEqual(sl.neg().cpu(), sl.cpu().neg())
 
 
 class TestLogical(TestCaseMPS):
