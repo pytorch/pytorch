@@ -94,6 +94,8 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // See note in _allgather_base below.
+    at::AutoDispatchBelowAutograd guard;
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
@@ -129,6 +131,8 @@ class FakeProcessGroup : public Backend {
         ") must have the same length as input tensor list (",
         inputTensors.size(),
         ")");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < inputTensors.size(); ++i) {
       TORCH_CHECK(
           static_cast<int>(outputTensorLists[i].size()) == size_,
@@ -185,6 +189,8 @@ class FakeProcessGroup : public Backend {
           ". Output list size should be ",
           size_,
           ", same as size of the process group.");
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
       }
@@ -220,6 +226,8 @@ class FakeProcessGroup : public Backend {
           ". Input list size should be ",
           size_,
           ", same as size of the process group.");
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
       outputTensors[0].copy_(inputTensors[0][rank_]);
     } else {
       TORCH_CHECK(
@@ -238,6 +246,8 @@ class FakeProcessGroup : public Backend {
     TORCH_CHECK(
         outputTensors.size() == inputTensors.size(),
         "requires input/output tensor lists to have the same length");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       TORCH_CHECK(
           static_cast<int>(inputTensors[i].size()) == size_,
@@ -341,6 +351,8 @@ class FakeProcessGroup : public Backend {
         ") tensor lists must both have length equal to group size (",
         size_,
         ")");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       outputTensors[i].copy_(inputTensors[i]);
     }
