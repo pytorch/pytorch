@@ -1155,7 +1155,7 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
 
 def skipOps(to_skip):
     def wrapped(fn):
-        fn._skipops = tuple(to_skip)
+        fn._skipops = getattr(fn, "_skipops", ()) + tuple(to_skip)
         return fn
 
     return wrapped
@@ -1260,6 +1260,10 @@ class ops(_TestParametrizer):
                 if o.name == op_name and o.variant_test_name == variant_name
             ]
             if len(matching_opinfos) < 1:
+                # When OPINFO_RESTRICT_TO_DSL filters op_db down to a DSL subset,
+                # skip entries targeting filtered-out ops are benign - just skip them.
+                if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                    continue
                 raise AssertionError(f"Couldn't find OpInfo for {skip_spec}")
             for op in matching_opinfos:
                 decorators = list(op.decorators)

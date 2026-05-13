@@ -994,9 +994,6 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        op_db,
-        "TestSingleDimStrategies",
-        "test_single_dim_strategy",
         {
             # Stochastic: each shard gets independent RNG, so
             # op(full) != cat(op(shard0), op(shard1)).
@@ -1162,9 +1159,6 @@ class TestCompiledDTensorOps(TestDTensorOps):
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        _op_db,
-        "TestCompiledDTensorOps",
-        "test_compiled_dtensor_op_db",
         (
             dtensor_fails
             | dtensor_fails_no_strategy
