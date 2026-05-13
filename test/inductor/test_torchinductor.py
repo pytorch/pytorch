@@ -9061,6 +9061,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(a_expect, a_actual)
         self.assertEqual(expect, actual)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_compile_fx_inner_mutates_and_returns_first_arg_alias(self):
+        # Regression test for an in-place aten op (lerp_/add_/etc - anything
+        # covered by torch._library.utils.mutates_and_returns_first_arg)
+        # mutating a graph input when fed to compile_fx_inner directly
+        # (i.e. bypassing AOT autograd functionalization).
+        #
+        # FallbackKernel's shortcut for these ops recorded the mutation but
+        # not the (output aliases first arg) alias relationship, so Inductor's
+        # in-place-reuse guard didn't fire and the planner reused the input's
+        # storage for an unrelated intermediate, silently corrupting the
+        # caller-visible input. The downstream fused op below provides the
+        # reuse opportunity that surfaces the bug.
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(m, x):
+            m.lerp_(x, 0.5)
+            return ((m + 1.0) * 2.0,)
+
+        def make_inputs():
+            gen = torch.Generator(device=self.device).manual_seed(0)
+            return (
+                torch.ones(64, 64, device=self.device),
+                torch.randn(64, 64, device=self.device, generator=gen),
+            )
+
+        m, x = make_inputs()
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(m, x)
+        # Re-create inputs because make_fx ran fn for tracing and already mutated m.
+        compiled = compile_fx_inner(gm, list(make_inputs()))
+
+        m_eager, x_eager = make_inputs()
+        fn(m_eager, x_eager)
+
+        m_compiled, x_compiled = make_inputs()
+        compiled([m_compiled, x_compiled])
+
+        self.assertEqual(m_compiled, m_eager)
+
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
