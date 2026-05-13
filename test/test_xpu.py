@@ -257,8 +257,7 @@ if __name__ == "__main__":
     test_multi_process(model, input)
     print(torch.xpu.device_count())
 """
-        # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-        rc = check_output(test_script).splitlines()[-1]
+        rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_parse_visible_devices(self):
@@ -706,6 +705,24 @@ print(torch.xpu.is_initialized())
             self.assertEqual(copy, original)
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
+
+    def test_is_shared(self):
+        t = torch.randn(5, 5, device="xpu")
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory(self):
+        t = torch.randn(5, 5, device="xpu")
+        result = t.share_memory_()
+        self.assertIs(result, t)
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory_nested(self):
+        a = torch.randn(3, 4, device="xpu")
+        b = torch.randn(5, 4, device="xpu")
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+        self.assertTrue(nt.is_shared())
 
     def test_out_of_memory(self):
         if self.expandable_segments:
@@ -3149,6 +3166,7 @@ class TestXpuAutocast(TestAutocast):
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
     def setUp(self):
+        super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 
