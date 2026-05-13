@@ -1,9 +1,11 @@
 import os
+import warnings
 from functools import cache
 from typing import cast
 
 # This handles collecting registration of all native ops
-from . import ops, registry
+# Also need to import DSL utils to make sure DSL registration is ok
+from . import cutedsl_utils, dsl_registry, ops, registry, triton_utils
 
 
 @cache
@@ -48,5 +50,10 @@ if user_order_fn:
     registry.reorder_graphs_from_user_function(user_order_fn)
 
 
-# Actually perform all registrations
-registry._register_all_overrides()
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="Warning only once for all operators,  other operators may also be overridden\\.",
+        category=UserWarning,
+    )
+    registry._register_all_overrides()

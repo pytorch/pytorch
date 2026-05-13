@@ -47,12 +47,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
-COPY ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
-
 ARG INDUCTOR_BENCHMARKS
 ARG ANACONDA_PYTHON_VERSION
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
@@ -80,12 +74,6 @@ COPY triton_xpu_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
-
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
@@ -94,9 +82,6 @@ RUN bash ./install_cache.sh && rm install_cache.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

@@ -256,9 +256,12 @@ def sig_for_ops(opname: str) -> list[str]:
         ]
     elif name in arithmetic_ops:
         if name.startswith("i"):
-            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`.
+            # `__idiv__` is not a real Python 3 in-place dunder (Python 3 uses `__itruediv__` /
+            # `__ifloordiv__`), so ruff's PYI034 doesn't fire on it and the noqa would be unused.
+            suffix = "" if name == "idiv" else "  # noqa: PYI034"
             return [
-                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...{suffix}"
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
@@ -996,7 +999,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
