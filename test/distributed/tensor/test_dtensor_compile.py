@@ -619,38 +619,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
-    def test_dtensor_input_mutations_repeated_compile(self):
-        def run_case():
-            mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-
-            def fn(x, y):
-                out = x.sin()
-                y.add_(2)
-                return out
-
-            opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-
-            x_ref = DTensor.from_local(
-                torch.randn(4), mesh, [Shard(0)], run_check=False
-            ).requires_grad_(True)
-            y_ref = DTensor.from_local(
-                torch.randn(4), mesh, [Shard(0)], run_check=False
-            ).requires_grad_(False)
-
-            x = x_ref.clone().detach().requires_grad_(True)
-            y = y_ref.clone().detach().requires_grad_(False)
-
-            ref = fn(x_ref.clone(), y_ref)
-            res = opt_fn(x.clone(), y)
-            self.assertEqual(res, ref)
-
-            ref.sum().backward()
-            res.sum().backward()
-            self.assertEqual(x.grad, x_ref.grad)
-
-        run_case()
-        run_case()
-
     @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

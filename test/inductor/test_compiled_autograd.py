@@ -4441,6 +4441,55 @@ class CompiledAutograd1(torch.nn.Module):
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
+    def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
+        from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        def run_case():
+            torch._dynamo.reset()
+            with compiled_autograd._enable(compiler_fn):
+                mesh = DeviceMesh("cpu", torch.arange(2))
+
+                def fn(x, y):
+                    out = x.sin()
+                    y.add_(2)
+                    return out
+
+                opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+                x_ref = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(True)
+                y_ref = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(False)
+
+                x = x_ref.clone().detach().requires_grad_(True)
+                y = y_ref.clone().detach().requires_grad_(False)
+
+                ref = fn(x_ref.clone(), y_ref)
+                res = opt_fn(x.clone(), y)
+                self.assertEqual(res, ref)
+
+                # The first backward populates the native sharding cache.
+                # The compiled-autograd backward must not reuse that entry when it
+                # contains SymInts from a different tracing context.
+                ref.sum().backward()
+                res.sum().backward()
+                self.assertEqual(x.grad, x_ref.grad)
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            run_case()
+            run_case()
+        finally:
+            dist.destroy_process_group()
+
     def test_anomaly_mode_already_nan(self):
         def fn():
             with torch.autograd.detect_anomaly():
@@ -5239,9 +5288,6 @@ copy_.default""",
 
 
 def load_test_module(name):
-    if name in sys.modules:
-        return sys.modules[name]
-
     testdir = Path(__file__).absolute().parent.parent
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
         return SourceFileLoader(
@@ -5274,17 +5320,10 @@ def lookup_backend(test_name):
         return "inductor"
 
 
-def wrap_test_class(orig_cls, only_tests=None):
+def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
-        if (
-            only_tests is not None
-            and name.startswith("test_")
-            and name not in only_tests
-        ):
-            dct[name] = None
-            continue
         if not callable(fn) or name in skipped_tests:
             continue
         elif (
@@ -5584,10 +5623,7 @@ xfail_by_backend = {
         "test_grad",  # AOT backward higher order gradients
         "test_grad_materialize_grads",  # AOT backward higher order gradients
     },
-    "inductor": {
-        # This DTensor regression test uses CPU and should run without GPU/Triton.
-        "test_dtensor_input_mutations_repeated_compile",
-    },  # will be run with torch.compile(backend="aot_eager")
+    "inductor": {},  # will be run with torch.compile(backend="aot_eager")
     # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
@@ -5660,14 +5696,10 @@ ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.ActivationCheckpointingTests
 )
 
-if torch.distributed.is_available():
+if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
-    dtensor_only_tests = None
-    if not HAS_GPU_AND_TRITON:
-        dtensor_only_tests = {"test_dtensor_input_mutations_repeated_compile"}
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
-        test_dtensor.TestDTensorCompile,
-        only_tests=dtensor_only_tests,
+        test_dtensor.TestDTensorCompile
     )
 
 xfail_hops = {"local_map_hop"}

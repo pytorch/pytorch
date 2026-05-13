@@ -2336,33 +2336,39 @@ create_native_op_schema(
 
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
-          size_t idx, c10::IValue arg) {
-        bool is_none_or_undefined =
-            arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
-        if (idx >= native_info.static_argnum || is_none_or_undefined) {
-          if (arg.isList()) {
-            const auto& list = arg.toList();
-            if (list.empty()) {
-              arg = c10::ivalue::Tuple::create({});
-            } else {
-              // WARNING: here we rely on c10::List being represented
-              // by a contiguous array of IValue for efficiency!
-              arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
-                  &(*list.begin()).get(), list.size()));
-            }
-          } else if (arg.isTensor() && !arg.toTensor().defined()) {
-            // Coerce undefined Tensor to None, just as we do when
-            // converting IValues to PyObject. Otherwise comparison
-            // doesn't work. (undefined Tensors can get here because
-            // check_for_dtensor_or_tensor calls them non-Tensors, but
-            // doesn't have a way to do the coercion for us.)
-            arg = c10::IValue();
-          }
-          comparison_key_hash =
-              c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-          comparison_key.emplace_back(std::move(arg));
+          size_t idx, c10::IValue arg) -> bool {
+    bool is_none_or_undefined =
+        arg.isNone() || (arg.isTensor() && !arg.toTensor().defined());
+    if (idx >= native_info.static_argnum || is_none_or_undefined) {
+      if (ivalue_has_symbolic_symint(arg)) {
+        // Symbolic SymInts are scoped to a single tracing/capture context,
+        // so cached sharding results containing them cannot be reused.
+        return true;
+      }
+      if (arg.isList()) {
+        const auto& list = arg.toList();
+        if (list.empty()) {
+          arg = c10::ivalue::Tuple::create({});
+        } else {
+          // WARNING: here we rely on c10::List being represented
+          // by a contiguous array of IValue for efficiency!
+          arg = c10::ivalue::Tuple::create(
+              c10::ArrayRef<c10::IValue>(&(*list.begin()).get(), list.size()));
         }
-      };
+      } else if (arg.isTensor() && !arg.toTensor().defined()) {
+        // Coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. Otherwise comparison
+        // doesn't work. (undefined Tensors can get here because
+        // check_for_dtensor_or_tensor calls them non-Tensors, but
+        // doesn't have a way to do the coercion for us.)
+        arg = c10::IValue();
+      }
+      comparison_key_hash =
+          c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+      comparison_key.emplace_back(std::move(arg));
+    }
+    return false;
+  };
   const auto handle_dtensor_arg = [&comparison_key,
                                    &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
@@ -2371,19 +2377,25 @@ create_native_op_schema(
   };
 
   const auto handle_non_tensor_or_undefined =
-      [&comparison_key, &comparison_key_hash](c10::IValue arg) {
-        // We reach here when arg is TensorFlavor::NON_TENSOR
-        // (not a Tensor at all or undefined Tensor)
-        // We coerce undefined Tensor to None, just as we do when
-        // converting IValues to PyObject. (same behaviour as
-        // handle_non_dtensor_arg)
-        if (arg.isTensor() && !arg.toTensor().defined()) {
-          arg = c10::IValue();
-        }
-        comparison_key_hash =
-            c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-        comparison_key.emplace_back(std::move(arg));
-      };
+      [&comparison_key, &comparison_key_hash](c10::IValue arg) -> bool {
+    // We reach here when arg is TensorFlavor::NON_TENSOR
+    // (not a Tensor at all or undefined Tensor)
+    // We coerce undefined Tensor to None, just as we do when
+    // converting IValues to PyObject. (same behaviour as
+    // handle_non_dtensor_arg)
+    if (ivalue_has_symbolic_symint(arg)) {
+      // Symbolic SymInts are scoped to a single tracing/capture context,
+      // so cached sharding results containing them cannot be reused.
+      return true;
+    }
+    if (arg.isTensor() && !arg.toTensor().defined()) {
+      arg = c10::IValue();
+    }
+    comparison_key_hash =
+        c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+    comparison_key.emplace_back(std::move(arg));
+    return false;
+  };
 
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
@@ -2434,11 +2446,6 @@ create_native_op_schema(
         break;
       }
       case TensorFlavor::NON_TENSOR: {
-        if (ivalue_has_symbolic_symint(arg)) {
-          // Symbolic SymInts are scoped to a single tracing/capture context,
-          // so cached sharding results containing them cannot be reused.
-          return std::nullopt;
-        }
         // Check if this is a list/tuple that might contain DTensors (e.g.,
         // torch.cat)
         if (arg.isList()) {
@@ -2466,13 +2473,17 @@ create_native_op_schema(
               // if the list's argument index is >= static_argnum.
               // Otherwise, step-varying scalars (like AdamW bias
               // corrections) cause unbounded cache growth.
-              handle_non_dtensor_arg(idx, item);
+              if (handle_non_dtensor_arg(idx, item)) {
+                return std::nullopt;
+              }
             }
           }
         } else {
           // non DTensor/Tensor args (i.e. int/float/bool), just add to
           // local_args
-          handle_non_dtensor_arg(idx, arg);
+          if (handle_non_dtensor_arg(idx, arg)) {
+            return std::nullopt;
+          }
         }
         break;
       }
@@ -2557,11 +2568,6 @@ create_native_op_schema(
           break;
         }
         case TensorFlavor::NON_TENSOR: {
-          if (ivalue_has_symbolic_symint(*argument_it)) {
-            // Symbolic SymInts are scoped to a single tracing/capture context,
-            // so cached sharding results containing them cannot be reused.
-            return std::nullopt;
-          }
           if (argument_it->isList()) {
             const auto list = argument_it->toList();
             comparison_key_hash =
@@ -2581,11 +2587,16 @@ create_native_op_schema(
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
               } else { // non-tensor
-                handle_non_tensor_or_undefined(item);
+                if (handle_non_tensor_or_undefined(item)) {
+                  return std::nullopt;
+                }
               }
             }
           } else {
-            handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
+            if (handle_non_dtensor_arg(
+                    native_info.static_argnum, *argument_it)) {
+              return std::nullopt;
+            }
           }
           break;
         }
