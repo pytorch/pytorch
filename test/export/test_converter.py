@@ -12,6 +12,7 @@ from torch.export import ExportedProgram
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
 from torch.testing._internal.torchbind_impls import (
+import types
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
@@ -1271,7 +1272,7 @@ class TestConverter(TestCase):
                 self.count += 1
                 return
 
-            def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+            def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
                 self.count -= 1
                 return
 

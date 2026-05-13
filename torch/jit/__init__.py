@@ -67,6 +67,7 @@ from torch.jit._trace import (
     TracingCheckError,
 )
 from torch.utils import set_module
+import types
 
 
 __all__ = [
@@ -274,7 +275,7 @@ class strict_fusion:
     def __enter__(self):
         pass
 
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+    def __exit__(self, type: type[BaseException] | None, value: BaseException | None, tb: types.TracebackType | None) -> None:
         pass
 
 
