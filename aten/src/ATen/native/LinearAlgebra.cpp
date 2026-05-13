@@ -22,6 +22,7 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/SymBool.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
@@ -138,6 +139,7 @@
 #include <ATen/ops/prod.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/relu.h>
+#include <ATen/ops/reshape.h>
 #include <ATen/ops/slogdet_native.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sqrt.h>
@@ -1979,16 +1981,17 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
 
   // Can always fold if the tensor is empty
   // This serves as a precondition for the code below
-  if (t1->numel() == 0) {
+  if (TORCH_GUARD_OR_FALSE(t1->sym_numel().sym_eq(0))) {
     return true;
   }
 
   // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
   // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
-  const auto t1_shape = t1->sizes();
-  const auto t1_strides = t1->strides();
+  const auto t1_shape = t1->sym_sizes();
+  const auto t1_strides = t1->sym_strides();
   for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (t1_strides[i] != t1_strides[i+1] * t1_shape[i+1]) {
+    if (TORCH_GUARD_OR_TRUE(
+            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]))) {
       return false;
     }
   }
@@ -2065,40 +2068,43 @@ static Tensor _matmul_impl(
     // Why not t1->view(-1, sizes_1.back())?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
-    const auto sizes_1 = t1->sizes();
-    auto output_shape = DimVector(sizes_1.begin(), sizes_1.end() - 1);
+    const auto sizes_1 = t1->sym_sizes();
+    auto output_shape = c10::SymDimVector(sizes_1.begin(), sizes_1.end() - 1);
     const auto folded_dim1 = c10::multiply_integers(output_shape);
 
     // Readjust output_shape if we are multiplying by a matrix
     const auto t2_is_matrix = t2->dim() == 2;
     if (t2_is_matrix) {
-      output_shape.push_back(t2->sizes()[1]);
+      output_shape.push_back(t2->sym_sizes()[1]);
     }
     // This will almost always be a view.
     // It may not be a view if t2->requires_grad(). See should_fold for an explanation
-    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
+    const c10::SymDimVector t1_folded_shape{folded_dim1, sizes_1.back()};
+    const auto t1_folded = at::reshape_symint(*t1, t1_folded_shape);
     if (!has_out) {
       if (t2_is_matrix) {
-        const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        const auto output = at::_unsafe_view_symint(t1_folded.mm(*t2), output_shape);
         // This copies if we perform a 2D @ 3D and the first tensor requires_grad
         // See should_fold for why.
         // If mm_out were differentiable, we could use it here, and pass a result with the
         // correct strides to avoid this unnecessary copy.
         return transpose ? output.mT().contiguous() : output;
       } else {
-        return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
+        return at::_unsafe_view_symint(t1_folded.mv(*t2), output_shape);
       }
     } else {
       // See the !has_out branch for an explanation
       TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
 
       // Resize output into the correct shape
-      at::native::resize_output(out, output_shape);
+      at::native::resize_output_symint(out, output_shape);
 
       // We then reshape the output to the expected shape and call mm/mv
       // and transpose back if necessary
-      auto reshaped_out = t2_is_matrix ? out.reshape({folded_dim1, t2->sizes().back()})
-                                       : out.reshape({folded_dim1});
+      auto reshaped_out = t2_is_matrix
+          ? at::reshape_symint(
+                out, c10::SymDimVector{folded_dim1, t2->sym_sizes().back()})
+          : at::reshape_symint(out, c10::SymDimVector{folded_dim1});
       if (t2_is_matrix) {
         at::mm_out(reshaped_out, t1_folded, *t2);
       } else {
