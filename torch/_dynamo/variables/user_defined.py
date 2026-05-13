@@ -102,6 +102,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttrMutationKind,
     MutationType,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
@@ -2369,7 +2370,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return fset_var.call_function(tx, [self, value], {})
 
             if isinstance(descriptor, types.MemberDescriptorType):
-                tx.output.side_effects.store_slot_attr(self, name_str, value)
+                tx.output.side_effects.store_generic_attr(self, name_str, value)
                 return variables.ConstantVariable.create(None)
 
             if isinstance(descriptor, types.GetSetDescriptorType):
@@ -2625,22 +2626,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._subobj_from_class[name] = result
         return result
 
-    def should_skip_descriptor_setter(self, attr_name: str) -> bool:
-        # Check if `attr_name` corresponds to a descriptor.
-        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
-        setter = inspect.getattr_static(type(descriptor), "__set__", None)
-        if setter:
-            # Skip if `__set__` was traceable (no need to redo the side effect).
-            if inspect.isfunction(setter):
-                return True
-            # For untraceable `__set__` we should still skip if the attribute
-            # was mutated via instance `__dict__`.
-            elif self.dict_vt and self.dict_vt.contains(attr_name):
-                return True
-        return False
-
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
-        if tx.output.side_effects.has_pending_instance_dict_mutation_of_attr(self, key):
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self, key, AttrMutationKind.INSTANCE_DICT
+        ):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
@@ -2789,15 +2778,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
         skip_instance_dict = False
-        if tx.output.side_effects.has_pending_instance_dict_or_generic_mutation_of_attr(
-            self, name
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
         ):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if not isinstance(result, variables.DeletedVariable):
                 return result
             skip_instance_dict = True
-        elif tx.output.side_effects.has_pending_generic_mutation_of_attr(
-            self, "__dict__"
+        elif tx.output.side_effects.has_pending_mutation_of_attr(
+            self, "__dict__", AttrMutationKind.GENERIC_SETATTR
         ):
             # obj.__dict__ = {...} replaces the lookup dict as a whole, unlike
             # per-attribute mutations tracked by the branch above.
@@ -2933,7 +2924,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, self, self.var_getattr(tx, "__class__")
             )
         if isinstance(type_attr, types.MemberDescriptorType):
-            if tx.output.side_effects.has_pending_slot_mutation_of_attr(self, name):
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self, name, AttrMutationKind.GENERIC_SETATTR
+            ):
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(
@@ -2948,7 +2941,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
 
         if isinstance(type_attr, types.GetSetDescriptorType):
-            if tx.output.side_effects.has_pending_generic_mutation_of_attr(self, name):
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self, name, AttrMutationKind.GENERIC_SETATTR
+            ):
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
                 if isinstance(result, variables.DeletedVariable):
                     raise_observed_exception(

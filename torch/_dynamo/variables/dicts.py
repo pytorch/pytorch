@@ -51,6 +51,7 @@ from ..utils import (
 from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
+    AttrMutationKind,
     NO_SUCH_SUBOBJ,
     ValueMutationNew,
     VariableTracker,
@@ -1298,8 +1299,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     ) -> dict[str, VariableTracker]:
         if isinstance(
             vt, variables.UserDefinedObjectVariable
-        ) and tx.output.side_effects.has_pending_generic_mutation_of_attr(
-            vt, "__dict__"
+        ) and tx.output.side_effects.has_pending_mutation_of_attr(
+            vt, "__dict__", AttrMutationKind.GENERIC_SETATTR
         ):
             dict_vt = tx.output.side_effects.load_attr(vt, "__dict__")
             if isinstance(dict_vt, ConstDictVariable):
@@ -1341,12 +1342,20 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return key.vt.as_python_constant() if istype(key, Hasher) else key
 
     def side_effects_table(self) -> dict[str, VariableTracker]:
-        return self.side_effects.instance_dict_attr_mutations(self.item)
+        return {
+            name: value
+            for name, value in self.side_effects.store_attr_mutations.get(
+                self.item, {}
+            ).items()
+            if self.side_effects.has_pending_mutation_of_attr(
+                self.item, name, AttrMutationKind.INSTANCE_DICT
+            )
+        }
 
     def __getitem__(self, key: kV) -> VariableTracker:
         name = self._maybe_unwrap_key(key)
-        if self.side_effects.has_pending_instance_dict_mutation_of_attr(
-            self.item, name
+        if self.side_effects.has_pending_mutation_of_attr(
+            self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
             return self.side_effects.load_attr(self.item, name, deleted_ok=True)
         return self.item_dict[name]
@@ -1366,8 +1375,8 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
         name = self._maybe_unwrap_key(key)
-        if self.side_effects.has_pending_instance_dict_mutation_of_attr(
-            self.item, name
+        if self.side_effects.has_pending_mutation_of_attr(
+            self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
             value = self.side_effects.load_attr(self.item, name, deleted_ok=True)
             return not isinstance(value, variables.DeletedVariable)
