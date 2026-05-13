@@ -1513,9 +1513,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                             # All args and kwargs peeked — try folding
                             try:
                                 res = fn(*peeked_args, **peeked_kwargs)
-                            except TypeError as exc:
-                                exc_str = str(exc)
-                                if "unsupported operand type" in exc_str:
+                            except Exception as exc:
+                                if (
+                                    isinstance(exc, TypeError)
+                                    and "unsupported operand type" in str(exc)
+                                ):
                                     raise_observed_exception(
                                         TypeError,
                                         tx,
@@ -1526,8 +1528,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                                             )
                                         ),
                                     )
-                            except Exception:
-                                pass
+                                raise_observed_exception(
+                                    type(exc),
+                                    tx,
+                                    args=list(exc.args),
+                                )
                             else:
                                 if any_unrealized:
                                     LazyVariableTracker.realize_all((args, kwargs))
