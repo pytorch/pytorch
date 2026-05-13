@@ -711,9 +711,8 @@ def _analyze_memory_coalescing(
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
-    # Extract the innermost pointwise variable for stride checks below.
-    index_vars = norm_read_writes.index_vars
-    innermost_pw_var = next(reversed(index_vars)) if index_vars else None
+    # Extract the innermost variable for stride checks below.
+    innermost_var = next(reversed(var_ranges)) if var_ranges else None
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
@@ -754,17 +753,17 @@ def _analyze_memory_coalescing(
             # Skip the innermost variable: it always varies across threads,
             # so its coalescing is always real.
             already_coalesced_1d = False
-            if innermost_pw_var is not None and maybe_coalesced_var != innermost_pw_var:
+            if innermost_var is not None and maybe_coalesced_var != innermost_var:
                 # Evaluate stride at two points (0->1 and 1->2) to catch
                 # non-linear expressions that only look coalesced at the origin.
                 subs = dict.fromkeys(var_ranges, 0)
                 try:
                     val_0 = sympy_subs(memory_expr, subs)
-                    subs[innermost_pw_var] = 1
+                    subs[innermost_var] = 1
                     val_1 = sympy_subs(memory_expr, subs)
                     stride_01 = val_1 - val_0
                     if stride_01 in (0, 1):
-                        subs[innermost_pw_var] = 2
+                        subs[innermost_var] = 2
                         val_2 = sympy_subs(memory_expr, subs)
                         stride_12 = val_2 - val_1
                         if stride_12 in (0, 1):
@@ -774,6 +773,8 @@ def _analyze_memory_coalescing(
 
             if not already_coalesced_1d:
                 coalesced_by_var[maybe_coalesced_var] += total_score
+            else:
+                coalesced_by_var[innermost_var] += total_score
         else:
             uncoalesced_addrs[memory_expr] += total_score
 
