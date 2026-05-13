@@ -9755,7 +9755,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -14624,17 +14623,19 @@ if __name__ == '__main__':
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 232
                         expected_weight_grad_max_ulp_diff = 166
-                    else:  # CUDA: widened from memory's 37.
+                    else:  # CUDA
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90
                         expected_weight_grad_max_ulp_diff = 118
                 else:  # bf16
-                    expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 90
                     if "mps" in device:
                         # MPS + use_acc_dtype: fallback to memory.
+                        expected_max_ulp_diff = 2
+                        expected_input_grad_max_ulp_diff = 90
                         expected_weight_grad_max_ulp_diff = 0
-                    else:  # CUDA: widened from memory's 0.
+                    else:  # CUDA
+                        expected_max_ulp_diff = 1
+                        expected_input_grad_max_ulp_diff = 44
                         expected_weight_grad_max_ulp_diff = 193
         elif acc_policy == "ultralow":
             # ultralow: bf16/fp16 logits + fp32 softmax_denom
@@ -14666,7 +14667,7 @@ if __name__ == '__main__':
                     if "mps" in device:
                         expected_input_grad_max_ulp_diff = 61500
                         expected_weight_grad_max_ulp_diff = 47619
-                    else:
+                    else:  # CUDA
                         # Bounds measured on A100; loosen if a different
                         # platform's ``torch.div(out=)`` lowering rounds
                         # differently — the fp64-reference check above
