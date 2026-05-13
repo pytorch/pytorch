@@ -4043,12 +4043,10 @@ class InstructionTranslatorBase(
             self.push(value)
             return
 
-        # For lazy constants with no conversion flag, keep them unrealized.
-        # But when a conversion IS needed (!s, !r, !a), we must apply it
-        # since str.format does not handle these conversions.
-        if (flags & 0x03) or not isinstance(
-            value, (LazyConstantVariable, ComputedLazyConstantVariable)
-        ):
+        # For lazy constants, we want to keep them unrealized.
+        # Skip _convert_value as it may realize the value.
+        # The conversion will be handled by str.format at runtime.
+        if not isinstance(value, (LazyConstantVariable, ComputedLazyConstantVariable)):
             value = self._convert_value(value, flags & 0x03)
 
         fmt_var = VariableTracker.build(

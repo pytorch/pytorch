@@ -780,8 +780,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
-        elif name == "__repr__" and not args and not kwargs:
-            return self.repr_impl(tx)
         elif name == "__iter__" and not args and not kwargs:
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
@@ -1199,25 +1197,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[
                 f"'{self.python_type_name()}' object cannot be interpreted as an integer"
             ],
-        )
-
-    def repr_impl(
-        self,
-        tx: Any,
-    ) -> VariableTracker:
-        """Mirrors CPython's tp_repr slot.
-
-        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
-
-        Called when type_implements_tp_repr returns True for this type.
-        Subclasses override to provide the actual repr implementation.
-        """
-        unimplemented(
-            gb_type="repr_impl not implemented",
-            context=f"{type(self).__name__} has tp_repr slot but no repr_impl override",
-            explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
-            "the corresponding VariableTracker doesn't implement repr_impl.",
-            hints=[*graph_break_hints.SUPPORTABLE],
         )
 
     def nb_int_impl(

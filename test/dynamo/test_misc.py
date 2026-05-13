@@ -2759,14 +2759,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         def fn(x):
             result = torch.max(x, dim=0)
-            repr(result)
+            s = repr(result)
             return result.values
 
         x = torch.randn(3, 2)
 
-        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         result = opt_fn(x)
-        self.assertEqual(result, torch.max(x, dim=0).values)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_range_input(self):

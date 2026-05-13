@@ -44,7 +44,6 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
-    tracked_repr,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -106,9 +105,6 @@ class BaseListVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
-
-    def repr_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
-        return VariableTracker.build(tx, self.debug_repr())
 
     def is_python_constant(self) -> bool:
         """Check if this container is a python constant without realizing lazy constants.
@@ -519,10 +515,6 @@ class RangeVariable(BaseListVariable):
             repr += f", {self.step()}"
         repr += ")"
         return repr
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        # ref: range_repr in https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Objects/rangeobject.c#L673-L691
-        return VariableTracker.build(tx, self.debug_repr())
 
     def python_type(self) -> type:
         return range
@@ -1047,10 +1039,6 @@ class ListVariable(CommonListMethodsVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("[", "]")
 
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        return VariableTracker.build(tx, f"[{items}]")
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self._contains_self_reference():
             # Self-referential list: create empty, cache, then extend
@@ -1289,19 +1277,10 @@ class DequeVariable(CommonListMethodsVariable):
 
     def debug_repr(self) -> str:
         if self.maxlen.as_python_constant() is None:
-            return self.debug_repr_helper("deque([", "])")
-        return self.debug_repr_helper(
-            "deque([", "], maxlen=" + self.maxlen.debug_repr() + ")"
-        )
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        if self.maxlen.as_python_constant() is None:
-            return VariableTracker.build(tx, f"deque([{items}])")
-        return VariableTracker.build(
-            tx,
-            f"deque([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
-        )
+            return self.debug_repr_helper(
+                "deque([", "], maxlen=" + self.maxlen.debug_repr() + ")"
+            )
+        return self.debug_repr_helper("deque([", "])")
 
     def as_python_constant(self) -> collections.deque[Any]:
         return self.python_type()(
@@ -1486,15 +1465,7 @@ class TupleVariable(BaseListVariable):
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self) -> str:
-        if len(self.items) == 1:
-            return self.debug_repr_helper("(", ",)")
         return self.debug_repr_helper("(", ")")
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        if len(self.items) == 1:
-            items += ","
-        return VariableTracker.build(tx, f"({items})")
 
     def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
@@ -1593,10 +1564,6 @@ class SizeVariable(TupleVariable):
 
     def debug_repr(self) -> str:
         return self.debug_repr_helper("torch.Size([", "])")
-
-    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        return VariableTracker.build(tx, f"torch.Size([{items}])")
 
     def python_type(self) -> type:
         return torch.Size

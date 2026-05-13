@@ -35,6 +35,7 @@ import sys
 import traceback
 import types
 import typing
+from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
@@ -402,10 +403,6 @@ class BaseUserFunctionVariable(VariableTracker):
         if self.dict_vt is None:
             self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
-
-    def repr_impl(self, tx: Any) -> "VariableTracker":
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
-        return VariableTracker.build(tx, repr(self.as_python_constant()))
 
     def call_method(
         self,
@@ -1864,19 +1861,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
-
-    def repr_impl(self, tx: Any) -> "VariableTracker":
-        try:
-            return super().repr_impl(tx)
-        except ClosureConversionError as e:
-            unimplemented(
-                gb_type="repr() on nested function with non-constructible closure",
-                context=f"repr() on nested function {self.fn_name.as_python_constant()}: {e}",
-                explanation="Dynamo could not safely evaluate repr() for this "
-                "nested function because it could not reconstruct its closure "
-                "as Python constants.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
@@ -3565,7 +3549,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
         #      `namedtuple` instead of the actual namedtuple type. Even if the type
         #      is explicitly registered.
         if is_namedtuple_class(node_type):
-            return collections.namedtuple
+            return namedtuple
         return node_type
     """
 
@@ -3585,12 +3569,8 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            import collections
-
             type_source = AttrSource(ImportSource("collections"), "namedtuple")
-            return VariableTracker.build(
-                tx, vars(collections)["namedtuple"], type_source
-            )
+            return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
 
