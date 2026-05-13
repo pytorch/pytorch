@@ -75,6 +75,7 @@ jobs:
       build-environment: ${{ needs.build-cuda.outputs.build-environment }}
       docker-image: ${{ needs.build-cuda.outputs.docker-image }}
       test-matrix: ${{ needs.build-cuda.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build-cuda.outputs.test-matrix-osdc }}
     secrets: inherit
 
   # ---- CUDA build for B200 (sm100) ----
@@ -112,6 +113,7 @@ jobs:
       build-environment: ${{ needs.build-b200.outputs.build-environment }}
       docker-image: ${{ needs.build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.build-b200.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.build-b200.outputs.test-matrix-osdc }}
       use-arc: true
       python-version: "3.10"
       compiler: gcc11
