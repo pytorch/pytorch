@@ -1457,6 +1457,7 @@ class GetAttrVariable(VariableTracker):
     def richcompare_impl(
         self, tx: "InstructionTranslator", other: "VariableTracker", op: str
     ) -> "VariableTracker":
+        from .constant import ConstantVariable
         from .object_protocol import generic_richcompare
 
         try:
@@ -1464,13 +1465,18 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            unimplemented(
-                gb_type="Unresolved GetAttrVariable comparison",
-                context=f"richcompare_impl {self} {op}",
-                explanation=f"Cannot compare {self} because the attribute "
-                f"could not be resolved to a concrete value.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            # If the object is a python constant, resolve the attr directly.
+            if self.obj.is_python_constant():
+                val = getattr(self.obj.as_python_constant(), self.name)
+                resolved = ConstantVariable.create(val)
+            else:
+                unimplemented(
+                    gb_type="Unresolved GetAttrVariable comparison",
+                    context=f"richcompare_impl {self} {op}",
+                    explanation=f"Cannot compare {self} because the attribute "
+                    f"could not be resolved to a concrete value.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         return generic_richcompare(tx, resolved, other, op)
 
     def call_function(
