@@ -128,14 +128,21 @@ def _set_invoke_subgraph_call_id(call_id: int):
         _invoke_subgraph_call_state.current = prev
 
 
-def summarize_backward_tangents(
+def warn_and_trace_duplicate_backward(
+    identifier: str | None,
+    suffix: int,
     bw_graph: torch.fx.GraphModule,
     num_primals: int,
     tangents: tuple[Any, ...],
-) -> list[dict[str, Any]]:
-    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+) -> None:
+    if suffix == 0:
+        return
 
-    summaries: list[dict[str, Any]] = []
+    from torch._dynamo.utils import warn_once
+    from torch._logging import trace_structured
+
+    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+    tangent_summaries: list[dict[str, Any]] = []
     for idx, tangent in enumerate(tangents):
         summary: dict[str, Any] = {}
         backward_input_idx = num_primals + idx
@@ -143,8 +150,8 @@ def summarize_backward_tangents(
             summary["backward_input_name"] = placeholders[backward_input_idx].name
 
         if not isinstance(tangent, torch.Tensor):
-            summary["type"] = type(tangent).__name__
-            summaries.append(summary)
+            summary["type"] = "non-Tensor"
+            tangent_summaries.append(summary)
             continue
 
         summary.update(
@@ -159,20 +166,7 @@ def summarize_backward_tangents(
                 "device": str(tangent.device),
             }
         )
-        summaries.append(summary)
-    return summaries
-
-
-def warn_and_trace_duplicate_backward(
-    identifier: str | None,
-    suffix: int,
-    new_variant_summary: dict[str, Any],
-) -> None:
-    if suffix == 0:
-        return
-
-    from torch._dynamo.utils import warn_once
-    from torch._logging import trace_structured
+        tangent_summaries.append(summary)
 
     warn_once(
         "invoke_subgraph traced multiple backward graphs for the same forward "
@@ -194,7 +188,10 @@ def warn_and_trace_duplicate_backward(
             "backward_identifier": f"bw_{identifier}_{suffix}",
             "new_variant_suffix": suffix,
             "num_variants_for_identifier": suffix + 1,
-            "new_variant": new_variant_summary,
+            "new_variant": {
+                "backward_identifier": f"bw_{identifier}_{suffix}",
+                "tangents": tangent_summaries,
+            },
             "explanation": (
                 "invoke_subgraph caches backward graphs by both the forward "
                 "identifier and tangent metadata. Multiple backward variants "
@@ -913,16 +910,9 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
                 identifier, tangent_metadata, bw_graph
             )
-            if suffix != 0:
-                tangent_summary = {
-                    "backward_identifier": f"bw_{identifier}_{suffix}",
-                    "tangents": summarize_backward_tangents(
-                        bw_graph,
-                        len(primals),
-                        filtered_grad_outs,
-                    ),
-                }
-                warn_and_trace_duplicate_backward(identifier, suffix, tangent_summary)
+            warn_and_trace_duplicate_backward(
+                identifier, suffix, bw_graph, len(primals), filtered_grad_outs
+            )
 
         with _set_invoke_subgraph_call_id(ctx._call_id):
             grads = invoke_subgraph(
