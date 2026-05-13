@@ -174,7 +174,7 @@ function install_132 {
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
-  install_cuda 13.2.0 cuda_13.2.0_595.45.04_linux
+  install_cuda 13.2.1 cuda_13.2.1_595.58.03_linux
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION

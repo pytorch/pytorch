@@ -253,6 +253,7 @@ class MetalOverrides(OpOverrides):
         return var
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
         return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
 
@@ -261,50 +262,61 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::remainder({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::max({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"c10::metal::min({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} || {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} && {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x: CSEVariable) -> str:
         return f"metal::isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x: CSEVariable) -> str:
         return f"metal::isinf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x: CSEVariable) -> str:
         return f"metal::precise::log({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x: CSEVariable) -> str:
         return f"metal::signbit({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x: CSEVariable) -> str:
         return f"metal::precise::sin({x})"
 
@@ -313,30 +325,37 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::sinc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x: CSEVariable) -> str:
         return f"metal::precise::cos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x: CSEVariable) -> str:
         return f"metal::precise::tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x: CSEVariable) -> str:
         return f"metal::precise::asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x: CSEVariable) -> str:
         return f"metal::precise::acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x: CSEVariable) -> str:
         return f"metal::precise::atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
         return f"::metal::precise::atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x: CSEVariable) -> str:
         return f"metal::precise::sqrt({x})"
 
@@ -347,14 +366,17 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::precise::rsqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x: CSEVariable) -> str:
         return f"metal::precise::tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x: CSEVariable) -> str:
         return f"metal::precise::atanh({x})"
 
@@ -364,24 +386,29 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::floor_divide({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x: CSEVariable) -> str:
         return f"metal::floor({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
         return f"metal::sign({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a: CSEVariable, b: CSEVariable) -> str:
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::fmod({typecast_a}, {typecast_b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x: CSEVariable) -> str:
         return f"metal::trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
         quot = f"{a} / {b}"
         if (a.dtype is not None and a.dtype.is_floating_point) or (
@@ -391,6 +418,7 @@ class MetalOverrides(OpOverrides):
         return quot
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x: CSEVariable) -> str:
         return f"metal::ceil({x})"
 
@@ -412,6 +440,7 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x: CSEVariable) -> str:
         return f"metal::rint({x})"
 
@@ -900,10 +929,11 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
-    def codegen_kernel(self, name: str | None = None) -> str:
+    def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
+        fn_name = name
 
         if V.graph.cpp_wrapper:
             code.writeline('(R"MTL(')
@@ -940,7 +970,7 @@ class MetalKernel(SIMDKernel):
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline("kernel void generated_kernel(")
+            code.writeline(f"kernel void {fn_name}(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
@@ -1151,36 +1181,55 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
+    _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        wrapper = V.graph.wrapper_code
-        if wrapper is not None:
-            if not V.graph.cpp_wrapper:
-                wrapper.header.splice(
-                    "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-                )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code]
-        else:
-            # TODO: Merge multiple kernels into a single library
-            # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
+            return wrapper.src_to_kernel[src_code]
+
+        if V.graph.cpp_wrapper:
+            # C++ path: one library per kernel (each has a single "generated_kernel" function)
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
-
-            kernel_name = f"{mps_lib_name}"
+            kernel_name = mps_lib_name
             wrapper.src_to_kernel[src_code] = kernel_name
-
-            if V.graph.cpp_wrapper:
-                # For shimified version, generate source constant instead of direct instantiation
-                src_code = f"const char* {mps_lib_name}_source = " + src_code
-
+            src_code = f"const char* {mps_lib_name}_source = " + src_code
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)
+            wrapper.define_kernel(
+                mps_lib_name, src_code, f"{origins}\n{detailed_origins}", gpu=False
+            )
+            return kernel_name
 
-        return kernel_name
+        # Python path: register kernel with async_compile; wait() will compile all
+        # accumulated Metal kernels into a single library and replace each placeholder.
+        fn_name = f"generated_kernel_{self._kernel_fn_counter}"
+        self._kernel_fn_counter += 1
+        wrapper.src_to_kernel[src_code] = fn_name
+
+        # Extract Metal source from compile_mps_shader('''...''') call
+        metal_src_start = "compile_mps_shader('''"
+        start = src_code.index(metal_src_start) + len(metal_src_start)
+        end = src_code.rindex("''')")
+        metal_src = src_code[start:end]
+
+        # Strip #include lines and rename the kernel function
+        body_lines = []
+        for line in metal_src.split("\n"):
+            if line.strip().startswith("#include"):
+                continue
+            body_lines.append(
+                line.replace("kernel void generated_kernel(", f"kernel void {fn_name}(")
+            )
+
+        headers_repr = repr(sorted(kernel.headers))
+        wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
+        for line in body_lines:
+            wrapper.header.writeline(line)
+        wrapper.header.writeline(f"''', {headers_repr})")
+
+        return fn_name

@@ -295,6 +295,14 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
+TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
+  if (!has_allocator(tensor.device().type())) {
+    return false;
+  }
+  auto allocator = get_allocator(tensor.device().type());
+  return allocator->has_allocation(tensor.storage().data_ptr().get());
+}
+
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx) {
