@@ -1612,6 +1612,9 @@ class SideEffects:
                                     ]
                                 )
                                 side_effect_occurred = True
+                        # GENERIC_SETATTR deletions on UDOV fall through to the
+                        # normal DELETE_ATTR path below so descriptor semantics
+                        # are preserved during replay.
                         elif isinstance(
                             var.mutation_type, AttributeMutationExisting
                         ) and hasattr(getattr(var, "value", None), name):

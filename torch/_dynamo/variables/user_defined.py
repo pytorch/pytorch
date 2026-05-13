@@ -2379,6 +2379,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         tx, deleter, del_source, realize=True
                     )
                     return del_var.call_function(tx, [desc_var, self], {})
+                if deleter is not None:
+                    unimplemented(
+                        gb_type="C-level descriptor delete on user-defined object",
+                        context=f"object={self}, name={name_str}, descriptor={descriptor}",
+                        explanation=(
+                            "Dynamo does not yet model this C-level descriptor deleter "
+                            "for user-defined objects."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
                 raise_readonly_attr()
             if isinstance(setter, types.FunctionType):
                 set_source = (

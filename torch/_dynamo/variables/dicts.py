@@ -1309,7 +1309,15 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             if isinstance(dict_vt, ConstDictVariable):
                 result = {}
                 for key, value in dict_vt.items.items():
-                    key_value = key.vt.as_python_constant()
+                    try:
+                        key_value = key.vt.as_python_constant()
+                    except NotImplementedError:
+                        unimplemented(
+                            gb_type="non-constant key in object __dict__",
+                            context=f"key={key.vt}",
+                            explanation="Dynamo expects object __dict__ replacement keys to be constants.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                     if not isinstance(key_value, str):
                         unimplemented(
                             gb_type="non-string key in object __dict__",

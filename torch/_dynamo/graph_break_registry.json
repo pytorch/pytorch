@@ -3662,6 +3662,26 @@
       ]
     }
   ],
+  "GB5849": [
+    {
+      "Gb_type": "non-constant key in object __dict__",
+      "Context": "key={key.vt}",
+      "Explanation": "Dynamo expects object __dict__ replacement keys to be constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3241": [
+    {
+      "Gb_type": "C-level descriptor delete on user-defined object",
+      "Context": "object={self}, name={name_str}, descriptor={descriptor}",
+      "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
