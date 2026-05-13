@@ -64,11 +64,7 @@ static PyObject* THXPStream_pynew(
 
 static void THXPStream_dealloc(THXPStream* self) {
   self->xpu_stream.~XPUStream();
-  // Mirror base THPStream_dealloc: clear weakrefs and release the
-  // lazily-allocated stream context.
-  PyObject_ClearWeakRefs((PyObject*)self);
-  Py_CLEAR(self->context);
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
 static PyObject* THXPStream_get_sycl_queue(THXPStream* self, void* unused) {

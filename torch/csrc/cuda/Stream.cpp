@@ -82,12 +82,7 @@ static PyObject* THCPStream_pynew(
 
 static void THCPStream_dealloc(THCPStream* self) {
   self->cuda_stream.~CUDAStream();
-  // Mirror base THPStream_dealloc: clear weakrefs (the subclass dealloc
-  // overrides the base, so it must perform the base's teardown too) and
-  // release the lazily-allocated stream context.
-  PyObject_ClearWeakRefs((PyObject*)self);
-  Py_CLEAR(self->context);
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
 static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
