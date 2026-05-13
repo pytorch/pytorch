@@ -27,7 +27,13 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
-from ..utils import cmp_name_to_op_mapping, istype, raise_args_mismatch, set_methods
+from ..utils import (
+    _item_debug_repr,
+    cmp_name_to_op_mapping,
+    istype,
+    raise_args_mismatch,
+    set_methods,
+)
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
@@ -37,6 +43,12 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.builtin import BuiltinVariable
+
+
+def _tracked_repr(tx: "InstructionTranslator", item: VariableTracker) -> str:
+    from .object_protocol import generic_repr
+
+    return generic_repr(tx, item).as_python_constant()
 
 
 # [Adding a new supported class within the keys of SetVariable]
@@ -103,9 +115,9 @@ class SetVariable(VariableTracker):
             items: list[str] = []
             for v in self.items:
                 vt = v.vt if isinstance(v, HashableTracker) else v
-                val_str = repr(vt.value) if hasattr(vt, "value") else vt.debug_repr()
+                val_str = _item_debug_repr(vt)
                 items.append(val_str)
-            return "{" + ",".join(items) + "}"
+            return "{" + ", ".join(items) + "}"
 
     @property
     def set_items(self) -> set["HashableTracker"]:
@@ -124,6 +136,13 @@ class SetVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
+
+    def repr_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
+        if not self.items:
+            return VariableTracker.build(tx, "set()")
+        items = ", ".join(_tracked_repr(tx, item.vt) for item in self.set_items)
+        return VariableTracker.build(tx, "{" + items + "}")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
@@ -726,11 +745,13 @@ class OrderedSetVariable(SetVariable):
         else:
             items: list[str] = []
             for k in self.items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
+                key_str = _item_debug_repr(k.vt)
                 items.append(key_str)
-            return "OrderedSet([" + ",".join(items) + "])"
+            return "OrderedSet([" + ", ".join(items) + "])"
+
+    def repr_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+        items = ", ".join(_tracked_repr(tx, item.vt) for item in self.set_items)
+        return VariableTracker.build(tx, f"OrderedSet([{items}])")
 
     def as_python_constant(self) -> OrderedSet[Any]:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
@@ -783,11 +804,9 @@ class FrozensetVariable(SetVariable):
         else:
             items: list[str] = []
             for k in self.items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
+                key_str = _item_debug_repr(k.vt)
                 items.append(key_str)
-            return "{" + ",".join(items) + "}"
+            return "frozenset({" + ", ".join(items) + "})"
 
     @property
     def set_items(self) -> set["HashableTracker"]:
@@ -801,6 +820,13 @@ class FrozensetVariable(SetVariable):
 
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
+
+    def repr_impl(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
+        if not self.items:
+            return VariableTracker.build(tx, "frozenset()")
+        items = ", ".join(_tracked_repr(tx, item.vt) for item in self.set_items)
+        return VariableTracker.build(tx, f"frozenset({{{items}}})")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -873,11 +899,9 @@ class DictKeySetVariable(SetVariable):
         else:
             items: list[str] = []
             for k in self.items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
+                key_str = _item_debug_repr(k.vt)
                 items.append(key_str)
-            return "dict_keys([" + ",".join(items) + "])"
+            return "dict_keys([" + ", ".join(items) + "])"
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslator", args: list[VariableTracker]
