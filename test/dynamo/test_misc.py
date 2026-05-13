@@ -5841,6 +5841,51 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.zeros(())
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_type_builtin_one_arg(self):
+        # type(x) returns the type of x and traces without graph break
+        def fn(x):
+            return type(x) is torch.Tensor
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(opt_fn(torch.zeros(())))
+
+    def test_type_builtin_three_args_constant(self):
+        # type(name, bases, dict) with all-constant args creates a class
+        def fn(x):
+            MyClass = type("MyClass", (object,), {"val": 42})
+            return x + MyClass.val
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_type_builtin_three_args_nonconstant_graph_breaks(self):
+        # type(name, bases, dict) with a non-constant arg (tensor as dict value)
+        # causes a graph break since dynamic class creation can't be traced
+        def fn(x):
+            MyClass = type("MyClass", (object,), {"val": x})
+            return MyClass.val + 1
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Failed to trace type\\(\\) with 3 arguments"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+
+    def test_type_builtin_invalid_args_raises(self):
+        # type() with wrong arg count raises TypeError, same as eager
+        @torch.compile(backend="eager")
+        def fn_zero(x):
+            return type()
+
+        @torch.compile(backend="eager")
+        def fn_two(x):
+            return type(x, object)
+
+        with self.assertRaises(TypeError):
+            fn_zero(torch.zeros(()))
+        with self.assertRaises(TypeError):
+            fn_two(torch.zeros(()))
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

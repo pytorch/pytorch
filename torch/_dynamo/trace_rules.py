@@ -80,6 +80,7 @@ from .variables import (
     SparseTensorCreationSkipVariable,
     StrBuiltinVariable,
     TorchInGraphFunctionVariable,
+    TypeBuiltinVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -4047,6 +4048,7 @@ BUILTIN_CALLABLES = {
     list: ListBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
     str: StrBuiltinVariable,
+    type: TypeBuiltinVariable,
 }
 
 

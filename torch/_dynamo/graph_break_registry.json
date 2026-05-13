@@ -5252,5 +5252,15 @@
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
+  ],
+  "GB0375": [
+    {
+      "Gb_type": "Failed to trace type() with 3 arguments",
+      "Context": "type({args})",
+      "Explanation": "Dynamo does not support dynamic class creation via type(name, bases, dict) with non-constant arguments",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
