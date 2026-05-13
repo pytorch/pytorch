@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from torch.distributed.tensor import DTensor
-from torch.distributed.tensor.experimental import local_map
 from torch.fx.node import map_aggregate
 from torch.nn.attention.flex_attention import BlockMask
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -208,17 +207,40 @@ def _split_tensor(
     _is_dtensor = isinstance(tensor, DTensor)
 
     if _is_dtensor:
-        # Use local_map to split locally and preserve placements.
-        # Going through DTensor dispatch would convert Shard(split_dim) to
-        # Replicate() via an implicit all-gather, which is both wasteful and
-        # semantically wrong for PP microbatch splitting.
+        # Split locally and wrap each chunk as a DTensor with the correct
+        # global shape.  We avoid DTensor dispatch (which would all-gather
+        # Shard(split_dim) to Replicate) and avoid local_map (whose
+        # from_local call assumes even sharding and computes wrong global
+        # sizes when local shards differ across ranks).
+        # Use to_local() (not ._local_tensor) so the autograd graph is
+        # preserved for backward.
         placements = tensor.placements
-        split_fn = local_map(
-            lambda t: torch.tensor_split(t, num_chunks, spec.split_dim),
-            out_placements=(placements,) * num_chunks,
-            in_placements=(placements,),
+        mesh = tensor.device_mesh
+        local_tensor = tensor.to_local()
+        local_chunks = torch.tensor_split(
+            local_tensor, num_chunks, spec.split_dim
         )
-        chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)  # type: ignore[assignment]
+        # Compute the correct global chunk sizes along split_dim.
+        # torch.tensor_split(N, S) produces chunks of size
+        # N // S + (1 if i < N % S else 0).
+        global_split_size = tensor.shape[spec.split_dim]
+        base, rem = divmod(global_split_size, num_chunks)
+        global_stride = tensor.stride()
+        chunk_tensors_list: list[torch.Tensor] = []
+        for i, local_chunk in enumerate(local_chunks):
+            chunk_shape = list(tensor.shape)
+            chunk_shape[spec.split_dim] = base + (1 if i < rem else 0)
+            chunk_tensors_list.append(
+                DTensor.from_local(
+                    local_chunk,
+                    mesh,
+                    placements,
+                    shape=torch.Size(chunk_shape),
+                    stride=global_stride,
+                    run_check=False,
+                )
+            )
+        chunk_tensors: Sequence[torch.Tensor] = chunk_tensors_list  # type: ignore[assignment]
     else:
         chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
@@ -249,13 +271,24 @@ def _split_tensor(
 
     if _is_dtensor:
         placements = tensor.placements
-        n = len(chunk_tensors)
-        expand_fn = local_map(
-            _expand_chunks,
-            out_placements=(placements,) * n,
-            in_placements=(placements,) + (placements,) * n,
+        mesh = tensor.device_mesh
+        global_shape = tensor.shape
+        global_stride = tensor.stride()
+        local_expanded = _expand_chunks(
+            tensor.to_local(),
+            *(c.to_local() for c in chunk_tensors),
         )
-        return list(expand_fn(tensor, *chunk_tensors))  # type: ignore[arg-type]
+        return [
+            DTensor.from_local(
+                t,
+                mesh,
+                placements,
+                shape=global_shape,
+                stride=global_stride,
+                run_check=False,
+            )
+            for t in local_expanded
+        ]
     else:
         return list(_expand_chunks(tensor, *chunk_tensors))
 
@@ -591,12 +624,27 @@ def merge_chunks(
                             f"merge_chunks: placement mismatch at chunk {i}: "
                             f"expected {placements}, got {v.placements}"
                         )
-                cat_fn = local_map(
-                    lambda *chunks: torch.cat(chunks, dim=arg.split_dim),
-                    out_placements=(placements,),
-                    in_placements=tuple(placements for _ in range(len(values_to_cat))),
+                mesh = values_to_cat[0].device_mesh
+                local_cat = torch.cat(
+                    [v.to_local() for v in values_to_cat],
+                    dim=arg.split_dim,
                 )
-                args_flattened.append(cat_fn(*values_to_cat))
+                cat_shape = list(values_to_cat[0].shape)
+                cat_shape[arg.split_dim] = sum(
+                    v.shape[arg.split_dim] for v in values_to_cat
+                )
+                cat_shape = torch.Size(cat_shape)
+                cat_stride = values_to_cat[0].stride()
+                args_flattened.append(
+                    DTensor.from_local(
+                        local_cat,
+                        mesh,
+                        placements,
+                        shape=cat_shape,
+                        stride=cat_stride,
+                        run_check=False,
+                    )
+                )
             else:
                 args_flattened.append(torch.cat(values_to_cat, dim=arg.split_dim))
         elif isinstance(arg, _CustomReducer):
