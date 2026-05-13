@@ -370,7 +370,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
     def get_kernel_prefix_name(self) -> str:
         return f"grouped_gemm_g{self.gemm_grouped_num}m{self.m}n{self.n}k{self.k}"
 
-    def render(  # type: ignore[override,return,no-untyped-def]
+    def render(
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: ir.CppTemplateBuffer | None = None,
