@@ -121,6 +121,12 @@ cdll.LoadLibrary("__lib_path__")
                 output_path = normalize_path_separator(
                     x86_isa_help_builder.get_target_file_path()
                 )
+                # Skip the dlopen probe if a prior process already verified
+                # this build. See the sentinel write below.
+                verified_path = output_path + ".loadok"
+                if os.path.isfile(verified_path):
+                    return True
+
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
 
@@ -157,6 +163,18 @@ cdll.LoadLibrary("__lib_path__")
                         )
                 else:
                     return False
+
+                # Persist the success signal as an empty sentinel file next
+                # to the .so. Its existence is the cache hit; contents are
+                # irrelevant. The codecache fingerprint (compiler + ISA
+                # flags + torch version) already pins all inputs, so once
+                # this combination loads it stays good. Write failure is
+                # non-fatal; next process just re-probes.
+                try:
+                    with open(verified_path, "w"):
+                        pass
+                except OSError:
+                    pass
             except Exception:
                 return False
 
