@@ -126,7 +126,7 @@ standard_library = ["typing_extensions"]
 [tool.ruff]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
-extend-exclude = ["third_party", "test/dynamo/cpython"]
+extend-exclude = ["third_party", "test/cpython"]
 
 [tool.ruff.per-file-target-version]
 "**/py312_intrinsics.py" = "py312"
