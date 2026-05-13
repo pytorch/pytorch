@@ -120,7 +120,6 @@ jobs:
     with:
       build-environment: linux-jammy-rocm-py3_10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
