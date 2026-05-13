@@ -839,6 +839,9 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
         ] = defaultdict(dict)
+        self.lazy_bwd_debug_cache: dict[str, dict[tuple[object], object]] = defaultdict(
+            dict
+        )
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
@@ -879,10 +882,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
         identifier: str,
         tangent_metadata: tuple[object],
         gmod: torch.fx.GraphModule,
+        debug_info: object | None = None,
     ) -> int:
         # Save the number of existing graph modules in the dictionary to get the suffix
         num_gmods = len(self.lazy_bwd_cache[identifier])
         self.lazy_bwd_cache[identifier][tangent_metadata] = (gmod, num_gmods)
+        if debug_info is not None:
+            self.lazy_bwd_debug_cache[identifier][tangent_metadata] = debug_info
         return num_gmods
 
     def get_lazy_bwd_entry(
@@ -892,6 +898,9 @@ class InvokeSubgraphCache(HopSubgraphCache):
             return (None, None)
 
         return self.lazy_bwd_cache[identifier].get(tangent_metadata, (None, None))
+
+    def get_lazy_bwd_debug_entries(self, identifier: str) -> list[object]:
+        return list(self.lazy_bwd_debug_cache.get(identifier, {}).values())
 
     def add_effects(self, identifier: str, effects: set) -> None:
         """Store the effect types for a given invoke_subgraph identifier."""
