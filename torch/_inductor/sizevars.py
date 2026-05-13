@@ -51,8 +51,8 @@ class LaneContiguity:
     alignment make a vector load valid.
     """
 
-    contiguous_width: int | SymInt | None = None
-    stride: int | SymInt | None = None
+    contiguous_width: int | None = None
+    stride: int | Expr | None = None
     uniform: bool = False
     unknown: bool = False
 
@@ -626,6 +626,7 @@ class SizeVarAllocator:
         be smaller than `requested_width` for modular expressions whose
         contiguous span is known only for a narrower aligned group.
         """
+        assert requested_width >= 1 and is_power_of_2(requested_width)
         expr = self.simplify(
             simplify_index_in_vec_range(expr, lane_var, requested_width)
         )
@@ -663,7 +664,7 @@ class SizeVarAllocator:
         result = LaneContiguity(stride=0, uniform=True)
         for arg in args:
             arg_result = self.analyze_lane_contiguity(arg, lane_var, requested_width)
-            if arg_result.unknown or result.unknown:
+            if arg_result.unknown:
                 return LaneContiguity(unknown=True)
             if result.uniform:
                 result = arg_result
@@ -692,9 +693,11 @@ class SizeVarAllocator:
             return LaneContiguity(unknown=True)
         stride = factor * child_result.stride
         return LaneContiguity(
-            contiguous_width=requested_width if stride == 1 else None,
+            contiguous_width=requested_width
+            if self.statically_known_equals(stride, 1)
+            else None,
             stride=stride,
-            uniform=stride == 0,
+            uniform=self.statically_known_equals(stride, 0),
         )
 
     def _analyze_lane_contiguity_modular_indexing(
@@ -727,7 +730,9 @@ class SizeVarAllocator:
         if not isinstance(modulus, (int, sympy.Integer)):
             return LaneContiguity(unknown=True)
         base_result = self.analyze_lane_contiguity(base, lane_var, requested_width)
-        if base_result.stride != 1:
+        if base_result.stride is None or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
             return LaneContiguity(unknown=True)
         modulus_int = int(modulus)
         if modulus_int <= 0:
