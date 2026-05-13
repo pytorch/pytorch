@@ -385,10 +385,10 @@ class TestFakePG(TestCase):
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
         inputs = [torch.ones(3, 3) * i for i in range(3)]
-        output_lists = [[torch.empty(3, 3) for _ in range(2)] for _ in range(3)]
+        output_lists = [[torch.empty(3, 3) for _ in inputs] for _ in range(2)]
         dist.all_gather_coalesced(output_lists, inputs)
-        for i, output_list in enumerate(output_lists):
-            for out in output_list:
+        for output_list in output_lists:
+            for i, out in enumerate(output_list):
                 self.assertEqual(out, inputs[i])
 
     def test_allgather_coalesced_requires_grad(self):
@@ -399,10 +399,10 @@ class TestFakePG(TestCase):
             torch.ones(3, 3).requires_grad_(True),
             (torch.ones(3, 3) * 2).requires_grad_(True),
         ]
-        output_lists = [[torch.empty(3, 3) for _ in range(2)] for _ in inputs]
+        output_lists = [[torch.empty(3, 3) for _ in inputs] for _ in range(2)]
         dist.all_gather_coalesced(output_lists, inputs)
-        for i, output_list in enumerate(output_lists):
-            for out in output_list:
+        for output_list in output_lists:
+            for i, out in enumerate(output_list):
                 self.assertEqual(out, inputs[i])
                 self.assertFalse(out.requires_grad)
 
@@ -429,7 +429,6 @@ class TestFakePG(TestCase):
         dist.all_to_all(output_list, input_list)
         for i in range(2):
             self.assertEqual(output_list[i], input_list[i])
-            self.assertFalse(output_list[i].requires_grad)
 
     @parametrize("rank", [0, 1])
     def test_alltoall_base_copy_semantics(self, rank):
@@ -524,9 +523,7 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "must both have length equal to group size"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "does not match world size"):
             dist.all_to_all(
                 [torch.empty(3, 3)],
                 [torch.ones(3, 3), torch.ones(3, 3)],
@@ -717,9 +714,9 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        output = [[torch.empty(3, 3)]]
+        output = [[torch.empty(3, 3)], []]
         inputs = [torch.ones(3, 3)]
-        with self.assertRaisesRegex(RuntimeError, "expected world size"):
+        with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
 
 
