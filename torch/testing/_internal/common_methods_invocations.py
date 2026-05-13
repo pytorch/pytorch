@@ -12216,7 +12216,7 @@ def reference_native_group_norm(input: npt.NDArray, weight: npt.NDArray | None, 
     input_view = input.reshape((N, group, C // group * HxW))
     mean = input_view.mean(axis=-1, keepdims=True)
     var = input_view.var(axis=-1, ddof=0, keepdims=True)
-    rsqrt = np.pow(var + eps, -0.5)
+    rsqrt = np.power(var + eps, -0.5)
     Y = (input_view - mean) * rsqrt
     Y = Y.reshape(input.shape)
     if weight is not None:
@@ -15892,6 +15892,9 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
             # composite compliance fails with "performing in-place operation add_"
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance", "test_backward"),
+            # sometimes fails in TorchScript interpreter with failures associated with
+            # batch_norm
+            DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_correctness"),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
         ),
