@@ -56,6 +56,18 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_force_exact_strides(input_tensor: Tensor, stride) -> Tensor:
+    if input_tensor.stride() == tuple(stride):
+        return input_tensor
+    return torch.empty_strided(
+        input_tensor.shape,
+        stride,
+        device=input_tensor.device,
+        dtype=input_tensor.dtype,
+        layout=input_tensor.layout,
+    ).copy_(input_tensor)
+
+
 def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
@@ -196,6 +208,14 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
+force_exact_strides = make_prim(
+    "inductor_force_exact_strides(Tensor input, SymInt[] stride) -> Tensor",
+    eager_force_exact_strides,
+    doc=(
+        "Force exact strides for input tensor. No-op if the input tensor already "
+        "has the stride. Do a copy otherwise"
+    ),
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
