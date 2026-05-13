@@ -2137,9 +2137,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise AssertionError(
                     f"Expected UserDefinedObjectVariable, got {type(other_)}"
                 )
-            r = other_.call_method(tx, rdunder, [self_], {})  # infinite recursion??
-            if not is_nb_not_implemented(r):
-                return r
+            if other_._maybe_get_baseclass_method(rdunder):
+                r = other_._vectorcall_maybe(tx, rdunder, [self_])
+                if not is_nb_not_implemented(r):
+                    return r
 
         return variables.ConstantVariable.create(NotImplemented)
 
