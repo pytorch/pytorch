@@ -3,7 +3,7 @@
 import logging
 import operator
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch.distributed.tensor import DTensor
@@ -217,9 +217,7 @@ def _split_tensor(
         placements = tensor.placements
         mesh = tensor.device_mesh
         local_tensor = tensor.to_local()
-        local_chunks = torch.tensor_split(
-            local_tensor, num_chunks, spec.split_dim
-        )
+        local_chunks = torch.tensor_split(local_tensor, num_chunks, spec.split_dim)
         # Compute the correct global chunk sizes along split_dim.
         # torch.tensor_split(N, S) produces chunks of size
         # N // S + (1 if i < N % S else 0).
@@ -276,7 +274,7 @@ def _split_tensor(
         global_stride = tensor.stride()
         local_expanded = _expand_chunks(
             tensor.to_local(),
-            *(c.to_local() for c in chunk_tensors),
+            *(cast(DTensor, c).to_local() for c in chunk_tensors),
         )
         return [
             DTensor.from_local(
