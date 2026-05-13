@@ -15140,8 +15140,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_lazy_conv_zero_in_channels_backward(self):
         for dim in (1, 2, 3):
             conv_cls = getattr(torch.nn, f"LazyConv{dim}d")
-            model = conv_cls(2, kernel_size=1).eval().cuda()
-            x = torch.randn(1, 0, *([8] * dim), device="cuda")
+            model = conv_cls(2, kernel_size=1).eval().to(GPU_TYPE)
+            x = torch.randn(1, 0, *([8] * dim), device=GPU_TYPE)
 
             y = torch.compile(model)(x)
             self.assertEqual(y.shape, torch.Size([1, 0, *([8] * dim)]))
