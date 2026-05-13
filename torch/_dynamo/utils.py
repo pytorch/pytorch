@@ -1259,7 +1259,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
+        isinstance(value, (types.UnionType, typing._Final))
         or value is typing.Generic
         or value is typing.Union
     )
@@ -1392,6 +1392,18 @@ def is_wrapper_or_member_descriptor(
             types.MethodWrapperType,
         ),
     )
+
+
+def tracked_repr(tx: InstructionTranslator, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
 
 
 def unwrap_if_wrapper(fn: Any) -> Any:
@@ -4172,7 +4184,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -4980,7 +4992,7 @@ def is_tensor_base_attr_getter(value: Any) -> bool:
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
         and hasattr(value.__self__, "__objclass__")
-        and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
+        and value.__self__.__objclass__ is torch._C._TensorBase
     )
 
 

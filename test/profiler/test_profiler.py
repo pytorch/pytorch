@@ -59,6 +59,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -188,7 +189,6 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_cudagraph_profiling_workaround(self):
         import subprocess
 
@@ -310,7 +310,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 check_trace(fname)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -352,7 +351,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
             torch._C._profiler._set_cuda_sync_enabled_val(False)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
@@ -395,7 +393,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_mixed_syntax(self):
         """Enum and dict entries can coexist for different activity groups."""
@@ -2083,6 +2080,7 @@ class TestProfilerDevice(TestCase):
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], device_available)
 
+    @onlyOn(["cpu", "cuda"])
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self, device):
         device_type = device.split(":")[0]
@@ -2476,6 +2474,7 @@ class TestProfilerDevice(TestCase):
                 file_num += 1
             self.assertEqual(file_num, 3)
 
+    @onlyOn(["cpu", "cuda"])
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
@@ -2814,6 +2813,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             gpu_events = [e for e in events if e.device_type == device_type_enum]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
+    @onlyOn(["cpu", "cuda"])
     @onlyAccelerator
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -2865,6 +2865,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
+    @onlyOn(["cpu", "cuda"])
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
