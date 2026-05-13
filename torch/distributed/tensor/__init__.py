@@ -2,6 +2,7 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
+from typing_extensions import TypeAliasType
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (
     distribute_module,
@@ -78,16 +79,17 @@ if DTensor not in _util_foreach_supported_types:
     _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
 
 
-# Set namespace for exposed private names
+# Replace __module__ reassignments with TypeAliasType for better type checker / linter compatibility
+# DTensor is a class used in isinstance() checks, so keep the __module__ assignment for it
 DTensor.__module__ = "torch.distributed.tensor"
-distribute_tensor.__module__ = "torch.distributed.tensor"
-distribute_module.__module__ = "torch.distributed.tensor"
-ones.__module__ = "torch.distributed.tensor"
-empty.__module__ = "torch.distributed.tensor"
-full.__module__ = "torch.distributed.tensor"
-rand.__module__ = "torch.distributed.tensor"
-randn.__module__ = "torch.distributed.tensor"
-zeros.__module__ = "torch.distributed.tensor"
+distribute_tensor: TypeAliasType = TypeAliasType("distribute_tensor", distribute_tensor)
+distribute_module: TypeAliasType = TypeAliasType("distribute_module", distribute_module)
+ones: TypeAliasType = TypeAliasType("ones", ones)
+empty: TypeAliasType = TypeAliasType("empty", empty)
+full: TypeAliasType = TypeAliasType("full", full)
+rand: TypeAliasType = TypeAliasType("rand", rand)
+randn: TypeAliasType = TypeAliasType("randn", randn)
+zeros: TypeAliasType = TypeAliasType("zeros", zeros)
 
 # Register DTensor dispatch for higher order operators
 from torch._higher_order_ops.print import _register_dtensor_impl
