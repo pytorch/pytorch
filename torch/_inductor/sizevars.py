@@ -88,18 +88,37 @@ _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     if not index.has(var):
+        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
+        # in this case, there is no dependencies between index and var.
         return sympy.S.Zero
-    return sympy.simplify(sympy_subs(index, {var: var + 1}) - index)
+    replacement = {var: var + 1}
+    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
+    return sympy.simplify(new_index - index)
 
 
 @functools.lru_cache
 def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
     """
-    Simplify an index expression within a vectorized loop range.
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
 
-    The returned expression is for analysis only. It may replace FloorDiv and
-    ModularIndexing with free variables that are independent of var within the
-    vector group.
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
     """
 
     div_freevar_id = 0
