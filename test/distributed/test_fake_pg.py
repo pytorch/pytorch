@@ -243,6 +243,96 @@ class TestFakePG(TestCase):
                 optim.step()
 
     @parametrize("rank", [0, 1])
+    def test_reduce_scatter_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        to_reduce_scatter = [torch.ones(3, 3) * r for r in range(2)]
+        output = torch.empty(3, 3)
+        dist.reduce_scatter(output, to_reduce_scatter)
+        self.assertEqual(output, to_reduce_scatter[rank])
+
+    def test_reduce_scatter_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        inputs = [
+            torch.ones(3, 3).requires_grad_(True),
+            (torch.ones(3, 3) * 2).requires_grad_(True),
+        ]
+        output = torch.empty(3, 3)
+        dist.reduce_scatter(output, inputs)
+        self.assertEqual(output, inputs[1])
+        self.assertFalse(output.requires_grad)
+
+    @parametrize("rank", [0, 1])
+    def test_scatter_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        if rank == 0:
+            to_scatter = [torch.ones(3, 3) * r for r in range(2)]
+            output = torch.empty(3, 3)
+            dist.scatter(output, to_scatter)
+            self.assertEqual(output, to_scatter[0])
+        else:
+            output = torch.ones(3, 3) * 5
+            dist.scatter(output, None, src=0)
+            self.assertEqual(output, torch.ones(3, 3) * 5)
+
+    def test_scatter_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        inputs = [
+            torch.ones(3, 3).requires_grad_(True),
+            (torch.ones(3, 3) * 2).requires_grad_(True),
+        ]
+        output = torch.empty(3, 3)
+        dist.scatter(output, inputs)
+        self.assertEqual(output, inputs[0])
+        self.assertFalse(output.requires_grad)
+
+    @parametrize("rank", [0, 1])
+    def test_reduce_scatter_base_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        in_buf = torch.arange(12.0).reshape(6, 2)
+        out_buf = torch.empty(3, 2)
+        dist._reduce_scatter_base(out_buf, in_buf)
+        self.assertEqual(out_buf, in_buf.chunk(2)[rank])
+
+    @parametrize("rank", [0, 1])
+    def test_reduce_scatter_tensor_copy_semantics(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(2, 2)
+        dist.reduce_scatter_tensor(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.chunk(2)[rank])
+
+    def test_reduce_scatter_base_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
+        out_tensor = torch.empty(2, 1)
+        dist._reduce_scatter_base(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.chunk(2)[1])
+
+    def test_reduce_scatter_tensor_coalesced_requires_grad(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1).requires_grad_(True)
+        out_tensor = torch.empty(2, 1)
+        with dist._coalescing_manager():
+            dist.reduce_scatter_tensor(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.chunk(2)[1])
+
+    @parametrize("rank", [0, 1])
     def test_allgather_copy_semantics(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
@@ -400,6 +490,36 @@ class TestFakePG(TestCase):
         self.assertIn("aten.lift_fresh.default", op_names)
         self.assertIn("c10d.allreduce_.default", op_names)
 
+    def test_reduce_scatter_wrong_input_list_size(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+
+        output = torch.empty(3, 3)
+        with self.assertRaisesRegex(
+            RuntimeError, "invalid input tensor list size, must be world size"
+        ):
+            dist.reduce_scatter(output, [torch.ones(3, 3)])
+
+    def test_scatter_wrong_input_list_size(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        output = torch.empty(3, 3)
+        with self.assertRaisesRegex(RuntimeError, "Incorrect input list size"):
+            dist.scatter(output, [torch.ones(3, 3)])
+
+    def test_scatter_non_root_rejects_input_list(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        pg = dist.distributed_c10d._get_default_group()
+
+        opts = dist.distributed_c10d.ScatterOptions()
+        opts.rootRank = 0
+        output = torch.empty(3, 3)
+        inputs = [[torch.ones(3, 3), torch.ones(3, 3)]]
+        with self.assertRaisesRegex(RuntimeError, "requires empty input on non-root"):
+            pg.scatter([output], inputs, opts)
+
     def test_gather_non_root_rejects_output_list(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
@@ -421,6 +541,31 @@ class TestFakePG(TestCase):
         output = [[torch.empty(3, 3), torch.empty(3, 3)]]
         with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
             pg.gather(output, [torch.ones(3, 3)], opts)
+
+    def test_reduce_scatter_wrong_output_list_size(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        pg = dist.distributed_c10d._get_default_group()
+
+        opts = dist.distributed_c10d.ReduceScatterOptions()
+        outputs = [torch.empty(3, 3), torch.empty(3, 3)]
+        inputs = [[torch.ones(3, 3), torch.ones(3, 3)]]
+        with self.assertRaisesRegex(
+            RuntimeError, "requires input/output tensor lists to have the same length"
+        ):
+            pg.reduce_scatter(outputs, inputs, opts)
+
+    def test_reduce_scatter_base_wrong_input_size(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_buf = torch.empty(3, 2)
+        in_buf = torch.ones(3, 2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input tensor must be the same size as output size times world size",
+        ):
+            dist._reduce_scatter_base(out_buf, in_buf)
 
     def test_allgather_coalesced_wrong_inner_list_size(self):
         store = FakeStore()

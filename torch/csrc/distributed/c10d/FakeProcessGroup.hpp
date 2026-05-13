@@ -180,37 +180,85 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
-      const ScatterOptions& /* opts */ = ScatterOptions()) override {
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::scatter: ", msg);
+    };
+    assertRootRank(invalidArgument, opts.rootRank, size_);
+    assertSingleElementOutput(invalidArgument, outputTensors);
+
+    if (rank_ == opts.rootRank) {
+      assertScatterInputTensorList(invalidArgument, inputTensors, size_);
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
+      outputTensors[0].copy_(inputTensors[0][rank_]);
+    } else {
+      assertEmptyInputTensorList(invalidArgument, inputTensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::reduce_scatter: ", msg);
+    };
+    assertInputOutputTensorListsSameSize(
+        invalidArgument, outputTensors.size(), inputTensors.size());
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      assertInputTensorListSizeEqualsWorldSize(
+          invalidArgument, inputTensors[i].size(), size_);
+      outputTensors[i].copy_(inputTensors[i][rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    TORCH_CHECK(
+        inputBuffer.numel() == outputBuffer.numel() * size_,
+        "input tensor must be the same size as output size times world size");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    auto chunks = inputBuffer.chunk(size_);
+    outputBuffer.copy_(chunks[rank_]);
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
-      std::vector<at::Tensor>& /* outputs */,
-      std::vector<at::Tensor>& /* inputs */,
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(
+          false, "FakeProcessGroup::reduce_scatter_tensor_coalesced: ", msg);
+    };
+    assertInputOutputTensorListsSameSize(
+        invalidArgument, outputs.size(), inputs.size());
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      TORCH_CHECK(
+          inputs[i].numel() == outputs[i].numel() * size_,
+          "input tensor must be the same size as output size times world size");
+      auto chunks = inputs[i].chunk(size_);
+      outputs[i].copy_(chunks[rank_]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 

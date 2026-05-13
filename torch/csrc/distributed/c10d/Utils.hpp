@@ -348,6 +348,20 @@ inline void assertGatherOutputTensorList(
   }
 }
 
+inline void assertScatterInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
+    int64_t size) {
+  if (inputTensors.size() != 1) {
+    fn("requires a single-element input list containing a list with " +
+       std::to_string(size) + " tensors.");
+  } else if (inputTensors[0].size() != static_cast<size_t>(size)) {
+    fn("Incorrect input list size " + std::to_string(inputTensors[0].size()) +
+       ". Input list size should be " + std::to_string(size) +
+       ", same as size of the process group.");
+  }
+}
+
 template <typename TensorList>
 inline void assertEmptyOutputTensorList(
     const std::function<void(const std::string&)>& fn,
@@ -357,11 +371,38 @@ inline void assertEmptyOutputTensorList(
   }
 }
 
+template <typename TensorList>
+inline void assertEmptyInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const TensorList& inputTensors) {
+  if (!inputTensors.empty()) {
+    fn("requires empty input on non-root");
+  }
+}
+
 inline void assertNonEmptyInputTensorList(
     const std::function<void(const std::string&)>& fn,
     size_t inputTensorListSize) {
   if (inputTensorListSize == 0) {
     fn("requires non-empty input tensor list");
+  }
+}
+
+inline void assertInputOutputTensorListsSameSize(
+    const std::function<void(const std::string&)>& fn,
+    size_t outputTensorListSize,
+    size_t inputTensorListSize) {
+  if (outputTensorListSize != inputTensorListSize) {
+    fn("requires input/output tensor lists to have the same length");
+  }
+}
+
+inline void assertInputTensorListSizeEqualsWorldSize(
+    const std::function<void(const std::string&)>& fn,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (inputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("invalid input tensor list size, must be world size");
   }
 }
 

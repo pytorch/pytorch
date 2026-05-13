@@ -5778,18 +5778,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   std::vector<at::Tensor> inputs;
 
   if (getRank() == opts.rootRank) {
-    if (inputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element input list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect input list size " << inputTensors[0].size()
-         << ". Input list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertScatterInputTensorList(invalidArgument, inputTensors, getSize());
 
     const auto& options = outputTensor.options();
     const auto& sizes = outputTensor.sizes();
@@ -5798,9 +5787,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   } else {
     // if not in the root rank, initialize inputTensors as empty place holder
     // with an empty list
-    if (!inputTensors.empty()) {
-      invalidArgument("requires empty input on non-root");
-    }
+    assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
