@@ -48,7 +48,7 @@ class LinearBlockSparsePattern:
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        backtrace: object | None,
+        backtrace: object,
     ) -> None:
         LinearBlockSparsePattern.row_block_size = (
             LinearBlockSparsePattern.prev_row_block_size

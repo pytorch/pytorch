@@ -959,7 +959,7 @@ class SACEstimator(TorchDispatchMode):
         self._saved_tensor_hook_ctx.__enter__()
         return super().__enter__()
 
-    def __exit__(self, *args: Any) -> None:  # type: ignore[no-untyped-def]
+    def __exit__(self, *args: object) -> None:  # type: ignore[no-untyped-def]
         self._saved_tensor_hook_ctx.__exit__()
         self._mod_tracker.__exit__(*args)
         super().__exit__(*args)

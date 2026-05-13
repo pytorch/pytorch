@@ -5,6 +5,7 @@ This package enables an interface for accessing MTIA backend in python
 
 import threading
 import traceback
+import types
 from collections.abc import Callable
 from typing import Any
 
@@ -309,7 +310,7 @@ class device:
         # pyrefly: ignore [missing-attribute]
         self.prev_idx = torch._C._mtia_maybeExchangeDevice(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, type: type[BaseException] | None, value: BaseException | None, traceback: types.TracebackType | None):
         # pyrefly: ignore [missing-attribute]
         self.idx = torch._C._mtia_maybeExchangeDevice(self.prev_idx)
         return False
@@ -359,7 +360,7 @@ class StreamContext:
                 self.dst_prev_stream = torch.mtia.current_stream(cur_stream.device)
         torch.mtia.set_stream(cur_stream)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, type: type[BaseException] | None, value: BaseException | None, traceback: types.TracebackType | None):
         # Local cur_stream variable for type refinement
         cur_stream = self.stream
         # If stream is None or no MTIA device available, return

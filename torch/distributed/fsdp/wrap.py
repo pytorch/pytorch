@@ -11,6 +11,7 @@ from collections.abc import Callable, Generator, Iterable, Sequence
 from typing import Any, cast
 
 import torch.nn as nn
+import types
 
 
 __all__ = [
@@ -604,5 +605,5 @@ class _ConfigAutoWrap:
     def __enter__(self) -> None:
         self.enable_autowrap_context(self.kwargs)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
         self.disable_autowrap_context()

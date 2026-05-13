@@ -9,6 +9,7 @@ import warnings
 from collections.abc import Callable
 from typing import Any, cast, overload, TypeVar
 from typing_extensions import Self
+import types
 
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
@@ -148,7 +149,7 @@ class _DecoratorContextManager:
     def __enter__(self) -> None:
         raise NotImplementedError
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
         raise NotImplementedError
 
     def clone(self):

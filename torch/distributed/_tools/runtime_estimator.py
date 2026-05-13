@@ -389,7 +389,7 @@ class RuntimeEstimator(TorchDispatchMode):
         return self
 
     # pyrefly: ignore [bad-override]
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         print(
             f"Estimated ({self._estimate_mode_type})"
             f"total_time: {self.total_runtime:.3f} ms"

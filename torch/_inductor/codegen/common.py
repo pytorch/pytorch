@@ -50,6 +50,7 @@ from ..utils import (
     unique,
 )
 from ..virtualized import (
+import types
     NullHandler,
     ops,
     OpsHandler,
@@ -2132,7 +2133,7 @@ class CodeGen:
         self.exit_stack.__enter__()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
@@ -2366,7 +2367,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
         self.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
