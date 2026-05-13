@@ -178,7 +178,7 @@ class CppTemplateKernel(CppKernel):
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data  # type: ignore[arg-type]
+        return L.view(node, sizes).data
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -186,10 +186,12 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
@@ -273,7 +275,7 @@ class CppTemplateKernel(CppKernel):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -335,7 +337,7 @@ class CppTemplateKernel(CppKernel):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -412,7 +414,7 @@ class CppTemplateKernel(CppKernel):
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst,
-                    epilogue_nodes,  # type: ignore[arg-type]
+                    epilogue_nodes,
                     offsets,
                     reindexers,
                 )
