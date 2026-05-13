@@ -2417,7 +2417,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
             )
 
         ref = self.arg_ref(guard)
@@ -2815,7 +2815,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
             if not self.guard_nn_modules:
                 # If guard_nn_modules is true, we will guard on the right set of guards
-                self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
+                self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             exc.unimplemented(
                 gb_type="Attempted to guard on uninitialized nn.Module",
@@ -2874,7 +2874,7 @@ class GuardBuilder(GuardBuilderBase):
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             # No explicit HASATTR guard needed for __code__ — the getattr
             # accessor installed by CONSTANT_MATCH implicitly guards hasattr.
-            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
 
@@ -3258,9 +3258,9 @@ class GuardBuilder(GuardBuilderBase):
             def _get_code_parts(langs: tuple[str, ...]) -> list[_ShapeGuardsHelper]:
                 # pyrefly: ignore [missing-attribute]
                 return output_graph.shape_env.produce_guards_verbose(
-                    [a.fake for a in fs],
+                    [a.fake for a in fs],  # type: ignore[misc]
                     [a.source for a in fs],
-                    input_contexts=input_contexts,
+                    input_contexts=input_contexts,  # type: ignore[arg-type]
                     equalities_inputs=equalities_inputs,
                     source_ref=self.source_ref,
                     # Export keeps static.

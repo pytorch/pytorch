@@ -509,7 +509,7 @@ class BaseUserFunctionVariable(VariableTracker):
             result = True
         else:
             try:
-                result = hasattr(self.get_function(), name)
+                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
             except NotImplementedError:
                 result = False
         return VariableTracker.build(tx, result)
@@ -621,7 +621,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         source = self.source
 
         if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn
+            source = self.source_fn  # type: ignore[assignment]
         return source  # type: ignore[return-value]
 
     def bind_args(
@@ -1524,7 +1524,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         return self.generator_cls(
             code,
             f_globals,
-            inline_tracer,
+            inline_tracer,  # type: ignore[arg-type]
             source=self.source,
         )
 
@@ -1599,7 +1599,7 @@ class UserMethodVariable(UserFunctionVariable):
         # operates on the unbound function, most guards should target
         # `source_fn` rather than the original `source`.
         if source_fn is None and kwargs.get("source") is not None:
-            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")  # type: ignore[assignment, arg-type]
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -1684,7 +1684,7 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         elif (
             _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
@@ -1701,7 +1701,7 @@ class UserMethodVariable(UserFunctionVariable):
             # We might have a better way to access the function object, this
             # information is stored in self.source_fn, use that to construct the
             # variable tracker.
-            return VariableTracker.build(tx, self.fn, self.source_fn)
+            return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
         return super().var_getattr(tx, name)
 
     def get_real_python_backed_value(self) -> Any:
@@ -1738,7 +1738,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
+        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -1772,7 +1772,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))
+        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -2543,7 +2543,7 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         all_args = self.self_args() + list(args)
         return VariableTracker.build(
             tx,
-            polyfills.getattr_and_trace,
+            polyfills.getattr_and_trace,  # type: ignore[arg-type]
         ).call_function(
             tx,
             [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],

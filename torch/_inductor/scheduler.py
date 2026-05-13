@@ -1442,7 +1442,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
         memory_warmup_iters=5,
         benchmark_iters=10,
         max_benchmark_duration=10,
-    )
+    )  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
@@ -4449,7 +4449,7 @@ class Scheduler:
 
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -7292,7 +7292,7 @@ class Scheduler:
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed
+            - V.graph.wrapper_code.freed  # type: ignore[has-type]
         ):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
@@ -8103,7 +8103,7 @@ class Scheduler:
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(
+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
         )
 
@@ -8743,7 +8743,7 @@ class BaseScheduling:  # noqa: docstring_linter
             from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
 
             debug_handle = set_kernel_post_grad_provenance_tracing(
-                node_schedule,
+                node_schedule,  # type: ignore[arg-type]
                 kernel_name,
             )
             V.graph.wrapper_code.write_provenance_debug_handle(
