@@ -23,7 +23,7 @@ exclude_patterns = [
     'test/generated_type_hints_smoketest.py',
     'test/test_torchfuzz_repros.py',
     # CPython tests
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -403,7 +403,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -994,7 +994,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
-    'test/dynamo/cpython/3.13/**',
+    'test/cpython/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1182,7 +1182,7 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'third_party/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
@@ -1215,7 +1215,7 @@ exclude_patterns = [
     'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1564,7 +1564,7 @@ exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/_vendor/**',
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
@@ -1598,7 +1598,7 @@ include_patterns = [
     'test/**/*.py',
 ]
 exclude_patterns = [
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'test/torch_np/numpy_test/**',
     'third_party/**',
@@ -1805,7 +1805,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     # CPython tests
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.
