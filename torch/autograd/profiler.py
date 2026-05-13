@@ -694,12 +694,21 @@ class profile:
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
+                is_python_function=kineto_event.is_python_function(),
+                activity_type=kineto_event.activity_type(),
                 metadata_json=kineto_event.metadata_json(),
+                extra_meta=kineto_event.extra_meta() or None,
                 flow_id=kineto_event.flow_id(),
                 flow_type=kineto_event.flow_type(),
                 flow_start=kineto_event.flow_start(),
                 external_id=kineto_event.external_id(),
                 linked_correlation_id=kineto_event.linked_correlation_id(),
+                structured_input_shapes=kineto_event.structured_input_shapes(),
+                structured_input_strides=kineto_event.structured_input_strides(),
+                input_dtypes=kineto_event.dtypes(),
+                python_id=kineto_event.python_id(),
+                python_parent_id=kineto_event.python_parent_id(),
+                python_module_id=kineto_event.python_module_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:

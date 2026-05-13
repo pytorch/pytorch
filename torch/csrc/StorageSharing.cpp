@@ -44,8 +44,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
       ctx->decref();
     }
   }
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -588,7 +587,7 @@ static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
 
 static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (arg == Py_None) {
+  if (Py_IsNone(arg)) {
     Py_RETURN_NONE;
   }
   TORCH_CHECK(

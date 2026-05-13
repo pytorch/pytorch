@@ -11,6 +11,7 @@ from sympy import Expr, symbols
 
 import torch._inductor.config as config
 from torch import dtype as torch_dtype
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
@@ -77,7 +78,7 @@ class CUTLASSKernel(Kernel):
     Baseclass for Cutlass based Kernels
     """
 
-    overrides = OpOverrides  # type: ignore[assignment]
+    overrides = OpOverrides
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -111,6 +112,25 @@ class CUTLASSKernel(Kernel):
             ):
                 raise AssertionError("All matching layout args should be identical")
             return first_match
+        attr_values = node.get_size() if attr == "size" else node.get_stride()
+        if dim >= len(attr_values):
+            return None
+        expr = attr_values[dim]
+        fallback_matches = []
+        for arg in itertools.chain.from_iterable(self.layout_args.values()):
+            if arg.attr != attr:
+                continue
+            if arg.node.get_name() != node.get_name():
+                continue
+            arg_values = (
+                arg.node.get_size() if arg.attr == "size" else arg.node.get_stride()
+            )
+            if arg.dim >= len(arg_values):
+                continue
+            if arg_values[arg.dim] == expr:
+                fallback_matches.append(arg)
+        if fallback_matches:
+            return fallback_matches[0]
         return None
 
     def add_layout_arg(
@@ -194,13 +214,12 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     Template kernels defined by Cutlass in C++.
     """
 
-    _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
-
     def __init__(
         self,
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
+        device_type: str = "cuda",
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
@@ -212,6 +231,9 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         self.kernel_name = kernel_name
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
+        self.device_type = device_type
+        self.device_codegen = get_device_op_overrides(self.device_type)
+        self._EXTRA_CPP_ARGS = f"size_t* workspace_size, uint8_t* workspace, {self.device_codegen.cpp_stream_type()} stream"
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -243,6 +265,22 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
 
     def get_signature(self) -> str:
         return self.signature
+
+    def _collect_unbound_layout_free_symbols(self, node: IRNode) -> OrderedSet[Expr]:
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for attr_name, values in (
+            ("size", node.get_size()),
+            ("stride", node.get_stride()),
+        ):
+            attr = attr_name  # help mypy narrow the Literal argument below
+            for dim, expr in enumerate(values):
+                if not isinstance(expr, Expr):
+                    continue
+                if self.find_layout_arg(node, attr, dim) is not None:
+                    continue
+                for symbol in expr.free_symbols:
+                    free_symbols.add(symbol)
+        return free_symbols
 
     def def_kernel(
         self,
@@ -284,27 +322,18 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 # NB: named nodes must be populated in the order of names
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-                if name not in (
-                    "X",
-                    "W",
-                    "Bias",
-                    "Y",
-                ):  # we handle these symbolic shapes explicitly
-                    for expr in itertools.chain(node.get_size(), node.get_stride()):
-                        if isinstance(expr, Expr):
-                            for s in expr.free_symbols:
-                                free_symbols.add(s)  # type: ignore[arg-type]
-
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for node in self.named_nodes.values():
+            free_symbols |= self._collect_unbound_layout_free_symbols(node)
         size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
@@ -326,7 +355,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     def call_kernel(
         self,
         name: str,
-        node: "CUTLASSTemplateBuffer",  # type: ignore[name-defined]
+        node: "CUTLASSTemplateBuffer",
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -354,7 +383,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         dynamic_shape_args = self.get_dynamic_shape_args()
         offset_args = self.get_offset_args()
         call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
-        call_args.extend(offset_args)  # type: ignore[arg-type]
+        call_args.extend(offset_args)
         for arg in self.runtime_arg_values:
             call_args.append(str(arg))
         arg_types.extend("const int" for _ in dynamic_shape_args)
@@ -584,8 +613,8 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         ],
         bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
-        template: "CUTLASSTemplate",  # type: ignore[name-defined]
-        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
+        template: "CUTLASSTemplate",
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)

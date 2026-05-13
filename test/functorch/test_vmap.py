@@ -59,7 +59,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     OpDTypes,
     ops,
-    skipCUDAIf,
     tol,
     toleranceOverride,
 )
@@ -70,7 +69,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
@@ -686,8 +684,6 @@ class TestVmapAPI(TestCase):
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
-        # noqa: F841
-
         def foo(xy):
             return xy[0] * xy[1]
 
@@ -3288,6 +3284,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(2, 0),
         )
 
+    def test_view_dtype(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        op = torch.ops.aten.view.dtype
+
+        test(op, (torch.rand(2, 3, 4), torch.uint8), in_dims=(1, None), out_dims=1)
+        test(op, (torch.rand(5), torch.int32), in_dims=(0, None), out_dims=0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"dim\(\) cannot be 0 to view Float as Byte"
+        ):
+            vmap(op, in_dims=(0, None))(torch.rand(6), torch.uint8)
+
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
@@ -4426,9 +4433,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
@@ -4439,7 +4443,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             }
         ),
     )
-    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = ()
@@ -4512,9 +4515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(
@@ -4831,6 +4831,60 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, Tensor.fill_)
 
+    @parametrize(
+        "op,msg,extra_positional_args,extra_kwargs",
+        [
+            subtest(
+                (
+                    Tensor.scatter_add_,
+                    "out-of-place operators instead of scatter_add_",
+                    (),
+                    {},
+                ),
+                name="scatter_add",
+            ),
+            subtest(
+                (
+                    Tensor.scatter_reduce_,
+                    "out-of-place operators instead of scatter_reduce_",
+                    ("sum",),
+                    {"include_self": True},
+                ),
+                name="scatter_reduce",
+            ),
+        ],
+    )
+    def test_scatter_inplace_self_not_batched(
+        self, device, op, msg, extra_positional_args, extra_kwargs
+    ):
+        x = torch.zeros(5, device=device)
+
+        def call_op(self, dim, index, src):
+            return op(
+                self,
+                dim,
+                index,
+                src,
+                *extra_positional_args,
+                **extra_kwargs,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, None, 0))(
+                x,
+                0,
+                torch.tensor([0, 1], device=device),
+                torch.randn(2, 2, device=device),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(call_op, in_dims=(None, None, 0, None))(
+                x,
+                0,
+                torch.tensor([[0, 1], [2, 3]], device=device),
+                torch.randn(2, device=device),
+            )
+
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -5111,10 +5165,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         test(self, op, tuple(inputs), in_dims=tuple(in_dims))
 
-    @skipCUDAIf(
-        TEST_WITH_ROCM and not torch.cuda.has_magma,
-        "ROCm hipsolver backend does not currently support eig",
-    )
     def test_torch_return_types_returns(self, device):
         t = torch.randn(3, 2, 2, device=device)
         self.assertTrue(
@@ -5128,9 +5178,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 vmap(torch.topk, (0, None, None))(t, 1, 0), torch.return_types.topk
             )
         )
-        self.assertTrue(
-            isinstance(vmap(torch.linalg.eig, (0))(t), torch.return_types.linalg_eig)
-        )
+        if not (TEST_WITH_ROCM and not torch.cuda.has_magma):
+            self.assertTrue(
+                isinstance(
+                    vmap(torch.linalg.eig, (0))(t), torch.return_types.linalg_eig
+                )
+            )
 
     def test_namedtuple_returns(self, device):
         Point = namedtuple("Point", ["x", "y"])

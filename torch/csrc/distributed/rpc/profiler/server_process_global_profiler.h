@@ -34,7 +34,7 @@ class State {
   void pushResult(thread_event_lists result) {
     std::unique_lock<std::mutex> lock(resultsMutex_);
 
-    // NB: When a thread wants to push an entry into the this container,
+    // NB: When a thread wants to push an entry into this container,
     // main control logic might have exited the process-global profile range.
     results_.emplace_back(std::move(result));
   }

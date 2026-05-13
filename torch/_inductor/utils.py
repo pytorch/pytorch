@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
-    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+    from torch.nn.functional import ScalingType
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -422,7 +422,7 @@ def _do_bench_using_profiling(
 @functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
-        from torchvision.ops import roi_align  # noqa: F401
+        from torchvision.ops import roi_align
 
         torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
@@ -453,6 +453,29 @@ def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
 def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
+
+
+def flatten_index(
+    indices: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
+) -> sympy.Expr:
+    """Row-major flatten: per-dimension indices -> flat index."""
+    assert len(indices) == len(sizes)
+    flat = sympy.S.Zero
+    for index, size in zip(indices, sizes):
+        flat = flat * size + index
+    return flat
+
+
+def decompose_index(
+    index: sympy.Expr,
+    sizes: Sequence[sympy.Expr],
+) -> list[sympy.Expr]:
+    """Row-major decomposition: flat index -> per-dimension indices."""
+    return [
+        ModularIndexing(index, sympy_product(sizes[i + 1 :]), size)
+        for i, size in enumerate(sizes)
+    ]
 
 
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
@@ -487,6 +510,8 @@ def _type_of(key: torch.dtype | None) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        "float8_e4m3fnuz": "fp8e4b8",
+        "float8_e5m2fnuz": "fp8e5b16",
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
@@ -1017,9 +1042,17 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(
-                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
-            )
+            formatted_node = node.format_node(include_tensor_metadata=True)
+            if formatted_node is not None and torch.version.hip:
+                # AMDGCN asm strings can contain newlines, which propagate
+                # into format_node() output.  Split so every line gets the
+                # comment prefix; otherwise bare newlines break the wrapper.
+                detailed_metadata.extend(
+                    f"{wrapper.comment}   {line}"
+                    for line in formatted_node.splitlines()
+                )
+            else:
+                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -1140,6 +1173,10 @@ def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
 
+def prefix_is_pointwise(prefix: str) -> bool:
+    return prefix[0] in ("x", "y", "z")
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -1236,7 +1273,7 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
         if isinstance(node.meta.get("val"), torch.Tensor)
     )
 
-    out_arg = output_node(gm).args[0]  # type: ignore[union-attr]
+    out_arg = output_node(gm).args[0]
     out_args = out_arg if isinstance(out_arg, tuple) else (out_arg,)
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
@@ -1547,6 +1584,20 @@ class IndentedBuffer:
         else:
             self._lines.append("")
 
+    def writeline_jit(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to JIT buffer only. On a plain IndentedBuffer, same as writeline."""
+        self.writeline(line)
+
+    def writeline_aot(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
+    def splice_jit(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to JIT buffer only. On a plain IndentedBuffer, same as splice."""
+        self.splice(other_code, strip=strip)
+
+    def splice_aot(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
     def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
         for line in lines:
             self.writeline(line)
@@ -1610,6 +1661,41 @@ class IndentedBuffer:
 
     def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
         return new_line in self._lines
+
+
+class AotOnlyBuffer(IndentedBuffer):
+    """IndentedBuffer for pure-AOTI codegen.
+
+    Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
+    write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
+    sites use writeline_jit/writeline_aot uniformly across pure-JIT and
+    pure-AOTI modes.
+    """
+
+    def writeline_jit(self, line) -> None:
+        pass
+
+    def writeline_aot(self, line) -> None:
+        self.writeline(line)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        pass
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        self.splice(other_code, strip=strip)
+
+
+def make_codegen_buffer() -> IndentedBuffer:
+    """Construct the IndentedBuffer subclass matching the current codegen mode.
+
+    Pure AOTI → AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  → IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    """
+    from .virtualized import V
+
+    if V.graph.aot_mode:
+        return AotOnlyBuffer()
+    return IndentedBuffer()
 
 
 class FakeIndentedBuffer(IndentedBuffer):
@@ -1956,12 +2042,46 @@ def can_use_tma(
     )
 
 
+def _descriptor_shape_fits_in_int32(
+    sizes: Sequence[sympy.Expr], add_guards: bool = False
+) -> bool:
+    int32_max = torch.iinfo(torch.int32).max
+    conditions = []
+    for size in sizes:
+        if isinstance(size, (int, sympy.Integer)):
+            if size > int32_max:
+                return False
+        else:
+            conditions.append(sympy.Le(size, int32_max))
+
+    if not conditions:
+        return True
+
+    from .virtualized import V
+
+    condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
     if not config.triton.enable_persistent_tma_matmul:
         return False
     if not all(len(m.get_size()) == 2 for m in matrices):
+        return False
+    if not all(
+        _descriptor_shape_fits_in_int32(m.get_size(), add_guards=add_guards)
+        for m in matrices
+    ):
+        return False
+    if config.triton.enable_template_tma_store and not _descriptor_shape_fits_in_int32(
+        output_layout.size, add_guards=add_guards
+    ):
         return False
     # On AMD (HIP), TMA is not available but we still use non-TMA persistent
     # kernels, so skip the TMA compatibility checks.
@@ -2602,7 +2722,7 @@ def run_and_get_kernels(
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
-        if config.cpp_wrapper and config.triton.autotune_at_compile_time is False:
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
@@ -2770,7 +2890,7 @@ def get_benchmark_name() -> str | None:
     It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
     scripts, this function may return None.
 
-    There are 2 flavors of --only argument we need handle:
+    There are 2 flavors of --only argument we need to handle:
     1. --only model_name
     2. --only=model_name
     """
@@ -2812,7 +2932,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(val, sympy.Expr), (
         "only support sympy.Expr as input to get_sympy_Expr_dtype"
     )
-    if val.is_integer:  # type: ignore[attr-defined]
+    if val.is_integer:
         return torch.int64
     else:
         return torch.float64
@@ -3542,7 +3662,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(e, int_max)
         return True
 
     # Allow for unhinted e as long as we can still statically prove
@@ -3742,6 +3862,13 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def device_supports_fp64(device: torch.device | None) -> bool:
+    """Check if the given device supports float64."""
+    if device is not None and device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
     if (
@@ -3927,7 +4054,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     # Check for cudagraph_unsafe tag
     if (
         isinstance(target, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
+        and torch._C.Tag.cudagraph_unsafe in target.tags
     ):
         return True
 
@@ -4332,7 +4459,8 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
         return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
-            x, torch._inductor.ir.GeneratorState
+            x,
+            (torch._inductor.ir.GeneratorState, torch._inductor.ir.OpaqueObjectState),
         )
 
     flat_args = [
