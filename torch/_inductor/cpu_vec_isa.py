@@ -127,33 +127,36 @@ cdll.LoadLibrary("__lib_path__")
                 # Bound the dlopen probe and retry on hang. A stuck
                 # `import torch` in the child has been observed in CI to
                 # hang the parent test process for the whole 30-minute
-                # outer timeout. Only retry on TimeoutExpired (transient);
-                # CalledProcessError means the .so genuinely can't load and
-                # falls through to the broad except below.
+                # outer timeout. Use subprocess.run so the child is killed
+                # on TimeoutExpired (check_call leaks the child). Only retry
+                # on TimeoutExpired (transient); CalledProcessError means
+                # the .so genuinely can't load and falls through to the
+                # broad except below.
                 probe_cmd = [
                     sys.executable,
                     "-c",
                     VecISA._avx_py_load.replace("__lib_path__", output_path),
                 ]
-                for attempt in range(2):
+                max_attempts = 2
+                for attempt in range(max_attempts):
                     try:
-                        subprocess.check_call(
+                        subprocess.run(
                             probe_cmd,
                             cwd=output_dir,
                             stderr=subprocess.DEVNULL,
                             env=python_subprocess_env(),
                             timeout=60,
+                            check=True,
                         )
                         break
                     except subprocess.TimeoutExpired:
-                        remaining = 1 - attempt
                         warnings.warn(
-                            f"VecISA dlopen probe for {self} hung after 60s; "
-                            f"retries remaining: {remaining}",
+                            f"VecISA dlopen probe for {self} hung after 60s "
+                            f"(attempt {attempt + 1}/{max_attempts})",
                             stacklevel=2,
                         )
-                        if remaining == 0:
-                            return False
+                else:
+                    return False
             except Exception:
                 return False
 
