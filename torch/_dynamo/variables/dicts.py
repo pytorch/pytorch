@@ -41,12 +41,14 @@ from ..source import (
     is_from_local_source,
 )
 from ..utils import (
+    _item_debug_repr,
     cmp_name_to_op_mapping,
     dict_items,
     dict_keys,
     dict_values,
     istype,
     raise_args_mismatch,
+    tracked_repr,
 )
 from .base import (
     AttributeMutationExisting,
@@ -159,8 +161,8 @@ class ConstDictVariable(VariableTracker):
     def debug_repr(self) -> str:
         items: list[str] = []
         for k, v in self.items.items():
-            key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-            val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+            key_str = _item_debug_repr(k.vt)
+            val_str = _item_debug_repr(v)
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
@@ -169,6 +171,13 @@ class ConstDictVariable(VariableTracker):
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
         }
+
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        items = [
+            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
+            for key, value in self.items.items()
+        ]
+        return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
         self.install_dict_keys_match_guard()
@@ -976,16 +985,18 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__repr__":
-            return VariableTracker.build(tx, self.debug_repr())
-        return super().call_method(tx, name, args, kwargs)
+    def repr_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+        if self.kv == "keys":
+            items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
+            return VariableTracker.build(tx, f"dict_keys([{items}])")
+        if self.kv == "values":
+            items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
+            return VariableTracker.build(tx, f"dict_values([{items}])")
+        items = ", ".join(
+            f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+            for key, value in self.view_items
+        )
+        return VariableTracker.build(tx, f"dict_items([{items}])")
 
     def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
         """Sequence length for dict view objects."""
@@ -1000,6 +1011,18 @@ class DictViewVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6142-L6155 (dictviews_or)
         s = VariableTracker.build(tx, set).call_function(tx, [self], {})
         s.call_method(tx, "update", [other], {})
+        return s
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslator",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6036 (dictviews_sub)
+        self_, other_ = (other, self) if reverse else (self, other)
+        s = VariableTracker.build(tx, set).call_function(tx, [self_], {})
+        s.call_method(tx, "difference_update", [other_], {})
         return s
 
 
@@ -1034,11 +1057,9 @@ class DictKeysVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k in self.view_items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
+                key_str = _item_debug_repr(k.vt)
                 items.append(key_str)
-            return "dict_keys([" + ",".join(items) + "])"
+            return "dict_keys([" + ", ".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -1056,8 +1077,6 @@ class DictKeysVariable(DictViewVariable):
         if name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
@@ -1078,7 +1097,7 @@ class DictKeysVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1103,9 +1122,11 @@ class DictValuesVariable(DictViewVariable):
     # Override DictViewVariable.hash_impl to restore the base identity hash.
     kv = "values"
 
-    # dict.values() do not implement nb_or and nb_inplace_or
+    # dict.values() do not implement tp_as_number
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None  # type: ignore[bad-override]
+    nb_inplace_or = None
+    nb_subtract_impl = None  # type: ignore[bad-override]
+    nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1133,9 +1154,9 @@ class DictValuesVariable(DictViewVariable):
         else:
             items: list[str] = []
             for v in self.view_items:
-                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                val_str = _item_debug_repr(v)
                 items.append(val_str)
-            return "dict_values([" + ",".join(items) + "])"
+            return "dict_values([" + ", ".join(items) + "])"
 
 
 class DictItemsVariable(DictViewVariable):
@@ -1165,12 +1186,10 @@ class DictItemsVariable(DictViewVariable):
         else:
             items: list[str] = []
             for k, v in self.view_items:
-                key_str = (
-                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
-                )
-                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                key_str = _item_debug_repr(k.vt)
+                val_str = _item_debug_repr(v)
                 items.append(f"({key_str}, {val_str})")
-            return "dict_items([" + ",".join(items) + "])"
+            return "dict_items([" + ", ".join(items) + "])"
 
     def sq_contains(
         self, tx: "InstructionTranslator", item: VariableTracker
@@ -1230,8 +1249,6 @@ class DictItemsVariable(DictViewVariable):
         elif name in (
             "__and__",
             "__iand__",
-            "__sub__",
-            "__isub__",
             "__xor__",
             "__ixor__",
         ):
@@ -1252,7 +1269,7 @@ class DictItemsVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1411,6 +1428,26 @@ class DunderDictVariable(ConstDictVariable):
             value = default()
             self.items[name] = value
             return value
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "copy":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ConstDictVariable(
+                dict(self.items), mutation_type=ValueMutationNew(), source=None
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
