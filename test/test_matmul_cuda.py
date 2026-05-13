@@ -22,6 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     blas_library_context,
+    IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     SM80OrLater,
     SM90OrLater,
@@ -118,8 +119,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
-        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12:
-            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+")
+        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12 or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+ and sm90")
 
         torch._C._set_sm_carveout_experimental(None)
         dtype = torch.float16
@@ -160,6 +161,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_sm_carveout_invalid_value_throws(self, device):
+        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12 or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+ and sm90")
         sm_count = torch.cuda.get_device_properties().multi_processor_count
         a = torch.empty(64, 64, device=device, dtype=torch.float16)
         b = torch.empty(64, 64, device=device, dtype=torch.float16)
