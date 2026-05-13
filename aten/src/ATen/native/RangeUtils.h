@@ -44,7 +44,6 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
-    TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
     int64_t sgn = (xstep > 0) - (xstep < 0);
     size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
   } else {
