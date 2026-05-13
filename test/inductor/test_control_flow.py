@@ -2010,7 +2010,6 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2])
     @parametrize("autograd", [True, False])
-    @torch._inductor.config.patch(shape_padding=False)
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_pytree_in_out(self, device, dynamic, reverse, dim, autograd):
         self._run_test(
@@ -2023,6 +2022,22 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    @requires_gpu
+    @torch._inductor.config.patch(shape_padding=True, force_shape_pad=True)
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_pytree_in_out_shape_padding(self):
+        self._run_test(
+            model=ScanModels.SimpleWithPytreeInOuts(reverse=False, dim=0),
+            inputs=(
+                torch.ones(2, 2, 2),
+                torch.ones(2, 2),
+                torch.ones(2),
+            ),
+            device=GPU_TYPE,
+            dynamic=False,
+            autograd=True,
         )
 
     @requires_gpu
