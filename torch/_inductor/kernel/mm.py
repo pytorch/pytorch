@@ -214,6 +214,17 @@ def check_supported_striding(mat_a, mat_b) -> None:
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
+def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
+
+
 def decomposeK(a, b, k_splits):
     m = a.shape[0]
     n = b.shape[1]
@@ -618,19 +629,6 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
-        if alpha == 0:
-            arg2 = 0
-        else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
-
     if out_dtype is not None:
         input_dtype = mat1.get_dtype()
         torch._check(
@@ -653,6 +651,43 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             ),
             lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
         )
+
+    if beta == 0 and mat1.get_device().type == "cuda":
+        _check_addmm_input_metadata(inp, mat1, mat2)
+        if alpha == 0:
+            _, _, _, layout, mat1, mat2 = mm_args(
+                mat1,
+                mat2,
+                layout=layout,
+                out_dtype=None if layout is not None else out_dtype,
+            )
+            return lowerings[aten.full](
+                layout.size,
+                0,
+                dtype=layout.dtype,
+                device=layout.device,
+            )
+        if layout is not None:
+            result = lowerings[aten.mm](mat1, mat2, layout=layout)
+        else:
+            result = lowerings[aten.mm](mat1, mat2, out_dtype=out_dtype)
+        if alpha != 1:
+            result = lowerings[aten.mul](alpha, result)
+        return result
+
+    if use_native_matmul(mat1, mat2):
+        if beta == 0:
+            _check_addmm_input_metadata(inp, mat1, mat2)
+            arg1 = 0
+        else:
+            arg1 = lowerings[aten.mul](beta, inp)
+
+        if alpha == 0:
+            arg2 = 0
+        else:
+            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
+
+        return lowerings[aten.add](arg1, arg2)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(

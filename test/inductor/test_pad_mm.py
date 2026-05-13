@@ -192,6 +192,37 @@ class PadMMTest(TestCase):
         b = torch.randn(10, 100).to(GPU_TYPE)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
+    @fresh_cache()
+    @inductor_config.patch(shape_padding=True)
+    @unittest.skipIf(
+        GPU_TYPE != "cuda",
+        "CUDA eager ignores addmm input shape when beta=0",
+    )
+    def test_addmm_beta_zero_mismatched_bias_skips_padding(self):
+        def addmm(bias, x, weight):
+            return torch.addmm(bias, x, weight, beta=0.0, alpha=0.1)
+
+        def bench(fn):
+            fn()
+            return 1.0
+
+        bias = torch.zeros(8, device=GPU_TYPE)
+        x = torch.randn(2, 8, device=GPU_TYPE)
+        weight = torch.randn(8, 13, device=GPU_TYPE)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.is_mm_compute_bound",
+                return_value=True,
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pad_mm.get_do_bench",
+                return_value=bench,
+            ),
+        ):
+            actual = torch.compile(addmm, fullgraph=True)(bias, x, weight)
+        self.assertEqual(actual, addmm(bias, x, weight))
+
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
