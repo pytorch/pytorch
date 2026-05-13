@@ -93,7 +93,8 @@ class _TensorMeta:
             An empty strided tensor on ``device``.
         """
         t = _make_tensor_from_meta(self, device)
-        t.requires_grad_(self.requires_grad)
+        if t.is_floating_point():
+            t.requires_grad_(self.requires_grad)
         return t
 
     def get_diff(self, other: _TensorMeta) -> list[str]:
