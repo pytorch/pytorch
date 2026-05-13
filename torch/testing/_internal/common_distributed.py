@@ -212,7 +212,9 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
-    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
+    if TEST_PRIVATEUSE1 and torch.accelerator.is_available() and torch.accelerator.device_count() >= x:
+        return True
+    return False
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -2038,9 +2040,6 @@ class MultiProcContinuousTest(TestCase):
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
-
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
 
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK

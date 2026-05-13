@@ -24,7 +24,14 @@ import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 from torch.distributed.distributed_c10d import SHRINK_ABORT as NCCL_SHRINK_ABORT
 
-if torch.accelerator.current_accelerator() is None:
+DEVICE_TYPE = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+
+if torch.accelerator.current_accelerator() and dist.is_backend_available(BACKEND) is None:
     print("No accelerator available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
@@ -91,12 +98,6 @@ if (acc := torch.accelerator.current_accelerator()):
     device_module = getattr(torch, acc.type, None)
     if device_module and hasattr(device_module, 'is_bf16_supported'):
         BFLOAT16_AVAILABLE = device_module.is_bf16_supported()
-DEVICE_TYPE = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
-BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 
 CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
     torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12

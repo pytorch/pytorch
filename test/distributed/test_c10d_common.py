@@ -1427,7 +1427,13 @@ class AbstractCommTest:
             rank=self.rank,
             store=store,
         )
-        device = device_type
+        device = (
+            device_type if backend == BACKEND
+            else "cuda" if backend == "nccl"
+            else "xpu" if backend == "xccl"
+            else "cpu"
+        )
+
         # test alltoall_base
         tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
         zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
