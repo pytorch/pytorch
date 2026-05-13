@@ -188,7 +188,7 @@ def tag_to_layout_constraint(
 ) -> Callable[..., tuple[Any, Any]] | None:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
-    if tag == torch._C.Tag.needs_contiguous_strides:
+    if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
         return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
@@ -280,7 +280,7 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
-        return x.is_integer is True
+        return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
 
@@ -755,7 +755,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type]
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -1190,7 +1190,7 @@ def squeeze(x, dim=None):
         if isinstance(dim, (int, sympy.Expr))
         else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
-    dim = canonicalize_dims(len(x.get_size()), dim)
+    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1597,8 +1597,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
-        prev_end = inputs_ranges[-1][-1]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
+        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -2239,7 +2239,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1] + offset,
                 original_shape[dim2],
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
@@ -2247,7 +2247,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
                 original_shape[dim1],
                 original_shape[dim2] - offset,
             ),
-            0,
+            0,  # type: ignore[arg-type]
         )
 
     base_idx = (0, 0)
@@ -2408,7 +2408,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.check_leq(size, dim_size)
-    sizevars.check_lt(0, step)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.guarding_hint_or_throw(dim_size) > 0:
@@ -3686,8 +3686,8 @@ def select_scatter(x, src, dim: int, index: int):
         # unbacked index
         return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
 
-    V.graph.sizevars.check_leq(0, index)
-    V.graph.sizevars.check_lt(index, x.get_size()[dim])
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -5095,7 +5095,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -8190,7 +8190,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitialized_val = 0.0
 
-    if V.graph.sizevars.statically_known_equals(old_numel, 0):
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
     strides = x.maybe_get_stride()
@@ -8465,7 +8465,7 @@ def associative_scan(
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
@@ -8619,7 +8619,7 @@ def prepare_softmax_online(x, dim):
     rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
     hint, num_split = ir.Reduction.num_splits(
         **kwargs,
-        reduction_type="online_softmax_reduce",
+        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
         reduction_numel=rnumel,
     )
 
