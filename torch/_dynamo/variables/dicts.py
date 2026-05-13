@@ -62,7 +62,7 @@ from .sets import SetVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
 
@@ -192,7 +192,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_tree_map_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
@@ -242,7 +242,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_tree_map_with_path_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
@@ -373,7 +373,7 @@ class ConstDictVariable(VariableTracker):
                 self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
@@ -381,7 +381,7 @@ class ConstDictVariable(VariableTracker):
         return self.items[key]
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
@@ -418,7 +418,7 @@ class ConstDictVariable(VariableTracker):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -461,14 +461,14 @@ class ConstDictVariable(VariableTracker):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
@@ -478,7 +478,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -715,7 +715,9 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items]
 
@@ -742,13 +744,13 @@ class ConstDictVariable(VariableTracker):
         self.call_method(tx, "update", [other], {})
         return self
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
@@ -779,12 +781,12 @@ class ConstDictVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str):
+    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
         return super().var_getattr(tx, name)
@@ -804,12 +806,14 @@ class MappingProxyVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MappingProxyType
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # mappingproxy.__hash__ delegates to the underlying dict, which
         # raises TypeError. Mirror that behavior.
         return self.dv_dict.hash_impl(tx)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return self.dv_dict.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -839,7 +843,7 @@ class MappingProxyVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
 
-    def _check_mutation_guard(self, tx: "InstructionTranslator") -> None:
+    def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
             msg = (
                 "A dict has been modified while we have an existing mappingproxy object. "
@@ -863,7 +867,7 @@ class MappingProxyVariable(VariableTracker):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
         # mappingproxy_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/descrobject.c#L1052-L1056
@@ -873,7 +877,7 @@ class MappingProxyVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -881,14 +885,14 @@ class MappingProxyVariable(VariableTracker):
         self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.tp_iter_impl(tx)
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length(tx)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         if self.python_type() is types.MappingProxyType:
             return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
@@ -901,7 +905,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         pass
 
@@ -934,7 +938,7 @@ class DictViewVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
@@ -945,7 +949,9 @@ class DictViewVariable(VariableTracker):
         # Implement in the subclasses
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return self.view_items_vt
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -956,7 +962,7 @@ class DictViewVariable(VariableTracker):
         codegen.call_method(0)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         if self.kv is None:
             raise AssertionError("kv must not be None for call_obj_hasattr")
@@ -966,7 +972,7 @@ class DictViewVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -975,13 +981,13 @@ class DictViewVariable(VariableTracker):
             return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
-    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""
         return VariableTracker.build(tx, len(self.view_items))
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1009,7 +1015,7 @@ class DictKeysVariable(DictViewVariable):
     def python_type(self) -> type:
         return dict_keys
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictKeysIterator
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
@@ -1030,7 +1036,7 @@ class DictKeysVariable(DictViewVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1094,7 +1100,7 @@ class DictValuesVariable(DictViewVariable):
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return super(DictViewVariable, self).hash_impl(tx)
 
     @property
@@ -1104,7 +1110,7 @@ class DictValuesVariable(DictViewVariable):
     def python_type(self) -> type:
         return dict_values
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictValuesIterator
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
@@ -1156,7 +1162,7 @@ class DictItemsVariable(DictViewVariable):
                 items.append(f"({key_str}, {val_str})")
             return "dict_items([" + ",".join(items) + "])"
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictItemsIterator
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
@@ -1165,7 +1171,7 @@ class DictItemsVariable(DictViewVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1258,7 +1264,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     @staticmethod
     def get_value___dict__(
-        tx: "InstructionTranslator", vt: VariableTracker
+        tx: "InstructionTranslatorBase", vt: VariableTracker
     ) -> dict[str, VariableTracker]:
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
 
@@ -1272,7 +1278,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             for key, value in example_value_dict.items()
         }
 
-    def __init__(self, item: VariableTracker, tx: "InstructionTranslator") -> None:
+    def __init__(self, item: VariableTracker, tx: "InstructionTranslatorBase") -> None:
         self.item = item
         self.side_effects = tx.output.side_effects
         self.item_dict = self.get_value___dict__(tx, item)
@@ -1333,7 +1339,7 @@ class DunderDictVariable(ConstDictVariable):
     @classmethod
     def create(
         cls,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         vt: VariableTracker,
     ) -> "DunderDictVariable":
         mutation = AttributeMutationExisting() if vt.source else AttributeMutationNew()
@@ -1349,7 +1355,7 @@ class DunderDictVariable(ConstDictVariable):
     def __init__(
         self,
         vt: VariableTracker,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
@@ -1382,6 +1388,6 @@ class DunderDictVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         pass

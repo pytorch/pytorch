@@ -35,7 +35,7 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class DistributedVariable(VariableTracker):
@@ -129,7 +129,9 @@ class WorldMetaClassVariable(DistributedVariable):
     def python_type(self) -> type:
         return type(self.value)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "WORLD":
             if not self.source:
                 raise AssertionError(
@@ -157,7 +159,7 @@ class BackwardHookVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         module: VariableTracker,
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
@@ -234,7 +236,7 @@ class BackwardHookVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -244,7 +246,10 @@ class BackwardHookVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     def _setup_hook(
-        self, tx: "InstructionTranslator", hook_method_name: str, args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        hook_method_name: str,
+        args: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
