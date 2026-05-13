@@ -60,9 +60,17 @@ class TestIndexingSimplification(InductorTestCase):
         sizevars = SizeVarAllocator()
         i = sympy.Symbol("i", integer=True, nonnegative=True)
 
+        with self.assertRaises(AssertionError):
+            sizevars.analyze_lane_contiguity(i, i, 6)
+
         result = sizevars.analyze_lane_contiguity(i + 8, i, 8)
         self.assertEqual(result.contiguous_width, 8)
         self.assertEqual(result.stride, 1)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i, i, 8)
+        self.assertIsNone(result.contiguous_width)
+        self.assertEqual(result.stride, 2)
         self.assertFalse(result.uniform)
 
         result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i, 8)
@@ -75,6 +83,10 @@ class TestIndexingSimplification(InductorTestCase):
 
         result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i, 8)
         self.assertEqual(result.contiguous_width, 2)
+        self.assertEqual(result.stride, 1)
+
+        result = sizevars.analyze_lane_contiguity(Mod(i, 4), i, 8)
+        self.assertEqual(result.contiguous_width, 4)
         self.assertEqual(result.stride, 1)
 
         result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i, 8)
