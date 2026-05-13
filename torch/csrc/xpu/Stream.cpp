@@ -163,7 +163,7 @@ static PyTypeObject THXPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    offsetof(THPStream, weakreflist), /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPStreamType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPStream_methods, /* tp_methods */

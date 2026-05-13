@@ -168,7 +168,7 @@ static PyTypeObject THXPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPEventType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPEvent_methods, /* tp_methods */
