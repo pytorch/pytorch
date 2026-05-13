@@ -1986,7 +1986,7 @@ class DeviceCachingAllocator {
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     const size_t prefix_size = requested_addr - block_begin;
 
-    // mallocWithAddress may allocates both prefix block and requested block,
+    // mallocWithAddress may allocate both prefix block and requested block,
     // and free prefix block later. This adds a fake malloc/free pair for prefix
     // block. A metadata is added for better memory visualization.
     const auto original_user_metadata = getUserMetadata();
