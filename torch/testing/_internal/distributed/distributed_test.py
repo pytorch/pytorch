@@ -25,7 +25,6 @@ import numpy as np
 
 import torch
 import torch.cuda
-import torch.xpu
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
@@ -33,6 +32,7 @@ import torch.distributed.algorithms.model_averaging.utils as model_averaging_uti
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.xpu
 from torch._utils_internal import (
     TEST_MASTER_ADDR as MASTER_ADDR,
     TEST_MASTER_PORT as MASTER_PORT,
@@ -94,13 +94,14 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    TemporaryFileName,
-    TEST_XPU,
-    TEST_CUDA,
     skipIfXpu,
+    TemporaryFileName,
+    TEST_CUDA,
+    TEST_XPU,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 # print("device_type: ",device_type)
@@ -510,7 +511,11 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if device_id is None:
         return torch.empty(size, size, size, dtype=dtype).fill_(value)
     else:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value).to(torch.device(device_id))
+        return (
+            torch.empty(size, size, size, dtype=dtype)
+            .fill_(value)
+            .to(torch.device(device_id))
+        )
 
 
 def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
@@ -603,7 +608,9 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
-        if (BACKEND == "nccl" or BACKEND == "xccl") and not torch.accelerator.is_available():
+        if (
+            BACKEND == "nccl" or BACKEND == "xccl"
+        ) and not torch.accelerator.is_available():
             sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         self = cls(test_name)
         self.rank = rank
@@ -648,7 +655,12 @@ class TestDistBackend(MultiProcessTestCase):
 
 class DistributedTest:
     class _DistTestBase:
-        blocking_str = "TORCH_NCCL_BLOCKING_WAIT" if BACKEND == "nccl" else "TORCH_XCCL_BLOCKING_WAIT"
+        blocking_str = (
+            "TORCH_NCCL_BLOCKING_WAIT"
+            if BACKEND == "nccl"
+            else "TORCH_XCCL_BLOCKING_WAIT"
+        )
+
         def _barrier(self, *args, **kwargs):
             Barrier.sync(*args, **kwargs)
 
@@ -1330,7 +1342,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
             (BACKEND != "nccl" and BACKEND != "xccl") or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL or XCCL only; internal test flaky"
+            "Coalescing manager currently tests with NCCL or XCCL only; internal test flaky",
         )
         def test_coalescing_manager(self):
             self._barrier()
@@ -1364,7 +1376,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
             (BACKEND != "nccl" and BACKEND != "xccl") or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL or XCCL only; internal test flaky"
+            "Coalescing manager currently tests with NCCL or XCCL only; internal test flaky",
         )
         def test_coalescing_manager_async(self):
             self._barrier()
@@ -1397,7 +1409,10 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
@@ -1412,7 +1427,7 @@ class DistributedTest:
 
             for val in ["1", "0"]:
                 os.environ[self.blocking_str] = val
-                for src in range(0, world_size):
+                for src in range(world_size):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(
                         src
                     )
@@ -1437,7 +1452,10 @@ class DistributedTest:
             self._barrier()
 
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_ring_exchange_nccl(self):
             self._barrier()
@@ -1460,7 +1478,10 @@ class DistributedTest:
             self._barrier()
 
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
             self._barrier()
@@ -1488,7 +1509,10 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @skip_if_small_worldsize
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
             self._barrier()
@@ -1567,7 +1591,10 @@ class DistributedTest:
             self._barrier()
 
         # NCCL Batch SEND RECV Op Error
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
             self._barrier()
@@ -1581,7 +1608,10 @@ class DistributedTest:
                     dist.batch_isend_irecv([send_op])
 
         # NCCL Batch SEND RECV p2p_op_list Error
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
             self._barrier()
@@ -1591,14 +1621,17 @@ class DistributedTest:
                     dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
             self._barrier()
             rank = dist.get_rank()
             init_multigpu_helper(dist.get_world_size(), BACKEND)
             group_gloo = dist.new_group(ranks=[0, 1], backend="gloo")
-            group = dist.new_group(ranks=[0, 1], backend=BACKEND) # nccl or xccl
+            group = dist.new_group(ranks=[0, 1], backend=BACKEND)  # nccl or xccl
             if rank == 0:
                 with self.assertRaisesRegex(
                     ValueError, "All ops need to use the same group"
@@ -1607,12 +1640,13 @@ class DistributedTest:
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
                     send_op = dist.P2POp(dist.isend, send_tensor, 1, group)
                     dist.batch_isend_irecv([send_op_gloo, send_op])
-                    
-
 
         # NCCL SEND RECV
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def _test_send_recv_nccl(self, profiler_ctx=None):
             # TODO: now that nccl send/recv is supported, there does not seem to
@@ -1661,20 +1695,29 @@ class DistributedTest:
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl(self):
             self._test_send_recv_nccl()
 
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl_autograd_profiler(self):
             profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
             self._test_send_recv_nccl(profiler_ctx)
 
         @skip_if_no_gpu
-        @skip_but_pass_in_sandcastle_if((BACKEND != "nccl" and BACKEND != "xccl"), "NCCL or XCCL Batch Send Recv Only")
+        @skip_but_pass_in_sandcastle_if(
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "NCCL or XCCL Batch Send Recv Only",
+        )
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1732,20 +1775,23 @@ class DistributedTest:
                             self.assertTrue(event.input_shapes in expected_shapes)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1898,20 +1944,23 @@ class DistributedTest:
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL send/recv tested by test_send_recv_nccl"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL send/recv tested by test_send_recv_nccl",
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1969,20 +2018,23 @@ class DistributedTest:
                             self.assertEqual(event.input_shapes, expected_shapes[rank])
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support isend"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support isend",
         )
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support isend"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support isend",
         )
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support isend"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support isend",
         )
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -1995,7 +2047,8 @@ class DistributedTest:
 
         # IRECV
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support irecv"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support irecv",
         )
         def test_irecv(self):
             rank = dist.get_rank()
@@ -2094,7 +2147,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_broadcast(self):
             group, group_id, rank = self._init_global_test()
@@ -2114,14 +2168,16 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_broadcast_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_broadcast_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2144,9 +2200,17 @@ class DistributedTest:
             store, rank, size = next(gen_iterator)
             store = dist.PrefixStore(new_port, store)
 
-            opts = dist.ProcessGroupNCCL.Options() if TEST_CUDA else dist.ProcessGroupXCCL.Options()
+            opts = (
+                dist.ProcessGroupNCCL.Options()
+                if TEST_CUDA
+                else dist.ProcessGroupXCCL.Options()
+            )
             opts.is_high_priority_stream = False
-            group_id = dist.ProcessGroupNCCL(store, rank, size, opts) if TEST_CUDA else dist.ProcessGroupXCCL(store, rank, size, opts)  
+            group_id = (
+                dist.ProcessGroupNCCL(store, rank, size, opts)
+                if TEST_CUDA
+                else dist.ProcessGroupXCCL(store, rank, size, opts)
+            )
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
 
@@ -2185,7 +2249,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2204,7 +2269,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND != "nccl" and BACKEND!="xccl"), "Only Nccl or XCCL supports CUDA reduce"
+            (BACKEND != "nccl" and BACKEND != "xccl"),
+            "Only Nccl or XCCL supports CUDA reduce",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2229,7 +2295,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2248,7 +2315,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2261,7 +2329,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2274,7 +2343,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2294,7 +2364,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2314,7 +2385,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2328,7 +2400,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2342,7 +2415,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2361,7 +2435,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2380,7 +2455,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2393,7 +2469,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2448,7 +2525,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            (BACKEND == "nccl" or BACKEND == "xccl"), "NCCL or XCCL does not support CPU tensors"
+            (BACKEND == "nccl" or BACKEND == "xccl"),
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2467,7 +2545,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl or XCCL supports CUDA reduce"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only Nccl or XCCL supports CUDA reduce",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2492,7 +2571,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL or XCCL supports reduce_scatter_v"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL or XCCL supports reduce_scatter_v",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2565,7 +2645,8 @@ class DistributedTest:
             return tensor_out
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL or XCCL supports CUDA reduce_scatter_tensor"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL or XCCL supports CUDA reduce_scatter_tensor",
         )
         @skip_if_no_gpu
         def test_reduce_scatter_tensor_cuda(self):
@@ -2706,7 +2787,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_sum(self):
             group, group_id, rank = self._init_global_test()
@@ -2721,7 +2803,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_sum_async(self):
             group, group_id, rank = self._init_global_test()
@@ -2742,9 +2825,8 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda(self):
-            
             torch.accelerator.set_device_index(self.rank)
-            
+
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_all_reduce_helper(
@@ -2765,9 +2847,8 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_async(self):
-            
             torch.accelerator.set_device_index(self.rank)
-            
+
             group, group_id, rank = self._init_global_test()
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -2785,7 +2866,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_sum_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -2801,7 +2883,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_complex_unsupported_ops(self):
             unsupported_ops = [
@@ -2825,9 +2908,8 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_complex(self):
-            
             torch.accelerator.set_device_index(self.rank)
-           
+
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_all_reduce_helper(
@@ -2844,7 +2926,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_product(self):
             group, group_id, rank = self._init_global_test()
@@ -2859,7 +2942,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_min(self):
             group, group_id, rank = self._init_global_test()
@@ -2868,7 +2952,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_max(self):
             group, group_id, rank = self._init_global_test()
@@ -2878,7 +2963,8 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_group_sum(self):
             group, group_id, rank = self._init_group_test()
@@ -2894,7 +2980,8 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_group_product(self):
             group, group_id, rank = self._init_group_test()
@@ -2910,7 +2997,8 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_group_min(self):
             group, group_id, rank = self._init_group_test()
@@ -2920,7 +3008,8 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_group_max(self):
             group, group_id, rank = self._init_group_test()
@@ -2929,7 +3018,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2944,7 +3034,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2959,7 +3050,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
@@ -2968,7 +3060,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
@@ -3043,7 +3136,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             _group, group_id, _rank = self._init_global_test()
@@ -3258,7 +3352,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3286,7 +3381,8 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3295,7 +3391,6 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
 
-       
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA gather"
         )
@@ -3306,7 +3401,8 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3327,7 +3423,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3338,7 +3435,8 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3378,7 +3476,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3406,7 +3505,8 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3416,7 +3516,8 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL and XCCL supports CUDA gather"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA gather",
         )
         @skip_if_no_gpu
         def test_gather_cuda(self):
@@ -3425,7 +3526,8 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3436,7 +3538,8 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
@@ -3480,14 +3583,16 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_if_no_gpu
         def test_all_gather_cuda(self):
@@ -3496,14 +3601,16 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_gather_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         @skip_if_no_gpu
         def test_all_gather_cuda_complex(self):
@@ -3515,21 +3622,24 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "NCCL or XCCL does not support CPU tensors"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "NCCL or XCCL does not support CPU tensors",
         )
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND!="xccl", "XCCL and NCCL support all_gather_v"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "XCCL and NCCL support all_gather_v",
         )
         @skip_if_no_gpu
         def test_all_gather_v_cuda(self):
@@ -3548,7 +3658,7 @@ class DistributedTest:
                         output_split_sizes[rank], sum_len, sum_len, dtype=torch.float
                     )
                     .fill_(value)
-                    .to(device_id) 
+                    .to(device_id)
                 )
                 out_tensor = _build_tensor(sum_len, -1, device_id=device_id)
 
@@ -3594,7 +3704,8 @@ class DistributedTest:
             return tensor_out
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND!="xccl", "XCCL and NCCL support CUDA all_gather_into_tensor"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "XCCL and NCCL support CUDA all_gather_into_tensor",
         )
         @skip_if_no_gpu
         def test_all_gather_into_cat_tensor_cuda(self):
@@ -3615,7 +3726,8 @@ class DistributedTest:
             self._barrier()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND!="xccl", "XCCL and NCCL support CUDA all_gather_into_tensor"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "XCCL and NCCL support CUDA all_gather_into_tensor",
         )
         @skip_if_no_gpu
         def test_all_gather_into_stack_tensor_cuda(self):
@@ -3874,7 +3986,8 @@ class DistributedTest:
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL and XCCL supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_cuda(self):
@@ -3898,7 +4011,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl" , "Only NCCL and XCCL supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_cuda_complex(self):
@@ -3916,7 +4030,8 @@ class DistributedTest:
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl" , "Only NCCL and XCCL supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_cuda(self):
@@ -3940,7 +4055,8 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL and XCCL supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_cuda_complex(self):
@@ -3963,7 +4079,8 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND!="xccl", "Only NCCL and XCCl supports CUDA all_to_all"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCl supports CUDA all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_cuda(self):
@@ -3979,7 +4096,8 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL and XCCL supports CUDA all_to_all"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_cuda_complex(self):
@@ -3998,7 +4116,8 @@ class DistributedTest:
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only Nccl supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         @skip_if_small_worldsize
@@ -4022,7 +4141,8 @@ class DistributedTest:
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only Nccl supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         @skip_if_small_worldsize
@@ -4046,7 +4166,8 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl and XCCL supports CUDA all_to_all_cuda"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only Nccl and XCCL supports CUDA all_to_all_cuda",
         )
         @skip_if_small_worldsize
         @skip_if_rocm_multiprocess
@@ -4063,7 +4184,8 @@ class DistributedTest:
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only NCCL and XCCL supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_full_group_cuda(self):
@@ -4085,7 +4207,8 @@ class DistributedTest:
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only Nccl supports CUDA all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_full_group_cuda(self):
@@ -4107,7 +4230,8 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl" , "Only NCCL and XCCL supports CUDA all_to_all"
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Only NCCL and XCCL supports CUDA all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_full_group_cuda(self):
@@ -4333,7 +4457,6 @@ class DistributedTest:
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
             model_gpu.to(gpu_subset[0])
-    
 
             # DDP training setup
             model_DDP = copy.deepcopy(model)
@@ -4368,8 +4491,8 @@ class DistributedTest:
             self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
-                input_cpu.to(gpu_subset[0]), 
-                target.to(gpu_subset[0]), 
+                input_cpu.to(gpu_subset[0]),
+                target.to(gpu_subset[0]),
                 loss,
                 local_bs,
                 rank,
@@ -4414,13 +4537,15 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "nccl does not support DDP on CPU models"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "nccl does not support DDP on CPU models",
         )
         def test_DistributedDataParallelCPU(self):
             self._test_DistributedDataParallelCPU()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "nccl does not support DDP on CPU models"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "nccl does not support DDP on CPU models",
         )
         def test_DistributedDataParallelCPU_grad_is_view(self):
             self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
@@ -4453,7 +4578,7 @@ class DistributedTest:
             nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl"  or BACKEND == "xccl", "Gloo-only test"
+            BACKEND == "nccl" or BACKEND == "xccl", "Gloo-only test"
         )
         def test_ddp_create_graph(self):
             class Model(nn.Module):
@@ -4483,10 +4608,11 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_DistributedDataParallel_non_default_stream(self):
             stream = torch.accelerator.current_stream(self.rank)
-            
-            
+
             rank = self.rank
-            stream_call = torch.xpu.stream(stream) if TEST_XPU else torch.cuda.stream(stream)
+            stream_call = (
+                torch.xpu.stream(stream) if TEST_XPU else torch.cuda.stream(stream)
+            )
             with stream_call:
                 net = torch.nn.parallel.DistributedDataParallel(
                     torch.nn.Linear(1, 1, bias=False).to(rank), device_ids=[rank]
@@ -4599,7 +4725,10 @@ class DistributedTest:
             ]
             if HAS_TORCHVISION:
                 models_to_test.append(
-                    (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).to(device_type))
+                    (
+                        torchvision.models.resnet50(),
+                        torch.randn(1, 3, 3, 1000).to(device_type),
+                    )
                 )
             for model, inp in models_to_test:
                 # Enable determinism in cudnn operators
@@ -4840,7 +4969,9 @@ class DistributedTest:
 
             # Test a simple linear as well as a ResNet model.
             models_to_test = [
-                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).to(device_type),
+                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).to(
+                    device_type
+                ),
                 # run model of at least 1M parameters to hit potential race conditions in
                 # stream semantics
                 nn.Sequential(
@@ -5391,7 +5522,10 @@ class DistributedTest:
                 input = input[torch.randperm(global_batch_size)]
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo" and BACKEND != "xccl",
+            BACKEND != "mpi"
+            and BACKEND != "nccl"
+            and BACKEND != "gloo"
+            and BACKEND != "xccl",
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -5402,7 +5536,10 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync()
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo" and BACKEND != "xccl",
+            BACKEND != "mpi"
+            and BACKEND != "nccl"
+            and BACKEND != "gloo"
+            and BACKEND != "xccl",
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -5413,7 +5550,10 @@ class DistributedTest:
             self._test_accumulate_gradients_no_sync(gradient_as_bucket_view=True)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo"  and BACKEND != "xccl",
+            BACKEND != "mpi"
+            and BACKEND != "nccl"
+            and BACKEND != "gloo"
+            and BACKEND != "xccl",
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -5441,7 +5581,10 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo"  and BACKEND != "xccl",
+            BACKEND != "mpi"
+            and BACKEND != "nccl"
+            and BACKEND != "gloo"
+            and BACKEND != "xccl",
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -5475,7 +5618,10 @@ class DistributedTest:
             )
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo" and BACKEND != "xccl",
+            BACKEND != "mpi"
+            and BACKEND != "nccl"
+            and BACKEND != "gloo"
+            and BACKEND != "xccl",
             "get_future is only supported on mpi, nccl and gloo",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
@@ -5498,7 +5644,9 @@ class DistributedTest:
 
             self.assertEqual(res[0], expected)
 
-        @skipIfXpu(msg="test_DistributedDataParallel fails with static_graph=True, issue #112277")
+        @skipIfXpu(
+            msg="test_DistributedDataParallel fails with static_graph=True, issue #112277"
+        )
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -5538,7 +5686,7 @@ class DistributedTest:
                 )
 
                 # test device_ids
-                gpus_list = [torch.device(device_type+":" + str(i)) for i in gpus]
+                gpus_list = [torch.device(device_type + ":" + str(i)) for i in gpus]
                 self._test_DistributedDataParallel(
                     gpu_subset=gpus_list,
                     rank=rank,
@@ -5608,10 +5756,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_with_amp_and_grad_is_view(self):
-
-            
             torch.accelerator.set_device_index(self.rank)
-            
 
             ddp_model_grad_not_view = self._test_DistributedDataParallel_with_amp(
                 grad_is_view=False
@@ -6271,7 +6416,8 @@ class DistributedTest:
             return model_DDP
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "nccl does not support DDP on CPU models"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "nccl does not support DDP on CPU models",
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
@@ -6539,7 +6685,8 @@ class DistributedTest:
             self.assertEqual(ddp_without_list.bucket_bytes_cap_list, [])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl" or BACKEND == "xccl", "nccl does not support DDP on CPU models"
+            BACKEND == "nccl" or BACKEND == "xccl",
+            "nccl does not support DDP on CPU models",
         )
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(Net())
@@ -6591,7 +6738,7 @@ class DistributedTest:
                 reduction_fn(tensor, op)
                 self.assertEqual(tensor, expected_tensor)
 
-        @require_backend_is_available({"nccl","xccl"})
+        @require_backend_is_available({"nccl", "xccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allreduce(self):
             torch.accelerator.set_device_index(self.rank)
@@ -6618,7 +6765,7 @@ class DistributedTest:
             # (see https://github.com/pytorch/pytorch/issues/41362). Add tests for
             # these once it is supported.
 
-        @require_backend_is_available({"nccl","xccl"})
+        @require_backend_is_available({"nccl", "xccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allgather(self):
             torch.accelerator.set_device_index(self.rank)
@@ -6640,7 +6787,7 @@ class DistributedTest:
             # does not modify its input.
             self.assertEqual(input_tensor_copy, input_tensor)
 
-        @require_backend_is_available({"nccl","xccl"})
+        @require_backend_is_available({"nccl", "xccl"})
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_nccl_backend_bool_reduce(self):
             torch.accelerator.set_device_index(self.rank)
@@ -6668,7 +6815,7 @@ class DistributedTest:
                 )
                 self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
 
-        @require_backend_is_available({"nccl","xccl"})
+        @require_backend_is_available({"nccl", "xccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_broadcast(self):
             tensor_size = 10
@@ -7102,7 +7249,11 @@ class DistributedTest:
         )
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
-            gpu_act = torch.profiler.ProfilerActivity.XPU if TEST_XPU else torch.profiler.ProfilerActivity.CUDA
+            gpu_act = (
+                torch.profiler.ProfilerActivity.XPU
+                if TEST_XPU
+                else torch.profiler.ProfilerActivity.CUDA
+            )
             torch_profiler_ctx = torch.profiler.profile(activities=[cpu_act, gpu_act])
             prof = self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
 
@@ -7188,7 +7339,10 @@ class DistributedTest:
             IS_MACOS or IS_WINDOWS,
             "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
         )
-        @unittest.skipIf(BACKEND != "nccl" and BACKEND != "xccl", "Tests nccl/xccl metadata primarily.")
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "xccl",
+            "Tests nccl/xccl metadata primarily.",
+        )
         def test_ddp_profiling_execution_trace(self):
             self.assertIn(dist.get_backend(), ["nccl", "xccl"])
             # Create a temp file to save execution trace data
@@ -7397,8 +7551,9 @@ class DistributedTest:
                 copy.deepcopy(model_bn)
             ).to(self.rank)
             comm_model = ModelWithComm().to(self.rank)
-            model_input = torch.randn(10, 2).to(torch.accelerator.current_device_index())
-            
+            model_input = torch.randn(10, 2).to(
+                torch.accelerator.current_device_index()
+            )
 
             for model in [model_bn, comm_model]:
                 model = torch.nn.parallel.DistributedDataParallel(
@@ -7726,7 +7881,9 @@ class DistributedTest:
             # Single object test with device specified. Backend="gloo", device=current_device+1
             # The test is gated by the fact GPU count is the same as world size to avoid the case
             # when backend is gloo but there is no multiple GPU devices.
-            if backend != "nccl" and torch.accelerator.device_count() == int(self.world_size):
+            if backend != "nccl" and torch.accelerator.device_count() == int(
+                self.world_size
+            ):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
                     self.assertNotEqual(single_obj_list[0], gather_objects[0])
@@ -7736,7 +7893,9 @@ class DistributedTest:
                 self.assertEqual(single_obj_list[0], gather_objects[0])
 
             # Single object test with device specified. Backend="nccl", device=current_device+1
-            if backend == "nccl" and torch.accelerator.device_count() == int(self.world_size):
+            if backend == "nccl" and torch.accelerator.device_count() == int(
+                self.world_size
+            ):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
                     self.assertNotEqual(single_obj_list[0], gather_objects[0])
@@ -8189,7 +8348,7 @@ class DistributedTest:
             dim = 10
 
             world_size = dist.get_world_size()
-            
+
             torch.accelerator.set_device_index(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
                 ControlFlowToyModel().to(self.rank),
@@ -8340,9 +8499,8 @@ class DistributedTest:
                         return F.relu(self.lin1(x))
 
             world_size = dist.get_world_size()
-            
+
             torch.accelerator.set_device_index(self.rank)
-            
 
             model = torch.nn.parallel.DistributedDataParallel(
                 ToyModel(self.rank).to(self.rank),
@@ -9289,7 +9447,7 @@ class DistributedTest:
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.accelerator.set_device_index(rank)
-            
+
             # Need to set track_running_stats=False, when track_running_stats=True,
             # bn_training is False and sync could not occur in eval model.
             model = nn.SyncBatchNorm(2, momentum=0.99, track_running_stats=False).to(
@@ -9659,10 +9817,8 @@ class DistributedTest:
                         model_no_hook_buffers = list(model_ddp_no_hook.module.buffers())
                         for tensor in model_no_hook_buffers:
                             dist.all_reduce(tensor)
-                    
-                    torch.accelerator.synchronize()
-                    
 
+                    torch.accelerator.synchronize()
 
                     # if return_futures, they are only awaited on by DDP
                     # at the end of the backwards pass for maximum overlap.
@@ -10051,6 +10207,7 @@ class DistributedTest:
                 torch.get_device_module(device_type).manual_seed(rank)
             else:
                 self.skipTest("This test requires CUDA or XPU")
+
             class NetWithBuffers(nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -10546,9 +10703,7 @@ class DistributedTest:
 
             from torch.distributed.device_mesh import init_device_mesh
 
-            
             device_mesh = init_device_mesh("xpu" if TEST_XPU else "cuda", (world_size,))
-           
 
             pg = _get_default_group()
 

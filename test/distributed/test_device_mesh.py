@@ -8,7 +8,6 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
-import unittest
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed import config as dist_config
@@ -35,8 +34,8 @@ from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
     DEVICE_COUNT,
+    DTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
@@ -459,7 +458,9 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
         self.assertEqual(hash(mesh), hash(mesh2))
-        mesh_tensor_3d = torch.arange(self.world_size).reshape(2, 2, self.world_size // 4)
+        mesh_tensor_3d = torch.arange(self.world_size).reshape(
+            2, 2, self.world_size // 4
+        )
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
@@ -835,7 +836,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_get_item_1d(self):
-        mesh = init_device_mesh(self.device_type, (self.world_size,), mesh_dim_names=("dp",))
+        mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
+        )
         # Make sure slicing out 1D mesh from a 1D mesh works.
         dp_mesh = mesh["dp"]
         self.assertEqual(dp_mesh, mesh)
@@ -886,7 +889,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp"))
+        mesh = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
 
         ref_pg_count = _world.group_count
 
