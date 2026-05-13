@@ -8469,6 +8469,10 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
+            # The op also returns its first arg, so the output aliases that input.
+            # Recording this lets the memory planner avoid reusing storage that the
+            # caller can still observe through the (graph-input) first arg.
+            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
