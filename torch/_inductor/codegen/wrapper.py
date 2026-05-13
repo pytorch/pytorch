@@ -60,6 +60,7 @@ from ..utils import (
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
     LineContext,
+    make_codegen_buffer,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -214,7 +215,7 @@ TritonGrid = (
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: list[triton.Config],  # type: ignore[name-defined]
+    configs: list[triton.Config],
     grids: list[TritonGrid],
     wrapper: PythonWrapperCodegen | None = None,
     original_fxnode_name: str | None = None,
@@ -339,8 +340,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     # Also include any possible kernel being called indirectly
     import triton
-    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-    from triton.language import constexpr  # type: ignore[name-defined]
+    from triton import JITFunction
+    from triton.language import constexpr
     from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
@@ -1109,7 +1110,7 @@ class MultiOutputLine(WrapperLine):
     indices: Sequence[Any]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
+        def codegen_list_tuple_access(basename, indices):
             if len(indices) > 0:
                 itype, i = indices[0]
                 if issubclass(itype, list):
@@ -1254,11 +1255,11 @@ class PythonWrapperCodegen(CodeGen):
             str, None | ir.TensorBox | ir.Buffer | ir.TorchBindObject
         ] = {}
         self.imports = IndentedBuffer()
-        self.header = IndentedBuffer()
-        self.prefix = IndentedBuffer()
+        self.header = make_codegen_buffer()
+        self.prefix = make_codegen_buffer()
         self.suffix = IndentedBuffer()
         self.kernel_declarations = IndentedBuffer()
-        self.wrapper_call = IndentedBuffer()
+        self.wrapper_call = make_codegen_buffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
@@ -2184,7 +2185,7 @@ class PythonWrapperCodegen(CodeGen):
             del async_compile
         """
         )
-        scope = {}  # type: ignore[var-annotated]
+        scope = {}
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
@@ -2905,7 +2906,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg,
-                        1,  # type: ignore[arg-type]
+                        1,
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -3893,7 +3894,7 @@ class PythonWrapperCodegen(CodeGen):
             # `go_outer` manages the top-level logic for generating the final expression.
             # It handles special cases for C++ code generation and adjusts
             # the keypath based on the context (e.g., single vs. multiple outputs).
-            def go_outer():  # type: ignore[no-untyped-def]
+            def go_outer():
                 if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
@@ -4227,7 +4228,7 @@ class PythonWrapperCodegen(CodeGen):
             val = V.graph._shape_env._maybe_evaluate_static(x)
             if val is None:
                 return val
-            return int(val)  # type: ignore[call-overload]
+            return int(val)
         except Exception:
             return None
 
