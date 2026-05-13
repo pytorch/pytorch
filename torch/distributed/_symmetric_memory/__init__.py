@@ -474,6 +474,9 @@ lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor"
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
+lib.define(
+    "_low_contention_all_reduce(Tensor tensor, str reduce_op, str group_name) -> Tensor"
+)
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
 """
@@ -1853,6 +1856,73 @@ def _low_contention_reduce_scatter(
         return _low_contention_reduce_scatter_with_workspace(
             tensor, reduce_op, workspace
         )
+
+
+@torch.library.impl(lib, "_low_contention_all_reduce", "Meta")
+def _low_contention_all_reduce_meta(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    return torch.empty_like(tensor)
+
+
+@torch.library.impl(lib, "_low_contention_all_reduce", "CUDA")
+def _low_contention_all_reduce(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """
+    Performs all-reduce with symmetric memory in a low-contention fashion.
+
+    One-shot pull-and-accumulate: each rank pulls every peer's tensor via
+    copy engine and accumulates locally. Uses 2 barriers and 1x tensor_size
+    temp buffer.
+
+    SM-usage: elementwise accumulation after each P2P pull, plus the
+    initial copy into workspace when input is not in symmetric memory.
+    """
+    symm_mem = rendezvous(tensor, group_name)
+    if symm_mem is not None:
+        input_is_symm_mem = True
+    else:
+        symm_mem = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        input_is_symm_mem = False
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    output = torch.empty_like(tensor)
+    temp = torch.empty_like(tensor)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with _get_backend_stream():
+        if not input_is_symm_mem:
+            local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
+            local_buf.copy_(tensor)
+
+        symm_mem.barrier()
+        # Pull local rank first (no P2P needed, just copy from symm_mem buffer)
+        src_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
+        output.copy_(src_buf)
+        # Pull-and-accumulate from each remote rank
+        for step in range(1, world_size):
+            remote_rank = (rank + step) % world_size
+            src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
+            temp.copy_(src_buf)
+            output.add_(temp)
+        symm_mem.barrier()
+
+        if reduce_op == "avg":
+            output.div_(world_size)
+        elif reduce_op != "sum":
+            raise ValueError(f"reduce_op ({reduce_op}) is not supported")
+
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
 
 
 @torch.library.impl(lib, "all_to_all_vdev_2d", "Meta")
