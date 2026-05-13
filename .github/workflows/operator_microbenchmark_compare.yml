@@ -89,6 +89,7 @@ jobs:
       runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
