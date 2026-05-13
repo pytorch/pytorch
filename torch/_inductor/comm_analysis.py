@@ -457,7 +457,7 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     kernel = snode.node
     assert kernel is not None
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
-    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+    pg_name = kernel.constant_args[-1]
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     pg = _resolve_process_group(pg_name)
