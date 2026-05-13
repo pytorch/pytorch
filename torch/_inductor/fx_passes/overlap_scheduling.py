@@ -1766,7 +1766,7 @@ def gather_node_runtime_estimations(
             )
             if custom_est is not None:
                 estimations[node] = custom_est
-            else:
+            elif custom_runtime_estimation is None:
                 est = estimate_roofline_runtime_ms(node)
                 if est > 0:
                     estimations[node] = est

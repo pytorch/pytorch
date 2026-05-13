@@ -171,7 +171,7 @@ class ManualOverlapScheduler(OverlapScheduler):
             def default_custom_runtime_estimation(node, size):
                 return 0.0
 
-        custom_runtime_estimation = default_custom_runtime_estimation
+            custom_runtime_estimation = default_custom_runtime_estimation
         super().__init__(
             gm,
             max_in_flight_gb=0.0,

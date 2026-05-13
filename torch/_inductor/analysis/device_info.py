@@ -201,6 +201,7 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     """
     return _device_mapping.get(name.upper())
 
+
 def _get_device_name(device: torch.device | None = None) -> str | None:
     if device is None:
         if torch.cuda.is_available():
@@ -222,7 +223,10 @@ def _get_device_name(device: torch.device | None = None) -> str | None:
 
     return None
 
-def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False, device: torch.device | None = None)-> float | None:
+
+def datasheet_tops(
+    dtype: torch.dtype, is_tf32: bool = False, device: torch.device | None = None
+) -> float | None:
     """
     Get the theoretical *dense* TFLOPS of the device for a given dtype.
 
