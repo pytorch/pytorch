@@ -2921,11 +2921,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from .builder import wrap_fx_proxy
         from .lazy import LazyVariableTracker
 
-        if any(isinstance(a, LazyVariableTracker) for a in args):
-            args = [
-                a.realize() if isinstance(a, LazyVariableTracker) else a
-                for a in args
-            ]
+        args = [a.realize() if isinstance(a, LazyVariableTracker) else a for a in args]
 
         if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
