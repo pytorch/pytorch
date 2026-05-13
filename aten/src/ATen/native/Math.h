@@ -3979,7 +3979,6 @@ inline C10_HOST_DEVICE T bessel_i_series(T x, T nu) {
         if (log_abs_term < log_min) {
             break;
         }
-
         T term = T(gamma_sgn) * std::exp(log_abs_term);
 
         T prev_result = result;
@@ -4029,6 +4028,8 @@ inline C10_HOST_DEVICE T bessel_k_recurrence(T K_mu, T K_mu1, T mu, int64_t N, T
 }
 
 // Modified Bessel I_nu(x) for arbitrary real order
+template<typename T, bool is_cuda=false> inline C10_HOST_DEVICE T modified_bessel_k_forward(T x, T nu);
+
 template<typename T, bool is_cuda=false>
 inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
     if (std::isnan(x) || std::isnan(nu)) {
@@ -4036,7 +4037,7 @@ inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
     }
 
     if (std::isinf(nu)) {
-        return T(0.0);
+        return std::isinf(x) ? std::numeric_limits<T>::quiet_NaN() : T(0.0);
     }
 
     // I_n(-x) = (-1)^n * I_n(|x|) for integer n (DLMF 10.27.1)
@@ -4070,6 +4071,18 @@ inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
     }
 
     T nu_abs = std::abs(nu);
+    if (nu < T(0.0) && bessel_is_integer(nu_abs)) {
+        nu = nu_abs;
+    } else if (nu < T(0.0)) {
+        const double pi = c10::pi<double>;
+        const double x_acc = static_cast<double>(x);
+        const double nu_acc = static_cast<double>(nu_abs);
+        const double nearest = std::floor(nu_acc + 0.5);
+        return static_cast<T>(modified_bessel_i_forward<double, is_cuda>(x_acc, nu_acc) +
+            2.0 * (std::fmod(std::abs(nearest), 2.0) == 0.0 ? 1.0 : -1.0) *
+            std::sin(pi * (nu_acc - nearest)) *
+            modified_bessel_k_forward<double, is_cuda>(x_acc, nu_acc) / pi);
+    }
     if (nu_abs < T(1e-10)) {
         return modified_bessel_i0_forward(x);
     }
@@ -4077,16 +4090,6 @@ inline C10_HOST_DEVICE T modified_bessel_i_forward(T x, T nu) {
         return modified_bessel_i1_forward(x);
     }
 
-    // I_{-n}(x) = I_n(x) for integer n (DLMF 10.27.1)
-    if (nu < T(0.0)) {
-        if (bessel_is_integer(nu_abs)) {
-            nu = nu_abs;
-        }
-    }
-
-    // For large x, I_{-nu}(x) = I_nu(x) to machine precision:
-    // the K_nu correction from DLMF 10.27.2 is O(e^{-2x}) relative to I_nu,
-    // which is < float64 epsilon for x >= 20.
     if (x > std::max(T(20.0), nu_abs * nu_abs / T(2.0)) + nu_abs) {
         return bessel_i_asymptotic(x, nu_abs);
     }
@@ -4131,8 +4134,9 @@ inline C10_HOST_DEVICE T bessel_k_uniform_asymptotic(T x, T nu) {
     return std::exp(log_K);
 }
 
-template<typename T, bool is_cuda=false>
+template<typename T, bool is_cuda>
 inline C10_HOST_DEVICE T modified_bessel_k_forward(T x, T nu) {
+    if constexpr (std::is_same_v<T, float>) { return static_cast<T>(modified_bessel_k_forward<double, is_cuda>(x, nu)); }
     if (std::isnan(x) || std::isnan(nu)) {
         return std::numeric_limits<T>::quiet_NaN();
     }
@@ -4157,10 +4161,8 @@ inline C10_HOST_DEVICE T modified_bessel_k_forward(T x, T nu) {
         return bessel_k_asymptotic(x, nu);
     }
 
-    // nu=inf: K_nu(x) diverges for any finite x>0. Handle separately since
-    // the UAE below produces NaN (inf - inf in log form) at this limit.
     if (std::isinf(nu)) {
-        return std::numeric_limits<T>::infinity();
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     // Large nu: uniform asymptotic (DLMF 10.41). This avoids both O(nu)

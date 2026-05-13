@@ -2929,7 +2929,6 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
             if (log_abs_term < log_min) {
                 break;
             }
-
             T term = T(gamma_sgn) * exp(log_abs_term);
 
             T prev_result = result;
@@ -2944,7 +2943,6 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
     }
 
     // Asymptotic expansion for K_nu(x) (large x)
-    // Used by both I (reflection formula) and K (direct evaluation)
     template<typename T>
     T bessel_k_asymptotic(T x, T nu) {
         const T pi = T(3.14159265358979323846);
@@ -2971,6 +2969,8 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
         return sqrt(pi / (T(2.0) * x)) * exp(-x) * sum_val;
     }
 
+    template<typename T> T modified_bessel_k_forward(T x, T nu);
+
     template<typename T>
     T modified_bessel_i_forward(T x, T nu) {
         if (isnan(x) || isnan(nu)) {
@@ -2978,7 +2978,7 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
         }
 
         if (isinf(nu)) {
-            return T(0.0);
+            return isinf(x) ? NAN : T(0.0);
         }
 
         // I_n(-x) = (-1)^n * I_n(|x|) for integer n (DLMF 10.27.1)
@@ -3014,6 +3014,17 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
         }
 
         T nu_abs = abs(nu);
+        if (nu < T(0.0) && bessel_is_integer(nu_abs)) {
+            nu = nu_abs;
+        } else if (nu < T(0.0)) {
+            const double pi = 3.14159265358979323846;
+            const double x_acc = static_cast<double>(x);
+            const double nu_acc = static_cast<double>(nu_abs);
+            const double nearest = floor(nu_acc + 0.5);
+            return T(modified_bessel_i_forward(x_acc, nu_acc) +
+                2.0 * (fmod(abs(nearest), 2.0) == 0.0 ? 1.0 : -1.0) *
+                sin(pi * (nu_acc - nearest)) * modified_bessel_k_forward(x_acc, nu_acc) / pi);
+        }
         if (nu_abs < T(1e-10)) {
             return modified_bessel_i0_forward(x);
         }
@@ -3021,20 +3032,6 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
             return modified_bessel_i1_forward(x);
         }
 
-        // For negative integer orders: I_{-n}(x) = I_n(x) (DLMF 10.27.1)
-        // Must redirect before series path, which breaks on Gamma poles
-        if (nu < T(0.0)) {
-            if (bessel_is_integer(nu_abs)) {
-                nu = nu_abs;
-            }
-        }
-
-        // Large x: asymptotic expansion
-        // Threshold must ensure first correction term |4*nu^2 - 1|/(8x) < 1,
-        // which requires x > nu^2/2 for convergence of the asymptotic series.
-        // For large x, I_{-nu}(x) = I_nu(x) to machine precision:
-        // the K_nu correction from DLMF 10.27.2 is O(e^{-2x}) relative to I_nu,
-        // which is < float64 epsilon for x >= 20.
         if (x > max(T(20.0), nu_abs * nu_abs / T(2.0)) + nu_abs) {
             return bessel_i_asymptotic(x, nu_abs);
         }
@@ -3043,7 +3040,6 @@ const auto modified_bessel_i_string = modified_bessel_i0_string + modified_besse
             return bessel_i_uniform_asymptotic(x, nu);
         }
 
-        // Small to medium x: power series
         return bessel_i_series(x, nu);
     }
 ); // modified_bessel_i_string
@@ -3306,10 +3302,8 @@ const auto modified_bessel_k_string = modified_bessel_i_string + modified_bessel
             return bessel_k_asymptotic(x, nu);
         }
 
-        // nu=inf: K_nu(x) diverges for any finite x>0. Handle separately since
-        // the UAE below would produce NaN (inf - inf in log form) at this limit.
         if (isinf(nu)) {
-            return INFINITY;
+            return NAN;
         }
 
         // Large nu: uniform asymptotic (DLMF 10.41). This avoids both O(nu)
@@ -3347,6 +3341,7 @@ const auto modified_bessel_k_string = modified_bessel_i_string + modified_bessel
 
         return bessel_k_recurrence(K_mu, K_mu1, mu, N, x);
     }
+    template<> float modified_bessel_k_forward<float>(float x, float nu) { return float(modified_bessel_k_forward(double(x), double(nu))); }
 ); // modified_bessel_k_string
 
 const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(

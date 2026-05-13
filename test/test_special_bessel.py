@@ -55,7 +55,7 @@ class TestModifiedBesselFunctions(TestCase):
                 torch.special.modified_bessel_i,
                 scipy_special.iv,
                 torch.linspace(0.1, 10, 50, device=device, dtype=dtype),
-                list(range(11)) + [0.5, 1.5, 2.5, 3.5],
+                list(range(11)) + [0.5, 1.5, 2.5, 3.5, -24.4293],
             ),
             (
                 torch.special.modified_bessel_i,
@@ -351,7 +351,6 @@ class TestModifiedBesselFunctions(TestCase):
             dtype=dtype,
         )
         x_cuda = x_cpu.to(device)
-
         for nu_val in [0.5, 2.5, 12.73, 50.0, 200.0, 2001.0, 5000.0]:
             nu_cpu = torch.full_like(x_cpu, nu_val)
             nu_cuda = nu_cpu.to(device)
@@ -386,7 +385,6 @@ class TestModifiedBesselFunctions(TestCase):
             test_pairs = [(0.01, 30.0), (0.001, 25.0), (0.5, 100.0)]
         else:
             test_pairs = [(0.001, 200.0), (1e-5, 100.0), (0.5, 700.0), (1000.0, 2001.0)]
-
         for x_val, nu_val in test_pairs:
             x = torch.tensor([x_val], device=device, dtype=dtype)
             nu = torch.full_like(x, nu_val)

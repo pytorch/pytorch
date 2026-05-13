@@ -20,7 +20,7 @@ void modified_bessel_i_kernel_cuda(TensorIteratorBase& iterator) {
         opmath_jitted_gpu_kernel_with_scalars<
             modified_bessel_i_name,
             scalar_t,
-            scalar_t>(iterator, modified_bessel_i_string);
+            scalar_t>(iterator, modified_bessel_k_string);
       });
 #else
   AT_DISPATCH_FLOATING_TYPES(

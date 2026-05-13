@@ -777,11 +777,7 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            # Reference comparisons can hit NaN/Inf at extreme orders where SciPy
-            # and this implementation choose different underflow boundaries.
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # The operator 'aten::special_modified_bessel_i.out' is not
-            # currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         backward_dtypes=floating_types(),
@@ -807,11 +803,7 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            # Reference comparisons can hit NaN/Inf at extreme orders where SciPy
-            # and this implementation choose different underflow boundaries.
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # The operator 'aten::special_modified_bessel_k.out' is not
-            # currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         backward_dtypes=floating_types(),
