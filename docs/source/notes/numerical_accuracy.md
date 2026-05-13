@@ -125,7 +125,10 @@ is going to be deprecated).
 
 For more information see {ref}`TensorFloat32 <tf32_on_ampere>`.
 
-(fp16reducedprecision)=
+```{eval-rst}
+.. _fp16reducedprecision:
+   :noindex:
+```
 
 ## Reduced Precision Reduction for FP16 and BF16 GEMMs
 
@@ -138,11 +141,6 @@ unexpected results (e.g., `inf` values when the final result should be represent
 half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False`.
-
-```{eval-rst}
-.. _fp16reducedprecision:
-   :noindex:
-```
 
 A similar flag exists for BF16 GEMM operations and is turned on by default. If BF16
 reduced-precision reductions are problematic, they can be turned off with
