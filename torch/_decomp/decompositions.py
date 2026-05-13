@@ -4888,7 +4888,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(t1.numel() == 0):
+    if guard_or_false(sym_numel(t1) == 0):
         return True
 
     t1_shape = t1.shape

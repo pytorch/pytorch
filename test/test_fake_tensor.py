@@ -45,6 +45,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     free_symbols,
+    free_unbacked_symbols,
     ShapeEnv,
     ShapeEnvSettings,
     StatelessSymbolicContext,
@@ -901,6 +902,62 @@ class FakeTensorTest(TestCase):
         self.assertIs(t2.fake_mode, mode2)
         self.assertIs(t2.size(0).node.shape_env, t1.size(0).node.shape_env)
         self.assertEqual(str(t2.size(0)), str(t1.size(0)))
+
+    def test_linear_rank3_unbacked_batch_dim(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        fake_x = fake_mode.from_tensor(
+            torch.randn(4, 16, 256),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[
+                    DimDynamic.UNBACKED,
+                    DimDynamic.STATIC,
+                    DimDynamic.STATIC,
+                ],
+                constraint_sizes=[None, None, None],
+            ),
+        )
+        fake_weight = fake_mode.from_tensor(torch.randn(3072, 256), static_shapes=True)
+
+        def f(x):
+            return torch.nn.functional.linear(x, fake_weight)
+
+        self.assertTrue(free_unbacked_symbols(fake_x.shape[0]))
+        with fake_mode:
+            out = f(fake_x)
+
+        self.assertEqual(out.shape[1:], (16, 3072))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
+
+        x = torch.randn(4, 16, 256)
+        weight = torch.randn(3072, 256)
+        torch._dynamo.decorators.mark_unbacked(
+            x, 0, min=2, max=8, hint_override=x.shape[0]
+        )
+
+        def trace_f(x, weight):
+            return torch.nn.functional.linear(x, weight)
+
+        gm = make_fx(trace_f, tracing_mode="symbolic")(x, weight)
+        replay_out = gm(torch.randn(5, 16, 256), weight)
+        self.assertEqual(replay_out.shape, (5, 16, 3072))
+
+    def test_view_unbacked_contiguous_relation_from_hints(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        with fake_mode:
+            seq = shape_env.create_unbacked_symint()
+            torch._dynamo.override_optimization_hint(seq, 16)
+            base = torch.empty(4, seq, 256)
+            chunked = torch.as_strided(
+                base,
+                (4, 2 * (seq // 2), 256),
+                (256 * seq, 256, 1),
+            )
+            out = chunked.view(4 * 2 * (seq // 2), 256)
+
+        self.assertEqual(out.shape, (4 * 2 * (seq // 2), 256))
+        self.assertTrue(free_unbacked_symbols(out.shape[0]))
 
     # TODO: Support NJT.  There's also some funny business with dynamic shapes
     # which would need to be dealt with as well
