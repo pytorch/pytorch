@@ -4891,6 +4891,85 @@ class TestResizeStorageWithAddr(TestCase):
         t.untyped_storage()._resize_with_addr_(0, 1)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_multiple_blocks_in_the_middle(self):
+        # Test allocating multiple target tensors in the middle of an empty memory segment
+        pool = torch.cuda.MemPool()
+
+        targets = []
+        dummys = []
+        with torch.cuda.use_mem_pool(pool):
+            for _ in range(10):
+                dummy = torch.empty(3729, dtype=torch.uint8, device="cuda")
+                target = torch.empty(4017, dtype=torch.uint8, device="cuda")
+                targets.append(target)
+                dummys.append(dummy)
+
+        original_ptrs = [t.untyped_storage().data_ptr() for t in targets]
+        original_sizes = [t.untyped_storage().nbytes() for t in targets]
+
+        for t, d in zip(targets, dummys):
+            t.untyped_storage().resize_(0)
+            d.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            for i in range(10):
+                ptr = original_ptrs[i]
+                size = original_sizes[i]
+                targets[i].untyped_storage()._resize_with_addr_(size, ptr)
+
+        for i in range(10):
+            ptr = original_ptrs[i]
+            size = original_sizes[i]
+            t = targets[i]
+            self.assertEqual(t.untyped_storage().data_ptr(), ptr)
+            self.assertEqual(t.untyped_storage().nbytes(), size)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not support exact-address allocation",
+    )
+    def test_resize_storage_with_coalesced_small_prefixes(self):
+        # Suppose we have allocated many small prefix tensors and a target tensor, where
+        # all tensors falls into the small block pool. When resize the target tensor later,
+        # we allocate 1 large prefix tensors for all small prefix tensors, then allocate
+        # the target tensor, and finally free the large prefix tensor. This large prefix
+        # tensor should come from the small block pool, even if its size is beyond the threshold.
+        pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool):
+            small_prefixes = []
+            for _ in range(800):
+                prefix = torch.empty(3729, dtype=torch.uint8, device="cuda")
+                small_prefixes.append(prefix)
+            t1 = torch.empty(4017, dtype=torch.uint8, device="cuda")
+            mid = torch.empty(2738, dtype=torch.uint8, device="cuda")
+            t2 = torch.empty(3897, dtype=torch.uint8, device="cuda")
+            suffix = torch.empty(9124, dtype=torch.uint8, device="cuda")
+
+        original_ptr1 = t1.untyped_storage().data_ptr()
+        original_size1 = t1.untyped_storage().nbytes()
+        original_ptr2 = t2.untyped_storage().data_ptr()
+        original_size2 = t2.untyped_storage().nbytes()
+
+        for prefix in small_prefixes:
+            prefix.untyped_storage().resize_(0)
+        mid.untyped_storage().resize_(0)
+        suffix.untyped_storage().resize_(0)
+        t1.untyped_storage().resize_(0)
+        t2.untyped_storage().resize_(0)
+
+        with torch.cuda.use_mem_pool(pool):
+            t1.untyped_storage()._resize_with_addr_(original_size1, original_ptr1)
+            t2.untyped_storage()._resize_with_addr_(original_size2, original_ptr2)
+
+        self.assertEqual(t1.untyped_storage().data_ptr(), original_ptr1)
+        self.assertEqual(t1.untyped_storage().nbytes(), original_size1)
+        self.assertEqual(t2.untyped_storage().data_ptr(), original_ptr2)
+        self.assertEqual(t2.untyped_storage().nbytes(), original_size2)
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest

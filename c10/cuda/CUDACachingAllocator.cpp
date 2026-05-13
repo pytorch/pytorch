@@ -1966,6 +1966,10 @@ class DeviceCachingAllocator {
     prepare_for_malloc(context, stream);
 
     const size_t size = round_size(orig_size);
+
+    // The same block pool is used for both prefix block and requested block.
+    // Prefix block may have a significantly larger size than requested block
+    // when multiple small blocks coalesced into a large prefix block.
     auto& pool = get_pool(size, stream);
     Block* containing_block =
         get_free_block_containing_address(pool, size, stream, addr);
@@ -1981,6 +1985,19 @@ class DeviceCachingAllocator {
     const auto block_begin = reinterpret_cast<uintptr_t>(containing_block->ptr);
     const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     const size_t prefix_size = requested_addr - block_begin;
+
+    // mallocWithAddress may allocates both prefix block and requested block,
+    // and free prefix block later. This adds a fake malloc/free pair for prefix
+    // block. A metadata is added for better memory visualization.
+    const auto original_user_metadata = getUserMetadata();
+    const auto malloc_with_address_metadata = original_user_metadata.empty()
+        ? std::string("mallocWithAddress")
+        : original_user_metadata + "\nmallocWithAddress";
+    setUserMetadata(malloc_with_address_metadata);
+    auto restore_user_metadata =
+        c10::make_scope_exit([this, original_user_metadata]() {
+          setUserMetadata(original_user_metadata);
+        });
 
     Block* prefix_block = nullptr;
     Block* requested_source = containing_block;
