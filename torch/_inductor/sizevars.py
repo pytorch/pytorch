@@ -601,9 +601,11 @@ class SizeVarAllocator:
         """Analyze whether `expr` is uniform or contiguous over vector lanes.
 
         The analysis is conservative: unknown cases must fall back to scalar or
-        gather-style lowering. `contiguous_width` can be smaller than
-        `requested_width` for modular expressions whose contiguous span is known
-        only for a narrower aligned group.
+        gather-style lowering. It only describes the lane pattern of the index
+        expression; callers must still prove tensor stride, offset, dtype, and
+        alignment before emitting a vector memory load. `contiguous_width` can
+        be smaller than `requested_width` for modular expressions whose
+        contiguous span is known only for a narrower aligned group.
         """
         expr = self.simplify(
             simplify_index_in_vec_range(expr, lane_var, requested_width)

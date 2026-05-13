@@ -120,7 +120,14 @@ def _sm100_bias(*shape):
 SM100_AUX_SCORE_MOD_CASES = (
     (128, "kv", lambda seq_len: (_sm100_bias(seq_len),), 8, True),
     (128, "kv_mod_4", lambda seq_len: (_sm100_bias(4),), 4, True),
-    (128, "kv_misaligned", lambda seq_len: (_sm100_bias(seq_len + 1)[1:],), 8, True),
+    # Inductor copies/normalizes sliced inputs, so the aux layout offset remains zero.
+    (
+        128,
+        "kv_sliced_storage_offset",
+        lambda seq_len: (_sm100_bias(seq_len + 1)[1:],),
+        8,
+        True,
+    ),
     (128, "kv_stride_mix", lambda seq_len: (_sm100_bias(2 * seq_len),), 1, False),
     (128, "q", lambda seq_len: (_sm100_bias(seq_len),), 8, False),
     (128, "q_kv", lambda seq_len: (_sm100_bias(seq_len, seq_len),), 8, True),
@@ -1332,7 +1339,7 @@ class TestFlexFlash(InductorTestCase):
         def fn(q, k, v, *biases):
             def score_mod(score, b, h, q_idx, kv_idx):
                 match index_dim:
-                    case "kv" | "kv_misaligned":
+                    case "kv" | "kv_sliced_storage_offset":
                         return score + biases[0][kv_idx]
                     case "kv_mod_4":
                         return score + biases[0][kv_idx % 4]

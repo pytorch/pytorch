@@ -728,16 +728,25 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             1 if self.vector_load_config is None else self.vector_load_config.vec_size
         )
         contiguous_width = idx_vars[vector_dim].contiguous_width
-        offset = buffer.get_layout().offset
+        has_vector_width = vector_size > 1
+        has_unit_stride = V.graph.sizevars.statically_known_equals(
+            strides[vector_dim], 1
+        )
+        has_full_width_contiguity = (
+            contiguous_width is not None and contiguous_width >= vector_size
+        )
+        is_size_aligned = V.graph.sizevars.statically_known_multiple_of(
+            sizes[vector_dim], vector_size
+        )
+        is_offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+            buffer.get_layout().offset, vector_size
+        )
         return (
-            vector_size > 1
-            and V.graph.sizevars.statically_known_equals(strides[vector_dim], 1)
-            and contiguous_width is not None
-            and contiguous_width >= vector_size
-            and V.graph.sizevars.statically_known_multiple_of(
-                sizes[vector_dim], vector_size
-            )
-            and V.graph.sizevars.statically_known_multiple_of(offset, vector_size)
+            has_vector_width
+            and has_unit_stride
+            and has_full_width_contiguity
+            and is_size_aligned
+            and is_offset_aligned
         )
 
     def _emit_contiguous_dim_load(
@@ -852,33 +861,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 is_static_int=True,
             )
 
-        semantic_expr = self._semantic_index_expr(expr)
-        vector_index = (
-            None if self.vector_load_config is None else self.vector_load_config.index
+        is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
+            self._semantic_index_expr(expr)
         )
-        vector_size = (
-            1 if self.vector_load_config is None else self.vector_load_config.vec_size
-        )
-        if vector_size <= 1:
-            is_lane_uniform = True
-            is_contiguous = False
-            contiguous_width = None
-        elif vector_index is None:
-            is_lane_uniform = False
-            is_contiguous = False
-            contiguous_width = None
-        else:
-            lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
-                semantic_expr, vector_index, vector_size
-            )
-            raw_contiguous_width = lane_contiguity.contiguous_width
-            contiguous_width = self._aligned_contiguous_width(
-                semantic_expr,
-                vector_index,
-                raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
-            )
-            is_lane_uniform = self._is_lane_uniform_expr(semantic_expr, vector_index)
-            is_contiguous = lane_contiguity.stride == 1 and contiguous_width is not None
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_fragment({self.kernel.kexpr(expr)}, {cute_dtype})"
@@ -889,6 +874,29 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             is_lane_uniform=is_lane_uniform,
             is_contiguous=is_contiguous,
             contiguous_width=contiguous_width,
+        )
+
+    def _analyze_index_fragment(
+        self, semantic_expr: sympy.Expr
+    ) -> tuple[bool, bool, int | None]:
+        if self.vector_load_config is None or self.vector_load_config.vec_size <= 1:
+            return True, False, None
+
+        lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
+            semantic_expr,
+            self.vector_load_config.index,
+            self.vector_load_config.vec_size,
+        )
+        raw_contiguous_width = lane_contiguity.contiguous_width
+        contiguous_width = self._aligned_contiguous_width(
+            semantic_expr,
+            self.vector_load_config.index,
+            raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
+        )
+        return (
+            self._is_lane_uniform_expr(semantic_expr, self.vector_load_config.index),
+            lane_contiguity.stride == 1 and contiguous_width is not None,
+            contiguous_width,
         )
 
     @staticmethod
