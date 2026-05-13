@@ -728,12 +728,34 @@ class DynamoTLS(threading.local):
     # temporal order.
     traced_frame_infos: list[str] = []
 
+    # Accumulated skip reasons during a fullgraph compile_wrapper call.
+    # Each entry is a formatted string like "fn (file.py:42): reason".
+    # None when not collecting (fullgraph not active).
+    skip_reasons: list[str] | None = None
+
 
 dynamo_tls = DynamoTLS()
 
 
+def reset_skip_reasons() -> None:
+    dynamo_tls.skip_reasons = []
+
+
+def add_skip_reason(reason: str, frame: DynamoFrameType) -> None:
+    if dynamo_tls.skip_reasons is not None:
+        code = frame.f_code
+        dynamo_tls.skip_reasons.append(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno}): {reason}"
+        )
+
+
+def get_skip_reasons() -> list[str]:
+    return dynamo_tls.skip_reasons or []
+
+
 def clear_dynamo_tls() -> None:
     dynamo_tls.traced_frame_infos.clear()
+    dynamo_tls.skip_reasons = None
 
 
 @atexit.register
@@ -1045,6 +1067,8 @@ class _TorchDynamoContext:
                 )
                 if not self.export:
                     fullgraph_count_enabled = set_fullgraph_compiled_frame_count(0) < 0
+                    if fullgraph_count_enabled:
+                        reset_skip_reasons()
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1138,11 +1162,19 @@ class _TorchDynamoContext:
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
                             if count == 0:
-                                raise RuntimeError(
-                                    "torch.compile with fullgraph=True found no compiled frames. "
-                                    "The frame was likely skipped (e.g., a non-infra torch dispatch "
-                                    "mode was active, dynamo was disabled, or the frame was skipped."
-                                )
+                                skip_reasons = get_skip_reasons()
+                                msg = "torch.compile with fullgraph=True found no compiled frames."
+                                if skip_reasons:
+                                    reasons_str = "\n".join(
+                                        f"  - {r}" for r in skip_reasons
+                                    )
+                                    msg += f" Skipped frames:\n{reasons_str}"
+                                else:
+                                    msg += (
+                                        " Compilation was not attempted and no cached compiled"
+                                        " code was found."
+                                    )
+                                raise RuntimeError(msg)
                         if prior_error_on_graph_break is not None:
                             _set_error_on_graph_break(prior_error_on_graph_break)
                         if prior_error_on_nested_compile is not None:
@@ -1163,6 +1195,7 @@ class _TorchDynamoContext:
             finally:
                 if fullgraph_count_enabled:
                     set_fullgraph_compiled_frame_count(-1)
+                    dynamo_tls.skip_reasons = None
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
