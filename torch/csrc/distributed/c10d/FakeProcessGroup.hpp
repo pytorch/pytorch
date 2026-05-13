@@ -82,21 +82,19 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  // NOTE [allgather on FakeProcessGroup]
-  // Assume each rank have the same input tensor so we just copy to the results
-  // since it's not a real allgather, we simply make this copying logic to let
-  // some simple validation works (i.e. calling allgather to see if each rank
-  // have the same tensor or not).
-  //
-  // NOTE: in general it's not good form to try to make FakeProcessGroup work
-  // with real data, but the reasoning here is that we want FakeProcessGroup to
-  // work with DeviceMesh's init code that have the data validation, which
-  // makes it worth the tradeoff.
+  // NOTE [FakeProcessGroup collective semantics]
+  // Collectives use deterministic single-process approximations. When output
+  // can be derived from local inputs, fake collectives copy those values into
+  // local outputs so tests do not consume uninitialized memory. For scatter on
+  // non-root ranks, the root's input list is unavailable in this single-process
+  // simulation, so the output tensor is left unchanged.
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // See note in _allgather_base below.
+    at::AutoDispatchBelowAutograd guard;
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
@@ -121,10 +119,23 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::allgather_coalesced: ", msg);
+    };
+    assertNonEmptyInputTensorList(invalidArgument, inputTensors.size());
+    assertAllgatherCoalescedOutputTensorLists(
+        invalidArgument, outputTensorLists, inputTensors.size(), size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& outputTensorList : outputTensorLists) {
+      for (size_t i = 0; i < inputTensors.size(); ++i) {
+        outputTensorList[i].copy_(inputTensors[i]);
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -145,10 +156,26 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> gather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const GatherOptions& /* opts */ = GatherOptions()) override {
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::gather: ", msg);
+    };
+    assertRootRank(invalidArgument, opts.rootRank, size_);
+    assertSingleElementInput(invalidArgument, inputTensors);
+
+    if (rank_ == opts.rootRank) {
+      assertGatherOutputTensorList(invalidArgument, outputTensors, size_);
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
+      for (auto& tensor : outputTensors[0]) {
+        tensor.copy_(inputTensors[0]);
+      }
+    } else {
+      assertEmptyOutputTensorList(invalidArgument, outputTensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 

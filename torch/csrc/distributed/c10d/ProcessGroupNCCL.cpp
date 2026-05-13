@@ -5703,18 +5703,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   std::vector<at::Tensor> outputs;
 
   if (getRank() == opts.rootRank) {
-    if (outputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputTensors[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputTensors, getSize());
 
     const auto& options = inputTensor.options();
     const auto& sizes = inputTensor.sizes();
@@ -5722,9 +5711,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     outputs = outputTensors[0];
   } else {
     // if not in the root rank, initialize outputs as empty list
-    if (!outputTensors.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function

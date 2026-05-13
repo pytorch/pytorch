@@ -334,6 +334,55 @@ inline void assertRootTensor(
   }
 }
 
+inline void assertGatherOutputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    int64_t size) {
+  if (outputTensors.size() != 1) {
+    fn("requires a single-element output list containing a list with " +
+       std::to_string(size) + " tensors.");
+  } else if (outputTensors[0].size() != static_cast<size_t>(size)) {
+    fn("Incorrect output list size " + std::to_string(outputTensors[0].size()) +
+       ". Output list size should be " + std::to_string(size) +
+       ", same as size of the process group.");
+  }
+}
+
+template <typename TensorList>
+inline void assertEmptyOutputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const TensorList& outputTensors) {
+  if (!outputTensors.empty()) {
+    fn("requires empty output on non-root");
+  }
+}
+
+inline void assertNonEmptyInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    size_t inputTensorListSize) {
+  if (inputTensorListSize == 0) {
+    fn("requires non-empty input tensor list");
+  }
+}
+
+inline void assertAllgatherCoalescedOutputTensorLists(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (outputTensorLists.size() != static_cast<size_t>(worldSize)) {
+    fn("output lists should be equal to world size");
+  }
+  for (const auto i : c10::irange(outputTensorLists.size())) {
+    const auto actual = outputTensorLists[i].size();
+    if (actual != inputTensorListSize) {
+      fn("invalid output size: (expected length " +
+         std::to_string(inputTensorListSize) + ", got " +
+         std::to_string(actual) + ")");
+    }
+  }
+}
+
 inline void assertDense(
     const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
