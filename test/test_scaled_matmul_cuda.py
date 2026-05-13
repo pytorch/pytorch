@@ -1765,6 +1765,10 @@ class TestFP8Matmul(TestCase):
         cu_count = torch.cuda.get_device_properties().multi_processor_count
         carveout = 66 if torch.version.cuda else cu_count // 8
 
+        # Warm up so hipBLASLt's one-time init kernel does not appear in the profile trace below.
+        scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+        torch.cuda.synchronize()
+
         with tempfile.NamedTemporaryFile() as f:
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
                 self.assertIsNone(torch._C._get_sm_carveout_experimental())
