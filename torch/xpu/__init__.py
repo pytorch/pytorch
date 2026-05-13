@@ -1011,12 +1011,18 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
 
 
 def power_draw(device: Device = None) -> float:
-    r"""Return the GPU power draw in watts.
+    r"""Return the GPU card power draw in watts.
+
+    The value is computed by dividing the energy delta by the time delta between
+    two energy-counter reads separated by a 100ms sampling interval.
 
     Args:
         device (torch.device, str or int, optional): selected device. Uses the
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
+
+    .. note:: This function blocks for approximately 100ms per call due to the
+        sampling interval required to compute an accurate power reading.
 
     .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU power information.
     """
@@ -1032,6 +1038,12 @@ def power_draw(device: Device = None) -> float:
         )
     if rc != pyzes.ZE_RESULT_SUCCESS:
         raise RuntimeError(f"Can't get Level Zero Sysman GPU power draw (rc={rc}).")
+
+    import time
+
+    # 100ms is well above the hardware energy-counter update granularity.
+    time.sleep(0.1)
+
     counter_end = pyzes.zes_power_energy_counter_t()
     _zes_check(
         pyzes.zesPowerGetEnergyCounter(power_handle, byref(counter_end)),
