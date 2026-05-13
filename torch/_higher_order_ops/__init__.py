@@ -18,6 +18,7 @@ from torch._higher_order_ops.flex_attention import (
     flex_attention,
     flex_attention_backward,
 )
+from torch._higher_order_ops.flex_ep import flex_ep
 from torch._higher_order_ops.foreach_map import _foreach_map, foreach_map
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
@@ -53,6 +54,7 @@ __all__ = [
     "map",
     "flex_attention",
     "flex_attention_backward",
+    "flex_ep",
     "hints_wrapper",
     "BaseHOP",
     "flat_apply",

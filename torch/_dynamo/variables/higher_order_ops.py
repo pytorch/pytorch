@@ -4505,6 +4505,343 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         return fn.call_function(tx, args, kwargs)
 
 
+class FlexEpHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_ep"
+
+    @staticmethod
+    def _as_python_int(value: VariableTracker, name: str) -> int:
+        if not value.is_python_constant():
+            unimplemented(
+                gb_type="flex_ep: non-constant config",
+                context=f"{name}: {value}",
+                explanation=f"flex_ep expects {name} to be a compile-time int.",
+                hints=[],
+            )
+        result = value.as_python_constant()
+        if not isinstance(result, int):
+            unimplemented(
+                gb_type="flex_ep: non-int config",
+                context=f"{name}: {type(result).__name__}",
+                explanation=f"flex_ep expects {name} to be an int.",
+                hints=[],
+            )
+        return result
+
+    @staticmethod
+    def _buildable_dim(dim: Any) -> Any:
+        if isinstance(dim, torch.SymInt):
+            try:
+                return int(dim)
+            except (TypeError, RuntimeError):
+                return dim
+        return dim
+
+    @staticmethod
+    def _static_dim_or(dim: Any, fallback: Any) -> Any:
+        if isinstance(dim, torch.SymInt):
+            try:
+                return int(dim)
+            except (TypeError, RuntimeError):
+                return fallback
+        return dim
+
+    @classmethod
+    def _new_empty(
+        cls,
+        tx: "InstructionTranslator",
+        ref: VariableTracker,
+        shape: Sequence[Any],
+        dtype: torch.dtype,
+        requires_grad: bool = False,
+    ) -> VariableTracker:
+        kwargs: dict[str, VariableTracker] = {
+            "dtype": VariableTracker.build(tx, dtype),
+        }
+        if dtype.is_floating_point or dtype.is_complex:
+            kwargs["requires_grad"] = VariableTracker.build(tx, requires_grad)
+        return ref.call_method(
+            tx,
+            "new_empty",
+            [VariableTracker.build(tx, [cls._buildable_dim(dim) for dim in shape])],
+            kwargs,
+        )
+
+    def _trace_flat_callable(
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        fn_args: Sequence[VariableTracker],
+        name: str,
+    ) -> tuple[Proxy, tuple[Proxy, ...], VariableTracker]:
+        _check_supported_callable_arg(tx, fn, name)
+        (
+            (body_r, _body_spec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            fn,
+            fn_args,
+            {},
+            description=f"{self._HOP_NAME}: {name}",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+        body_name = tx.output.install_subgraph(
+            name,
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+        )
+        return make_attr(tx, body_name), tuple(body_lifted_freevars), body_r
+
+    @staticmethod
+    def _require_tuple_output(
+        output: VariableTracker,
+        name: str,
+    ) -> Sequence[VariableTracker]:
+        output = output.realize()
+        if not isinstance(output, (TupleVariable, ListVariable)):
+            unimplemented(
+                gb_type="flex_ep: invalid callable output",
+                context=f"{name}: {output}",
+                explanation=f"flex_ep expects {name} to return a tuple/list.",
+                hints=[],
+            )
+        return output.items
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) < 8:
+            unimplemented(
+                gb_type="flex_ep: missing arguments",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="flex_ep expects x, topk_idx, w13, w2, and four callables.",
+                hints=[],
+            )
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        kwargs = dict(kwargs)
+        required_kwargs = (
+            "num_experts",
+            "ep_rank",
+            "ep_size",
+            "max_tokens",
+            "topk",
+        )
+        missing = [name for name in required_kwargs if name not in kwargs]
+        if missing:
+            unimplemented(
+                gb_type="flex_ep: missing config",
+                context=f"missing kwargs: {missing}",
+                explanation="flex_ep requires keyword-only expert-parallel config.",
+                hints=[],
+            )
+        num_experts = self._as_python_int(kwargs.pop("num_experts"), "num_experts")
+        ep_rank = self._as_python_int(kwargs.pop("ep_rank"), "ep_rank")
+        ep_size = self._as_python_int(kwargs.pop("ep_size"), "ep_size")
+        max_tokens = self._as_python_int(kwargs.pop("max_tokens"), "max_tokens")
+        topk = self._as_python_int(kwargs.pop("topk"), "topk")
+        num_ctas = self._as_python_int(
+            kwargs.pop("num_ctas", ConstantVariable.create(152)), "num_ctas"
+        )
+        if kwargs:
+            unimplemented(
+                gb_type="flex_ep: unexpected kwargs",
+                context=f"kwargs: {kwargs}",
+                explanation="flex_ep received unsupported keyword arguments.",
+                hints=[],
+            )
+
+        (
+            x,
+            topk_idx,
+            w13,
+            w2,
+            dispatch_fn,
+            combine_fn,
+            combine_bwd_fn,
+            dispatch_bwd_fn,
+            *router_operands,
+        ) = args
+
+        x_fake = _get_fake_value(x)
+        max_routed_tokens = max_tokens * topk
+        x_batch = self._static_dim_or(x_fake.shape[0], max_tokens)
+        hidden_dim = self._static_dim_or(x_fake.shape[1], 1)
+        requires_grad = any(
+            getattr(_get_fake_value(v), "requires_grad", False) for v in (x, w13, w2)
+        )
+
+        with discard_graph_changes(tx):
+            x_expanded = self._new_empty(
+                tx,
+                x,
+                (x_batch, topk, hidden_dim),
+                x_fake.dtype,
+                x_fake.requires_grad,
+            )
+        dispatch_node, dispatch_lifted_args, dispatch_out = self._trace_flat_callable(
+            tx,
+            dispatch_fn,
+            (x_expanded, topk_idx, *router_operands),
+            "flex_ep_dispatch",
+        )
+        dispatch_items = self._require_tuple_output(dispatch_out, "dispatch_fn")
+        if len(dispatch_items) != 9:
+            unimplemented(
+                gb_type="flex_ep: invalid dispatch output",
+                context=f"num outputs: {len(dispatch_items)}",
+                explanation=(
+                    "flex_ep dispatch_fn must return recv_x plus 8 flat "
+                    "TokenMappingInfo values."
+                ),
+                hints=[],
+            )
+
+        recv_fake = _get_fake_value(dispatch_items[0])
+        with discard_graph_changes(tx):
+
+            def static_shape(shape: Sequence[Any]) -> tuple[Any, ...]:
+                return tuple(
+                    self._static_dim_or(dim, max_routed_tokens) for dim in shape
+                )
+
+            def tmi_arg(idx: int) -> VariableTracker:
+                item = dispatch_items[idx]
+                if not item.is_tensor():
+                    if idx == 8:
+                        if item.is_python_constant():
+                            return VariableTracker.build(tx, item.as_python_constant())
+                        return VariableTracker.build(tx, max_tokens)
+                    unimplemented(
+                        gb_type="flex_ep: invalid TokenMappingInfo",
+                        context=f"dispatch output {idx}: {item}",
+                        explanation=(
+                            "flex_ep dispatch_fn must return tensor "
+                            "TokenMappingInfo values except for the final B."
+                        ),
+                        hints=[],
+                    )
+                fake = _get_fake_value(dispatch_items[idx])
+                return self._new_empty(
+                    tx, x, static_shape(fake.shape), fake.dtype, False
+                )
+
+            tmi_args = (
+                tmi_arg(1),
+                tmi_arg(2),
+                tmi_arg(3),
+                tmi_arg(4),
+                tmi_arg(5),
+                tmi_arg(6),
+                tmi_arg(7),
+                tmi_arg(8),
+            )
+            y3 = self._new_empty(
+                tx,
+                x,
+                (*static_shape(recv_fake.shape[:-1]), hidden_dim),
+                x_fake.dtype,
+                requires_grad,
+            )
+            dy = self._new_empty(
+                tx,
+                x,
+                (x_batch, hidden_dim),
+                x_fake.dtype,
+                False,
+            )
+            dx_recv = self._new_empty(
+                tx,
+                x,
+                static_shape(recv_fake.shape),
+                recv_fake.dtype,
+                False,
+            )
+
+        combine_node, combine_lifted_args, combine_out = self._trace_flat_callable(
+            tx,
+            combine_fn,
+            (y3, *tmi_args, *router_operands),
+            "flex_ep_combine",
+        )
+        combine_bwd_node, combine_bwd_lifted_args, _ = self._trace_flat_callable(
+            tx,
+            combine_bwd_fn,
+            (dy, *tmi_args, *router_operands),
+            "flex_ep_combine_bwd",
+        )
+        dispatch_bwd_node, dispatch_bwd_lifted_args, _ = self._trace_flat_callable(
+            tx,
+            dispatch_bwd_fn,
+            (dx_recv, *tmi_args, *router_operands),
+            "flex_ep_dispatch_bwd",
+        )
+
+        if not combine_out.is_tensor():
+            unimplemented(
+                gb_type="flex_ep: invalid combine output",
+                context=str(combine_out),
+                explanation="flex_ep combine_fn must return a tensor.",
+                hints=[],
+            )
+
+        proxied_args, _ = proxy_args_kwargs(
+            [x, topk_idx, w13, w2, *router_operands], {}
+        )
+        hop_args = (
+            *proxied_args[:4],
+            dispatch_node,
+            combine_node,
+            combine_bwd_node,
+            dispatch_bwd_node,
+            *proxied_args[4:],
+        )
+        hop_kwargs = {
+            "num_experts": num_experts,
+            "ep_rank": ep_rank,
+            "ep_size": ep_size,
+            "max_tokens": max_tokens,
+            "topk": topk,
+            "num_ctas": num_ctas,
+            "_dispatch_lifted_args": dispatch_lifted_args,
+            "_combine_lifted_args": combine_lifted_args,
+            "_combine_bwd_lifted_args": combine_bwd_lifted_args,
+            "_dispatch_bwd_lifted_args": dispatch_bwd_lifted_args,
+        }
+        example_value = combine_out.as_proxy().node.meta["example_value"]
+        return add_call_function(
+            tx,
+            self.value,
+            hop_args,
+            hop_kwargs,
+            example_value,
+        )
+
+
+class FlexEpBackwardHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_ep_backward"
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="flex_ep_backward: Dynamo tracing unsupported",
+            context="torch.ops.higher_order.flex_ep_backward",
+            explanation=(
+                "flex_ep_backward is an internal autograd HOP and should only "
+                "be captured by AOTAutograd/proxy tracing."
+            ),
+            hints=[],
+        )
+
+
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention"
 
@@ -5875,6 +6212,8 @@ _hop_name_to_variable_class = {
     "hints_wrapper": HintsWrapperHigherOrderVariable,
     "flex_attention": FlexAttentionHigherOrderVariable,
     "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
+    "flex_ep": FlexEpHigherOrderVariable,
+    "flex_ep_backward": FlexEpBackwardHigherOrderVariable,
     "wrap_activation_checkpoint": CheckpointHigherOrderVariable,
     "tag_activation_checkpoint": CheckpointHigherOrderVariable,
     "_export_tracepoint": ExportTracepointHigherOrderVariable,
