@@ -143,7 +143,6 @@ class OverlapPreservingBucketer:
         collective_bucketing: bool = True,
         bucket_mode: BucketMode | None = None,
         bucket_exposed_first: bool | None = None,
-        region_of: dict[fx.Node, Any] | None = None,
         bucket_only_internode_comms: bool = False,
     ):
         self.graph = graph
@@ -157,7 +156,6 @@ class OverlapPreservingBucketer:
         self.bucket_only_internode_comms = bucket_only_internode_comms
         self.bucket_mode = bucket_mode or _default_bucket_mode()
         self.collective_bucketing = collective_bucketing
-        self.region_of: dict[fx.Node, Any] = region_of or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -374,37 +372,13 @@ class OverlapPreservingBucketer:
                 preserve_node_ordering(self.graph, filtered_deps)
 
     def bucket_collectives(self) -> None:
-        """Run the full bucketing and dep application flow.
-
-        Order is important:
-        1. Bucketing - merge collectives into buckets
-        2. Inline fusions - expand call_module back to original nodes
-        3. Transfer deps - move deps from erased nodes to their replacements
-        4. Add control deps - apply effect tokens and topo sort
-
-        Steps 2-3 MUST happen before step 4, because control deps need to
-        reference the final inlined nodes, not the erased fusion modules.
-        """
+        """Run the full bucketing and dep application flow."""
         # Step 1: Bucket collectives
         all_buckets: list[CollBucket] | None = None
         if self.collective_bucketing:
             all_buckets = self._bucket_collectives_impl()
 
-        # Step 2: Inline fusion regions (expand call_module -> original nodes)
-        replaced: dict[fx.Node, fx.Node | None] = {}
-        if self.region_of:
-            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
-
-            gm = self.graph.owning_module
-            if gm is None:
-                raise AssertionError("graph.owning_module must not be None")
-            replaced = expand_fusion_regions(gm, self.region_of)
-
-        # Step 3: Transfer deps from erased fusion modules to inlined nodes
-        if replaced:
-            self.aug_graph.transfer_erased_node_deps(replaced)
-
-        # Step 4: Add control deps (MUST be after inline + transfer)
+        # Step 2: Add control deps
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 
@@ -1079,19 +1053,16 @@ def finalize_overlap_scheduling(
     insert_overlap_deps: bool = False,
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
-    region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
     bucket_mode: BucketMode | None = None,
 ) -> None:
     """
-    Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
+    Finalize overlap scheduling by applying deps and optionally bucketing.
 
     This is the main entry point for post-scheduling graph transformations:
     1. Bucket collectives (if collective_bucketing=True)
-    2. Inline fusion regions back to original nodes
-    3. Transfer deps from erased nodes to replacements
-    4. Apply topological sort and effect tokens
+    2. Apply topological sort and effect tokens
 
     Args:
         gm: The graph module to modify
@@ -1101,7 +1072,6 @@ def finalize_overlap_scheduling(
         insert_overlap_deps: Whether to insert effect tokens for overlap deps
         max_bucket_memory_gb: Maximum memory for a bucket in GB
         max_coll_distance: Maximum distance for bucketing candidates
-        region_of: Optional dict mapping module nodes to FusionRegions
     """
     bucketer = OverlapPreservingBucketer(
         graph=gm.graph,
@@ -1113,7 +1083,6 @@ def finalize_overlap_scheduling(
         collective_bucketing=collective_bucketing,
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
-        region_of=region_of,
         bucket_mode=bucket_mode,
     )
     bucketer.bucket_collectives()
