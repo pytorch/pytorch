@@ -2759,18 +2759,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         def fn(x):
             result = torch.max(x, dim=0)
-            s = repr(result)
+            repr(result)
             return result.values
 
         x = torch.randn(3, 2)
 
-        # Verify that fullgraph=True fails (confirms graph break occurs)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True, backend="eager")(x)
-
-        # Verify that it works without fullgraph
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
         result = opt_fn(x)
+        self.assertEqual(result, torch.max(x, dim=0).values)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_range_input(self):
@@ -5019,6 +5015,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(x, loc)
 
         self.assertTrue(loc.x is x)
+
+    def test_setattr_wrong_args_raises(self):
+        # setattr() with wrong arg count should raise TypeError during tracing,
+        # not silently graph-break (a graph break would just defer the same
+        # failure to eager execution).
+        @torch.compile(backend="eager")
+        def fn(x):
+            setattr(x, "foo")
+            return x
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(4))
 
     def test_user_defined_class_name(self):
         class MyClassFoo:

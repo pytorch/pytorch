@@ -177,7 +177,6 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_cudagraph_profiling_workaround(self):
         import subprocess
 
@@ -299,7 +298,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 check_trace(fname)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -341,7 +339,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
             torch._C._profiler._set_cuda_sync_enabled_val(False)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
@@ -384,7 +381,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 self.payload(device="cuda", tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_mixed_syntax(self):
         """Enum and dict entries can coexist for different activity groups."""
@@ -2764,12 +2760,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 found_mm = True
         self.assertTrue(found_mm)
         if use_cuda:
-            from torch._C import _get_privateuse1_backend_name
-
-            device_type_enum = getattr(DeviceType, device.upper(), None)
-            if device_type_enum is None and device == _get_privateuse1_backend_name():
-                device_type_enum = DeviceType.PrivateUse1
-            gpu_events = [e for e in events if e.device_type == device_type_enum]
+            gpu_events = [e for e in events if e.device_type == DeviceType.CUDA]
             self.assertGreater(len(gpu_events), 0, "No GPU events captured by profiler")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
