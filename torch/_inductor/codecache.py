@@ -134,7 +134,7 @@ from .cache_key import (
     SYSTEM_CACHE_KEY_STRATEGY,
 )
 from .output_code import CompiledFxGraph
-from .remote_cache import create_cache
+from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
@@ -196,18 +196,29 @@ def get_device_information(device_type: str) -> dict[str, str]:
     return metadata
 
 
+from torch.utils._functools import prefetchable_cache as torch_key_cache
+
+
+@torch_key_cache
+def triton_key() -> str | None:
+    from torch._inductor.runtime.triton_compat import (
+        HAS_TRITON,
+        triton_key as _triton_key_impl,
+    )
+
+    # Use triton_key instead of triton.__version__ as the version
+    # is not updated with each code change
+    if HAS_TRITON:
+        return _triton_key_impl()
+    return None
+
+
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
-
-        if HAS_TRITON:
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
+        with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
-        else:
-            triton_version = None
 
         try:
             system: dict[str, Any] = {
@@ -834,102 +845,20 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def _collect_module_files(
-    roots: list[str] | None, prefix: str
-) -> list[tuple[str, str]]:
-    """Collect all (spec_name, file_path) pairs from a module tree."""
-    result: list[tuple[str, str]] = []
-    for lib in pkgutil.iter_modules(roots, prefix):
+def build_code_hash(
+    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
+    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
-        result.append((spec.name, module))
+        with open(module, "rb") as f:
+            hasher.update(spec.name.encode("utf-8"))
+            hasher.update(f.read())
         if lib.ispkg:
-            result.extend(
-                _collect_module_files(spec.submodule_search_locations, f"{spec.name}.")
-            )
-    return result
-
-
-def _hash_one_file(name: str, path: str) -> tuple[str, bytes]:
-    """Hash a single module file. Suitable for concurrent execution."""
-    h = hashlib.sha256()
-    h.update(name.encode("utf-8"))
-    with open(path, "rb") as f:
-        if sys.version_info >= (3, 11):
-            h.update(hashlib.file_digest(f, "sha256").digest())
-        else:
-            h.update(f.read())
-    return (name, h.digest())
-
-
-def build_code_hash(
-    roots: list[str] | None, prefix: str, hasher: hashlib._Hash
-) -> None:
-    from concurrent.futures import ThreadPoolExecutor
-
-    files = _collect_module_files(roots, prefix)
-    if not files:
-        return
-    with ThreadPoolExecutor(max_workers=min(64, len(files))) as pool:
-        per_file_hashes = list(pool.map(lambda t: _hash_one_file(*t), files))
-    per_file_hashes.sort()
-    for _name, digest in per_file_hashes:
-        hasher.update(digest)
-
-
-_MISSING = object()
-
-
-def torch_key_cache(func: Callable[[], T]) -> Callable[[], T]:
-    """
-    Like functools.cache but with a prefetch() method that starts computing
-    the value in a background thread, and a set() method for prepopulating.
-    """
-    _cache: T | object = _MISSING
-    _lock = threading.Lock()
-    _future: Future[T] | None = None
-
-    def wrapper() -> T:
-        nonlocal _cache, _future
-        with _lock:
-            if _cache is not _MISSING:
-                return _cache  # type: ignore[return-value]
-            if _future is not None:
-                _cache = _future.result()
-                _future = None
-                return _cache  # type: ignore[return-value]
-            _cache = func()
-            return _cache  # type: ignore[return-value]
-
-    def set_val(val: T) -> None:
-        nonlocal _cache
-        with _lock:
-            assert _cache is _MISSING
-            _cache = val
-
-    def clear() -> None:
-        nonlocal _cache, _future
-        with _lock:
-            _cache = _MISSING
-            _future = None
-
-    def prefetch() -> None:
-        nonlocal _future
-        from concurrent.futures import ThreadPoolExecutor
-
-        with _lock:
-            if _cache is not _MISSING or _future is not None:
-                return
-            executor = ThreadPoolExecutor(max_workers=1)
-            _future = executor.submit(func)
-            executor.shutdown(wait=False)
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    wrapper.prefetch = prefetch  # type: ignore[attr-defined]
-    return wrapper
+            # need to also hash submodules
+            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
 @torch_key_cache
@@ -1729,6 +1658,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Called by GuardedCache to record hit/miss statistics.
         """
         if local_hit:
+            cache_stats.hit("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_hit_count",
@@ -1744,6 +1674,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 key,
             )
         if local_miss:
+            cache_stats.miss("LocalFxGraphCache")
             CompileEventLogger.try_(
                 CompileEventLogger.increment_toplevel,
                 "inductor_fx_local_cache_miss_count",
@@ -1995,6 +1926,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             CacheArtifactRecorder(InductorCacheArtifact.type(), key).record(content)
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
+                cache_stats.put("LocalFxGraphCache")
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
