@@ -780,6 +780,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__repr__" and not args and not kwargs:
+            return self.repr_impl(tx)
         elif name == "__iter__" and not args and not kwargs:
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
@@ -824,6 +826,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
+        elif name == "__sub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_subtract_impl(tx, args[0])
+        elif name == "__rsub__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_subtract_impl(tx, args[0], reverse=True)
+        elif name == "__isub__":
+            return self.nb_inplace_subtract_impl(tx, args[0])
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
             other = args[0]
             if not isinstance(self, type(other)) and not (
@@ -1190,6 +1201,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
+    def repr_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_repr slot.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
+
+        Called when type_implements_tp_repr returns True for this type.
+        Subclasses override to provide the actual repr implementation.
+        """
+        unimplemented(
+            gb_type="repr_impl not implemented",
+            context=f"{type(self).__name__} has tp_repr slot but no repr_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
+            "the corresponding VariableTracker doesn't implement repr_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def nb_int_impl(
         self,
         tx: Any,
@@ -1291,6 +1321,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement nb_positive_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def nb_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_subtract slot. Default: graph break.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rsub__`` instead of ``__sub__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
+        return variables.ConstantVariable(NotImplemented)
 
     def __init__(
         self,
