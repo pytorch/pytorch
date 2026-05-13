@@ -228,14 +228,13 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   auto grad = _grad.contiguous();
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
-  auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU || device1 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X1 got: ", device1);
-  auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU || device2 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X2 got: ", device2);
+  TORCH_CHECK(x1.device() == x2.device(),
+              "_cdist_backward expects X1 and X2 to be on the same device, got X1: ",
+              x1.device(), " and X2: ", x2.device());
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
+  cdist_backward_stub(x1.device().type(), grad_x1, grad, x1, x2, p, cdist);
 
   // Use x1.size() here and not the original size of _x1.size() as this gradient is not taking broadcasting into account
   // Broadcasting will be handled automatically by the autograd engine
