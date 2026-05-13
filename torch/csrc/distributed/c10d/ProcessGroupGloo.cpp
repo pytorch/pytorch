@@ -2584,17 +2584,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
   };
 
   // Validate input and output tensor lists
-  if (inputTensors.size() != static_cast<size_t>(getSize())) {
-    invalidArgument(
-        "input tensor list size " + std::to_string(inputTensors.size()) +
-        " does not match world size " + std::to_string(getSize()));
-  }
-
-  if (outputTensors.size() != static_cast<size_t>(getSize())) {
-    invalidArgument(
-        "output tensor list size " + std::to_string(outputTensors.size()) +
-        " does not match world size " + std::to_string(getSize()));
-  }
+  assertAllToAllTensorListSizes(
+      invalidArgument, outputTensors.size(), inputTensors.size(), getSize());
 
   assertDense(invalidArgument, inputTensors);
   assertDense(invalidArgument, outputTensors);

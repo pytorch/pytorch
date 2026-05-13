@@ -424,6 +424,21 @@ inline void assertAllgatherCoalescedOutputTensorLists(
   }
 }
 
+inline void assertAllToAllTensorListSizes(
+    const std::function<void(const std::string&)>& fn,
+    size_t outputTensorListSize,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (inputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("input tensor list size " + std::to_string(inputTensorListSize) +
+       " does not match world size " + std::to_string(worldSize));
+  }
+  if (outputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("output tensor list size " + std::to_string(outputTensorListSize) +
+       " does not match world size " + std::to_string(worldSize));
+  }
+}
+
 inline void assertDense(
     const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {

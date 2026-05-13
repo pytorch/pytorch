@@ -2,6 +2,7 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/utils.h>
 
 namespace c10d {
@@ -263,20 +264,62 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> alltoall_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      std::vector<int64_t>& /* outputSplitSizes */,
-      std::vector<int64_t>& /* inputSplitSizes */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
     checkCollectiveError();
+    c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
+    c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
+      outputBuffer.copy_(inputBuffer);
+    } else {
+      // Approximation: rank j's inputSplitSizes are unavailable here, so
+      // each output slot is filled by repeating inputBuffer[0:slot]. The
+      // values are deterministic but arbitrary; do not assert on them.
+      int64_t out_offset = 0;
+      auto in_size = inputBuffer.size(0);
+      for (int j = 0; j < size_; ++j) {
+        int64_t remaining = outputSplitSizes[j];
+        if (remaining > 0) {
+          TORCH_CHECK(
+              in_size > 0,
+              "alltoall_base: inputBuffer is empty but outputSplitSizes[",
+              j,
+              "] > 0");
+        }
+        int64_t dst = out_offset;
+        while (remaining > 0) {
+          auto chunk = std::min(remaining, in_size);
+          outputBuffer.narrow(0, dst, chunk)
+              .copy_(inputBuffer.narrow(0, 0, chunk));
+          dst += chunk;
+          remaining -= chunk;
+        }
+        out_offset += outputSplitSizes[j];
+      }
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> alltoall(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const AllToAllOptions& opts = AllToAllOptions()) override {
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::alltoall: ", msg);
+    };
+    assertAllToAllTensorListSizes(
+        invalidArgument, outputTensors.size(), inputTensors.size(), size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      outputTensors[i].copy_(inputTensors[i]);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
