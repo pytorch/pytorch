@@ -3,9 +3,9 @@
 import os
 import sys
 
+
 import torch
 import torch.distributed as dist
-
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
@@ -19,7 +19,6 @@ from torch.testing._internal.distributed.distributed_test import (
     TestDistBackend,
 )
 
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -27,7 +26,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-_allowed_backends = ("gloo", "nccl", "ucc")
+_allowed_backends = ("gloo", "nccl", "ucc", "xccl")
 if (
     "BACKEND" not in os.environ
     or "WORLD_SIZE" not in os.environ
