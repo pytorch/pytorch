@@ -92,7 +92,10 @@ def _get_device_from_value(value) -> torch.device | None:  # type: ignore[no-unt
 
     return None
 
-def flops_to_ns(flops: float | int, dtype: "torch.dtype",  device: torch.device | None = None) -> float:
+
+def flops_to_ns(
+    flops: float | int, dtype: "torch.dtype", device: torch.device | None = None
+) -> float:
     """Convert a FLOPs count to estimated nanoseconds on the current GPU.
 
     Uses 75% of theoretical peak and converts FLOPs to MACs (divide by 2).
@@ -102,7 +105,6 @@ def flops_to_ns(flops: float | int, dtype: "torch.dtype",  device: torch.device 
         return 0.0
 
     peak_gpu_flops = device_tflops * 1e12
-
 
     if peak_gpu_flops == 0:
         return 0.0

@@ -3127,7 +3127,10 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype, device: torch.device | None = None,) -> float:
+def get_device_tflops(
+    dtype: torch.dtype,
+    device: torch.device | None = None,
+) -> float:
     """
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
