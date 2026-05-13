@@ -48,7 +48,7 @@ def to_fun(t: object) -> Any:
 
 def sync_functional_tensor(t: torch.Tensor) -> None:
     if is_traceable_wrapper_subclass(t):
-        attrs, _ctx = t.__tensor_flatten__()
+        attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
             match getattr(t, attr):
                 case Tensor() as inner:
@@ -78,7 +78,7 @@ def from_fun(t: object) -> object:
     if not isinstance(t, FunctionalTensor):
         # quick sanity assert
         if isinstance(t, torch.Tensor):
-            if torch._is_functional_tensor(t):
+            if torch._is_functional_tensor(t):  # type: ignore[attr-defined]
                 raise AssertionError("expected non-functional tensor")
         return t
     sync_functional_tensor(t)
@@ -91,7 +91,7 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
-        t_attrs, _ = t.__tensor_flatten__()
+        t_attrs, _ = t.__tensor_flatten__()  # type: ignore[attr-defined]
         got_fun: bool | None = None
         for attr in t_attrs:
             match getattr(t, attr):
@@ -262,7 +262,7 @@ def has_metadata_mutation(
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
         # This is true if the current tensor experienced at least one set_() call
-        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)
+        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)  # type: ignore[attr-defined]
         # However, multiple set_() calls can cancel out. So we also check whether the
         # storage of the tensor has changed.
         # Note: if an input experienced two set_() calls that cancel out, **and**
@@ -284,7 +284,7 @@ def has_metadata_mutation(
         if has_storage_metadata_mutation:
             return True
 
-        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)
+        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
         # This is true if the current tensor experienced at least one metadata mutation.
         # So if false, we know there was no metadata mutation
         if not maybe_metadata_mutated:
