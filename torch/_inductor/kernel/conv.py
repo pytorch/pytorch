@@ -551,6 +551,8 @@ def convolution(
     if bias is not None and device_type != "cpu":
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
+        if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
+            return result
         return L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
