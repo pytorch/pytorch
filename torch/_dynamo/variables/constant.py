@@ -8,6 +8,7 @@ maintaining type safety through the compilation process.
 
 from __future__ import annotations
 
+import enum
 import operator
 from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
@@ -523,24 +524,36 @@ CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
-class FakeIdVariable(VariableTracker):
-    """A compile-time-only id value that can be used as a dict key but cannot
-    be reconstructed across graph breaks.
+class FakeValueKind(enum.Enum):
+    ID = "id"
+    HASH = "hash"
 
-    When dynamo evaluates ``id(x)`` on a variable tracker that has no
-    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
-    tracing), we mint a fake integer id.  This variable holds that id and
-    supports the minimal interface needed to participate as a dict key
-    (hashing and equality).  It intentionally blocks reconstruction so that a
-    graph break does not silently bake a stale id into the resumed bytecode.
+
+class FakeIdVariable(VariableTracker):
+    """A compile-time-only id or hash value that can be used as a dict key but
+    cannot be reconstructed across graph breaks.
+
+    When dynamo evaluates ``id(x)`` or ``hash(x)`` on a variable tracker that
+    has no corresponding runtime object, we mint a fake integer.  The ``kind``
+    field tracks which builtin produced the value so that same-kind comparisons
+    (e.g. ``id(a) != id(b)``) can be resolved at compile time while cross-kind
+    comparisons graph-break.
     """
 
     # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
     _cpython_type = int
 
-    def __init__(self, value: int, **kwargs: Any) -> None:
+    _nonvar_fields = {
+        "kind",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: int, *, kind: FakeValueKind = FakeValueKind.ID, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
+        self.kind = kind
 
     def as_python_constant(self) -> int:
         return self.value
@@ -557,10 +570,17 @@ class FakeIdVariable(VariableTracker):
     def richcompare_impl(
         self, tx: Any, other: VariableTracker, op: str
     ) -> VariableTracker:
-        # FakeIdVariable holds a compile-time-only id() or hash() value.
-        # Comparing it produces a result that depends on compile-time
-        # object identity, which may not hold at runtime.  Graph-break
-        # to run the comparison eagerly with real values.
+        if (
+            isinstance(other, FakeIdVariable)
+            and self.kind == other.kind
+            and op in ("__eq__", "__ne__")
+        ):
+            result = (
+                (self.value == other.value)
+                if op == "__eq__"
+                else (self.value != other.value)
+            )
+            return ConstantVariable.create(result)
         unimplemented(
             gb_type="Comparison on compile-time-only id or hash value",
             context=f"FakeIdVariable({self.value}) {op} {type(other).__name__}",

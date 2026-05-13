@@ -3948,7 +3948,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:

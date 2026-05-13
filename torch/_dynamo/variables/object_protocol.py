@@ -924,11 +924,11 @@ def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     Wraps the result in ConstantVariable or FakeIdVariable depending on
     whether the hash depends on a sourceless object's identity.
     """
-    from .constant import ConstantVariable, FakeIdVariable
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 
     h, is_fake = generic_hash_impl(tx, obj)
     if is_fake:
-        return FakeIdVariable(h)
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 
