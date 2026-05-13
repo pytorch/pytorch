@@ -885,13 +885,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
             semantic_expr,
             self.vector_load_config.index,
-            self.vector_load_config.vec_size,
         )
-        raw_contiguous_width = lane_contiguity.contiguous_width
         contiguous_width = self._aligned_contiguous_width(
             semantic_expr,
             self.vector_load_config.index,
-            raw_contiguous_width if isinstance(raw_contiguous_width, int) else None,
+            lane_contiguity,
+            self.vector_load_config.vec_size,
         )
         return (
             self._is_lane_uniform_expr(semantic_expr, self.vector_load_config.index),
@@ -942,17 +941,19 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     @staticmethod
     def _aligned_contiguous_width(
-        expr: sympy.Expr, vector_index: sympy.Symbol, contiguous_width: int | None
+        expr: sympy.Expr,
+        vector_index: sympy.Symbol,
+        lane_contiguity,
+        max_width: int,
     ) -> int | None:
         """Narrow contiguous width until the first lane is statically aligned."""
-        if contiguous_width is None:
-            return None
         start_expr = V.graph.sizevars.simplify(
             expr.xreplace({vector_index: sympy.Integer(0)})
         )
-        for width in (contiguous_width, 4, 2):
+        for width in (max_width, 4, 2):
             if (
-                width <= contiguous_width
+                width <= max_width
+                and lane_contiguity.is_contiguous_for(width)
                 and V.graph.sizevars.statically_known_multiple_of(start_expr, width)
                 and V.graph.sizevars.statically_known_geq(start_expr, 0)
             ):
