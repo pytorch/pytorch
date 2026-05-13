@@ -174,8 +174,8 @@ def create_subclass_metadata(
             included_subclass_symints=count_symints,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
         ),
