@@ -45,6 +45,7 @@ install_ubuntu() {
     libc6-dbg \
     libyaml-dev \
     libz-dev \
+    liblzma-dev \
     libjemalloc2 \
     libgl1 \
     libjpeg-dev \
