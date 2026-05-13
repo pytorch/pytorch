@@ -327,6 +327,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -1307,11 +1309,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def __init__(self) -> None:
         super().__init__()
 
-        # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
-        # shapes the default mm_configs list under-explores. Autotune
-        # handles per-shape selection, so smaller / odd-aligned shapes
-        # fall back to existing configs.
-        self.mm_configs.append(GemmConfig(128, 256, 64, 4, 8))
+
 
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
