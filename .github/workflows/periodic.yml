@@ -93,6 +93,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -136,6 +137,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-debug-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -180,6 +182,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build.outputs.test-matrix-osdc }}
       timeout-minutes: 300
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
