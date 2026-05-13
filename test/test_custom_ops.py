@@ -5121,15 +5121,18 @@ class TestCustomOpFastPath(TestCase):
         result = fp_disabled(x)
         self.assertEqual(result, x)
 
-    def test_fast_path_mixed_device_falls_back(self):
+    def test_fast_path_mixed_device_uses_first_tensor(self):
         @torch.library.custom_op("_torch_testing::fp_mixed", mutates_args=())
         def fp_mixed(x: Tensor, y: Tensor) -> Tensor:
             return x.clone()
 
+        # C++ checker uses the first tensor's device; mixed-device handling
+        # is left to the kernel / fast_call meta fallback.
         result = torch._C._custom_op_fast_path_check(
             (torch.randn(3, device="cpu"), torch.randn(3, device="meta"))
         )
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "cpu")
 
 
 class TestLibrarySourceLocation(TestCase):

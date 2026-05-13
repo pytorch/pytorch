@@ -21,6 +21,32 @@ class Info:
     _setup_context_fn: Callable | None
 
 
+def _invoke_setup_context(
+    info: InfoProtocol,
+    schema,
+    has_kwarg_only_args: bool,
+    ctx,
+    args,
+    kwargs,
+    result,
+):
+    """Invoke info._setup_context_fn after filling defaults.
+
+    Shared between make_autograd_impl's Generated.forward and
+    CustomOpDef's fast-path Generated.forward so we only spell the
+    fill_defaults / has_kwarg_only_args handling once.
+    """
+    if info._setup_context_fn is None:
+        return
+    args, kwargs = utils.fill_defaults(schema, args, kwargs)
+    if has_kwarg_only_args:
+        info._setup_context_fn(
+            ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
+        )
+    else:
+        info._setup_context_fn(ctx=ctx, inputs=args, output=result)
+
+
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
@@ -49,25 +75,12 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             keyset = metadata.keyset
             kwargs = metadata.keyword_only_args
             result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            if info._setup_context_fn:
-                # The Dispatcher will remove args that are equal to their default
-                # values from (args, kwargs). We're going to add it back so that
-                # the user can access them.
-                #
-                # This is OK to do: The Dispatcher removed the args for serialization
-                # FC/BC reasons (that is, a graph will not store args that are equal
-                # to their default values), but that doesn't matter here. If the user
-                # adds a new default arg, then they must update
-                # their setup_context (along with the rest of their operator
-                # registrations)
-                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
-
-                if has_kwarg_only_args:
-                    info._setup_context_fn(
-                        ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
-                    )
-                else:
-                    info._setup_context_fn(ctx=ctx, inputs=args, output=result)
+            # The Dispatcher strips args equal to their default values (done for
+            # serialization FC/BC). fill_defaults puts them back so setup_context
+            # sees the full call signature.
+            _invoke_setup_context(
+                info, op._schema, has_kwarg_only_args, ctx, args, kwargs, result
+            )
             return result
 
     def backward(ctx, *grads):

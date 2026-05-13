@@ -38,60 +38,6 @@ def _keyset_for_device(device_type: str) -> "_C.DispatchKeySet":
     return ks
 
 
-if not hasattr(_C, "_custom_op_fast_path_check"):
-    _NORMAL_TLS_INCLUDE_RAW = (
-        _C.DispatchKeySet(_C.DispatchKey.BackendSelect)
-        | _C.DispatchKeySet(_C.DispatchKey.ADInplaceOrView)
-    ).raw_repr()
-
-    def _custom_op_fast_path_check(args):
-        """Pure-Python fallback for the C++ fast-path eligibility check.
-
-        Eligible when all of:
-        - No TorchFunctionMode active
-        - No TorchDispatchMode active (dispatch stack empty)
-        - TLS dispatch include set ⊆ {BackendSelect, ADInplaceOrView}
-        - No autocast (CUDA or CPU)
-        - Every tensor arg is exactly torch.Tensor (no subclasses)
-        - No nested, sparse, or quantized tensors
-        - All tensor args on the same device
-        - At least one tensor arg present
-
-        Returns (device_type_str, any_requires_grad) or None."""
-        from torch.overrides import _is_torch_function_mode_enabled
-
-        if _is_torch_function_mode_enabled():
-            return None
-        if _C._len_torch_dispatch_stack() > 0:
-            return None
-        if (
-            _C._dispatch_tls_local_include_set().raw_repr() & ~_NORMAL_TLS_INCLUDE_RAW
-        ) != 0:
-            return None
-        if torch.is_autocast_enabled("cuda") or torch.is_autocast_enabled("cpu"):
-            return None
-        first_device = None
-        any_requires_grad = False
-        for a in args:
-            if not isinstance(a, torch.Tensor):
-                continue
-            if type(a) is not torch.Tensor:
-                return None
-            if a.is_nested or a.is_sparse or a.is_quantized:
-                return None
-            if first_device is None:
-                first_device = a.device.type
-            elif a.device.type != first_device:
-                return None
-            if a.requires_grad:
-                any_requires_grad = True
-        if first_device is None:
-            return None
-        return (first_device, any_requires_grad)
-
-    _C._custom_op_fast_path_check = _custom_op_fast_path_check  # type: ignore[attr-defined]
-
-
 @overload
 def custom_op(
     name: str,
@@ -870,9 +816,7 @@ class CustomOpDef:
 
             # Returns (device_type,) or None; rejects subclasses, modes,
             # autocast, multi-device, nested/sparse/quantized, tensor lists
-            check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
-                args
-            )
+            check = _C._custom_op_fast_path_check(args)  # pyrefly: ignore[missing-attribute]
             if check is None:
                 return _FAST_PATH_FALLBACK
 
@@ -890,7 +834,7 @@ class CustomOpDef:
             _fast_dispatch_tls_fn.fn = fn
             try:
                 with _ops._enable_fast_dispatch(op, chain):
-                    return autograd_impl(keyset, *args)
+                    return autograd_impl(keyset, *args)  # pyrefly: ignore[not-callable]
             finally:
                 _fast_dispatch_tls_fn.fn = None
 
