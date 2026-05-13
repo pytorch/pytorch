@@ -346,21 +346,23 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
     return;
   }
   auto input = input_.contiguous();
-  auto output_c = output;
+  const bool output_needs_copy = !output.is_contiguous();
+  auto output_buf = output_needs_copy ? at::empty(output.sizes(), output.options()) : output;
+  auto output_c = output_buf;
   if (input.dim() == 2) {
     input = input.unsqueeze(0);
     output_c = output_c.unsqueeze(0);
   }
   TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
 
-  const auto nbatch = input.size(0);
-  const auto nplane = input.size(1);
-  const auto input_W = input.size(2);
-  const auto output_W = output_c.size(2);
-  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                            static_cast<int32_t>(output_W),
-                                            static_cast<int32_t>(padding[0]),
-                                            static_cast<int32_t>(padding[1])};
+  const auto nbatch = c10::checked_convert<int32_t>(input.size(0), "int32_t");
+  const auto nplane = c10::checked_convert<int32_t>(input.size(1), "int32_t");
+  const auto input_W = c10::checked_convert<int32_t>(input.size(2), "int32_t");
+  const auto output_W = c10::checked_convert<int32_t>(output_c.size(2), "int32_t");
+  const std::array<int32_t, 4> sizes_pad = {input_W,
+                                            output_W,
+                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
+                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -375,6 +377,9 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
       getMPSProfiler().endProfileKernel(pso);
     }
   });
+  if (output_needs_copy) {
+    output.copy_(output_buf);
+  }
 }
 
 static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
@@ -385,21 +390,23 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
     return;
   }
   auto grad_output = grad_output_.contiguous();
-  auto grad_input_c = grad_input;
+  const bool grad_input_needs_copy = !grad_input.is_contiguous();
+  auto grad_input_buf = grad_input_needs_copy ? at::empty(grad_input.sizes(), grad_input.options()) : grad_input;
+  auto grad_input_c = grad_input_buf;
   if (input.dim() == 2) {
     grad_output = grad_output.unsqueeze(0);
     grad_input_c = grad_input_c.unsqueeze(0);
   }
   TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
 
-  const auto nbatch = grad_input_c.size(0);
-  const auto nplane = grad_input_c.size(1);
-  const auto input_W = grad_input_c.size(2);
-  const auto output_W = grad_output.size(2);
-  const std::array<int32_t, 4> sizes_pad = {static_cast<int32_t>(input_W),
-                                            static_cast<int32_t>(output_W),
-                                            static_cast<int32_t>(padding[0]),
-                                            static_cast<int32_t>(padding[1])};
+  const auto nbatch = c10::checked_convert<int32_t>(grad_input_c.size(0), "int32_t");
+  const auto nplane = c10::checked_convert<int32_t>(grad_input_c.size(1), "int32_t");
+  const auto input_W = c10::checked_convert<int32_t>(grad_input_c.size(2), "int32_t");
+  const auto output_W = c10::checked_convert<int32_t>(grad_output.size(2), "int32_t");
+  const std::array<int32_t, 4> sizes_pad = {input_W,
+                                            output_W,
+                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
+                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
   auto stream = getCurrentMPSStream();
@@ -414,6 +421,9 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
       getMPSProfiler().endProfileKernel(pso);
     }
   });
+  if (grad_input_needs_copy) {
+    grad_input.copy_(grad_input_buf);
+  }
 }
 
 } // namespace mps
