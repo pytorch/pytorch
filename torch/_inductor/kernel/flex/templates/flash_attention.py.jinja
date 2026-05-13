@@ -24,7 +24,7 @@
             m="q_idx",
             n="kv_idx",
             out="tSrS_ssa",
-            vector_load_vec_size=SCORE_MOD_VEC_SIZE or 1,
+            vector_load_vec_size=SCORE_MOD_VEC_SIZE,
             vector_load_index="kv_idx",
             vector_load_dim=-1
         ) | indent_except_first(2) }}

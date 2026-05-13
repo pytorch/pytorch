@@ -634,6 +634,7 @@ class SizeVarAllocator:
     def _analyze_lane_contiguity_add(
         self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
+        """Combine additive terms when at most one term varies across lanes."""
         result = LaneContiguity(stride=0, uniform=True)
         for arg in args:
             arg_result = self.analyze_lane_contiguity(arg, lane_var, requested_width)
@@ -650,6 +651,7 @@ class SizeVarAllocator:
     def _analyze_lane_contiguity_mul(
         self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
+        """Propagate lane stride through constant multiplication."""
         if len(args) != 2:
             return LaneContiguity(unknown=True)
         lhs, rhs = args
@@ -673,6 +675,7 @@ class SizeVarAllocator:
     def _analyze_lane_contiguity_modular_indexing(
         self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
+        """Analyze ModularIndexing(base, 1, modulus) as base % modulus."""
         base, divisor, modulus = expr.args
         if not isinstance(divisor, (int, sympy.Integer)) or int(divisor) != 1:
             return LaneContiguity(unknown=True)
@@ -683,6 +686,7 @@ class SizeVarAllocator:
     def _analyze_lane_contiguity_mod(
         self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
     ) -> LaneContiguity:
+        """Analyze Python-style modulo expressions over the vector lane."""
         base, modulus = expr.args
         return self._analyze_lane_contiguity_mod_args(
             base, modulus, lane_var, requested_width
@@ -695,11 +699,13 @@ class SizeVarAllocator:
         lane_var: sympy.Symbol,
         requested_width: int,
     ) -> LaneContiguity:
-        """Handle modulo when the whole vector group cannot wrap.
+        """Return the largest aligned no-wrap modulo span up to requested_width.
 
-        `(base % modulus)` is lane-contiguous only when the group start and the
-        modulus are aligned to the accepted width. Otherwise vector lanes can
-        wrap around the modulus boundary and are not a contiguous memory span.
+        `base % modulus` is contiguous for a vector group only when both the
+        group start and modulus are multiples of the chosen width. For example,
+        lanes 0..3 under `% 4` are contiguous, but lanes 2..5 wrap to 2,3,0,1.
+        We try narrower widths so callers can still use vec4 or vec2 when vec8
+        would cross a modulo boundary.
         """
         if not isinstance(modulus, (int, sympy.Integer)):
             return LaneContiguity(unknown=True)

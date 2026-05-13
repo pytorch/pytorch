@@ -69,6 +69,31 @@ class CuteDSLKernelWrapper:
 
 
 @dataclasses.dataclass(frozen=True)
+class CuteDSLVectorLoadConfig:
+    vec_size: int
+    index: sympy.Symbol
+    dim: int
+
+    @staticmethod
+    def from_fixed_inputs(
+        fixed_inputs: dict[str, Any],
+    ) -> "CuteDSLVectorLoadConfig | None":
+        vec_size = fixed_inputs.pop("vector_load_vec_size", None)
+        index = fixed_inputs.pop("vector_load_index", None)
+        dim = fixed_inputs.pop("vector_load_dim", None)
+        if vec_size is None or index is None or dim is None:
+            return None
+        return CuteDSLVectorLoadConfig(
+            vec_size=int(vec_size),
+            index=sympy_index_symbol(str(index)),
+            dim=int(dim),
+        )
+
+    def normalized_dim(self, ndim: int) -> int:
+        return self.dim + ndim if self.dim < 0 else self.dim
+
+
+@dataclasses.dataclass(frozen=True)
 class CuteDSLIndexFragment:
     """Generated index expression metadata for CuteDSL tensor loads.
 
@@ -538,7 +563,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         super().__init__(cutedsl_ops)
         self.name = f"CuteDSLPlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
-        self.fixed_inputs = fixed_inputs
+        self.fixed_inputs = dict(fixed_inputs)
+        self.vector_load_config = CuteDSLVectorLoadConfig.from_fixed_inputs(
+            self.fixed_inputs
+        )
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
@@ -635,7 +663,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         dynamic_index_fragment = next(
             (idx for idx in idx_vars if not idx.is_static_int), None
         )
-        # Dynamic index fragments all carry the same vector-lane shape, so one
+        # Dynamic index fragments all carry the same vector width, so one
         # representative fragment is enough to size the loaded value fragment.
         val_frag = self.kernel.cse.newvar(dtype=var_dtype)
         if len(buffer.get_size()) == 0:
@@ -657,7 +685,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             f"{val_frag} = cute.make_rmem_tensor("
             f"cute.size({dynamic_index_fragment.code}.shape), {cute_dtype})"
         )
-        vector_dim = self._vector_load_dim(len(idx_vars))
+        if self.vector_load_config is None:
+            vector_dim = len(idx_vars) - 1
+        else:
+            vector_dim = self.vector_load_config.normalized_dim(len(idx_vars))
         if self._can_emit_contiguous_dim_load(idx_vars, buffer, var_dtype, vector_dim):
             self._emit_contiguous_dim_load(
                 var, idx_vars, val_frag, cute_dtype, var_dtype, vector_dim
@@ -693,7 +724,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             return False
         sizes = buffer.get_size()
         strides = buffer.get_stride()
-        vector_size = self._vector_load_vec_size()
+        vector_size = (
+            1 if self.vector_load_config is None else self.vector_load_config.vec_size
+        )
         contiguous_width = idx_vars[vector_dim].contiguous_width
         offset = buffer.get_layout().offset
         return (
@@ -706,18 +739,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
             and V.graph.sizevars.statically_known_multiple_of(offset, vector_size)
         )
-
-    def _vector_load_vec_size(self) -> int:
-        value = self.fixed_inputs.get("vector_load_vec_size", 1)
-        return int(1 if value is None else value)
-
-    def _vector_load_index_symbol(self) -> sympy.Symbol | None:
-        value = self.fixed_inputs.get("vector_load_index")
-        return None if value is None else sympy_index_symbol(str(value))
-
-    def _vector_load_dim(self, ndim: int) -> int:
-        dim = int(self.fixed_inputs.get("vector_load_dim", ndim - 1))
-        return dim + ndim if dim < 0 else dim
 
     def _emit_contiguous_dim_load(
         self,
@@ -828,8 +849,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
 
         semantic_expr = self._semantic_index_expr(expr)
-        vector_index = self._vector_load_index_symbol()
-        vector_size = self._vector_load_vec_size()
+        vector_index = (
+            None if self.vector_load_config is None else self.vector_load_config.index
+        )
+        vector_size = (
+            1 if self.vector_load_config is None else self.vector_load_config.vec_size
+        )
         if vector_size <= 1:
             is_lane_uniform = True
             is_contiguous = False

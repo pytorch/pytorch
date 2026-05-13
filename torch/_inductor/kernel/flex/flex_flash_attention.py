@@ -75,6 +75,13 @@ def _get_flex_flash_fwd_configs(
 def _select_aux_score_mod_vec_size(
     graph_module: GraphModule | None, score_mod_other_buffers: Sequence[TensorBox]
 ) -> int:
+    """Choose a safe score_mod vector width for captured tensor loads.
+
+    Flex score_mod vectorization is only enabled when every captured tensor
+    index load can be emitted as a direct contiguous vector load. If any load
+    needs scalar gather semantics, force vec_size=1 so the generated score_mod
+    matches scalar-lane lowering.
+    """
     if graph_module is None:
         return 1
 
