@@ -897,3 +897,16 @@ def register_symm_mem_lowerings():
             reduce_op,
             group_name,
         )
+
+    @register_lowering(symm_mem._low_contention_all_reduce)
+    def _symm_mem_low_contention_all_reduce(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        return _create_out_of_place(
+            symm_mem._low_contention_all_reduce.default,
+            inp,
+            reduce_op,
+            group_name,
+        )
