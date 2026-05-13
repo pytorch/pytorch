@@ -1027,23 +1027,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", list(args), kwargs)
             return var
 
-        if (
-            self.can_constant_fold_through()
-            and self.value is not torch.Size
-            and (constant_args or check_args_peekable_as_constant(args, kwargs))
-        ):
-            # constant fold - catch AsPythonConstantNotImplementedError for lazy
-            # args that realize into SymNodeVariable (specialize_int=False)
-            try:
-                return VariableTracker.build(
-                    tx,
-                    self.as_python_constant()(
-                        *[x.as_python_constant() for x in args],
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    ),
-                )
-            except AsPythonConstantNotImplementedError:
-                pass
+        if self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return VariableTracker.build(
+                tx,
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
