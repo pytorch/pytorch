@@ -68,7 +68,6 @@ from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
-    BuiltinMethodVariable,
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
@@ -130,7 +129,6 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CellVariable,
-    ConstantMethodWrapperVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
