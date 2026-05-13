@@ -1517,7 +1517,11 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import start_graph, end_graph
+            from {triton_heuristics.__name__} import (
+                end_graph,
+                start_combo_kernel_standalone_autotune,
+                start_graph,
+            )
             """
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)

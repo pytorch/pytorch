@@ -420,6 +420,37 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertIs(result, sentinel)
         mock_autotune.assert_not_called()
 
+    def test_no_launch_autotune_uses_default_autotune_path(self):
+        seen = []
+
+        class _Plugin(CachingAutotunerPlugin):
+            def pre_autotune(self, autotuner, *args, stream, **kwargs):
+                seen.append("pre_autotune")
+                return object()
+
+        autotuner = self._make_autotuner([_Plugin()])
+        launcher_a = MagicMock()
+        launcher_a.config = triton_config({"x": 16}, 64)
+        launcher_b = MagicMock()
+        launcher_b.config = triton_config({"x": 256}, 64)
+        autotuner.launchers = [launcher_a, launcher_b]
+
+        def autotune_to_launcher_a(*args, **kwargs):
+            autotuner.launchers = [launcher_a]
+
+        with patch.object(
+            autotuner,
+            "autotune_to_one_config",
+            side_effect=autotune_to_launcher_a,
+        ) as mock_autotune:
+            result = autotuner.autotune_to_one_config_no_launch(
+                *self._make_kernel_inputs(), stream=self._get_stream()
+            )
+
+        self.assertIs(result, launcher_a.config)
+        self.assertEqual(seen, [])
+        mock_autotune.assert_called_once()
+
     def test_hooks_fire_in_registration_order(self):
         sentinel = object()
         seen = []
@@ -830,6 +861,32 @@ class TestRecheckAutotuneCache(TestCase):
         self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_propagates_found_by_combo_autotune(self):
+        """
+        When the cached best config was already tuned from standalone
+        subkernel seeds, the marker must survive static autotuner reload.
+        """
+        cfg = triton_config({"x": 16}, 64)
+        cfg.found_by_combo_autotune = False
+        compile_result = self._make_compile_result(cfg)
+
+        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+
+        cached_cfg = triton_config({"x": 16}, 64)
+        cached_cfg.found_by_combo_autotune = True
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        self.assertTrue(
+            autotuner.compile_results[0].config.found_by_combo_autotune
+        )
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_no_cache_hit_leaves_results_unchanged(self):
         """
         When there's no autotune cache hit, compile_results should not change.
@@ -1117,6 +1174,36 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertIsNotNone(result)
         self.assertIs(result, cfg_b)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_load_cached_autotuning_restores_combo_autotune_marker(self):
+        """
+        A combo-autotuned cache hit must not run combo seed tuning again.
+        """
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        cfg = triton_config({"x": 8}, 4, num_stages=1)
+        original_configs = [cfg]
+        configs_hash = hash_configs(original_configs)
+
+        best_config_data = {
+            **cfg.kwargs,
+            "num_warps": cfg.num_warps,
+            "num_stages": cfg.num_stages,
+            "configs_hash": configs_hash,
+            "found_by_combo_autotune": True,
+        }
+
+        result = _load_cached_autotuning(
+            best_config_data,
+            configs_hash,
+            original_configs,
+            {"combo_tuning_groups": [{"member_indices": [0], "skip_rblock": False}]},
+        )
+
+        self.assertIs(result, cfg)
+        self.assertTrue(result.found_by_combo_autotune)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):

@@ -468,6 +468,7 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
+        self.standalone_autotune_seed_infos: list[tuple[str, list[Any]]] = []
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -1154,6 +1155,41 @@ class ComboKernel(Kernel):
         assert self.dispatch_class is not None
         if self.dynamic_shape_args:
             self.add_numel_to_call_args(name, call_args, arg_types)
+
+        if self.standalone_autotune_seed_infos:
+            inplaced_call_arg_replacements: dict[str, str] = {}
+            seen_inplaced_args: set[str] = set()
+            for inplaced in self.args.inplace_buffers.values():
+                if isinstance(inplaced, RemovedArg):
+                    continue
+                if inplaced.inner_name in seen_inplaced_args:
+                    continue
+                seen_inplaced_args.add(inplaced.inner_name)
+                live_name = inplaced.other_names[-1]
+                for other_name in inplaced.other_names[:-1]:
+                    inplaced_call_arg_replacements[other_name] = live_name
+
+            seed_specs = []
+            for seed_name, seed_call_args in self.standalone_autotune_seed_infos:
+                seed_call_args = [
+                    inplaced_call_arg_replacements.get(arg, arg)
+                    if isinstance(arg, str)
+                    else arg
+                    for arg in seed_call_args
+                ]
+                seed_args = wrapper.prepare_triton_kernel_call(seed_call_args)
+                if len(seed_args) == 1:
+                    seed_args_str = f"({seed_args[0]},)"
+                else:
+                    seed_args_str = f"({', '.join(seed_args)})"
+                seed_specs.append(f"({seed_name}, {seed_args_str})")
+            if len(seed_specs) == 1:
+                seed_specs_str = f"({seed_specs[0]},)"
+            else:
+                seed_specs_str = f"({', '.join(seed_specs)})"
+            wrapper.writeline(
+                f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+            )
 
         wrapper.generate_kernel_call(
             name,
