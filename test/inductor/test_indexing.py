@@ -34,6 +34,7 @@ from torch.utils._sympy.functions import (
     RoundDecimal,
     RoundToInt,
 )
+from torch.utils._sympy.numbers import int_oo
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
@@ -61,56 +62,61 @@ class TestIndexingSimplification(InductorTestCase):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
         j = sympy.Symbol("j", integer=True, nonnegative=True)
 
-        with self.assertRaises(AssertionError):
-            sizevars.analyze_lane_contiguity(i, i, 6)
-
-        result = sizevars.analyze_lane_contiguity(i + 8, i, 8)
-        self.assertEqual(result.contiguous_width, 8)
+        result = sizevars.analyze_lane_contiguity(i + 8, i)
+        self.assertEqual(result.contiguous_width, int_oo)
         self.assertEqual(result.stride, 1)
         self.assertFalse(result.uniform)
 
-        result = sizevars.analyze_lane_contiguity(2 * i, i, 8)
+        result = sizevars.analyze_lane_contiguity(2 * i, i)
         self.assertIsNone(result.contiguous_width)
         self.assertEqual(result.stride, 2)
         self.assertFalse(result.uniform)
 
-        result = sizevars.analyze_lane_contiguity(2 * i * j, i, 8)
+        result = sizevars.analyze_lane_contiguity(2 * i * j, i)
         self.assertIsNone(result.contiguous_width)
         self.assertEqual(result.stride, 2 * j)
         self.assertFalse(result.uniform)
 
-        result = sizevars.analyze_lane_contiguity(i * i, i, 8)
+        result = sizevars.analyze_lane_contiguity(i * i, i)
         self.assertTrue(result.unknown)
 
-        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i, 8)
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 1, 4), i)
         self.assertEqual(result.contiguous_width, 4)
         self.assertEqual(result.stride, 1)
 
-        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 4, 1, 8), i, 8)
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 4, 1, 8), i)
         self.assertEqual(result.contiguous_width, 4)
         self.assertEqual(result.stride, 1)
 
-        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i, 8)
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 2, 1, 8), i)
         self.assertEqual(result.contiguous_width, 2)
         self.assertEqual(result.stride, 1)
 
-        result = sizevars.analyze_lane_contiguity(Mod(i, 4), i, 8)
+        result = sizevars.analyze_lane_contiguity(Mod(i, 4), i)
         self.assertEqual(result.contiguous_width, 4)
         self.assertEqual(result.stride, 1)
 
-        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i, 8)
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i + 1, 1, 8), i)
         self.assertTrue(result.unknown)
 
-        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8), i, 8)
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8), i)
         self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
         self.assertEqual(result.stride, 0)
 
-        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i, 8)
-        self.assertTrue(result.unknown)
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 2), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 2)
 
-        result = sizevars.analyze_lane_contiguity(
-            2 * i - ModularIndexing(i, 1, 4), i, 8
-        )
+        result = sizevars.analyze_lane_contiguity(ModularIndexing(i, 8, 4), i)
+        self.assertTrue(result.uniform)
+        self.assertEqual(result.uniform_width, 8)
+
+        result = sizevars.analyze_lane_contiguity(FloorDiv(i, 8) + i, i)
+        self.assertEqual(result.contiguous_width, 8)
+        self.assertFalse(result.uniform)
+
+        result = sizevars.analyze_lane_contiguity(2 * i - ModularIndexing(i, 1, 4), i)
         self.assertTrue(result.unknown)
 
     def test_indexing_simplification(self):

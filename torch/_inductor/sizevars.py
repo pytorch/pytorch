@@ -24,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
@@ -42,19 +43,51 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+Width = int | IntInfinity
+
+
 @dataclasses.dataclass(frozen=True)
 class LaneContiguity:
-    """How an index expression varies across lanes in a vector group.
+    """How an index expression varies across lanes.
 
     This describes only the per-lane relationship, not full memory safety.
     Callers still need to prove the relevant tensor dimension, stride, and base
-    alignment make a vector load valid.
+    alignment make a vector load valid. ``int_oo`` means the expression does not
+    impose a finite limit on that width.
     """
 
-    contiguous_width: int | None = None
+    contiguous_width: Width | None = None
+    uniform_width: Width | None = None
     stride: int | Expr | None = None
-    uniform: bool = False
     unknown: bool = False
+
+    @property
+    def uniform(self) -> bool:
+        return self.uniform_width is not None
+
+    def is_contiguous_for(self, width: int) -> bool:
+        return _width_covers(self.contiguous_width, width)
+
+    def is_uniform_for(self, width: int) -> bool:
+        return _width_covers(self.uniform_width, width)
+
+
+def _width_covers(max_width: Width | None, width: int) -> bool:
+    return max_width is not None and (max_width == int_oo or max_width >= width)
+
+
+def _min_width(lhs: Width | None, rhs: Width | None) -> Width | None:
+    if lhs is None or rhs is None:
+        return None
+    if lhs == int_oo:
+        return rhs
+    if rhs == int_oo:
+        return lhs
+    return min(lhs, rhs)
+
+
+def _largest_power_of_2_factor(n: int) -> int:
+    return n & -n
 
 
 # Symbols created by CppTemplateKernel.slice_nd → parse_expr_with_index_symbols
@@ -615,67 +648,66 @@ class SizeVarAllocator:
         return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
 
     def analyze_lane_contiguity(
-        self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
+        self, expr: Expr, lane_var: sympy.Symbol
     ) -> LaneContiguity:
         """Analyze whether `expr` is uniform or contiguous over vector lanes.
 
         The analysis is conservative: unknown cases must fall back to scalar or
         gather-style lowering. It only describes the lane pattern of the index
         expression; callers must still prove tensor stride, offset, dtype, and
-        alignment before emitting a vector memory load. `contiguous_width` can
-        be smaller than `requested_width` for modular expressions whose
-        contiguous span is known only for a narrower aligned group.
+        alignment before emitting a vector memory load.
         """
-        assert requested_width >= 1 and is_power_of_2(requested_width)
-        expr = self.simplify(
-            simplify_index_in_vec_range(expr, lane_var, requested_width)
-        )
+        expr = self.simplify(expr)
         if lane_var not in expr.free_symbols:
-            return LaneContiguity(stride=0, uniform=True)
+            return LaneContiguity(stride=0, uniform_width=int_oo)
         stride = stride_at(expr, lane_var)
         match expr:
             case _ if self.statically_known_equals(stride, 1):
-                return LaneContiguity(contiguous_width=requested_width, stride=1)
+                return LaneContiguity(contiguous_width=int_oo, stride=1)
             case _ if self.statically_known_equals(stride, 0):
-                return LaneContiguity(stride=0, uniform=True)
+                return LaneContiguity(stride=0, uniform_width=int_oo)
             case sympy.Add():
-                return self._analyze_lane_contiguity_add(
-                    expr.args, lane_var, requested_width
-                )
+                return self._analyze_lane_contiguity_add(expr.args, lane_var)
             case sympy.Mul():
-                return self._analyze_lane_contiguity_mul(
-                    expr.args, lane_var, requested_width
+                return self._analyze_lane_contiguity_mul(expr.args, lane_var)
+            case FloorDiv():
+                return self._analyze_lane_contiguity_floor_div(
+                    expr.args[0], expr.args[1], lane_var
                 )
             case ModularIndexing():
-                return self._analyze_lane_contiguity_modular_indexing(
-                    expr, lane_var, requested_width
-                )
+                return self._analyze_lane_contiguity_modular_indexing(expr, lane_var)
             case _ if isinstance(expr, (Mod, sympy.Mod)):
                 return self._analyze_lane_contiguity_mod(
-                    expr.args[0], expr.args[1], lane_var, requested_width
+                    expr.args[0], expr.args[1], lane_var
                 )
             case _:
                 return LaneContiguity(unknown=True)
 
     def _analyze_lane_contiguity_add(
-        self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
     ) -> LaneContiguity:
         """Combine additive terms when at most one term varies across lanes."""
-        result = LaneContiguity(stride=0, uniform=True)
+        uniform_width: Width | None = int_oo
+        varying_result: LaneContiguity | None = None
         for arg in args:
-            arg_result = self.analyze_lane_contiguity(arg, lane_var, requested_width)
+            arg_result = self.analyze_lane_contiguity(arg, lane_var)
             if arg_result.unknown:
                 return LaneContiguity(unknown=True)
-            if result.uniform:
-                result = arg_result
-            elif arg_result.uniform:
-                continue
+            if arg_result.uniform:
+                uniform_width = _min_width(uniform_width, arg_result.uniform_width)
+            elif varying_result is None:
+                varying_result = arg_result
             else:
                 return LaneContiguity(unknown=True)
-        return result
+        if varying_result is None:
+            return LaneContiguity(stride=0, uniform_width=uniform_width)
+        return LaneContiguity(
+            contiguous_width=_min_width(varying_result.contiguous_width, uniform_width),
+            stride=varying_result.stride,
+        )
 
     def _analyze_lane_contiguity_mul(
-        self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
     ) -> LaneContiguity:
         """Propagate lane stride through lane-uniform multiplication."""
         uniform_factor: Expr = sympy.S.One
@@ -687,63 +719,87 @@ class SizeVarAllocator:
                 uniform_factor *= arg
         if len(lane_factors) != 1:
             return LaneContiguity(unknown=True)
-        child_result = self.analyze_lane_contiguity(
-            lane_factors[0], lane_var, requested_width
-        )
+        child_result = self.analyze_lane_contiguity(lane_factors[0], lane_var)
         if child_result.unknown or child_result.stride is None:
             return LaneContiguity(unknown=True)
         stride = self.simplify(uniform_factor * child_result.stride)
+        if self.statically_known_equals(stride, 0):
+            return LaneContiguity(
+                stride=0,
+                uniform_width=child_result.uniform_width,
+            )
         return LaneContiguity(
-            contiguous_width=requested_width
+            contiguous_width=child_result.contiguous_width
             if self.statically_known_equals(stride, 1)
             else None,
             stride=stride,
-            uniform=self.statically_known_equals(stride, 0),
         )
 
     def _analyze_lane_contiguity_modular_indexing(
-        self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
+        self, expr: Expr, lane_var: sympy.Symbol
     ) -> LaneContiguity:
-        """Analyze ModularIndexing(base, 1, modulus) as base % modulus."""
+        """Analyze ModularIndexing(base, divisor, modulus)."""
         base, divisor, modulus = expr.args
-        if not isinstance(divisor, (int, sympy.Integer)) or int(divisor) != 1:
+        if not isinstance(divisor, (int, sympy.Integer)):
             return LaneContiguity(unknown=True)
-        return self._analyze_lane_contiguity_mod(
-            base, modulus, lane_var, requested_width
+        if int(divisor) != 1:
+            return self._analyze_lane_contiguity_floor_div(base, divisor, lane_var)
+        return self._analyze_lane_contiguity_mod(base, modulus, lane_var)
+
+    def _analyze_lane_contiguity_floor_div(
+        self, base: Expr, divisor: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Return the largest width where ``base // divisor`` is lane-uniform."""
+        if not isinstance(divisor, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        divisor_int = int(divisor)
+        if divisor_int <= 0:
+            return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
+        group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(divisor_int),
         )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
+                return LaneContiguity(stride=0, uniform_width=width)
+            width //= 2
+        return LaneContiguity(unknown=True)
 
     def _analyze_lane_contiguity_mod(
         self,
         base: Expr,
         modulus: Expr,
         lane_var: sympy.Symbol,
-        requested_width: int,
     ) -> LaneContiguity:
-        """Return the largest aligned no-wrap modulo span up to requested_width.
+        """Return the largest aligned no-wrap modulo span.
 
         `base % modulus` is contiguous for a vector group only when both the
         group start and modulus are multiples of the chosen width. For example,
         lanes 0..3 under `% 4` are contiguous, but lanes 2..5 wrap to 2,3,0,1.
-        We try successively narrower power-of-two widths so callers can still
-        use a smaller vector width when the requested width would cross a modulo
-        boundary.
         """
         if not isinstance(modulus, (int, sympy.Integer)):
-            return LaneContiguity(unknown=True)
-        base_result = self.analyze_lane_contiguity(base, lane_var, requested_width)
-        if base_result.stride is None or not self.statically_known_equals(
-            base_result.stride, 1
-        ):
             return LaneContiguity(unknown=True)
         modulus_int = int(modulus)
         if modulus_int <= 0:
             return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
         group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
-        width = requested_width
-        while width >= 2:
-            if self.statically_known_multiple_of(
-                sympy.Integer(modulus_int), width
-            ) and self.statically_known_multiple_of(group_start, width):
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(modulus_int),
+        )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
                 return LaneContiguity(contiguous_width=width, stride=1)
             width //= 2
         return LaneContiguity(unknown=True)
