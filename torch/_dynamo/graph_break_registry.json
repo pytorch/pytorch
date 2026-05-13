@@ -662,6 +662,16 @@
       ]
     }
   ],
+  "GB0465": [
+    {
+      "Gb_type": "Failed to trace str()",
+      "Context": "str({args})",
+      "Explanation": "Dynamo does not know how to call str() on argument type {type(args[0]).__name__ if args else 'unknown'}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4297": [
     {
       "Gb_type": "Call to `torch._dynamo.skip_frame()`",
