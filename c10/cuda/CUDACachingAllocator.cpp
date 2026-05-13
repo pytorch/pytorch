@@ -34,6 +34,7 @@
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -140,7 +141,7 @@ namespace Native {
  */
 
 // counter to track order for Mempool Registration
-thread_local int32_t registration_counter_global = -1;
+std::atomic<int32_t> registration_counter_global{-1};
 
 static char SHAREABLE_HANDLE_VERSION = 3;
 enum ShareableHandleType : char {
@@ -165,12 +166,15 @@ void decrease_stat_array(
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorSize(const Block* a, const Block* b);
+static bool BlockComparatorRegistrationCounter(const Block* a, const Block* b);
+static bool BlockComparatorSizeAddress(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
+      : blocks(
+            private_pool ? BlockComparatorRegistrationCounter
+                         : BlockComparatorSizeAddress),
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
@@ -233,14 +237,19 @@ struct Block {
         requested_size(0),
         pool(pool),
         ptr(ptr) {
-    registration_counter = ++registration_counter_global;
+    if (pool && pool->owner_PrivatePool) {
+      registration_counter =
+          registration_counter_global.fetch_add(1, std::memory_order_relaxed) +
+          1;
+    }
   }
 
   // constructor for search key
+  // Use the default value for registration_counter and not modify
+  // registration_counter_global, because the search key is just a
+  // dummy placeholder.
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {
-    registration_counter = ++registration_counter_global;
-  }
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -1079,7 +1088,17 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorRegistrationCounter(const Block* a, const Block* b) {
+  if (a->stream != b->stream) {
+    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+  }
+  if (a->size != b->size) {
+    return a->size < b->size;
+  }
+  return a->registration_counter < b->registration_counter;
+}
+
+bool BlockComparatorSizeAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -1088,6 +1107,7 @@ bool BlockComparatorSize(const Block* a, const Block* b) {
   }
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
+
 bool BlockComparatorAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
