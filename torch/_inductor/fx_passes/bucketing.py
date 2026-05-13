@@ -1293,6 +1293,7 @@ def merge_all_gather_bucket(
         ag_nodes,
         ag_merge_fn,
         create_trace_args,
+        insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
