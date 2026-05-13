@@ -1320,6 +1320,7 @@ def unpack_and_apply_fn(
         (
             variables.ConstDictVariable,
             variables.DictViewVariable,
+            variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
             variables.SetVariable,
