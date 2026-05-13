@@ -452,14 +452,6 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
-    "hook_with_zero_step",
-    "hook_with_zero_step_interleaved",
-    # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
-    "post_localSGD_hook",
-    # torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
-    "quantization_perchannel_hook",
-    "quantization_pertensor_hook",
     # torch.distributed.checkpoint.default_planner
     "create_default_global_load_plan",
     "create_default_global_save_plan",
@@ -536,12 +528,6 @@ coverage_ignore_functions = [
     "synchronize",
     "store_timeout",
     # torch.distributed.fsdp.wrap
-    "always_wrap_policy",
-    "enable_wrap",
-    "lambda_auto_wrap_policy",
-    "size_based_auto_wrap_policy",
-    "transformer_auto_wrap_policy",
-    "wrap",
     # torch.distributed.nn.functional
     "all_to_all",
     "all_to_all_single",
@@ -608,6 +594,11 @@ coverage_ignore_functions = [
     "set_grad_fn_seq_nr",
     "set_stack_trace",
     "get_current_replay_node",
+    # torch.fx.experimental.proxy_tensor
+    "wrap_key",
+    "wrapper_and_args_for_make_fx",
+    # torch.fx.experimental.sym_node
+    "wrap_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",

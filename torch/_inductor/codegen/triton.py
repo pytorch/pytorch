@@ -2849,7 +2849,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     triton kernel programmatically
     """
 
-    overrides = TritonKernelOverrides  # type: ignore[assignment]
+    overrides = TritonKernelOverrides
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
@@ -4009,7 +4009,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
+        result_var.mask_vars = indexing.mask_vars
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -4204,13 +4204,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{sorter_ptr}, {sorter_stride}, "
             f"{sorter_indices}, "
             ")",
-            dtype=indexing_dtype,  # type: ignore[attr-defined]
+            dtype=indexing_dtype,
             shape=values.shape,
         )
         self._handle_pdl_after_load(self.compute, result)
 
         masks = self._combine_masks(values, boundary_indices, sorter_indices)
-        result.mask_vars = masks  # type: ignore[attr-defined]
+        result.mask_vars = masks
 
         return result
 
@@ -5124,7 +5124,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                    result_var.mask_vars = masks
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -5222,13 +5222,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_vars = [
                 self.cse.newvar(dtype=dtype, shape=value.shape)
                 for dtype, value in zip(dtypes, broadcasted_values)
-            ]  # type: ignore[attr-defined]
+            ]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
             for result_var, cache_key in zip(result_vars, cache_keys):
                 if masks:
-                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                    result_var.mask_vars = masks
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
@@ -5245,7 +5245,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             raise AssertionError("Unhandled sort")
 
         for result_var, input_var in zip(result_vars, values):
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.mask_vars = masks
             result_var.bounds = input_var.bounds
 
         return tuple(result_vars)
@@ -5511,7 +5511,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         hint_override=self.hint_override,
                     )
                     result.writeline(
-                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]
+                        f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.optimization_hint_with_override(
@@ -5733,6 +5733,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["tma_min_block_sizes"] = self.tma_min_block_sizes
         if self.tiling_scores:
             out["tiling_scores"] = self.tiling_scores
+        if self.min_xblock is not None:
+            out["min_xblock"] = self.min_xblock
+        if self.min_rblock is not None:
+            out["min_rblock"] = self.min_rblock
         if self.cooperative_reduction:
             out["persistent_reduction"] = self.persistent_reduction
         if self.add_persistent_rblock:
@@ -5952,7 +5956,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
+        for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
@@ -6263,6 +6267,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
+        if not tree.supports_constant_mask():
+            return False
+
         if self.is_native_matmul:
             # tl.dot requires the shape to be >= 16,
             # so when matmul shape is smaller than 16, we always keep the mask.
@@ -6402,8 +6409,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
     def iteration_ranges_codegen_header(
-        self, entry: IterationRangesRoot, code: IndentedBuffer
+        self,
+        entry: IterationRangesRoot,
+        code: IndentedBuffer,
     ) -> None:
+        if entry.has_custom_codegen_header():
+            assert not (
+                self.cooperative_reduction
+                and self.persistent_reduction
+                and entry.is_reduction
+            ), "derived reduction roots do not support cooperative reductions"
+            for sym, expr, constexpr in entry.named_constants():
+                annotation = ": tl.constexpr" if constexpr else ""
+                code.writeline(f"{sym}{annotation} = {self.index_to_str(expr)}")
+            code.writeline(
+                f"{entry.name} = {self.index_to_str(entry.block_offset())} + "
+                f"{self.iteration_ranges_ranges_code(entry)}"
+            )
+            code.writeline(
+                f"{entry.mask_name()} = {entry.name} < {self.index_to_str(entry.numel)}"
+            )
+            return
+
         x = entry.prefix
         if entry.is_loop:
             code.writeline(f"{entry.name} = {x}offset + {x}base")
@@ -6630,7 +6657,7 @@ class TritonScheduling(SIMDScheduling):
 
         if kernel_name:
             debug_handle = set_kernel_post_grad_provenance_tracing(
-                node_schedule,  # type: ignore[arg-type]
+                node_schedule,
                 kernel_name,
             )
             wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
@@ -6859,7 +6886,7 @@ class TritonScheduling(SIMDScheduling):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+        if not kernel_type.has_persistent_RBLOCK(kernel_features.reduction_numel):
             # Cannot use persistent reduction with unknown dynamic rnumel
             assert not kernel_kwargs.get("override_persistent_reduction")
             kernel_kwargs["override_persistent_reduction"] = False
