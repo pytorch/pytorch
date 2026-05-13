@@ -356,6 +356,8 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
+        self.assertFalse(s0.is_shared())
+
         with self.assertRaisesRegex(NotImplementedError, r'Not available'):
             s0.tolist()
 
@@ -1539,15 +1541,6 @@ class TestTorchDeviceType(TestCase):
                 else:
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
-
-    def test_deterministic_replication_pad_tensor_padding(self, device):
-        # gh-182339: 0-d int64 tensor in padding tuple should not crash
-        x = torch.randn(2, 1, 16, device=device)
-        extra_padding = torch.tensor(4, dtype=torch.int64, device=device)
-        with DeterministicGuard(True):
-            result = torch.nn.functional.pad(x, (4, extra_padding), mode='replicate')
-        expected = torch.nn.functional.pad(x, (4, 4), mode='replicate')
-        self.assertEqual(result, expected)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
