@@ -274,10 +274,10 @@ def _unbox_process_group_torchbinds(
         return gm
 
     for node in gm.graph.find_nodes(op="get_attr"):
-        attr = _get_attr(gm, node.target)  # type: ignore[arg-type]
+        attr = _get_attr(gm, node.target)
         if not isinstance(attr, torch.ScriptObject):
             continue
-        if attr._type().qualified_name() != "__torch__.torch.classes.c10d.ProcessGroup":  # type: ignore[attr-defined]
+        if attr._type().qualified_name() != "__torch__.torch.classes.c10d.ProcessGroup":
             continue
-        _assign_attr(dist.ProcessGroup.unbox(attr), gm, node.target)  # type: ignore[arg-type]
+        _assign_attr(dist.ProcessGroup.unbox(attr), gm, node.target)
     return gm

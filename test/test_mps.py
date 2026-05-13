@@ -1107,9 +1107,8 @@ class TestMPS(TestCaseMPS):
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
-            eps = 1e-6
             x.requires_grad = True
-            d = torch.cdist(x, y)
+            d = torch.cdist(x, y, p=p)
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
@@ -6204,6 +6203,33 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
+    def test_fold_invalid_input_raises(self):
+        # F.fold/col2im on MPS must raise the same shape errors as CPU. See #170639.
+        cases = [
+            # (shape, output_size, kernel_size, padding, stride, error_regex)
+            # dim-2 mismatch (the issue's exact repro: 3*3=9 expected, got 10)
+            ((1, 6, 10), (4, 5), (2, 3), 0, 1,
+             r"expected size of input's dimension 2 to match the calculated number of sliding blocks"),
+            # input channels not divisible by kernel product (5 not divisible by 2*3=6)
+            ((1, 5, 9), (4, 5), (2, 3), 0, 1,
+             r"Expected size of input's dimension 1 to be divisible"),
+            # zero kernel size
+            ((1, 6, 9), (4, 5), (0, 3), 0, 1,
+             r"kernel size should be greater than zero"),
+            # negative padding
+            ((1, 6, 9), (4, 5), (2, 3), (-1, 0), 1,
+             r"padding should be non-negative"),
+        ]
+        for shape, output_size, kernel_size, padding, stride, regex in cases:
+            x_cpu = torch.randn(*shape)
+            x_mps = x_cpu.to('mps')
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_cpu, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch.nn.functional.fold(x_mps, output_size=output_size,
+                                         kernel_size=kernel_size, padding=padding, stride=stride)
+
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
@@ -9301,6 +9327,16 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
+    @serialTest()
+    def test_64bit_strided_unary(self):
+        # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
+        # extent > INT32_MAX forces TensorIterator to split the iter
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        sl = torch.randn(1_200_000, 464, dtype=torch.float32, device='mps')[:, 4:50]
+        self.assertGreater((sl.size(0) - 1) * sl.stride(0) * sl.element_size(), (1 << 31) - 1)
+        self.assertEqual(sl.neg().cpu(), sl.cpu().neg())
+
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -10239,6 +10275,17 @@ class TestPad(TestCaseMPS):
         output_mps = torch.constant_pad_nd(input_mps, [])
         self.assertEqual(output_mps, input_mps)
 
+    def test_replication_pad1d_non_contig_out(self):
+        x = torch.randn(2, 3, 5, device="mps")
+        out = torch.empty(2, 7, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d.out(x, (1, 1), out=out)
+        self.assertEqual(out.cpu(), F.pad(x.cpu(), (1, 1), mode="replicate"))
+        go = torch.randn(2, 3, 7, device="mps")
+        gi = torch.empty(2, 5, 3, device="mps").transpose(1, 2)
+        torch.ops.aten.replication_pad1d_backward.grad_input(go, x, (1, 1), grad_input=gi)
+        gi_ref = torch.ops.aten.replication_pad1d_backward(go.cpu(), x.cpu(), (1, 1))
+        self.assertEqual(gi.cpu(), gi_ref)
+
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
@@ -10703,6 +10750,58 @@ class TestSDPA(TestCaseMPS):
 
         self.assertEqual(out_mps, out_cpu, atol=1e-3, rtol=1e-6)
         self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector(self, dtype, s_len):
+        # Float additive mask matching the Q dtype should route to the
+        # templated vector decode kernel
+        torch.manual_seed(0)
+        q = torch.randn(1, 32, 1, 128, dtype=dtype)
+        k = torch.randn(1, 2, s_len, 128, dtype=dtype)
+        v = torch.randn(1, 2, s_len, 128, dtype=dtype)
+        mask = torch.randn(1, 1, 1, s_len, dtype=dtype) * 0.1
+
+        out_cpu = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, enable_gqa=True
+        )
+        out_mps = F.scaled_dot_product_attention(
+            q.to("mps"), k.to("mps"), v.to("mps"),
+            attn_mask=mask.to("mps"), enable_gqa=True,
+        )
+        tol = 0.01 if dtype == torch.bfloat16 else 0.00001
+        self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector_strided(self, dtype, layout, s_len):
+        torch.manual_seed(0)
+        batch, NH_kv, q_len, head_dim = 1, 2, 1, 128
+        NH_q = NH_kv * 4  # GQA path
+        q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
+        # Broadcast mask over B/H/qL — the layout exercised by transformers.
+        mask = torch.randn(1, 1, 1, s_len, dtype=dtype, device="mps") * 0.1
+
+        out_mps = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, enable_gqa=True
+        )
+        out_cpu = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), enable_gqa=True
+        )
+        tol = 0.01 if dtype == torch.bfloat16 else 0.00001
+        self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float])
+    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    def test_sdpa_additive_mask_vector_fully_masked_row(self, dtype, s_len):
+        # Every key masked out via additive -inf shouldn't return nans
+        q = torch.randn(1, 32, 1, 128, dtype=dtype, device="mps")
+        k = torch.randn(1, 2, s_len, 128, dtype=dtype, device="mps")
+        v = torch.randn(1, 2, s_len, 128, dtype=dtype, device="mps")
+        mask = torch.full((1, 1, 1, s_len), float("-inf"), dtype=dtype, device="mps")
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=True)
+        self.assertFalse(torch.isnan(out).any())
 
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
