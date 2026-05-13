@@ -38,7 +38,7 @@ on:
       runs_on:
         required: false
         type: string
-        default: linux.rocm.gpu.gfx942.1
+        default: linux.rocm.gpu.gfx950.1
       timeout-minutes:
         required: false
         type: number

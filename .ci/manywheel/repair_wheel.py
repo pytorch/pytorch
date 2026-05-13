@@ -188,9 +188,17 @@ def rocm_arch_filter(arch_list: str) -> list[str]:
 
 
 def rocm_lib_kernels(
-    rocm_home: Path, lib_subdir: str, archs: list[str]
+    rocm_home: Path,
+    lib_subdir: str,
+    archs: list[str],
+    include_common: bool = True,
 ) -> list[AuxFile]:
-    """Per-gfx kernel files under $ROCM_HOME/lib/<lib_subdir>/library/ plus the non-gfx common files."""
+    """Per-gfx kernel files under $ROCM_HOME/lib/<lib_subdir>/library/.
+
+    When include_common is True (default) also bundles non-gfx common files.
+    Set include_common=False for hipsparselt to match build_rocm.sh, which
+    intentionally shipped only arch-specific gfx kernels.
+    """
     src_dir = rocm_home / "lib" / lib_subdir / "library"
     if not src_dir.is_dir():
         return []
@@ -198,9 +206,11 @@ def rocm_lib_kernels(
     for entry in sorted(src_dir.iterdir()):
         if not entry.is_file():
             continue
-        # Pick gfx-specific files matching the arch set, plus common (non-gfx) files.
         name = entry.name
-        if "gfx" in name and not any(a in name for a in archs):
+        if "gfx" in name:
+            if not any(a in name for a in archs):
+                continue
+        elif not include_common:
             continue
         files.append(AuxFile(src=entry, rel_dest=f"lib/{lib_subdir}/library/{name}"))
     return files
@@ -228,26 +238,35 @@ def rocm_bundle(rocm_home: Path) -> tuple[list[BundledLib], list[AuxFile]]:
 
     archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
     aux: list[AuxFile] = []
-    for sub in ("rocblas", "hipblaslt", "hipsparselt"):
-        aux += rocm_lib_kernels(rocm_home, sub, archs)
+    # hipsparselt intentionally skips non-gfx common files (build_rocm.sh had
+    # HIPSPARSELT_OTHER_FILES commented out); rocblas/hipblaslt ship both.
+    for sub, include_common in (
+        ("rocblas", True),
+        ("hipblaslt", True),
+        ("hipsparselt", False),
+    ):
+        aux += rocm_lib_kernels(rocm_home, sub, archs, include_common=include_common)
     miopen_db = rocm_home / "share/miopen/db"
-    if miopen_db.is_dir():
-        for entry in sorted(miopen_db.iterdir()):
-            if entry.is_file() and any(a in entry.name for a in archs):
-                aux.append(AuxFile(src=entry, rel_dest=f"share/miopen/db/{entry.name}"))
+    if not miopen_db.is_dir():
+        sys.exit(f"Required ROCm MIOpen kernel-db directory not found: {miopen_db}")
+    for entry in sorted(miopen_db.iterdir()):
+        if entry.is_file() and any(a in entry.name for a in archs):
+            aux.append(AuxFile(src=entry, rel_dest=f"share/miopen/db/{entry.name}"))
     rccl_dir = rocm_home / "share/rccl/msccl-algorithms"
-    if rccl_dir.is_dir():
-        for entry in sorted(rccl_dir.iterdir()):
-            if entry.is_file():
-                aux.append(
-                    AuxFile(
-                        src=entry,
-                        rel_dest=f"share/rccl/msccl-algorithms/{entry.name}",
-                    )
+    if not rccl_dir.is_dir():
+        sys.exit(f"Required ROCm RCCL msccl-algorithms directory not found: {rccl_dir}")
+    for entry in sorted(rccl_dir.iterdir()):
+        if entry.is_file():
+            aux.append(
+                AuxFile(
+                    src=entry,
+                    rel_dest=f"share/rccl/msccl-algorithms/{entry.name}",
                 )
+            )
     amdgpu_ids = Path("/opt/amdgpu/share/libdrm/amdgpu.ids")
-    if amdgpu_ids.is_file():
-        aux.append(AuxFile(src=amdgpu_ids, rel_dest="share/libdrm/amdgpu.ids"))
+    if not amdgpu_ids.is_file():
+        sys.exit(f"Required amdgpu.ids file not found: {amdgpu_ids}")
+    aux.append(AuxFile(src=amdgpu_ids, rel_dest="share/libdrm/amdgpu.ids"))
     return libs, aux
 
 

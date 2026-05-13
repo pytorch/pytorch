@@ -142,17 +142,13 @@ XPU_BUILD_ENV: dict[str, str] = {
     "INSTALL_TEST": "0",
 }
 
-# ROCm builds use static linking and skip debug info; mirror the original
-# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
-ROCM_BUILD_ENV_STATIC: dict[str, str] = {
+# ROCm builds skip debug info; mirror the original build_rocm.sh. ROCM_HOME
+# is also read by repair_wheel.py to discover libs.
+ROCM_BUILD_ENV: dict[str, str] = {
     "ROCM_HOME": "/opt/rocm",
     "MAGMA_HOME": "/opt/rocm/magma",
     "BUILD_DEBUG_INFO": "0",
     "TH_BINARY_BUILD": "1",
-    "USE_STATIC_CUDNN": "1",
-    "USE_STATIC_NCCL": "1",
-    "ATEN_STATIC_CUDA": "1",
-    "USE_CUDA_STATIC_LINK": "1",
     "INSTALL_TEST": "0",
     "FORCE_RPATH": "--force-rpath",
 }
@@ -438,7 +434,7 @@ def main() -> None:
         env_out.update(XPU_BUILD_ENV)
         print("XPU environment configured")
     elif gpu_arch_type == "rocm":
-        env_out.update(ROCM_BUILD_ENV_STATIC)
+        env_out.update(ROCM_BUILD_ENV)
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
