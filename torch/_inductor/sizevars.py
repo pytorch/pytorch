@@ -720,8 +720,9 @@ class SizeVarAllocator:
         `base % modulus` is contiguous for a vector group only when both the
         group start and modulus are multiples of the chosen width. For example,
         lanes 0..3 under `% 4` are contiguous, but lanes 2..5 wrap to 2,3,0,1.
-        We try narrower widths so callers can still use vec4 or vec2 when vec8
-        would cross a modulo boundary.
+        We try successively narrower power-of-two widths so callers can still
+        use a smaller vector width when the requested width would cross a modulo
+        boundary.
         """
         if not isinstance(modulus, (int, sympy.Integer)):
             return LaneContiguity(unknown=True)
@@ -732,13 +733,13 @@ class SizeVarAllocator:
         if modulus_int <= 0:
             return LaneContiguity(unknown=True)
         group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
-        for width in (requested_width, 4, 2):
-            if (
-                width <= requested_width
-                and self.statically_known_multiple_of(sympy.Integer(modulus_int), width)
-                and self.statically_known_multiple_of(group_start, width)
-            ):
+        width = requested_width
+        while width >= 2:
+            if self.statically_known_multiple_of(
+                sympy.Integer(modulus_int), width
+            ) and self.statically_known_multiple_of(group_start, width):
                 return LaneContiguity(contiguous_width=width, stride=1)
+            width //= 2
         return LaneContiguity(unknown=True)
 
     # The expect/check functions require you to ALREADY KNOW that a particular
