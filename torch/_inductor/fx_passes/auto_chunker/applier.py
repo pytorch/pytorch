@@ -251,6 +251,7 @@ class ChunkingApplier:
                 and meta.chunk_dim is not None
             ):
                 shape = list(original_node.args[0])  # type: ignore[arg-type]
+                # pyrefly: ignore [unsupported-operation]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.full.default,
@@ -266,10 +267,11 @@ class ChunkingApplier:
                 and meta.chunk_dim is not None
             ):
                 shape = list(original_node.args[1])  # type: ignore[arg-type]
+                # pyrefly: ignore [unsupported-operation]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.expand.default,
-                    (env.get(original_node.args[0], original_node.args[0]), shape),  # type: ignore[arg-type]
+                    (env.get(original_node.args[0], original_node.args[0]), shape),
                     original_node.kwargs,
                 )
                 continue
@@ -282,10 +284,11 @@ class ChunkingApplier:
                 and meta.chunk_dim is not None
             ):
                 shape = list(original_node.args[1])  # type: ignore[arg-type]
+                # pyrefly: ignore [unsupported-operation]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.view.default,
-                    (env[original_node.args[0]], shape),  # type: ignore[arg-type]
+                    (env[original_node.args[0]], shape),
                     original_node.kwargs,
                 )
                 continue

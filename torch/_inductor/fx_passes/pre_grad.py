@@ -318,7 +318,7 @@ def pre_grad_passes(
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                pattern_matcher_pass.apply(gm.graph)
             GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
                 lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
             )
@@ -333,7 +333,7 @@ def pre_grad_passes(
                 # we support run same pattern multiple times, the default is to run only once
                 counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
                 for _ in range(counter):
-                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                    pattern_matcher_pass.apply(gm.graph)
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     trace_structured(
                         "artifact",
@@ -431,16 +431,20 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
     """
-
-    class IdentityRemover(torch.fx.Transformer):
-        def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
-                assert len(args) == 1
-                return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
-
-    return IdentityRemover(gm).transform()
+    graph = gm.graph
+    work_done = False
+    for module_name, module in gm.named_modules():
+        if type(module) is nn.Identity:
+            for node in list(graph.find_nodes(op="call_module", target=module_name)):
+                assert len(node.args) == 1
+                input_node = node.args[0]
+                node.replace_all_uses_with(input_node)
+                graph.erase_node(node)
+                work_done = True
+    if work_done:
+        graph.lint()
+        gm.recompile()
+    return gm
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:

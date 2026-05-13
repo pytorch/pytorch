@@ -204,7 +204,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
          break;
     }
   } else {
-    TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
+    TORCH_CHECK(false, "This supposed to be called only for Float8 types");
   }
 }
 

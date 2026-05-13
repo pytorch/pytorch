@@ -4,7 +4,7 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import sympy
@@ -232,6 +232,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         PythonWrapperCodegen.write_header(self)
 
+    def register_alignment_check_inputs(self) -> None:
+        """FXIR does not emit deferred alignment copies.
+        Alignment is handled by the runtime wrapper."""
+
+    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
+        """FXIR does not emit deferred alignment copies."""
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
@@ -318,6 +325,8 @@ class FxConverter:
         stride: tuple[Any, ...],
         offset: int | sympy.Expr,
     ) -> torch.fx.Node:
+        if isinstance(offset, sympy.Expr):
+            offset = replace_floor_div(offset)
         return self.gm.graph.call_function(
             torch.as_strided,
             args=(
@@ -713,6 +722,9 @@ class FxConverter:
             args=(predicate, true_subgm, false_subgm, operands),
         )
         self._record_allocation(ir_node, fx_node)
+
+    def _generate_assert_size_stride(self, line: WrapperLine) -> None:
+        pass
 
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
