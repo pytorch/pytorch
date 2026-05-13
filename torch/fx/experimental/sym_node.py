@@ -1887,6 +1887,8 @@ def _make_user_magic(method: str, user_type: type) -> None:
             """Implements True+True=2, which works in python but not sympy"""
             if isinstance(x, SymBool):
                 return SymInt(x.node.wrap_int(int(x)))
+            if type(x) is bool:
+                return int(x)
             return x
 
     else:
