@@ -531,6 +531,10 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.api
     "method_factory",
     "new_method",
+    "remote",
+    "rpc_async",
+    "rpc_sync",
+    "shutdown",
     # torch.distributed.rpc.backend_registry
     "construct_rpc_backend_options",
     "init_backend",
