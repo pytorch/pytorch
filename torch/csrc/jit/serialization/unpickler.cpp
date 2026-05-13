@@ -992,9 +992,9 @@ void Unpickler::rebuildTensor(bool quantized) {
         storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
     for (const auto i : c10::irange(size.size())) {
       TORCH_CHECK(
-          size[i] >= 0, "Tensor: invalid size ", size[i], " at dim ", i);
+          size[i] >= 0, "Tensor: negative size ", size[i], " at dim ", i);
       TORCH_CHECK(
-          stride[i] >= 0, "Tensor: invalid stride ", stride[i], " at dim ", i);
+          stride[i] >= 0, "Tensor: negative stride ", stride[i], " at dim ", i);
     }
     const size_t itemsize = storage_tensor.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
