@@ -77,7 +77,6 @@ from ..source import (
     TypeSource,
 )
 from ..utils import (
-    check_args_peekable_as_constant,
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -2787,27 +2786,23 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if check_constant_args(args, kwargs) or check_args_peekable_as_constant(
-            args, kwargs
-        ):
+        constant_args = check_constant_args(args, kwargs)
+        if constant_args:
             try:
                 value = self.fn(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            except AsPythonConstantNotImplementedError:
-                pass  # lazy arg became symbolic after realization, fall through
             except TypeError as exc:
                 raise_observed_exception(
                     type(exc),
                     tx,
                     args=list(exc.args),
                 )
-            else:
-                return variables.UserDefinedClassVariable(
-                    value,
-                    mutation_type=ValueMutationNew(),
-                )
+            return variables.UserDefinedClassVariable(
+                value,
+                mutation_type=ValueMutationNew(),
+            )
         unimplemented(
             gb_type="namedtuple construction",
             context=f"{args=}, {kwargs=}",
