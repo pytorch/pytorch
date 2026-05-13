@@ -1,15 +1,8 @@
+#include <ATen/native/mps/kernels/Distance.h>
+#include <c10/metal/common.h>
 #include <metal_stdlib>
 
 using namespace metal;
-
-// Layout must match `CdistBwdParams` in operations/Distance.mm.
-struct CdistBwdParams {
-  long B;
-  long P;
-  long R;
-  long D;
-  float p_minus_1;
-};
 
 // P_KIND: 0 = p==1, 1 = p==inf, 2 = generic. The TG precomputes
 // `grad / cdist^(p-1)` per (b, i, j) into `s_reducer`, shared across c-threads.
@@ -60,9 +53,9 @@ kernel void cdist_backward(
     if (t < tile_size) {
       const ulong g_idx = gr_row + static_cast<ulong>(j_base + t);
       const float g_val = static_cast<float>(grad[g_idx]);
-      if constexpr (P_KIND == 0) {
+      if IF_CONSTEXPR (P_KIND == 0) {
         s_reducer[t] = g_val;
-      } else if constexpr (P_KIND == 1) {
+      } else if IF_CONSTEXPR (P_KIND == 1) {
         s_reducer[t] = g_val;
         s_cdist[t] = cdist[g_idx];
       } else {
@@ -88,9 +81,9 @@ kernel void cdist_backward(
         }
         const float sij = (dij > 0.0f) ? 1.0f : -1.0f;
         const float r = s_reducer[t_off];
-        if constexpr (P_KIND == 0) {
+        if IF_CONSTEXPR (P_KIND == 0) {
           acc += r * sij;
-        } else if constexpr (P_KIND == 1) {
+        } else if IF_CONSTEXPR (P_KIND == 1) {
           if (::metal::precise::abs(dij) == s_cdist[t_off]) {
             acc += r * sij;
           }

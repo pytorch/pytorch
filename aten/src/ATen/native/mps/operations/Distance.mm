@@ -1,4 +1,3 @@
-//  Copyright © 2026 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -16,6 +15,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <ATen/native/mps/kernels/Distance.h>
 #include <cmath>
 
 namespace at::native {
@@ -24,19 +24,8 @@ using namespace mps;
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/Cdist_metallib.h>
+#include <ATen/native/mps/Distance_metallib.h>
 #endif
-
-// Layout must match `CdistBwdParams` in kernels/Cdist.metal.
-struct CdistBwdParams {
-  int64_t B;
-  int64_t P;
-  int64_t R;
-  int64_t D;
-  float p_minus_1;
-};
-static_assert(offsetof(CdistBwdParams, p_minus_1) == 32, "Metal struct layout mismatch");
-static_assert(sizeof(CdistBwdParams) == 40, "Metal struct size mismatch");
 
 Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
@@ -135,13 +124,7 @@ Tensor _cdist_backward_mps(const Tensor& grad,
       @autoreleasepool {
         auto compute_encoder = stream->commandEncoder();
         [compute_encoder setComputePipelineState:pso];
-        mtl_setArgs(compute_encoder,
-                    x1c.view({batch_product, r1, c}),
-                    x2c.view({batch_product, r2, c}),
-                    gradc.view({batch_product, r1, r2}),
-                    cdistc.view({batch_product, r1, r2}),
-                    out.view({batch_product, r1, c}),
-                    params);
+        mtl_setArgs(compute_encoder, x1c, x2c, gradc, cdistc, out, params);
         const MTLSize grid = MTLSizeMake(D_padded, static_cast<NSUInteger>(r1), static_cast<NSUInteger>(batch_product));
         const MTLSize tg = MTLSizeMake(tg_c, 1, 1);
         [compute_encoder dispatchThreads:grid threadsPerThreadgroup:tg];
