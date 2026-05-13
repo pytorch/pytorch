@@ -561,8 +561,6 @@ def generic_getiter(
 NB_SLOT_MAPPING = {
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
-    "nb_subtract": PyNumberSlots.NB_SUBTRACT,
-    "nb_inplace_subtract": PyNumberSlots.NB_INPLACE_SUBTRACT,
 }
 
 
@@ -607,11 +605,8 @@ def binary_op1(
     v_slot = getattr(type(v), impl_attr, None)
     w_slot = getattr(type(w), impl_attr, None)
 
-    # Same class -> only call once (CPython: slotw = NULL if same type) don't use
-    # v.python_type() is w.python_type() here since v := ConstantVariable(int)
-    # and w := SymNodeVariable(int) have different VT types but the same
-    # Python type.
-    if type(v) is type(w):
+    # Same class -> only call once (CPython: slotw = NULL if same type)
+    if v.python_type() is w.python_type():
         w_slot = None
     # Same implementation (inherited) -> skip w
     elif v_slot is w_slot:

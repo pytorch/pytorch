@@ -568,6 +568,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
+            operator.sub: (["__sub__", "__rsub__", "__isub__"], operator.isub),
             operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
             operator.truediv: (
                 ["__truediv__", "__rtruediv__", "__itruediv__"],
@@ -3070,12 +3071,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_sub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_op(tx, a, b, "nb_subtract", "-")
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__sub__", [b], {})
+        return None
 
     def call_isub(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return binary_iop(tx, a, b, "nb_inplace_subtract", "nb_subtract", "-=")
+        if isinstance(a, _SET_LIKE_OP_SUPPORT):
+            return a.call_method(tx, "__isub__", [b], {})
+        return None
 
     def call_and_(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
