@@ -46,7 +46,9 @@ from torch._inductor.runtime.hints import (
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
+    _enforce_reduction_config_block_minimums,
     autotune_hints_to_configs,
+    cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     DEFER,
@@ -94,6 +96,48 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_reduction_min_block_preserves_tile_product(self):
+        cfg = _enforce_reduction_config_block_minimums(
+            [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
+            {"x": 4096, "r0_": 4096},
+            {"min_xblock": 128},
+        )[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 128)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+        cfg = _enforce_reduction_config_block_minimums(
+            [triton.Config({"XBLOCK": 1024, "R0_BLOCK": 64})],
+            {"x": 4096, "r0_": 4096},
+            {"min_rblock": 128},
+        )[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 512)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    def test_cached_autotune_enforces_reduction_min_block(self):
+        def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
+            pass
+
+        class FakeJitFunction:
+            def __init__(self):
+                self.fn = triton_fn
+
+        class CaptureAutotuner:
+            def __init__(self, *args, configs, **kwargs):
+                self.configs = configs
+
+        autotuner = cached_autotune(
+            {"x": 4096, "r0_": 4096},
+            [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
+            triton_meta={},
+            heuristic_type=HeuristicType.REDUCTION,
+            inductor_meta={"min_xblock": 128},
+            caching_autotuner_cls=CaptureAutotuner,
+        )(FakeJitFunction())
+
+        cfg = autotuner.configs[0]
+        self.assertEqual(cfg.kwargs["XBLOCK"], 128)
+        self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
