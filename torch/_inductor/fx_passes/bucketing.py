@@ -326,7 +326,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+    all_node_ancestors: Any = None,
 ) -> bool:
     """Check if an all_gather derives from exactly one placeholder (parameter).
 
@@ -429,8 +429,11 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
+    # Build forward adjacency list once for incremental descendant tracking
+    children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
+    for node in g.nodes:
+        for inp in node._input_nodes:
+            children[inp].append(node)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -452,6 +455,16 @@ def greedy_bucket_collective_by_mb(
     if len(cur_group) > 1:
         nodes_groups.append(cur_group)
 
+    def _add_descendants(node: torch.fx.Node, desc: OrderedSet[torch.fx.Node]) -> None:
+        """Forward BFS from node, adding all reachable nodes to desc."""
+        stack = [node]
+        while stack:
+            n = stack.pop()
+            for child in children[n]:
+                if child not in desc:
+                    desc.add(child)
+                    stack.append(child)
+
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
         cur_bucket: list[torch.fx.Node] = []
@@ -463,7 +476,6 @@ def greedy_bucket_collective_by_mb(
         )
         for node in nodes:
             if node in cur_bucket_descendents:
-                # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
@@ -472,7 +484,6 @@ def greedy_bucket_collective_by_mb(
             in_size_bytes = n_input_val.numel() * n_input_val.element_size()
             size_bytes = max(out_size_bytes, in_size_bytes)
             if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
-                # Current bucket is full, create new bucket
                 if len(cur_bucket) > 1:
                     buckets.append(cur_bucket)
                 cur_bucket = []
@@ -481,7 +492,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendents[node]
+            _add_descendants(node, cur_bucket_descendents)
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
