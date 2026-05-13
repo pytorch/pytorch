@@ -1,17 +1,17 @@
 #include <gtest/gtest.h>
 
-#include <csrc/OpenRegTracer.h>
+#include <csrc/tracer.h>
 
 using namespace openreg::profiler;
 
 class OpenRegTracerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    OpenRegTracer::instance().disable();
+    OpenRegTracer::instance().disableActivityTracing();
   }
 
   void TearDown() override {
-    OpenRegTracer::instance().disable();
+    OpenRegTracer::instance().disableActivityTracing();
   }
 };
 
@@ -23,26 +23,26 @@ TEST_F(OpenRegTracerTest, Singleton) {
 
 TEST_F(OpenRegTracerTest, EnableDisable) {
   auto& t = OpenRegTracer::instance();
-  EXPECT_FALSE(t.isEnabled());
-  t.enable();
-  EXPECT_TRUE(t.isEnabled());
-  t.disable();
-  EXPECT_FALSE(t.isEnabled());
+  EXPECT_FALSE(t.isActivityTracingEnabled());
+  t.enableActivityTracing();
+  EXPECT_TRUE(t.isActivityTracingEnabled());
+  t.disableActivityTracing();
+  EXPECT_FALSE(t.isActivityTracingEnabled());
 }
 
 TEST_F(OpenRegTracerTest, CorrelationPushPop) {
   auto& t = OpenRegTracer::instance();
-  EXPECT_EQ(t.currentCorrelation(), 0);
+  EXPECT_EQ(t.getExternalCorrelationId(), 0);
 
-  t.pushCorrelation(42);
-  EXPECT_EQ(t.currentCorrelation(), 42);
+  t.pushExternalCorrelationId(42);
+  EXPECT_EQ(t.getExternalCorrelationId(), 42);
 
-  t.pushCorrelation(99);
-  EXPECT_EQ(t.currentCorrelation(), 99);
+  t.pushExternalCorrelationId(99);
+  EXPECT_EQ(t.getExternalCorrelationId(), 99);
 
-  t.popCorrelation();
-  EXPECT_EQ(t.currentCorrelation(), 42);
+  t.popExternalCorrelationId();
+  EXPECT_EQ(t.getExternalCorrelationId(), 42);
 
-  t.popCorrelation();
-  EXPECT_EQ(t.currentCorrelation(), 0);
+  t.popExternalCorrelationId();
+  EXPECT_EQ(t.getExternalCorrelationId(), 0);
 }
