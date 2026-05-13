@@ -698,6 +698,12 @@ class OverlapScheduler:
         self._identify_collectives()
         self.wasted_compute = 0.0
 
+        # Bitset masks for fast pre-filtering in _find_schedulable_path
+        self._scheduled_bits: int = 0
+        self._compute_bits: int = 0
+        for n in self.compute_nodes:
+            self._compute_bits |= 1 << self.node_idx[n]
+
         # Calculate domination indices for both compute and reduce_scatter nodes
         self.reduce_scatter_nodes = self.graph.find_nodes(
             op="call_function",
@@ -1277,6 +1283,7 @@ class OverlapScheduler:
         assert node not in self.scheduled
         assert all(n in self.scheduled for n in node.all_input_nodes)
         self.scheduled.add(node)
+        self._scheduled_bits |= 1 << self.node_idx[node]
         self.memory_tracker.schedule_node(node)
 
         log.debug(
@@ -1569,6 +1576,18 @@ class OverlapScheduler:
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
+        target_idx = self.node_idx[target]
+
+        # Bitset pre-filter: check if any compute node is an unscheduled ancestor
+        ancestor_bits = self.node_ancestors._bits[target_idx]
+        unscheduled_bits = ancestor_bits & ~self._scheduled_bits
+        if unscheduled_bits & self._compute_bits:
+            why("bitset: unscheduled compute ancestor")
+            return None
+
+        if not unscheduled_bits:
+            return OrderedSet()
+
         # Backward BFS from target, stopping at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
