@@ -12592,6 +12592,11 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
+               # Dynamo wraps the ValueError from the fractional-step / integer-out check,
+               # so test_errors can't match the eager exception type/regex under inductor.
+               DecorateInfo(unittest.skip("error type wrapped under torch.compile"),
+                            'TestCommon', 'test_errors', active_if=TEST_WITH_TORCHINDUCTOR),
+
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
