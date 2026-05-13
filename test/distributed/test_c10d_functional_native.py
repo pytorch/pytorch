@@ -1445,6 +1445,60 @@ class CompileTest(TestCase):
         code = run_and_get_triton_code(compiled, arg)
         (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_compile_all_gather_into_tensor_out(self):
+        def func(input, out):
+            y = torch.ops._c10d_functional.all_gather_into_tensor_out(
+                input, self.world_size, "0", out=out
+            )
+            y = torch.ops._c10d_functional.wait_tensor(y)
+            return y + 1
+
+        input_t = torch.ones(4, device=self.device)
+        out_t = torch.empty(4 * self.world_size, device=self.device)
+        compiled = torch.compile(func, fullgraph=True)
+        result = compiled(input_t, out_t)
+        self.assertEqual(result.shape, (4 * self.world_size,))
+
+        code = run_and_get_triton_code(compiled, input_t, out_t)
+        buf = find_buffer_assignments(code)[0]
+        (
+            FileCheck()
+            .check(f"{buf} = empty")
+            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_same(f"out={buf}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf})")
+            .run(code)
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_compile_reduce_scatter_tensor_out(self):
+        def func(input, out):
+            y = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+                input, "sum", self.world_size, "0", out=out
+            )
+            y = torch.ops._c10d_functional.wait_tensor(y)
+            return y + 1
+
+        input_t = torch.ones(4 * self.world_size, device=self.device)
+        out_t = torch.empty(4, device=self.device)
+        compiled = torch.compile(func, fullgraph=True)
+        result = compiled(input_t, out_t)
+        self.assertEqual(result.shape, (4,))
+
+        code = run_and_get_triton_code(compiled, input_t, out_t)
+        buf = find_buffer_assignments(code)[0]
+        (
+            FileCheck()
+            .check(f"{buf} = empty")
+            .check("torch.ops._c10d_functional.reduce_scatter_tensor_out.default(")
+            .check_same(f"out={buf}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf})")
+            .run(code)
+        )
+
 
 class ACTCompileTest(TestCase):
     """
