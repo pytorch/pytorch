@@ -17,7 +17,6 @@
 #include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
-#include <ATen/ops/rsqrt.h>
 #include <ATen/ops/var_mean_native.h>
 #endif
 
@@ -232,9 +231,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
 
   auto input_reshaped = input.view({N, group, C / group * HxW});
   auto [var, mean] = at::native::var_mean(input_reshaped, {2}, 0, true);
-  auto rsqrt = at::rsqrt(var.add(eps));
-
-  auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input_shape);
+  auto rsqrt = var.add_(eps).rsqrt_();
+  auto out = input_reshaped.sub(mean).mul_(rsqrt).reshape(input_shape);
 
   std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
   weight_bias_shape[1] = C;
@@ -245,6 +243,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     out.add_(bias_opt->view(weight_bias_shape));
   }
 
-  return std::make_tuple(std::move(out), mean.squeeze(-1), rsqrt.squeeze(-1));
+  mean.squeeze_(-1);
+  rsqrt.squeeze_(-1);
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rsqrt));
 }
 } // namespace at::native
