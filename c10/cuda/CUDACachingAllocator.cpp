@@ -167,11 +167,14 @@ struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
 static bool BlockComparatorRegistrationCounter(const Block* a, const Block* b);
+static bool BlockComparatorSizeAddress(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorRegistrationCounter),
+      : blocks(
+            private_pool ? BlockComparatorRegistrationCounter
+                         : BlockComparatorSizeAddress),
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
@@ -234,8 +237,11 @@ struct Block {
         requested_size(0),
         pool(pool),
         ptr(ptr) {
-    registration_counter =
-        registration_counter_global.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (pool && pool->owner_PrivatePool) {
+      registration_counter =
+          registration_counter_global.fetch_add(1, std::memory_order_relaxed) +
+          1;
+    }
   }
 
   // constructor for search key
@@ -1090,6 +1096,16 @@ bool BlockComparatorRegistrationCounter(const Block* a, const Block* b) {
     return a->size < b->size;
   }
   return a->registration_counter < b->registration_counter;
+}
+
+bool BlockComparatorSizeAddress(const Block* a, const Block* b) {
+  if (a->stream != b->stream) {
+    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+  }
+  if (a->size != b->size) {
+    return a->size < b->size;
+  }
+  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
 bool BlockComparatorAddress(const Block* a, const Block* b) {
