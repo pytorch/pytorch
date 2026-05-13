@@ -1720,18 +1720,50 @@ class _GroupedReductionLayout:
         if parent_dim == self.parent_block or parent_dim == "1":
             return value
 
-        # The reduced grouped value is a register CSE variable, not a memory
-        # buffer, so IR-level expand/broadcast can't handle it. Broadcast it
-        # from [X, num_groups] -> [X, num_groups, 1] ->
-        # [X, num_groups, local_reduction_size] -> [X, RBLOCK] on first
-        # parent-full load.
-        num_groups = self.num_groups_str
+        return self._broadcast_value_to_parent_resolution(kernel, value, parent_dim)
+
+    def ensure_parent_tile_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        assert value.dtype is not None
+        assert value.shape is not None and len(value.shape) >= 2, (
+            "grouped reduction input must have a known parent-tile shape"
+        )
+
+        parent_dim = str(value.shape[self.parent_axis])
+        if parent_dim == self.parent_block:
+            return value
+
+        return self._broadcast_value_to_parent_resolution(kernel, value, parent_dim)
+
+    def _broadcast_value_to_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+        parent_dim: str,
+    ) -> CSEVariable:
+        assert value.dtype is not None
         passthrough_extent = self.passthrough_block
-        local_reduction_size = self.local_reduction_size_dim
         parent_extent = self.parent_block
-        pre_broadcast_shape = (passthrough_extent, num_groups, 1)
-        broadcast_shape = (passthrough_extent, num_groups, local_reduction_size)
-        final_shape = (passthrough_extent, parent_extent)
+        if parent_dim == "1":
+            # A parent-axis singleton already broadcasts semantically, but the
+            # grouped reduction still needs a full parent tile before reshape.
+            pre_broadcast_shape = (passthrough_extent, 1)
+            broadcast_shape = (passthrough_extent, parent_extent)
+            final_shape = (passthrough_extent, parent_extent)
+        else:
+            # The reduced grouped value is a register CSE variable, not a memory
+            # buffer, so IR-level expand/broadcast can't handle it. Broadcast it
+            # from [X, num_groups] -> [X, num_groups, 1] ->
+            # [X, num_groups, local_reduction_size] -> [X, RBLOCK] on first
+            # parent-full load.
+            num_groups = self.num_groups_str
+            local_reduction_size = self.local_reduction_size_dim
+            pre_broadcast_shape = (passthrough_extent, num_groups, 1)
+            broadcast_shape = (passthrough_extent, num_groups, local_reduction_size)
+            final_shape = (passthrough_extent, parent_extent)
         value = kernel.emit_broadcast_via_reshape(
             value=value,
             pre_broadcast_shape=pre_broadcast_shape,
@@ -1795,6 +1827,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
     ) -> CSEVariable:
         """Reshape the parent-full tile and reduce over the local reduction."""
         k = self._kernel
+        value = self._layout.ensure_parent_tile_resolution(k, value)
         # The grouped-reduction reshape uses the grouped-axis named constants
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
