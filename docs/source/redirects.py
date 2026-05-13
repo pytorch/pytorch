@@ -158,7 +158,5 @@ redirects = {
     "compile/programming_model.where_to_apply_compile": (
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
-    ),
-    # Auto-generated redirects for moved files
-    "elastic/agent": "elastic/agent.html",
+    )
 }
