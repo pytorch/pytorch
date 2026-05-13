@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Union
 from warnings import warn
 
+from typing_extensions import TypeAliasType
 import torch.backends.cuda
 from torch._C import _SDPBackend as SDPBackend
 from torch.backends.cuda import (
@@ -187,11 +188,12 @@ list_flash_attention_impls = _registry.list_flash_attention_impls
 current_flash_attention_impl = _registry.current_flash_attention_impl
 restore_flash_attention_impl = _registry.restore_flash_attention_impl
 
-register_flash_attention_impl.__module__ = __name__
-activate_flash_attention_impl.__module__ = __name__
-list_flash_attention_impls.__module__ = __name__
-current_flash_attention_impl.__module__ = __name__
-restore_flash_attention_impl.__module__ = __name__
+# Replace __module__ reassignments with TypeAliasType for better type checker / linter compatibility
+register_flash_attention_impl: TypeAliasType = TypeAliasType("register_flash_attention_impl", register_flash_attention_impl)
+activate_flash_attention_impl: TypeAliasType = TypeAliasType("activate_flash_attention_impl", activate_flash_attention_impl)
+list_flash_attention_impls: TypeAliasType = TypeAliasType("list_flash_attention_impls", list_flash_attention_impls)
+current_flash_attention_impl: TypeAliasType = TypeAliasType("current_flash_attention_impl", current_flash_attention_impl)
+restore_flash_attention_impl: TypeAliasType = TypeAliasType("restore_flash_attention_impl", restore_flash_attention_impl)
 
 # Import built-in implementations to trigger self-registration
 from . import _fa3, _fa4
