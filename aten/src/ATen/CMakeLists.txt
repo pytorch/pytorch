@@ -211,6 +211,22 @@ if(USE_FLASH_ATTENTION)
     else()
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
     endif()
+    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
+    # empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA)
+      set(_have_ck_sdpa_arch FALSE)
+      foreach(ARCH gfx942 gfx950)
+        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+          set(_have_ck_sdpa_arch TRUE)
+          break()
+        endif()
+      endforeach()
+      if(NOT _have_ck_sdpa_arch)
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
+      endif()
+    endif()
   endif()
   if(USE_ROCM AND USE_ROCM_CK_SDPA)
     if(DEFINED ENV{PYTORCH_ROCM_ARCH})
@@ -423,6 +439,21 @@ IF(USE_MSLK)
     # Add MSLK include directories for gemm_torch.h
     list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
   elseif(USE_ROCM)
+    # MSLK only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the mslk target ends up with an empty
+    # HIP_ARCHITECTURES and CMake errors out.
+    set(_mslk_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _mslk_hip_arches ${ARCH})
+      endif()
+    endforeach()
+  endif()
+  if(USE_MSLK AND USE_ROCM AND _mslk_hip_arches STREQUAL "")
+    message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+    caffe2_update_option(USE_MSLK OFF)
+  endif()
+  if(USE_MSLK AND USE_ROCM)
     # Path to vendored CK
     set(MSLK_CK_DIR "${MSLK_THIRD_PARTY}/composable_kernel")
     rocm_generate_ck_conf(
@@ -443,14 +474,6 @@ IF(USE_MSLK)
     if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
         list(PREPEND MSLK_EXTRA_HIP_FLAGS -mllvm=-amdgpu-coerce-illegal-types=1)
       endif()
-
-    # Only compile for gfx942 and gfx950.
-    set(_mslk_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
-      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND _mslk_hip_arches ${ARCH})
-      endif()
-    endforeach()
 
     add_library(mslk STATIC ${mslk_native_rocm_hip})
     set_target_properties(mslk PROPERTIES
@@ -473,7 +496,9 @@ IF(USE_MSLK)
   endif()
 
   # Ensure torch_cpu is built before mslk to avoid race conditions
-  add_dependencies(mslk torch_cpu)
+  if(TARGET mslk)
+    add_dependencies(mslk torch_cpu)
+  endif()
 endif()
 
 # XNNPACK
