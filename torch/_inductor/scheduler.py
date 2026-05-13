@@ -6715,6 +6715,10 @@ class Scheduler:
 
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
+            # Reindex pointwise to match reduction iteration domain before
+            # can_fuse_vertical checks index equality (fixes FloorDiv broadcast).
+            if config.loop_reindexing_after_fusion:
+                self._try_reindex_pointwise_for_reduction(node1, node2)
             return (
                 self.can_fuse_vertical(node1, node2)
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
