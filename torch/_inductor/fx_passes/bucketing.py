@@ -476,6 +476,7 @@ def greedy_bucket_collective_by_mb(
         )
         for node in nodes:
             if node in cur_bucket_descendents:
+                # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
@@ -484,6 +485,7 @@ def greedy_bucket_collective_by_mb(
             in_size_bytes = n_input_val.numel() * n_input_val.element_size()
             size_bytes = max(out_size_bytes, in_size_bytes)
             if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
+                # Current bucket is full, create new bucket
                 if len(cur_bucket) > 1:
                     buckets.append(cur_bucket)
                 cur_bucket = []

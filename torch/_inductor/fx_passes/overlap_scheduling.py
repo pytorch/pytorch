@@ -186,7 +186,16 @@ class NodeReachability:
 
 
 class _BitsetAncestorView:
-    """Proxy returned by BitsetAncestors[node] supporting `x in view`."""
+    """View of a single node's ancestor set, backed by a Python int bitset.
+
+    Returned by ``BitsetAncestors[node]``.  Supports the same operations
+    callers used on the old ``OrderedSet[fx.Node]`` values:
+
+    * ``node_a in view`` -- O(1) bit test
+    * ``for a in view``  -- iterate ancestors via bit-scan
+    * ``len(view)``      -- popcount
+    * ``view & other``   -- intersection with another view or OrderedSet
+    """
 
     __slots__ = ("_bits", "_node_to_idx", "_idx_to_node")
 
@@ -207,6 +216,7 @@ class _BitsetAncestorView:
         return bool((self._bits >> idx) & 1)
 
     def __iter__(self):
+        """Iterate set bits from lowest to highest using x & -x isolation."""
         bits = self._bits
         idx_to_node = self._idx_to_node
         while bits:
@@ -239,10 +249,39 @@ class _BitsetAncestorView:
 
 
 class BitsetAncestors:
-    """Ancestor sets stored as Python int bitsets for O(N/64) union.
+    """Transitive ancestor sets for an FX graph, stored as Python int bitsets.
 
-    Drop-in replacement for dict[Node, OrderedSet[Node]] with the same
-    ``ancestors[node]`` API returning a proxy that supports ``in`` checks.
+    Drop-in replacement for ``dict[fx.Node, OrderedSet[fx.Node]]`` used by
+    the overlap scheduling passes.  Access via ``ancestors[node]`` returns a
+    :class:`_BitsetAncestorView` that supports ``in``, iteration, and ``&``.
+
+    **Representation.** Each node in the topologically-sorted graph is assigned
+    an integer index 0..N-1.  A node's ancestor set is a single Python ``int``
+    where bit *j* is set iff node *j* is a (transitive) ancestor::
+
+        Node 5 ancestors = 0b...010110
+                                ^ ^^
+                                4 21   -> nodes 1, 2, 4 are ancestors
+
+    For a 36 000-node graph each int is ~4.5 KB and CPython stores it as
+    ~563 64-bit machine words.
+
+    **Why this is fast.** The transitive closure is built with::
+
+        bits[i] |= (1 << j) | bits[j]      for each input j of node i
+
+    The ``|=`` on two ~4.5 KB ints is a tight C loop over ~563 words
+    (one OR per word) -- compared to ``OrderedSet.__ior__`` which calls
+    ``dict.update`` touching every key individually.
+
+    **Extra edges.** ``extra_inputs`` adds edges beyond the FX graph (e.g.
+    hiding-interval dependencies in the bucketer).  They participate in the
+    same bitwise closure.
+
+    Attributes:
+        _bits:        list[int]  -- _bits[i] is the ancestor bitset for node i
+        _node_to_idx: dict       -- fx.Node -> int index
+        _idx_to_node: list       -- int index -> fx.Node
     """
 
     def __init__(
