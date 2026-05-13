@@ -90,9 +90,9 @@ class WrapBackendDebug:
         if hasattr(unconfigured_compiler_fn, "__name__"):
             self.__name__ = unconfigured_compiler_fn.__name__
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
-            self.__name__ = unconfigured_compiler_fn.compiler_name
+            self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config
+            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
@@ -512,7 +512,7 @@ def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
                 opt_mod,  # type: ignore[arg-type]
                 args,
                 only_fwd=options.only_fwd,
-                disable_clone=True,
+                disable_clone=True,  # type: ignore[arg-type]
             )
 
 
