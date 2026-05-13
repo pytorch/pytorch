@@ -829,6 +829,37 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(ComplexInitModel(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
+    @common_utils.parametrize(
+        "mode",
+        [
+            common_utils.subtest("bilinear", name="bilinear"),
+            common_utils.subtest("bicubic", name="bicubic"),
+        ],
+    )
+    def test_interpolate_antialias_matches_eager(self, mode):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.interpolate(
+                    x.unsqueeze(0),
+                    size=(3, 5),
+                    mode=mode,
+                    align_corners=False,
+                    antialias=True,
+                ).squeeze(0)
+
+        x = torch.arange(2 * 6 * 4, dtype=torch.float32).reshape(2, 6, 4) / 10.0
+        onnx_program = self.export(Model(), (x,), opset_version=18)
+        onnx_testing.assert_onnx_program(onnx_program)
+        resize_nodes = [
+            node for node in onnx_program.model.graph if node.op_type == "Resize"
+        ]
+        self.assertEqual(len(resize_nodes), 1)
+        attrs = resize_nodes[0].attributes
+        self.assertEqual(attrs["antialias"].value, 1)
+        self.assertEqual(attrs["exclude_outside"].value, 1)
+        if mode == "bicubic":
+            self.assertEqual(attrs["cubic_coeff_a"].value, -0.5)
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):

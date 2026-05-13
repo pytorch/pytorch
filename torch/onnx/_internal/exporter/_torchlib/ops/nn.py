@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
+from onnxscript import INT64
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+    opset18 as op18,
     opset20 as op20,
     opset21 as op21,
     opset23 as op23,
@@ -374,3 +376,70 @@ def _aten_scaled_dot_product_attention_float_mask_onnx(
     )
     attn_weight, _ = op.Dropout(attn_weight, dropout_p)
     return op.MatMul(attn_weight, value)
+
+
+def _resize_with_antialias(
+    self: TReal,
+    output_size: INT64,
+    align_corners: bool,
+    mode: str,
+    cubic_coeff_a: float,
+) -> TReal:
+    coordinate_transformation_mode = (
+        "align_corners" if align_corners else "pytorch_half_pixel"
+    )
+    batch_and_channel = op18.Shape(self, end=2, start=0)
+    output_size_cast = op18.Cast(output_size, to=INT64.dtype)
+    full_output_size = op18.Concat(batch_and_channel, output_size_cast, axis=0)
+    return op18.Resize(
+        self,
+        None,
+        None,
+        full_output_size,
+        antialias=1,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        cubic_coeff_a=cubic_coeff_a,
+        exclude_outside=1,
+        mode=mode,
+        nearest_mode="floor",
+    )
+
+
+@onnx_impl(aten._upsample_bilinear2d_aa.default, trace_only=True)
+def aten__upsample_bilinear2d_aa(
+    self: TReal,
+    output_size: INT64,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> TReal:
+    """_upsample_bilinear2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+    del scales_h, scales_w
+    return _resize_with_antialias(
+        self,
+        output_size,
+        align_corners,
+        mode="linear",
+        cubic_coeff_a=-0.75,
+    )
+
+
+@onnx_impl(aten._upsample_bicubic2d_aa.default, trace_only=True)
+def aten__upsample_bicubic2d_aa(
+    self: TReal,
+    output_size: INT64,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> TReal:
+    """_upsample_bicubic2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+    del scales_h, scales_w  # PyTorch ignores explicit scales for the AA path.
+    # PyTorch uses cubic_coeff_a=-0.5 (Keys / PIL-compatible) for the AA bicubic
+    # kernel, as opposed to -0.75 (OpenCV-compatible) for the non-AA case.
+    return _resize_with_antialias(
+        self,
+        output_size,
+        align_corners,
+        mode="cubic",
+        cubic_coeff_a=-0.5,
+    )
