@@ -208,7 +208,9 @@ class TestTritonHeuristics(TestCase):
         mock_launcher.__code__.co_argcount = 4  # expects 3 args + stream
         with self.assertRaisesRegex(TypeError, "Too many arguments"):
             autotuner._validate_launcher_args(
-                mock_launcher, [1, 2, 3, 4], "test_kernel"  # 4 args, expects 3
+                mock_launcher,
+                [1, 2, 3, 4],
+                "test_kernel",  # 4 args, expects 3
             )
 
     def test_validate_launcher_args_too_few(self):
@@ -225,7 +227,9 @@ class TestTritonHeuristics(TestCase):
         mock_launcher.__code__.co_argcount = 4  # expects 3 args + stream
         with self.assertRaisesRegex(TypeError, "Too few arguments"):
             autotuner._validate_launcher_args(
-                mock_launcher, [1, 2], "test_kernel"  # 2 args, expects 3
+                mock_launcher,
+                [1, 2],
+                "test_kernel",  # 2 args, expects 3
             )
 
     def test_autotune_hints_to_configs(self):
