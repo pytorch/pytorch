@@ -13,7 +13,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
@@ -22,7 +21,6 @@
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
 #include <ATen/ops/count_nonzero_native.h>
-#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/median.h>
@@ -1178,33 +1176,6 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
   auto iter =
       make_reduction("count_nonzero_mps", result, self, dims, /*keepdim=*/false, self.scalar_type(), ScalarType::Long);
   count_nonzero_kernel_mps(iter);
-  return result;
-}
-
-Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
-  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
-  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.size(-1) == x2.size(-1),
-              "X1 and X2 must have the same number of columns. X1: ",
-              x1.size(-1),
-              " X2: ",
-              x2.size(-1));
-  TORCH_CHECK(
-      at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
-  TORCH_CHECK(
-      at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
-  TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
-
-  int64_t mode = compute_mode.value_or(0);
-  TORCH_CHECK(mode >= 0 && mode <= 2, "possible modes: 0, 1, 2, but was: ", mode);
-
-  Tensor x1_ = x1.unsqueeze(-2);
-  Tensor x2_ = x2.unsqueeze(-3);
-  Tensor diff = x1_.sub(x2_);
-  IntArrayRef output_shape(diff.sizes().data(), diff.dim() - 1);
-  Tensor result = at::empty(output_shape, x1.options());
-  linalg_vector_norm_out(result, diff, p, makeArrayRef<int64_t>(-1), /*keepdim=*/false, /*dtype=*/std::nullopt);
-
   return result;
 }
 
