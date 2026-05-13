@@ -277,8 +277,14 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
         follow_spec = op_schema.args_spec[0]
         enforce_sharding.update(zip(out_dimchars, follow_spec.dim_map))
     elif op_schema.is_out_variant_op():
-        follow_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
-        enforce_sharding.update(zip(out_dimchars, follow_spec.dim_map))
+        out_arg_names = [
+            argument.name
+            for argument in op_schema.op._schema.arguments
+            if argument.is_out
+        ]
+        if len(out_arg_names) == 1:
+            follow_spec = cast(DTensorSpec, op_schema.kwargs_schema[out_arg_names[0]])
+            enforce_sharding.update(zip(out_dimchars, follow_spec.dim_map))
 
     return einop_rule(
         fmt,
