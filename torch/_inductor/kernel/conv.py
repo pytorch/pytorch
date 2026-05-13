@@ -552,7 +552,7 @@ def convolution(
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
-            # we should not add bias when the input/output channel is 0
+            # we should not add bias when the output channel is 0
             return result
         return L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
