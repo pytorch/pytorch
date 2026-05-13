@@ -1161,7 +1161,7 @@ class _TorchDynamoContext:
                         set_eval_frame(None)
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0:
+                            if count == 0 and _stance.stance == "default":
                                 skip_reasons = get_skip_reasons()
                                 msg = "torch.compile with fullgraph=True found no compiled frames."
                                 if skip_reasons:
