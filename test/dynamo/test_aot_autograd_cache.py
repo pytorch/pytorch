@@ -3996,9 +3996,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(xnumel, device=GPU_TYPE)
         out = torch.empty_like(inp)
         current_stream = torch.accelerator.current_stream()
-        stream = next(filter(lambda x:x,
-                             (getattr(current_stream, 'cuda_stream', None),
-                             getattr(current_stream, 'sycl_queue', None))), None)
+        stream = next(
+            filter(
+                lambda x:x,
+                (
+                    getattr(current_stream, 'cuda_stream', None),
+                    getattr(current_stream, 'sycl_queue', None),
+                ),
+            ),
+            None,
+        )
         autotuner.run(inp, out, xnumel, stream=stream)
         self.assertEqual(out, inp + 1.0)
 
