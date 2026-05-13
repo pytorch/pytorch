@@ -5130,6 +5130,14 @@ class TestMPS(TestCaseMPS):
             for _ in range(4):
                 self.assertEqual(x.sum().item(), ref, msg=f"unstable sum for N={N}")
 
+    def test_trace_repeated(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178497
+        torch.manual_seed(42)
+        x = torch.rand(3000, 3000, device="mps", dtype=torch.float32)
+        ref = x.trace().item()
+        for _ in range(2000):
+            self.assertEqual(x.trace().item(), ref)
+
     # Test forward max
     # Note - don't test grad now
     def test_max_el(self):
