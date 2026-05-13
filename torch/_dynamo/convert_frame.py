@@ -1627,14 +1627,6 @@ def compile_frame(  # type: ignore[return]
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
                 failed_tracer_output._cleanup_output_graph()
-            log.debug(
-                "Received signal to skip frame (without graph break): %s %s \
-                %s %s",
-                e,
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-            )
             raise
 
 
