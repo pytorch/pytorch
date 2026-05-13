@@ -206,7 +206,7 @@ def replace_random(
         aten.randn: "randn",
     }[
         match.output_node().target.overloadpacket  # type: ignore[union-attr]
-    ]
+    ]  # type: ignore[union-attr]
     device = get_device(device)
     replacement_fn = replacement
 
