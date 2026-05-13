@@ -2300,6 +2300,18 @@ def forward(self, arg0_1):
         )
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_c10d_functional_out_ops_can_functionalize(self):
+        from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+        from torch._library.utils import is_out
+
+        ag_out = torch.ops._c10d_functional.all_gather_into_tensor_out.default
+        rs_out = torch.ops._c10d_functional.reduce_scatter_tensor_out.default
+
+        self.assertTrue(is_out(ag_out))
+        self.assertTrue(is_out(rs_out))
+        self.assertTrue(can_auto_functionalize(ag_out))
+        self.assertTrue(can_auto_functionalize(rs_out))
+
 
 @xfail_inherited_tests(
     [
