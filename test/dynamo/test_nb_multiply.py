@@ -2,6 +2,8 @@
 
 """Tests for the * and *= operators in PyTorch Dynamo (nb_multiply slot)."""
 
+import operator
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
@@ -258,6 +260,53 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
     def test_set_mul_raises(self):
         with self.assertRaises(TypeError):
             {1, 2} * 3
+
+    # --- operator.mul / operator.imul function-call form ---
+    # BuiltinVariable.call_mul / call_imul are hit by the BINARY_OP /
+    # INPLACE_MULTIPLY opcodes above, but also by an explicit
+    # ``operator.mul(a, b)`` / ``operator.imul(a, b)`` call; verify both routes.
+
+    @make_dynamo_test
+    def test_operator_mul_int(self):
+        self.assertEqual(operator.mul(5, 7), 35)
+
+    @make_dynamo_test
+    def test_operator_mul_list_int(self):
+        self.assertEqual(operator.mul([1, 2], 3), [1, 2, 1, 2, 1, 2])
+
+    @make_dynamo_test
+    def test_operator_mul_int_str(self):
+        # int * str via sq_repeat fallback in generic_multiply.
+        self.assertEqual(operator.mul(3, "ab"), "ababab")
+
+    @make_dynamo_test
+    def test_operator_imul_int(self):
+        # int has no nb_inplace_multiply — generic_inplace_multiply falls
+        # back to nb_multiply via binary_iop1.
+        self.assertEqual(operator.imul(5, 3), 15)
+
+    @make_dynamo_test
+    def test_operator_imul_list(self):
+        # list has sq_inplace_repeat; operator.imul mutates a.
+        a = [1, 2]
+        operator.imul(a, 3)
+        self.assertEqual(a, [1, 2, 1, 2, 1, 2])
+
+    @make_dynamo_test
+    def test_operator_imul_tuple(self):
+        # tuple has no sq_inplace_repeat — falls back to sq_repeat, returns
+        # a new tuple.
+        t = (1, 2)
+        self.assertEqual(operator.imul(t, 3), (1, 2, 1, 2, 1, 2))
+
+    @make_dynamo_test
+    def test_operator_imul_str(self):
+        self.assertEqual(operator.imul("ab", 3), "ababab")
+
+    @make_dynamo_test
+    def test_operator_imul_unsupported_raises(self):
+        with self.assertRaises(TypeError):
+            operator.imul({1, 2}, 3)
 
     # --- Direct method calls ---
 

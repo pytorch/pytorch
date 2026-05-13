@@ -86,7 +86,7 @@ def vt_identity_compare(
     if (
         istype(left, variables.ExceptionVariable)
         and istype(right, variables.ExceptionVariable)
-        and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
+        and left.exc_type is not right.exc_type
     ):
         return ConstantVariable.create(False)
 
@@ -573,6 +573,8 @@ def generic_getiter(
 NB_SLOT_MAPPING = {
     "nb_or": PyNumberSlots.NB_OR,
     "nb_inplace_or": PyNumberSlots.NB_INPLACE_OR,
+    "nb_subtract": PyNumberSlots.NB_SUBTRACT,
+    "nb_inplace_subtract": PyNumberSlots.NB_INPLACE_SUBTRACT,
     "nb_multiply": PyNumberSlots.NB_MULTIPLY,
     "nb_inplace_multiply": PyNumberSlots.NB_INPLACE_MULTIPLY,
 }
