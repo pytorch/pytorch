@@ -3782,6 +3782,18 @@ class GraphModule(torch.nn.Module):
             args[2] = 1
         return args
 
+    def test_list_iterator_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = [1, 3, 5].__iter__()
+            y = x + next(it)
+            torch._dynamo.graph_break()
+            return y + next(it) + next(it)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x + 1 + 3 + 5)
+
     def test_range_iterator_graph_break(self):
         @torch.compile(backend="eager")
         def fn(x):
