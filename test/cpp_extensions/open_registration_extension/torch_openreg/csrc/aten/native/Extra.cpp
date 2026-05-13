@@ -29,6 +29,12 @@ void quantize_tensor_per_tensor_affine_stub(
     double scale,
     int64_t zero_point) {}
 
+void dequantize_tensor_per_tensor_affine_stub(
+    const at::Tensor& qtensor,
+    at::Tensor& rtensor,
+    double scale,
+    int64_t zero_point) {}
+
 std::tuple<
     at::Tensor,
     at::Tensor,
