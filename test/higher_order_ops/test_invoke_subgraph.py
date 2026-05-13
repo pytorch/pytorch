@@ -15,7 +15,7 @@ import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
-from functorch.compile import aot_function, make_boxed_func, nop
+from functorch.compile import aot_function, nop
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -120,19 +120,6 @@ class TestInvokeSubgraph(TestCase):
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_duplicate_backward_variants_warn_and_trace(self):
-        from torch._dynamo.backends.common import aot_autograd
-
-        fw_graphs = []
-        bw_graphs = []
-
-        def fw_compiler(gm, example_inputs, **kwargs):
-            fw_graphs.append(gm)
-            return make_boxed_func(gm.forward)
-
-        def bw_compiler(gm, example_inputs, **kwargs):
-            bw_graphs.append(gm)
-            return make_boxed_func(gm.forward)
-
         @nested_compile_region
         def block(x):
             return torch.sin(x) * 2.0
@@ -145,23 +132,21 @@ class TestInvokeSubgraph(TestCase):
                 return z.square().sum()
 
         torch._dynamo.reset()
+        backend = AotEagerAndRecordGraphs()
         with mock.patch("torch._logging.trace_structured") as trace_structured_mock:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 compiled = torch.compile(
                     Model(),
-                    backend=aot_autograd(
-                        fw_compiler=fw_compiler,
-                        bw_compiler=bw_compiler,
-                    ),
+                    backend=backend,
                     fullgraph=True,
                 )
                 x = torch.randn(4, 3, 5, requires_grad=True)
                 tail = torch.randn(4, 7, 5, requires_grad=True)
                 compiled(x, tail).backward()
 
-        self.assertEqual(len(fw_graphs), 1)
-        self.assertEqual(len(bw_graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
         self.assertTrue(
             any(
                 "invoke_subgraph traced multiple backward graphs"
@@ -190,23 +175,14 @@ class TestInvokeSubgraph(TestCase):
         payload = duplicate_payloads[0]
         self.assertEqual(payload["new_variant_suffix"], 1)
         self.assertEqual(payload["num_variants_for_identifier"], 2)
-        self.assertEqual(len(payload["variants"]), 2)
-        variant0_tangent = payload["variants"][0]["tangents"][0]
-        variant1_tangent = payload["variants"][1]["tangents"][0]
-        self.assertEqual(variant0_tangent["forward_output_index"], 0)
-        self.assertEqual(variant0_tangent["forward_output_name"], "mul")
-        self.assertIsInstance(variant0_tangent["backward_input_name"], str)
-        self.assertEqual(variant0_tangent["shape"], [4, 3, 5])
-        self.assertEqual(variant0_tangent["stride"], [50, 5, 1])
-        self.assertFalse(variant0_tangent["is_contiguous"])
-        self.assertEqual(variant1_tangent["forward_output_index"], 0)
-        self.assertEqual(variant1_tangent["forward_output_name"], "mul")
         self.assertEqual(
-            variant1_tangent["backward_input_name"],
-            variant0_tangent["backward_input_name"],
+            payload["new_variant"]["backward_identifier"],
+            payload["backward_identifier"],
         )
-        self.assertEqual(variant1_tangent["stride"], [15, 5, 1])
-        self.assertTrue(variant1_tangent["is_contiguous"])
+        tangent = payload["new_variant"]["tangents"][0]
+        self.assertIsInstance(tangent["backward_input_name"], str)
+        self.assertEqual(tangent["shape"], [4, 3, 5])
+        self.assertEqual(tangent["stride"], [15, 5, 1])
 
     def test_make_fx_without_shape_env(self):
         """Test that make_fx with invoke_subgraph works without a ShapeEnv.

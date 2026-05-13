@@ -54,7 +54,6 @@ class OutputMetadata:
     num_fw_outs: int | None = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
-    output_names: list[str | None] = field(default_factory=list)
 
 
 # This config will be stored in invoke_subgraph HOP node.meta["custom"]["nested_region_config"]
@@ -130,21 +129,18 @@ def _set_invoke_subgraph_call_id(call_id: int):
 
 
 def summarize_backward_tangents(
+    bw_graph: torch.fx.GraphModule,
+    num_primals: int,
     tangents: tuple[Any, ...],
-    forward_output_indices: list[int],
-    forward_output_names: list[str | None],
-    backward_input_names: list[str | None],
 ) -> list[dict[str, Any]]:
+    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+
     summaries: list[dict[str, Any]] = []
     for idx, tangent in enumerate(tangents):
-        summary: dict[str, Any] = {
-            "index": idx,
-            "forward_output_index": forward_output_indices[idx],
-        }
-        if forward_output_names[idx] is not None:
-            summary["forward_output_name"] = forward_output_names[idx]
-        if backward_input_names[idx] is not None:
-            summary["backward_input_name"] = backward_input_names[idx]
+        summary: dict[str, Any] = {}
+        backward_input_idx = num_primals + idx
+        if backward_input_idx < len(placeholders):
+            summary["backward_input_name"] = placeholders[backward_input_idx].name
 
         if not isinstance(tangent, torch.Tensor):
             summary["type"] = type(tangent).__name__
@@ -161,31 +157,16 @@ def summarize_backward_tangents(
                 ],
                 "dtype": str(tangent.dtype),
                 "device": str(tangent.device),
-                "is_contiguous": tangent.is_contiguous(),
             }
         )
         summaries.append(summary)
     return summaries
 
 
-def get_backward_tangent_input_names(
-    bw_graph: torch.fx.GraphModule,
-    num_primals: int,
-    num_tangents: int,
-) -> list[str | None]:
-    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
-    return [
-        placeholders[num_primals + idx].name
-        if num_primals + idx < len(placeholders)
-        else None
-        for idx in range(num_tangents)
-    ]
-
-
 def warn_and_trace_duplicate_backward(
     identifier: str | None,
     suffix: int,
-    variant_summaries: list[object],
+    new_variant_summary: dict[str, Any],
 ) -> None:
     if suffix == 0:
         return
@@ -213,7 +194,7 @@ def warn_and_trace_duplicate_backward(
             "backward_identifier": f"bw_{identifier}_{suffix}",
             "new_variant_suffix": suffix,
             "num_variants_for_identifier": suffix + 1,
-            "variants": variant_summaries,
+            "new_variant": new_variant_summary,
             "explanation": (
                 "invoke_subgraph caches backward graphs by both the forward "
                 "identifier and tangent metadata. Multiple backward variants "
@@ -521,7 +502,6 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             output_metadata = OutputMetadata()
 
             output_metadata.num_fw_outs = num_fw_outs
-            output_metadata.output_names = [None] * num_fw_outs
             for idx, fw_out in enumerate(fw_outs):
                 if isinstance(fw_out, torch.SymInt):
                     output_metadata.indexes_with_symint.add(idx)
@@ -587,11 +567,6 @@ def get_output_metadata(subgraph, *operands):
     # The output node has args=(output_values,) where output_values is a tuple/list
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
-    output_names = [
-        output_arg.name if isinstance(output_arg, torch.fx.Node) else None
-        for output_arg in output_node.args[0]
-    ]
-    output_metadata.output_names = output_names
 
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
@@ -605,9 +580,7 @@ def get_output_metadata(subgraph, *operands):
             # If we don't have complete metadata for all outputs, fall back to execution
             # This is important for correctness (e.g., detecting SymInts) even though it
             # runs side-effectful operations
-            output_metadata = _get_output_metadata_by_execution(subgraph, *operands)
-            output_metadata.output_names = output_names
-            return output_metadata
+            return _get_output_metadata_by_execution(subgraph, *operands)
 
         val = output_arg.meta["val"]
         if isinstance(val, torch.SymInt):
@@ -652,7 +625,6 @@ def _get_output_metadata_by_execution(subgraph, *operands):
 
             output_metadata = OutputMetadata()
             output_metadata.num_fw_outs = num_fw_outs
-            output_metadata.output_names = [None] * num_fw_outs
 
             for idx, fw_out in enumerate(fw_outs):
                 if isinstance(fw_out, torch.SymInt):
@@ -838,8 +810,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # the assumption we made during the tracing of joint_graph.
         non_differentiable_indices = ctx._non_differentiable_indices
         filtered_grad_outs = []
-        filtered_grad_out_indices = []
-        filtered_grad_out_names = []
         for idx, o in enumerate(grad_outs):
             if o is None:
                 if (
@@ -858,12 +828,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 pass
             else:
                 filtered_grad_outs.append(o)
-                filtered_grad_out_indices.append(idx)
-                filtered_grad_out_names.append(
-                    output_metadata.output_names[idx]
-                    if idx < len(output_metadata.output_names)
-                    else None
-                )
         filtered_grad_outs = tuple(filtered_grad_outs)
 
         # Important note - Even though the forward graph can be same for
@@ -946,27 +910,19 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                     ]
 
         if invoke_subgraph_cache and not cache_hit:
-            backward_input_names = get_backward_tangent_input_names(
-                bw_graph, len(primals), len(filtered_grad_outs)
-            )
-            tangent_summary = {
-                "backward_identifier": None,
-                "tangents": summarize_backward_tangents(
-                    filtered_grad_outs,
-                    filtered_grad_out_indices,
-                    filtered_grad_out_names,
-                    backward_input_names,
-                ),
-            }
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
-                identifier, tangent_metadata, bw_graph, tangent_summary
+                identifier, tangent_metadata, bw_graph
             )
-            tangent_summary["backward_identifier"] = f"bw_{identifier}_{suffix}"
-            warn_and_trace_duplicate_backward(
-                identifier,
-                suffix,
-                invoke_subgraph_cache.get_lazy_bwd_debug_entries(identifier),
-            )
+            if suffix != 0:
+                tangent_summary = {
+                    "backward_identifier": f"bw_{identifier}_{suffix}",
+                    "tangents": summarize_backward_tangents(
+                        bw_graph,
+                        len(primals),
+                        filtered_grad_outs,
+                    ),
+                }
+                warn_and_trace_duplicate_backward(identifier, suffix, tangent_summary)
 
         with _set_invoke_subgraph_call_id(ctx._call_id):
             grads = invoke_subgraph(
