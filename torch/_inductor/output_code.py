@@ -128,26 +128,26 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: list[int]) -> torch.Tens
     return t
 
 
-def complex_memory_overlap(t: torch.Tensor) -> bool:
-    if config.always_complex_memory_overlap_TESTING_ONLY:
-        return True
-
-    # if torch._debug_has_internal_overlap thinks this tensor potentially has
-    # memory overlap internally, let's dig deeper to find out whether it's true.
-    #
-    # Call squeeze() so that dimension with size 1 does not cause false positive.
-    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
-    if torch._debug_has_internal_overlap(t) != 0:
-        strides = t.stride()
-        sizes = t.shape
-        indices = list(range(len(strides)))
-        indices = [x for _, x in sorted(zip(strides, indices))]
-        for i in range(len(strides)):
-            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
-            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
-            if strides[indices[i]] < prev_stride * prev_size:
-                return True
-    return False
+# Bytewise copy of src's reachable strided extent into dst, starting from each
+# tensor's data_ptr. Requires matching sizes/strides/dtype. Use when dst
+# self-overlaps and a regular strided copy_ would be ambiguous: the overlap
+# pattern reproduces in dst because the underlying bytes are copied verbatim.
+def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
+    assert dst.dtype == src.dtype
+    assert tuple(dst.size()) == tuple(src.size())
+    assert tuple(dst.stride()) == tuple(src.stride())
+    if dst.numel() == 0:
+        return
+    assert all(st >= 0 for st in src.stride()), (
+        "copy_strided_storage_ requires non-negative strides"
+    )
+    elem = src.element_size()
+    nbytes = (sum((s - 1) * st for s, st in zip(src.size(), src.stride())) + 1) * elem
+    src_off = src.storage_offset() * elem
+    dst_off = dst.storage_offset() * elem
+    dst.untyped_storage()[dst_off : dst_off + nbytes].copy_(
+        src.untyped_storage()[src_off : src_off + nbytes]
+    )
 
 
 def maybe_handle_backward_generation(
@@ -172,7 +172,7 @@ def maybe_handle_backward_generation(
         assert manager is not None
 
         def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -605,12 +605,6 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
                 if not config.triton.cudagraph_support_input_mutation:
                     # Skip supports for cudagraph-managed tensors
                     from torch._inductor.cudagraph_utils import (
@@ -635,7 +629,10 @@ class CompiledFxGraph(OutputCode):
 
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
+                    (
+                        not config.force_disable_cudagraph_TESTING_ONLY,
+                        "force_disable_cudagraph_TESTING_ONLY",
+                    ),
                     (
                         all(
                             isinstance(
@@ -1021,30 +1018,24 @@ class CompiledAOTI(OutputCode):
             return
 
         if self.device_type.startswith("cuda"):
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
-                    current_callable,
-                    1,
-                    self.device_type,
-                    "",
-                    True,
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
+            current_callable = torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                current_callable,
+                1,
+                self.device_type,
+                "",
+                True,
+            ).run
         elif self.device_type.startswith("xpu"):
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
-                    current_callable,
-                    1,
-                    self.device_type,
-                    "",
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
+            current_callable = torch._C._aoti.AOTIModelContainerRunnerXpu(
+                current_callable,
+                1,
+                self.device_type,
+                "",
+            ).run
         elif self.device_type == "cpu":
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
-                    current_callable, 1
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
+            current_callable = torch._C._aoti.AOTIModelContainerRunnerCpu(
+                current_callable, 1
+            ).run
         else:
             raise RuntimeError(f"unsupported device type {self.device_type}")
         self.current_callable = current_callable
