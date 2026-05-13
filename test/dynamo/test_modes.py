@@ -921,9 +921,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             with A():
                 _x = torch.tensor([1])
 
-                # Second graph break inside the with block
-                class B:
-                    pass
+                torch._dynamo.graph_break()
 
                 y = torch.tensor([2])
             return y
