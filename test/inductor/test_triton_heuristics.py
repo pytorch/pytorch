@@ -323,7 +323,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,

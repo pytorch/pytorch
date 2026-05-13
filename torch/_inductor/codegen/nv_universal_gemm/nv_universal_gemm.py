@@ -21,9 +21,9 @@ from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
 )
+from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
