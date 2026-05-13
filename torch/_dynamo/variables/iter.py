@@ -408,7 +408,8 @@ class ZipVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2906-L2994
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("ZipVariable must be mutable for next()")
         tuplesize = len(self.iterable.items)
 
         if tuplesize == 0:
@@ -482,7 +483,10 @@ class MapVariable(IteratorVariable):
     ) -> None:
         super().__init__(**kwargs)
         self.fn = fn
-        assert isinstance(iterables, variables.TupleVariable)
+        if not isinstance(iterables, variables.TupleVariable):
+            raise AssertionError(
+                f"Expected a tuple of iterables, got {type(iterables)}"
+            )
         self.iterable = iterables
         self.strict = strict
 
@@ -494,7 +498,8 @@ class MapVariable(IteratorVariable):
 
     def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
-        assert self.is_mutable()
+        if not self.is_mutable():
+            raise AssertionError("MapVariable must be mutable for next()")
 
         tuplesize = len(self.iterable.items)
 
