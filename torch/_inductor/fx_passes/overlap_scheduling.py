@@ -110,11 +110,28 @@ class WhyNoOverlap:
 
 
 class NodeReachability:
-    """Lazy reachability index replacing O(N^2) precomputed ancestor sets.
+    """Lazy reachability index for FX graph nodes using on-demand DFS.
 
-    Stores topological order for O(1) necessary-condition elimination and
-    uses on-demand backward DFS for exact reachability queries. Results
-    are cached to amortize repeated queries on the same pairs.
+    Answers reachability queries ("is A an ancestor of B?") without
+    precomputing the full transitive closure.  Uses topological order for
+    O(1) necessary-condition elimination (A can only be an ancestor of B
+    if topo_idx[A] < topo_idx[B]), then falls back to backward DFS for
+    exact answers.  Results are cached across calls.
+
+    Example::
+
+        reachability = NodeReachability(list(graph.nodes))
+        reachability.is_ancestor(node_a, node_d)       # True/False
+        reachability.has_dependency(node_a, node_b)     # either direction
+        reachability.get_unscheduled_ancestors(target, scheduled_set)
+
+    Args:
+        nodes: topologically sorted list of FX nodes
+        extra_inputs: optional additional edges beyond the FX graph
+            (e.g. hiding-interval deps), mapping node -> set of extra parents
+
+    See also: :class:`BitsetAncestors` for the precomputed variant that
+    trades O(N^2 / 64) memory for O(1) membership queries.
     """
 
     def __init__(
@@ -186,7 +203,29 @@ class NodeReachability:
 
 
 class _BitsetAncestorView:
-    """Proxy returned by BitsetAncestors[node] supporting `x in view`."""
+    """Read-only view of one node's ancestor set, backed by a Python int.
+
+    Returned by ``BitsetAncestors[node]``.  The underlying ``int`` has bit j
+    set when node j is a transitive ancestor.  This class wraps that int to
+    provide the same interface callers used with ``OrderedSet[fx.Node]``.
+
+    Supported operations (all use the node-to-index mapping for translation)::
+
+        node_a in view          # O(1) -- test bit at node_a's index
+        for a in view: ...      # iterate ancestors via lowest-bit scan
+        len(view)               # popcount via int.bit_count()
+        view & other_view       # bitwise AND then scan set bits
+        view & ordered_set      # iterate smaller set, test membership
+
+    Example::
+
+        ancestors = BitsetAncestors(nodes)
+        view = ancestors[some_node]
+        if predecessor in view:       # O(1) bit test
+            print("predecessor is an ancestor")
+        for a in view:                # iterate all ancestors
+            print(a.name)
+    """
 
     __slots__ = ("_bits", "_node_to_idx", "_idx_to_node")
 
@@ -239,10 +278,56 @@ class _BitsetAncestorView:
 
 
 class BitsetAncestors:
-    """Ancestor sets stored as Python int bitsets for O(N/64) union.
+    """Precomputed transitive ancestor sets for an FX graph using int bitsets.
 
-    Drop-in replacement for dict[Node, OrderedSet[Node]] with the same
-    ``ancestors[node]`` API returning a proxy that supports ``in`` checks.
+    Drop-in replacement for ``dict[fx.Node, OrderedSet[fx.Node]]``.
+    Access ``ancestors[node]`` returns a :class:`_BitsetAncestorView`.
+
+    Mental model
+    ------------
+    Consider a small diamond graph (edges point downward)::
+
+            a          index 0
+           / \\
+          b   c        index 1, 2
+           \\ /
+            d          index 3
+
+    Each node gets an index from topological order.  An ancestor set is
+    a single Python ``int`` where bit j means "node j is my ancestor"::
+
+        ancestors of a = 0b0000 = 0   (no ancestors)
+        ancestors of b = 0b0001 = 1   (bit 0 set -> a)
+        ancestors of c = 0b0001 = 1   (bit 0 set -> a)
+        ancestors of d = 0b0111 = 7   (bits 0,1,2 -> a, b, c)
+
+    Building the closure: for each node i in topo order, for each parent j::
+
+        bits[i] |= (1 << j) | bits[j]
+
+    The ``|=`` merges j's ancestors into i.  For Python ints this is a
+    single C-level loop over 64-bit machine words -- O(N/64) per union
+    vs O(N) for ``OrderedSet.__ior__`` / ``dict.update``.
+
+    For a 36 000-node graph each int is ~4.5 KB (~563 machine words).
+
+    Querying::
+
+        ancestors = BitsetAncestors(topo_sorted_nodes)
+        a_in_d = a in ancestors[d]       # (bits[3] >> 0) & 1 == True
+        all_of_d = list(ancestors[d])    # [a, b, c]  via bit-scan
+        common = ancestors[d] & ancestors[c]  # bitwise AND
+
+    Extra edges
+    -----------
+    ``extra_inputs`` adds edges beyond the FX graph data dependencies
+    (e.g. hiding-interval deps in the overlap bucketer).  They are folded
+    into the same bitwise closure during construction.
+
+    Attributes:
+        _bits:        list[int]  -- _bits[i] is the ancestor bitset for node i
+        _node_to_idx: dict       -- fx.Node -> int index
+        _idx_to_node: list       -- int index -> fx.Node
     """
 
     def __init__(
