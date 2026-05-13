@@ -1032,7 +1032,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     # Builtins that have been promoted to their own VT classes. Creating a
     # BuiltinVariable for these is a bug; use the specialized class instead.
     MUST_USE_SPECIALIZED: frozenset[Any] = frozenset(
-        {dict, getattr, iter, list, setattr}
+        {dict, getattr, hasattr, iter, list, setattr}
     )
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
@@ -2775,14 +2775,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return arg.items[0]
             raise
 
-    def call_hasattr(
-        self, tx: "InstructionTranslator", obj: VariableTracker, attr: VariableTracker
-    ) -> VariableTracker | None:
-        if attr.is_python_constant():
-            name = attr.as_python_constant()
-            return obj.call_obj_hasattr(tx, name)
-        return None
-
     def call_map(
         self,
         tx: "InstructionTranslator",
@@ -3608,6 +3600,49 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 return variables.GetAttrVariable(obj, name, source=source)
 
 
+class HasAttrBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `hasattr` builtin."""
+
+    _fn = hasattr
+
+    def __init__(self, value: Any = hasattr, **kwargs: Any) -> None:
+        if value is not hasattr:
+            raise AssertionError(
+                f"HasAttrBuiltinVariable value must be hasattr, got {value}"
+            )
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "HasAttrBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+            ]
+        if len(args) != 2 or kwargs:
+            raise_observed_exception(TypeError, tx)
+        obj, attr = args
+        if not attr.is_python_constant():
+            raise_observed_exception(TypeError, tx)
+        result = obj.call_obj_hasattr(tx, attr.as_python_constant())
+        if result is None:
+            unimplemented(
+                gb_type="hasattr() on unsupported type",
+                context=f"hasattr({obj}, {attr})",
+                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return result
+
+
 class SetAttrBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `setattr` builtin."""
 
@@ -3644,7 +3679,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         unimplemented(
             gb_type="setattr() on unsupported type",
             context=f"setattr({obj}, {name_var}, {val})",
-            explanation=f"setattr() is not supported on type {type(obj).__name__}",
+            explanation=f"setattr() is not supported on type {obj.python_type_name()}",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
