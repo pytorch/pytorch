@@ -4,7 +4,10 @@ import itertools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._fsdp_api import DataParallelMeshDims
 
 import torch
 import torch.nn as nn
@@ -419,7 +422,9 @@ class FSDPParam:
         self._spmd_mesh = spmd_mesh
         self._spmd_placements: tuple[Placement, ...] = tuple(new_placements)
         self._sharding_spec = self._build_spmd_sharding_spec(
-            dp_dim_names, dp_shard_indices, fsdp_placement,
+            dp_dim_names,
+            dp_shard_indices,
+            fsdp_placement,
         )
         return cast(DTensor, param)._local_tensor
 
@@ -437,18 +442,18 @@ class FSDPParam:
         """
         spmd_mesh = self._spmd_mesh
         spmd_placements = self._spmd_placements
+        assert self._unsharded_dtensor_spec is not None
         tensor_meta = self._unsharded_dtensor_spec.tensor_meta
 
         if len(dp_shard_indices) <= 1:
-            return DTensorSpec(
-                spmd_mesh, spmd_placements, tensor_meta=tensor_meta
-            )
+            return DTensorSpec(spmd_mesh, spmd_placements, tensor_meta=tensor_meta)
 
         shard_names_set = set(dp_dim_names.shard_names)
         replicate_names_set = set(dp_dim_names.replicate_names)
 
         # Walk spmd_mesh.mesh_dim_names in order. Replace consecutive DP
         # shard dims with the flattened DP mesh; keep non-DP dims as-is.
+        assert spmd_mesh.mesh_dim_names is not None
         submeshes: list[DeviceMesh] = []
         spec_placements: list[Placement] = []
         skip = 0
@@ -472,9 +477,7 @@ class FSDPParam:
                 spec_placements.append(spmd_placements[i])
 
         spec_mesh = DeviceMesh._concatenate(submeshes)
-        return DTensorSpec(
-            spec_mesh, tuple(spec_placements), tensor_meta=tensor_meta
-        )
+        return DTensorSpec(spec_mesh, tuple(spec_placements), tensor_meta=tensor_meta)
 
     def _init_sharding_spec_tp(
         self,
