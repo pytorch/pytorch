@@ -403,11 +403,11 @@ def wrap_compiler_debug(
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiled function with real inputs
-                    out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    out = inner_compiled_fn(real_inputs)
                     # sync cuda kernels to ensure IMA detection
                     for arg in example_inputs:
                         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -1028,8 +1028,8 @@ def inductor_accuracy_fails(
 
     return backend_aot_accuracy_fails(
         fx_g,
-        args,  # type: ignore[arg-type]
-        _compile_with_symbolic_args,  # type: ignore[arg-type]
+        args,
+        _compile_with_symbolic_args,
         require_fp64=require_fp64,
         ignore_non_fp=ignore_non_fp,
     )
@@ -1202,7 +1202,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)  # type: ignore[has-type]
+        pbar.update(1)
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
@@ -1216,7 +1216,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     ):
         if isinstance(compiled, str):
             raise AssertionError("compile_fx_inner should not return a string")
-        compiled(new_args)  # type: ignore[arg-type]
+        compiled(new_args)
         if new_args:
             raise AssertionError("new_args should be empty after compiled() call")
 
@@ -1243,7 +1243,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
             intermediate_hook(check_hook),
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
-            compiled(new_args)  # type: ignore[arg-type]
+            compiled(new_args)
             if new_args:
                 raise AssertionError("new_args should be empty after compiled() call")
 
@@ -1263,7 +1263,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         if new_args:
@@ -1285,7 +1285,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             if new_args:
