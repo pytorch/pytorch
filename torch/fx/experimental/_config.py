@@ -1,6 +1,7 @@
 import enum
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -130,6 +131,10 @@ soft_pending_unbacked_not_found_error = False
 # could be taken anyway.
 # See AggressiveGuardFreeMode below for valid values.
 aggressive_guard_free_semantics = 0
+
+
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 install_config_module(sys.modules[__name__])
