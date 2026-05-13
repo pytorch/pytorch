@@ -1723,25 +1723,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
-  if (input_list.empty()) {
-    invalidArgument("requires non-empty input tensor list");
-  }
-
-  if (output_lists.size() != static_cast<size_t>(getSize())) {
-    invalidArgument("output lists should be equal to world size");
-  }
+  assertNonEmptyInputTensorList(invalidArgument, input_list.size());
+  assertAllgatherCoalescedOutputTensorLists(
+      invalidArgument, output_lists, input_list.size(), getSize());
 
   assertSameDevice(invalidArgument, input_list);
 
   // Expect i'th tensor of each list from 'output_lists' match i'th tensor
   // from 'input_list' in type and size.
   for (const auto& output_list : output_lists) {
-    if (output_list.size() != input_list.size()) {
-      invalidArgument(
-          "invalid output size: (expected length " +
-          std::to_string(input_list.size()) + ", got " +
-          std::to_string(output_list.size()) + ")");
-    }
     for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
@@ -1953,26 +1943,13 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputs[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputs, getSize());
 
     const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
-    if (!outputs.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputs);
   }
 
   const auto& device = inputs[0].device();
