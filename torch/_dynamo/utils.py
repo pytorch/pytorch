@@ -4978,17 +4978,12 @@ def is_rng_state_getter_or_setter(value: Any) -> bool:
 def is_tensor_base_attr_getter(value: Any) -> bool:
     if not (isinstance(value, types.MethodWrapperType) and value.__name__ == "__get__"):
         return False
-
     descriptor = value.__self__
-
-    # C-defined GetSetDescriptor (like _base, grad, _grad)
     if isinstance(descriptor, types.GetSetDescriptorType):
         return (
             hasattr(descriptor, "__objclass__")
             and descriptor.__objclass__ is torch._C._TensorBase
         )
-
-    # Python-defined property - not a TensorBase attr getter
     return False
 
 
