@@ -1665,7 +1665,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         def fn(a):
             return a + 4
 
-        t = torch.zeros(2**30 + 1, dtype=torch.int8, device='cuda')
+        t = torch.zeros(2**30 + 1, dtype=torch.int8, device=GPU_TYPE)
         compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
