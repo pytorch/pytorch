@@ -5020,6 +5020,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(loc.x is x)
 
+    def test_setattr_wrong_args_raises(self):
+        # setattr() with wrong arg count should raise TypeError during tracing,
+        # not silently graph-break (a graph break would just defer the same
+        # failure to eager execution).
+        @torch.compile(backend="eager")
+        def fn(x):
+            setattr(x, "foo")
+            return x
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(4))
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass

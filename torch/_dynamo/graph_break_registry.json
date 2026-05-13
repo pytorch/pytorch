@@ -3211,6 +3211,16 @@
       ]
     }
   ],
+  "GB0467": [
+    {
+      "Gb_type": "setattr() on unsupported type",
+      "Context": "setattr({obj}, {name_var}, {val})",
+      "Explanation": "setattr() is not supported on type {type(obj).__name__}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0239": [
     {
       "Gb_type": "Invalid use of pytree_flatten with nonstrict_trace-ed function",
