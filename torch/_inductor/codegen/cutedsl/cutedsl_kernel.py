@@ -771,10 +771,20 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             if len(idx_vars) == 1
             else f"{aligned_source}[{', '.join(source_view_items)}]"
         )
+        tiler = (
+            f"({tiler_items[0]},)"
+            if len(tiler_items) == 1
+            else f"({', '.join(tiler_items)})"
+        )
+        coord = (
+            f"({coord_items[0]},)"
+            if len(coord_items) == 1
+            else f"({', '.join(coord_items)})"
+        )
         self.kernel.body.splice(
             f"""
             {aligned_idx} = cute.assume({vector_idx}[0], divby={vec_size})
-            {source_tile} = cute.local_tile({var}, {self._tuple_expr(tiler_items)}, {self._tuple_expr(coord_items)})
+            {source_tile} = cute.local_tile({var}, {tiler}, {coord})
             {aligned_ptr} = cute.make_ptr({cute_dtype}, {source_tile}.iterator.toint(), {source_tile}.iterator.memspace, assumed_align=min(16, {vec_size} * {var_dtype.itemsize}))
             {aligned_source} = cute.make_tensor({aligned_ptr}, {source_tile}.layout)
             cute.autovec_copy({source_view}, {val_frag})
@@ -818,12 +828,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             self.kernel.body.writeline(
                 f"{val_frag}[load_idx] = ({var}[{', '.join(load_indices)}])"
             )
-
-    @staticmethod
-    def _tuple_expr(items: list[str]) -> str:
-        if len(items) == 1:
-            return f"({items[0]},)"
-        return f"({', '.join(items)})"
 
     def _emit_index_fragment(
         self,
@@ -947,12 +951,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 return width
         return None
 
-    def _cse_source_name(self, value: object) -> str | None:
-        for expr, var in self.kernel.cse._cache.items():
-            if var is value:
-                return expr if isinstance(expr, str) else None
-        return None
-
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
         if isinstance(index_var, int | sympy.Integer):
@@ -972,7 +970,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
             )
             return sympy_index_symbol(str(wrapped))
-        symbol = sympy_index_symbol(self._cse_source_name(index_var) or str(index_var))
+        source_name = None
+        for expr, var in self.kernel.cse._cache.items():
+            if var is index_var:
+                source_name = expr if isinstance(expr, str) else None
+                break
+        symbol = sympy_index_symbol(source_name or str(index_var))
         if (
             isinstance(index_var, CuteDSLCSEVariable)
             and index_var.index_expr is not None
