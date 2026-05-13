@@ -978,7 +978,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     # Builtins that have been promoted to their own VT classes. Creating a
     # BuiltinVariable for these is a bug; use the specialized class instead.
     MUST_USE_SPECIALIZED: frozenset[Any] = frozenset(
-        {dict, getattr, hasattr, isinstance, iter, list, setattr, str}
+        {dict, getattr, hasattr, isinstance, iter, list, setattr, str, type}
     )
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
@@ -2447,32 +2447,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
-    def call_type(
-        self, tx: "InstructionTranslator", obj: VariableTracker
-    ) -> VariableTracker:
-        try:
-            py_type = obj.python_type()
-        except NotImplementedError as error:
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                str(error),
-                case_name="unknown_python_type",
-            ) from None
-
-        source = obj.source and TypeSource(obj.source)
-        if (
-            source is None
-            and isinstance(obj, variables.UserDefinedObjectVariable)
-            and obj.cls_source
-        ):
-            source = obj.cls_source
-        if py_type is torch.Tensor:
-            # In some cases torch isn't available in globals
-            name = tx.output.install_global_by_id("", torch)
-            source = AttrSource(GlobalSource(name), "Tensor")
-
-        return VariableTracker.build(tx, py_type, source)
-
     def call_reversed(
         self, tx: "InstructionTranslator", obj: VariableTracker
     ) -> VariableTracker | None:
@@ -3719,6 +3693,93 @@ class StrBuiltinVariable(BaseBuiltinVariable):
                     return None
                 return user_func_variable.call_function(tx, [arg], {})
         return None
+
+
+class TypeBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `type` builtin."""
+
+    _fn = type
+
+    def __init__(self, value: type = _fn, **kwargs: Any) -> None:
+        if value is not type:
+            raise AssertionError(f"TypeBuiltinVariable value must be type, got {value}")
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "TypeBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyConstantVariable, LazyVariableTracker
+
+        # Realize non-constant lazy args; LazyConstantVariable.python_type()
+        # installs only a TYPE_MATCH guard, which is what type() needs.
+        if any(
+            isinstance(a, LazyVariableTracker)
+            and not isinstance(a, LazyConstantVariable)
+            for a in args
+        ):
+            args = [
+                a.realize()
+                if isinstance(a, LazyVariableTracker)
+                and not isinstance(a, LazyConstantVariable)
+                else a
+                for a in args
+            ]
+
+        if len(args) == 1 and not kwargs:
+            return self._call_type_single(tx, args[0])
+
+        if len(args) == 3 and not kwargs:
+            return self._call_type_three(tx, args)
+
+        raise_observed_exception(TypeError, tx)
+
+    def _call_type_single(
+        self, tx: "InstructionTranslator", obj: VariableTracker
+    ) -> VariableTracker:
+        try:
+            py_type = obj.python_type()
+        except NotImplementedError as error:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                str(error),
+                case_name="unknown_python_type",
+            ) from None
+
+        source = obj.source and TypeSource(obj.source)
+        if (
+            source is None
+            and isinstance(obj, variables.UserDefinedObjectVariable)
+            and obj.cls_source
+        ):
+            source = obj.cls_source
+        if py_type is torch.Tensor:
+            name = tx.output.install_global_by_id("", torch)
+            source = AttrSource(GlobalSource(name), "Tensor")
+
+        return VariableTracker.build(tx, py_type, source)
+
+    def _call_type_three(
+        self, tx: "InstructionTranslator", args: Sequence[VariableTracker]
+    ) -> VariableTracker:
+        try:
+            name, bases, ns = (x.as_python_constant() for x in args)
+            res = type(name, bases, ns)
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="Failed to trace type() with 3 arguments",
+                context=f"type({args})",
+                explanation="Dynamo does not support dynamic class creation via type(name, bases, dict) with non-constant arguments",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, res)
 
 
 class ListBuiltinVariable(BaseBuiltinVariable):
