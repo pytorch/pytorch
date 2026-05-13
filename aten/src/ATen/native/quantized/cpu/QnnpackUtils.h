@@ -425,7 +425,7 @@ Tensor qnnpack_avg_pool2d(
 } // namespace at::native::qnnp_avgpool_helper
 
 namespace {
-[[maybe_unused]] std::vector<float> generate_requantization_scales(
+[[maybe_unused]] void generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale,
@@ -437,8 +437,8 @@ namespace {
   if (static_cast<int64_t>(requant_scales.size()) < num_output_channels_padded) {
     requant_scales.resize(num_output_channels_padded);
   }
+  const auto inverse_output_scale = 1.f / output_scale;
   for (const auto i : c10::irange(num_output_channels_padded)) {
-    const auto inverse_output_scale = 1.f /output_scale;
     requant_scales[i] = (weight_scales_data[i] * input_scale) * inverse_output_scale;
     TORCH_CHECK(
         (requant_scales[i] > 0.0f && std::isnormal(requant_scales[i])),
@@ -446,7 +446,6 @@ namespace {
         requant_scales[i],
         ": requantization scale must be finite and positive");
   }
-  return requant_scales;
 }
 
 [[maybe_unused]] std::pair<std::vector<uint8_t>, at::Tensor>
