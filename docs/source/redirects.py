@@ -159,6 +159,4 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
-    # Redirect for rST-to-MyST Markdown conversion
-    "cuda._sanitizer": "cuda._sanitizer.html",
 }
