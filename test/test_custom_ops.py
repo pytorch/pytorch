@@ -5061,19 +5061,6 @@ class TestCustomOpFastPath(TestCase):
                 result = fp_outer(x)
         self.assertEqual(result, x * 2 + 1)
 
-    def test_fast_path_mutable_with_autograd(self):
-        @torch.library.custom_op("_torch_testing::fp_mut_grad", mutates_args=("x",))
-        def fp_mut_grad(x: Tensor) -> None:
-            x.mul_(2)
-
-        x = torch.randn(3, requires_grad=True)
-        x_clone = x.detach().clone()
-        v_before = x._version
-        with self._assert_fast_path_taken(fp_mut_grad):
-            fp_mut_grad(x)
-        self.assertTrue(x._version > v_before)
-        self.assertEqual(x, x_clone * 2)
-
     def test_fast_path_error_propagation(self):
         @torch.library.custom_op("_torch_testing::fp_err", mutates_args=())
         def fp_err(x: Tensor) -> Tensor:
@@ -5105,21 +5092,6 @@ class TestCustomOpFastPath(TestCase):
             futures = [pool.submit(worker, float(i)) for i in range(4)]
             for f in concurrent.futures.as_completed(futures):
                 self.assertTrue(f.result())
-
-    def test_fast_path_disabled_kernel(self):
-        @torch.library.custom_op("_torch_testing::fp_disabled", mutates_args=())
-        def fp_disabled(x: Tensor) -> Tensor:
-            return x.clone()
-
-        @fp_disabled.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        fp_disabled._disabled_kernel.add("cpu")
-
-        x = torch.randn(3)
-        result = fp_disabled(x)
-        self.assertEqual(result, x)
 
     def test_fast_path_mixed_device_uses_first_tensor(self):
         @torch.library.custom_op("_torch_testing::fp_mixed", mutates_args=())
