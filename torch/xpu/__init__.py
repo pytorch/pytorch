@@ -946,8 +946,6 @@ def clock_rate(device: Device = None) -> float:
         device (torch.device, str or int, optional): selected device. Uses the
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
-
-    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU clock information.
     """
     frequency_handle = _get_zes_frequency_handle(device)
 
@@ -955,10 +953,6 @@ def clock_rate(device: Device = None) -> float:
 
     freq_state = pyzes.zes_freq_state_t()
     rc = pyzes.zesFrequencyGetState(frequency_handle, byref(freq_state))
-    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
-        raise RuntimeError(
-            "GPU clock rate querying is not available. Try running with elevated privileges (e.g. sudo)."
-        )
     if rc != pyzes.ZE_RESULT_SUCCESS:
         raise RuntimeError(f"Can't get Level Zero Sysman GPU clock rate (rc={rc}).")
     return freq_state.actual
@@ -1031,26 +1025,23 @@ def power_draw(device: Device = None) -> float:
 
     import pyzes  # type: ignore[import]
 
-    power_energy = pyzes.zes_power_energy_counter_t()
-    rc = pyzes.zesPowerGetEnergyCounter(power_handle, byref(power_energy))
+    counter_start = pyzes.zes_power_energy_counter_t()
+    rc = pyzes.zesPowerGetEnergyCounter(power_handle, byref(counter_start))
     if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
         raise RuntimeError(
             "GPU power draw querying is not available. Try running with elevated privileges (e.g. sudo)."
         )
     if rc != pyzes.ZE_RESULT_SUCCESS:
         raise RuntimeError(f"Can't get Level Zero Sysman GPU power draw (rc={rc}).")
-    timestamp_start = power_energy.timestamp
-    energy_start = power_energy.energy
+    counter_end = pyzes.zes_power_energy_counter_t()
     _zes_check(
-        pyzes.zesPowerGetEnergyCounter(power_handle, byref(power_energy)),
+        pyzes.zesPowerGetEnergyCounter(power_handle, byref(counter_end)),
         "Can't get Level Zero Sysman GPU power energy counter.",
     )
     # energy is in microjoules, timestamp is in microseconds (per L0 Sysman spec).
     # microjoules / microseconds = watts, so the micro factors cancel.
-    dt = power_energy.timestamp - timestamp_start
-    if dt == 0:
-        return 0.0
-    return (power_energy.energy - energy_start) / dt
+    dt = counter_end.timestamp - counter_start.timestamp
+    return (counter_end.energy - counter_start.energy) / dt
 
 
 def _get_zes_engine_handle(device: Device = None) -> c_void_p:
@@ -1145,8 +1136,8 @@ def utilization(device: Device = None) -> float:
 
     import pyzes  # type: ignore[import]
 
-    engine_stats = pyzes.zes_engine_stats_t()
-    rc = pyzes.zesEngineGetActivity(engine_handle, byref(engine_stats))
+    stats_start = pyzes.zes_engine_stats_t()
+    rc = pyzes.zesEngineGetActivity(engine_handle, byref(stats_start))
     if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
         raise RuntimeError(
             "GPU utilization querying is not available. Try running with elevated privileges (e.g. sudo)."
@@ -1155,17 +1146,14 @@ def utilization(device: Device = None) -> float:
         raise RuntimeError(
             f"Can't get Level Zero Sysman GPU engine activity (rc={rc})."
         )
-    active_start = engine_stats.activeTime
-    timestamp_start = engine_stats.timestamp
+    stats_end = pyzes.zes_engine_stats_t()
     _zes_check(
-        pyzes.zesEngineGetActivity(engine_handle, byref(engine_stats)),
+        pyzes.zesEngineGetActivity(engine_handle, byref(stats_end)),
         "Can't get Level Zero Sysman GPU engine activity.",
     )
     # activeTime and timestamp are monotonic counters in microseconds.
-    dt = engine_stats.timestamp - timestamp_start
-    if dt == 0:
-        return 0.0
-    return (engine_stats.activeTime - active_start) / dt * 100
+    dt = stats_end.timestamp - stats_start.timestamp
+    return (stats_end.activeTime - stats_start.activeTime) / dt * 100
 
 
 # import here to avoid circular import
