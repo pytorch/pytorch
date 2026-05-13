@@ -1121,7 +1121,7 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement nb_or and nb_inplace_or
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None
+    nb_inplace_or = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True

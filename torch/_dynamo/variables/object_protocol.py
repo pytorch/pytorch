@@ -65,12 +65,15 @@ def vt_identity_compare(
     if left_known != right_known:
         return ConstantVariable.create(False)
 
-    # Mutable containers created during tracing: VT identity = Python identity.
+    # Objects created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .misc import TracebackVariable
     from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
+    if isinstance(
+        left, (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
+    ):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
@@ -86,7 +89,7 @@ def vt_identity_compare(
     if (
         istype(left, variables.ExceptionVariable)
         and istype(right, variables.ExceptionVariable)
-        and left.exc_type is not right.exc_type
+        and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
     ):
         return ConstantVariable.create(False)
 
