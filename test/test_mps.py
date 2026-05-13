@@ -2347,6 +2347,49 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("N", [64, 256, 1024, 4096, 4097, 8192])
+    @parametrize("elementwise_affine", [True, False])
+    def test_layer_norm_backward_metal(self, dtype, N, elementwise_affine):
+        """Correctness tests for Metal LayerNorm backward kernels."""
+        B, T = (2, 8) if N > 4096 else (4, 16)
+        dx_tol = 1e-3 if dtype == torch.float32 else (5e-2 if dtype == torch.float16 else 1e-1)
+        dw_tol = 1e-3 if dtype == torch.float32 else (5e-2 if dtype == torch.float16 else 2e-1)
+
+        cpu_x = torch.randn(B, T, N, dtype=torch.float32)
+        ln_cpu = torch.nn.LayerNorm(N, elementwise_affine=elementwise_affine,
+                                    dtype=torch.float32)
+        if elementwise_affine:
+            torch.nn.init.normal_(ln_cpu.weight)
+            torch.nn.init.normal_(ln_cpu.bias)
+
+        xc = cpu_x.clone().requires_grad_(True)
+        yc = ln_cpu(xc)
+        dyc = torch.randn_like(yc)
+        yc.backward(dyc)
+
+        ref_dw = ln_cpu.weight.grad.clone() if elementwise_affine else None
+        ref_db = ln_cpu.bias.grad.clone() if elementwise_affine else None
+
+        x_mps = cpu_x.to(device='mps', dtype=dtype).requires_grad_(True)
+        ln_mps = ln_cpu.to(device='mps', dtype=dtype)
+        if elementwise_affine:
+            ln_mps.weight.grad = None
+            ln_mps.bias.grad = None
+        ym = ln_mps(x_mps)
+        ym.backward(dyc.to(device='mps', dtype=dtype))
+
+        dx_err = (x_mps.grad.float().cpu() - xc.grad).abs().max().item()
+        self.assertLess(dx_err, dx_tol,
+            f"dx error {dx_err:.2e} > {dx_tol} for dtype={dtype} N={N}")
+        if elementwise_affine:
+            dw_err = (ln_mps.weight.grad.float().cpu() - ref_dw).abs().max().item()
+            db_err = (ln_mps.bias.grad.float().cpu() - ref_db).abs().max().item()
+            self.assertLess(dw_err, dw_tol,
+                f"dw error {dw_err:.2e} > {dw_tol} for dtype={dtype} N={N}")
+            self.assertLess(db_err, dw_tol,
+                f"db error {db_err:.2e} > {dw_tol} for dtype={dtype} N={N}")
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
