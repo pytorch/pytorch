@@ -1308,9 +1308,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
-
-
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
             (torch.float32, 128): FlexConfig(128, 32, 2, 4),
