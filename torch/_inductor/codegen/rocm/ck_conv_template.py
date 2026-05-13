@@ -437,7 +437,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-    def filter_op(self, op: "CKGroupedConvFwdOp"):
+    def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
         metas = [
             T.get_layout()
             for T in [*self.input_nodes, self.output_node]
@@ -492,7 +492,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:  # type: ignore[name-defined]
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -527,7 +527,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: ROCmTemplateKernel,
-        op: "CKGroupedConvFwdOp",
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
         **kwargs,
     ) -> str:
         template_buffer_node = kwargs.get("template_buffer_node")
