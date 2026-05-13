@@ -194,7 +194,8 @@ def build_memory_profile(
         if node.op in ("placeholder", "get_attr", "output"):
             continue
 
-        # Process allocations
+        # Safe to use fresh_allocations here: nodes are in original topo order,
+        # so the allocator is always visited before any shared-storage copy.
         for storage_key in alias_info.get_fresh_allocations(node):
             if device_filter(storage_key.device):
                 current_memory += size_of(storage_key.storage.nbytes())
@@ -348,6 +349,9 @@ class MemoryTracker:
         # Memory tracking using GraphAliasTracker
         self.alias_tracker = GraphAliasTracker(self.nodes)
         self.current_live_storages: OrderedSet[StorageKey] = OrderedSet()
+        # Monotonic set: once a storage is allocated, it is never re-counted
+        # even if freed and later encountered as output of another node.
+        self.ever_allocated_storages: OrderedSet[StorageKey] = OrderedSet()
         self.current_memory_bytes = 0
         self.is_releasable = _is_releasable if is_releasable is None else is_releasable
 
@@ -358,6 +362,7 @@ class MemoryTracker:
                 for storage_key in fresh_allocations:
                     if self.device_filter(storage_key.device):
                         self.current_live_storages.add(storage_key)
+                        self.ever_allocated_storages.add(storage_key)
                         self.current_memory_bytes += self._get_storage_size(storage_key)
 
         self.peak_memory = self.current_memory_bytes
@@ -419,18 +424,27 @@ class MemoryTracker:
         if node.op in ("placeholder", "get_attr", "output"):
             return
 
-        # Add fresh allocations
-        fresh_allocations = self.alias_tracker.get_fresh_allocations(node)
+        # Mark all output storages as live. Using output storages (not just
+        # fresh allocations) handles shared storages between forward and
+        # recomputed nodes: both output the same storage but only the first
+        # is the "allocator". When recomputed is scheduled before forward,
+        # fresh allocations alone would miss the storage.
+        output_storages = self.alias_tracker.node_to_output_storages.get(
+            node, OrderedSet()
+        )
         alloc_bytes = 0
-        for storage_key in fresh_allocations:
+        alloc_count = 0
+        for storage_key in output_storages:
             if (
                 self.device_filter(storage_key.device)
-                and storage_key not in self.current_live_storages
+                and storage_key not in self.ever_allocated_storages
             ):
                 size = self._get_storage_size(storage_key)
+                self.ever_allocated_storages.add(storage_key)
                 self.current_live_storages.add(storage_key)
                 self.current_memory_bytes += size
                 alloc_bytes += size
+                alloc_count += 1
 
         self.peak_memory = max(self.current_memory_bytes, self.peak_memory)
 
@@ -447,7 +461,7 @@ class MemoryTracker:
         log.debug(
             "Scheduled %s: memory change %d allocs, %d frees, current memory: %d MB",
             node.name,
-            len(fresh_allocations),
+            alloc_count,
             len(storages_to_free),
             self.current_memory_bytes // (1024 * 1024),
         )

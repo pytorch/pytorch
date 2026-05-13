@@ -340,6 +340,99 @@ class TestMemoryTracker(InductorTestCase):
                 peak1, peak2, "Different scheduling produces different peak memory"
             )
 
+    def test_memory_tracker_shared_storage_reorder(self):
+        """MemoryTracker must handle shared FakeTensor storage across forward
+        and recomputed nodes when scheduling out of original graph order.
+
+        Background: selective-activation-checkpointing (SAC) in aot_fx_trace
+        mode duplicates forward nodes into the backward region via
+        ``graph.node_copy``.  Because ``node_copy`` copies ``meta["val"]``,
+        the duplicate (``_recomputed``) shares the same FakeTensor storage
+        (same ``_cdata``) as the original forward node.
+
+        ``GraphAliasTracker`` attributes each storage to the *first* node in
+        topological order that outputs it -- the forward node.  The old code
+        only added "fresh allocations" to ``current_live_storages`` (storages
+        whose allocator is the node being scheduled).  When the overlap
+        scheduler reordered the graph so that a recomputed node was scheduled
+        *before* the forward allocator, the storage was never marked live and
+        downstream consumers hit the assertion.
+
+        The graph built here models the real failure from MAST job
+        ``SWEEPAP7_sfsdp_8b_NOCG-tp8-bs4-*`` (Llama-8B, TP=8, SFSDP,
+        ``auto_bucketing`` pass):
+
+            x (placeholder)
+            |
+            +--> fwd_rms_norm  ──> fwd_getitem ──> fwd_allgather ──> ...
+            |        (allocates storage S)
+            |
+            +--> bwd_rms_norm_recomputed ──> bwd_getitem_recomputed ──> ...
+                     (outputs same storage S via node_copy)
+
+        The overlap scheduler may schedule the backward chain before the
+        forward chain because they are independent sub-graphs.
+        """
+        with FakeTensorMode():
+            # Shared storage: view(-1) keeps the same _cdata, modelling
+            # what node_copy does for SAC recomputation.
+            shared_storage_tensor = torch.randn(1000, device=GPU_TYPE)
+            recomp_view = shared_storage_tensor.view(-1)
+            self.assertEqual(
+                shared_storage_tensor.untyped_storage()._cdata,
+                recomp_view.untyped_storage()._cdata,
+            )
+            graph = torch.fx.Graph()
+
+            # -- placeholder (input activation) --
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(100, device=GPU_TYPE)
+
+            # -- forward chain --
+            fwd_rms = graph.call_function(torch.ops.aten.mul.Tensor, (x, x))
+            fwd_rms.meta["val"] = shared_storage_tensor  # allocates S
+
+            fwd_getitem = graph.call_function(torch.ops.aten.add.Tensor, (fwd_rms, x))
+            fwd_getitem.meta["val"] = torch.randn(1000, device=GPU_TYPE)
+
+            # -- independent node (e.g. backward grad input) --
+            bwd_input = graph.call_function(torch.ops.aten.neg.default, (x,))
+            bwd_input.meta["val"] = torch.randn(100, device=GPU_TYPE)
+
+            # -- recomputed chain (SAC duplicate, shares storage S) --
+            recomp_rms = graph.call_function(
+                torch.ops.aten.mul.Tensor, (bwd_input, bwd_input)
+            )
+            recomp_rms.meta["val"] = recomp_view  # same _cdata as fwd_rms
+
+            recomp_getitem = graph.call_function(
+                torch.ops.aten.add.Tensor, (recomp_rms, bwd_input)
+            )
+            recomp_getitem.meta["val"] = torch.randn(1000, device=GPU_TYPE)
+
+            graph.output((fwd_getitem, recomp_getitem))
+
+        # -- 1. Original topological order (must always work) --
+        compute = [
+            n for n in graph.nodes if n.op not in ("placeholder", "get_attr", "output")
+        ]
+        tracker_orig = MemoryTracker(graph, device_filter=device_filter)
+        for n in compute:
+            tracker_orig.schedule_node(n)
+
+        # -- 2. Reordered: backward/recomp chain BEFORE forward chain --
+        #    This is a valid topological order because the two chains
+        #    share no data-flow edges (only a shared storage _cdata).
+        reorder = [bwd_input, recomp_rms, recomp_getitem, fwd_rms, fwd_getitem]
+        tracker_reorder = MemoryTracker(graph, device_filter=device_filter)
+        for n in reorder:
+            tracker_reorder.schedule_node(n)
+
+        # -- 3. Verify memory accounting is consistent --
+        #    The shared storage S (nbytes) should be counted once in
+        #    whichever order the nodes are scheduled.
+        self.assertEqual(tracker_orig.peak_memory, tracker_reorder.peak_memory)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
