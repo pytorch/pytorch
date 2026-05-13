@@ -1205,7 +1205,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     def handle_isinstance(
                         tx: Any, args: Any, kwargs: Any
                     ) -> VariableTracker | None:
-                        return IsInstanceBuiltinVariable().call_function(tx, args, kwargs)
+                        return IsInstanceBuiltinVariable().call_function(
+                            tx, args, kwargs
+                        )
 
                     return handle_isinstance
 
@@ -1214,7 +1216,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     def handle_type(
                         tx: Any, args: Any, kwargs: Any
                     ) -> VariableTracker | None:
-                        return obj.call_type(tx, args[0])
+                        return TypeBuiltinVariable().call_function(
+                            tx, args, kwargs
+                        )
 
                     return handle_type
 
