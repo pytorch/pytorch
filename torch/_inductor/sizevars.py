@@ -632,25 +632,29 @@ class SizeVarAllocator:
         if lane_var not in expr.free_symbols:
             return LaneContiguity(stride=0, uniform=True)
         stride = stride_at(expr, lane_var)
-        if self.statically_known_equals(stride, 1):
-            return LaneContiguity(contiguous_width=requested_width, stride=1)
-        if self.statically_known_equals(stride, 0):
-            return LaneContiguity(stride=0, uniform=True)
-        if isinstance(expr, sympy.Add):
-            return self._analyze_lane_contiguity_add(
-                expr.args, lane_var, requested_width
-            )
-        if isinstance(expr, sympy.Mul):
-            return self._analyze_lane_contiguity_mul(
-                expr.args, lane_var, requested_width
-            )
-        if isinstance(expr, ModularIndexing):
-            return self._analyze_lane_contiguity_modular_indexing(
-                expr, lane_var, requested_width
-            )
-        if isinstance(expr, (Mod, sympy.Mod)):
-            return self._analyze_lane_contiguity_mod(expr, lane_var, requested_width)
-        return LaneContiguity(unknown=True)
+        match expr:
+            case _ if self.statically_known_equals(stride, 1):
+                return LaneContiguity(contiguous_width=requested_width, stride=1)
+            case _ if self.statically_known_equals(stride, 0):
+                return LaneContiguity(stride=0, uniform=True)
+            case sympy.Add():
+                return self._analyze_lane_contiguity_add(
+                    expr.args, lane_var, requested_width
+                )
+            case sympy.Mul():
+                return self._analyze_lane_contiguity_mul(
+                    expr.args, lane_var, requested_width
+                )
+            case ModularIndexing():
+                return self._analyze_lane_contiguity_modular_indexing(
+                    expr, lane_var, requested_width
+                )
+            case _ if isinstance(expr, (Mod, sympy.Mod)):
+                return self._analyze_lane_contiguity_mod(
+                    expr.args[0], expr.args[1], lane_var, requested_width
+                )
+            case _:
+                return LaneContiguity(unknown=True)
 
     def _analyze_lane_contiguity_add(
         self, args: tuple[Expr, ...], lane_var: sympy.Symbol, requested_width: int
@@ -700,20 +704,11 @@ class SizeVarAllocator:
         base, divisor, modulus = expr.args
         if not isinstance(divisor, (int, sympy.Integer)) or int(divisor) != 1:
             return LaneContiguity(unknown=True)
-        return self._analyze_lane_contiguity_mod_args(
+        return self._analyze_lane_contiguity_mod(
             base, modulus, lane_var, requested_width
         )
 
     def _analyze_lane_contiguity_mod(
-        self, expr: Expr, lane_var: sympy.Symbol, requested_width: int
-    ) -> LaneContiguity:
-        """Analyze Python-style modulo expressions over the vector lane."""
-        base, modulus = expr.args
-        return self._analyze_lane_contiguity_mod_args(
-            base, modulus, lane_var, requested_width
-        )
-
-    def _analyze_lane_contiguity_mod_args(
         self,
         base: Expr,
         modulus: Expr,

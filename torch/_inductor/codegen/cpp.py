@@ -451,7 +451,7 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         for _node in self.outer_fused_nodes:
             assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
             flatten_snodes.extend(list(_node.get_nodes()))
-        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
+        super().__init__(scheduler, flatten_snodes)
 
     def get_outer_nodes(self):
         return self.outer_fused_nodes
@@ -627,7 +627,7 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if use_compute_types and dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             """
             https://github.com/pytorch/pytorch/issues/115260
             For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -1647,7 +1647,7 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if use_compute_types and dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1735,7 +1735,7 @@ class CppVecOverrides(CppOverrides):
                     overrides: type[CppOverrides | CppVecOverrides] = (
                         # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
-                    )  # type: ignore[has-type]
+                    )
                     code.writeline(
                         f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
@@ -1930,7 +1930,7 @@ class CppKernel(Kernel):
         num_threads: Number of threads for parallel execution
     """
 
-    overrides = CppOverrides  # type: ignore[assignment]
+    overrides = CppOverrides
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
@@ -2082,8 +2082,8 @@ class CppKernel(Kernel):
         return any(
             self.cse.varname_map[s.name].depends_on(itervar)  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name in self.cse.varname_map  # type: ignore[attr-defined]
-            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)  # type: ignore[attr-defined]
+            if s.name in self.cse.varname_map
+            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)
         )
 
     def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
@@ -2502,7 +2502,7 @@ class CppKernel(Kernel):
                 depth: int = 0,
                 in_reduction: bool = False,
             ):
-                if _loop_nest.loops is None or depth == len(_loop_nest.loops):  # type: ignore[arg-type]
+                if _loop_nest.loops is None or depth == len(_loop_nest.loops):
                     gen_kernel(_loop_nest)
                 else:
                     gen_loop_with_reduction(_loop_nest, depth, in_reduction)
@@ -2656,7 +2656,7 @@ class CppKernel(Kernel):
 
 
 class CppVecKernel(CppKernel):
-    overrides = CppVecOverrides  # type: ignore[assignment]
+    overrides = CppVecOverrides
 
     def __init__(
         self,
@@ -2679,7 +2679,7 @@ class CppVecKernel(CppKernel):
         if self.index_indirect_depends_on(index, itervar):
             return None
         for indirect_var in (
-            self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+            self.cse.varname_map[s.name]
             for s in index.free_symbols
             if symbol_is_type(s, SymT.TMP)
         ):
@@ -2839,7 +2839,7 @@ class CppVecKernel(CppKernel):
             )
             replacements = {}
             for indirect_var in (
-                self.cse.varname_map[s.name]  # type: ignore[attr-defined]
+                self.cse.varname_map[s.name]
                 for s in index.free_symbols
                 if symbol_is_type(s, SymT.TMP)
             ):
@@ -2886,7 +2886,7 @@ class CppVecKernel(CppKernel):
                 else:
                     code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
             if not store_value:
-                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
+                load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)
                 code.writeline(f"return {load_line};")
         code.writeline("()")
         if store_value:
@@ -2911,7 +2911,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -3581,7 +3581,7 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    overrides = CppTile2DOverrides  # type: ignore[assignment]
+    overrides = CppTile2DOverrides
 
     def __init__(
         self,
@@ -3698,7 +3698,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
-            line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
+            line = self._get_vec_load_line(loadbuf, 0, dtype)
             csevar = self.cse.generate(self.loads, line, dtype=dtype)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
@@ -3987,7 +3987,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4203,13 +4203,13 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, value, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     # No need to promote to float if all users are ops that accepts lowp fp input
                     (ops, x, dt) = _node.args
-                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
@@ -5454,9 +5454,9 @@ class CppScheduling(BaseScheduling):
         )
         with kernel:
             if not is_multi_outputs_template(template_node.node):
-                template_node.mark_run()  # type: ignore[attr-defined]
+                template_node.mark_run()
             for node in epilogue_nodes:
-                node.mark_run()  # type: ignore[attr-defined]
+                node.mark_run()
             src_code = render()
 
         with V.set_kernel_handler(kernel):
@@ -5549,7 +5549,7 @@ class CppScheduling(BaseScheduling):
                 V.graph.wrapper_code.write_kernel_context_guard_begin()
                 V.graph.wrapper_code.write_kernel_context_guard(
                     kernel_name,
-                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
+                    self.kernel_group.scheduled_nodes,
                 )
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
             if config.cpp.enable_kernel_profile:
@@ -5562,7 +5562,7 @@ class CppScheduling(BaseScheduling):
         # below add provenance tracing info for cpu CppKernel types
         wrapper = V.graph.wrapper_code
         debug_handle = set_kernel_post_grad_provenance_tracing(
-            node_schedule,  # type: ignore[arg-type]
+            node_schedule,
             # pyrefly: ignore [bad-argument-type]
             kernel_name,
         )
