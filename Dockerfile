@@ -44,9 +44,17 @@ ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
 ARG TARGETPLATFORM
 
+# torchaudio does not publish wheels against the CUDA 13.2 index yet,
+# so skip it when CUDA_PATH=cu132 to keep this Dockerfile building.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision torchaudio ;; \
+         *) \
+             if [ "${CUDA_PATH}" = "cu132" ]; then \
+                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision; \
+             else \
+                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision torchaudio; \
+             fi \
+             ;; \
     esac
 RUN pip3 install torchelastic
 RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
