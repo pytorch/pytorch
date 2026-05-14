@@ -9451,7 +9451,9 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(ReproTests)
 
 devices = ["cuda", "hpu", "xpu"]
-instantiate_device_type_tests(ReproTestsDevice, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
