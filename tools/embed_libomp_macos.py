@@ -78,26 +78,42 @@ def main() -> int:
 
     # Homebrew/abs-path case: rewrite the load command to @rpath form.
     if str(libomp_path) in libs:
-        subprocess.check_call([
-            "install_name_tool", "-change",
-            str(libomp_path), rpath_ref, str(libtorch_cpu),
-        ])
+        subprocess.check_call(
+            [
+                "install_name_tool",
+                "-change",
+                str(libomp_path),
+                rpath_ref,
+                str(libtorch_cpu),
+            ]
+        )
 
     # Replace any rpath pointing at the build-time libomp directory so dyld
     # cannot fall back to it at runtime.
     libomp_dir = libomp_path.parent
     for rp in rpaths:
         if Path(rp) == libomp_dir:
-            subprocess.check_call([
-                "install_name_tool", "-rpath", rp, "@loader_path", str(libtorch_cpu),
-            ])
+            subprocess.check_call(
+                [
+                    "install_name_tool",
+                    "-rpath",
+                    rp,
+                    "@loader_path",
+                    str(libtorch_cpu),
+                ]
+            )
             return 0
 
     # No matching rpath -- add @loader_path if not already present.
     if "@loader_path" not in rpaths:
-        subprocess.check_call([
-            "install_name_tool", "-add_rpath", "@loader_path", str(libtorch_cpu),
-        ])
+        subprocess.check_call(
+            [
+                "install_name_tool",
+                "-add_rpath",
+                "@loader_path",
+                str(libtorch_cpu),
+            ]
+        )
     return 0
 
 
