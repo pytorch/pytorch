@@ -1014,7 +1014,7 @@ def instantiate_device_type_tests(
     only_for=None,
     include_lazy=False,
     allow_mps=False,
-    allow_xpu=False,
+    allow_xpu=None,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -1022,6 +1022,7 @@ def instantiate_device_type_tests(
 
     generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
+    allow_xpu = allow_xpu if isinstance(allow_xpu, bool) else (only_for and "xpu" in only_for)
 
     # Creates device-specific test cases
     for base in get_desired_device_type_test_bases(
