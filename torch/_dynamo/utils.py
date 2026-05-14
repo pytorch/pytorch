@@ -4240,31 +4240,9 @@ def object_has_getattribute(value: Any) -> bool:
 
 
 def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
-    # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
-    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
-    try:
-        d = object.__getattribute__(obj, "__dict__")
-    except AttributeError:
-        if not isinstance(obj, threading.local):
-            raise
-        # threading.local stores attributes in a per-thread C-backed dict that
-        # object.__getattribute__ cannot see. CPython passes that dict directly
-        # to _PyObject_GenericSetAttrWithDict:
-        # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
-        d = threading.local.__getattribute__(obj, "__dict__")
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
     d[name] = value
-
-
-def object_delattr_ignore_descriptor(obj: Any, name: str) -> None:
-    # Same path as object_setattr_ignore_descriptor with a NULL value.
-    # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
-    try:
-        d = object.__getattribute__(obj, "__dict__")
-    except AttributeError:
-        if not isinstance(obj, threading.local):
-            raise
-        d = threading.local.__getattribute__(obj, "__dict__")
-    del d[name]
 
 
 def class_has_getattribute(cls: type) -> bool:
