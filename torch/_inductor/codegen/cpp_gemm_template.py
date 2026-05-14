@@ -277,7 +277,7 @@ GEMM_TEMPLATE = r"""
                 }
 {%- if maybe_k_slicing %}
                 if (num_Kt_blocks > 1) {
-                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
+                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + (nc / Nc_blocks);
                     local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
                         {{ kernel.release_buffer(acc_buf_name) }});
                 } else
@@ -313,20 +313,22 @@ GEMM_TEMPLATE = r"""
                         const int64_t n_start = nc * Nr;
                         const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                         const int64_t n_size = n_end - n_start;
-                        const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
+                        const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + (nc / Nc_blocks);
                         auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
                         for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
                             auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
                             for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                                 #pragma omp simd
                                 for (int64_t n = 0; n < n_size; n++) {
-                                    {{acc_buf_name}}[m*Nr + n] += other_acc[m*Nr + n];
+                                    {{acc_buf_name}}[m*Nc_blocks*Nr + n] += other_acc[m*Nc_blocks*Nr + n];
                                 }
                             }
                         }
-        {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+        {%- set tile_Y_m_slice = kernel.slice_nd(Y_2d, [("m_start", "m_start + m_size"), ("n_start", "n_start + n_size")]) %}
+        {%- set tile_acc_full = kernel.slice_nd(acc, [("0", "m_size_unsliced"), ("0", "n_size")]) %}
+        {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc_full, [("m_offset", "m_offset + m_size"), ()]) %}
                         {{ kernel.store_output(
-                            tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                            tile_Y_m_slice, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                         )|indent(20, false)
                         }}
                     }
