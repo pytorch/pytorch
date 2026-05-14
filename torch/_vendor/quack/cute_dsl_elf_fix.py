@@ -74,7 +74,7 @@ def patch() -> None:
                 with open(file_path, "rb") as f:
                     object_file_content = f.read()
             except Exception as e:
-                raise DSLRuntimeError(f"Failed to read object file {file_path}: {e}") from e
+                raise DSLRuntimeError(f"Failed to read object file {file_path}: {e}")
 
         useJitLink = not enable_tvm_ffi
         if not useJitLink and object_file_content:
