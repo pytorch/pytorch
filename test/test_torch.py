@@ -2847,6 +2847,16 @@ class TestTorchDeviceType(TestCase):
                     'Expected reduction dim -1 or 0 for scalar but got 100'):
                 op(x, dim)
 
+            # Range-check empty tensors too -- previously, an out-of-range dim
+            # would silently succeed when the input had zero elements
+            # (https://github.com/pytorch/pytorch/issues/131273).
+            for empty_shape in ([0], [1, 0], [1, 1, 0]):
+                empty = torch.empty(empty_shape, device=device)
+                ndim = empty.dim()
+                for bad_dim in (ndim, -ndim - 1, 100, -100):
+                    with self.assertRaises(IndexError):
+                        op(empty, bad_dim)
+
             # Check that op over a zero length dimension doesn't crash on backprop.
             # Also check that op over other dimensions in a tensor with a zero-length
             # dimension also works
