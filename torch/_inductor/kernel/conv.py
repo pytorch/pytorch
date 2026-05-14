@@ -457,6 +457,7 @@ def convolution(
     output_padding: Sequence[int],
     groups: int,
 ):
+    """Lower aten.convolution using Inductor convolution kernels or fallbacks."""
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
