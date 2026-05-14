@@ -1631,10 +1631,7 @@ class f(torch.nn.Module):
             Q, R = torch.linalg.qr(A)
 
     def _make_unbacked_size(self, shape_env):
-        u = shape_env.create_unbacked_symint()
-        torch._check(u >= 0)
-        torch._check(u >= 1)
-        return u
+        return shape_env.create_unbacked_symint()
 
     def test_avg_pool2d_unbacked_symint(self):
         from torch._subclasses.fake_tensor import FakeTensorMode

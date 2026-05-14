@@ -4839,6 +4839,8 @@ def pool2d_shape_check(
     outputWidth,
     memory_format,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     ndim = input.dim()
     nOutputPlane = nInputPlane
 
@@ -4855,28 +4857,28 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            sym_and(ndim == 4, valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            sym_or(
+                sym_and(ndim == 3, input.size(0) != 0, valid_dims),
+                sym_and(ndim == 4, valid_dims, input.size(3) != 0),
+            ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
+        sym_and(kW // 2 >= padW, kH // 2 >= padH),
         lambda: "pad should be smaller than or equal to half of kernel size, but got "
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
-
-    from torch.fx.experimental.symbolic_shapes import sym_and
 
     torch._check(
         sym_and(outputWidth >= 1, outputHeight >= 1),
