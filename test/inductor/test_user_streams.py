@@ -362,7 +362,7 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("synchronize_stream", code)
 
     def test_stream_context_with_data_dependency(self):
-        """Test stream contexts with data flowing between streams."""
+        """Test stream contexts with explicitly synchronized cross-stream data."""
         from torch._inductor.utils import run_and_get_code
 
         def fn(x):
@@ -372,6 +372,7 @@ class TestUserStreamCompile(InductorTestCase):
             a = x * 2
 
             # Use result on side stream
+            s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
                 b = a + 1  # depends on 'a' from default stream
 
@@ -388,6 +389,7 @@ class TestUserStreamCompile(InductorTestCase):
 
         # Verify stream context and synchronize survive
         self.assertIn("torch.cuda.stream", code)
+        self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
     def test_event_record_and_wait(self):
