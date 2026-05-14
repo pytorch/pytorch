@@ -13,8 +13,7 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,21 +45,38 @@ class LintMessage(NamedTuple):
 
 
 class IdentifierUse(NamedTuple):
+    """
+    An identifier (name of function, typedef, class etc) that at a particular verion.
+    """
+
     identifier: str
     version: tuple[int, int] | None
 
 
 class IdentifierMatcher(NamedTuple):
+    """
+    Identifier matching using a start and end pattern, and a handler to extract the
+    identifieruse from the accumulated buffer.
+    """
+
     start_pattern: str | re.Pattern
     end_pattern: str | re.Pattern
-    # Handler is passed the accumulated buffer and should return identifiers
-    # from the buffer.
+    # Handler is a function that takes:
+    # - buffer: str -> This is the accumulated buffer between the start and end
+    #   pattern, possibly containing newlines.
+    # - version: tuple[int, int] | None -> Provides the version of the block this
+    #   buffer is located in, None if outside of a versioning block.
+    # It returns a list of IdentifierUse entries.
     handler: Callable[[str, tuple[int, int] | None], list[IdentifierUse]]
 
 
 def extract_factory(
     pattern,
 ) -> Callable[[str, tuple[int, int] | None], list[IdentifierUse]]:
+    """
+    Default handler that uses a single pattern and is expected to just find a single match.
+    It uses re.DOTALL to compile the regex pattern provided.
+    """
     p = re.compile(pattern, flags=re.DOTALL)
 
     def extractor(buffer: str, current_version: tuple[int, int] | None):
@@ -80,8 +96,9 @@ def extract_factory(
     return extractor
 
 
-# When adding a matcher, please add a test to tools/test/test_stable_shim_utils.py
-# to verify it works as expected, and allow easy iteration on the pattern.
+# When adding a matcher, add a test to tools/test/test_stable_shim_utils.py
+# to verify it works as expected, this test file is also helpful for iterating
+# on the regular expressions.
 
 # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
 FUNCTION_IDENTIFIER_MATCHER = IdentifierMatcher(
@@ -118,9 +135,19 @@ IDENTIFIER_MATCHERS = [
 
 
 class MatcherAccumulator:
+    """
+    This class accumulates into a buffer whenever one of the start patterns of the matchers
+    is encountered. When the end pattern is found it triggers the handler to extract the
+    identifier(s) used in the buffer.
+
+    After the handler is triggered, the internal state is reset with reset() and it continues
+    scanning lines for new start patterns.
+    """
+
     def __init__(self, matchers: list[IdentifierMatcher]):
         self._matchers = []
-        # Compile the regexes.
+
+        # Compile all regexes.
         for m in matchers:
             end_pattern = re.compile(m.end_pattern)
             start_pattern = re.compile(m.start_pattern)
@@ -131,23 +158,36 @@ class MatcherAccumulator:
                     handler=m.handler,
                 )
             )
+        # Scope version is not part of reset, it persists through resets.
         self._scope_version = None
-        self.reset()
+        self._reset()
 
-    def reset(self):
+    def _reset(self):
+        """
+        Resets the internal state such that new start patterns are sought.
+        """
         self._buffer = ""
         self._end_token_found = False
         self._active_matcher = None
 
     def set_scope_version(self, scope_version: tuple[int, int] | None):
+        """
+        Function called whenever the outer version 'scope' we're parsing from
+        changes, this is provided to the handler.
+        """
         self._scope_version = scope_version
 
     def process_line(
         self,
         line: str,
     ) -> bool:
+        """
+        Processess a single line, searches for start and end token and strips out single-line comments.
+
+        Returns whether this line is part of an actively being parsed matcher.
+        """
         if self._end_token_found:
-            self.reset()
+            self._reset()
 
         # If no matcher is active yet, check if any of them found a start token.
         if not self._active_matcher:
@@ -171,7 +211,11 @@ class MatcherAccumulator:
 
         return self._active_matcher is not None
 
-    def information(self) -> None | list[IdentifierUse]:
+    def identifiers_used(self) -> None | list[IdentifierUse]:
+        """
+        Returns the identifiers used in the pattern as parsed, identifiers are retrieved only
+        at the end of the pattern, when the next line is processed they are no longer available.
+        """
         if not self._end_token_found or not self._active_matcher:
             return None
 

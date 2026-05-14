@@ -75,6 +75,7 @@ class TestStableShimUsageLinter(unittest.TestCase):
             "function_that_returns_constchar": (2, 12),
             # Function that has its declaration over two lines.
             "this_is_a_very_long_function": (2, 12),
+            "this_is_a_very_long_function2": (2, 12),
         }
 
         self.assertEqual(result, expected)

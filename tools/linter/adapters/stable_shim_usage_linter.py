@@ -15,6 +15,7 @@ import re
 import sys
 from pathlib import Path
 
+
 # Add repo root to sys.path so we can import from tools
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
@@ -24,6 +25,7 @@ from tools.linter.adapters._stable_shim_utils import (
     LintSeverity,
     PreprocessorTracker,
 )
+
 
 LINTER_CODE = "STABLE_SHIM_USAGE"
 

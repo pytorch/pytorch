@@ -113,6 +113,13 @@ AOTI_TORCH_EXPORT AOTITorchError
 this_is_a_very_long_function(StableIValue** ret_value);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
+// And with a comment... should also match.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT AOTITorchError // This is a really long function
+this_is_a_very_long_function2(StableIValue** ret_value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

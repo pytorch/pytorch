@@ -2,7 +2,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(REPO_ROOT))
 
@@ -11,12 +10,12 @@ import re
 
 from tools.linter.adapters._stable_shim_utils import (
     FUNCTION_IDENTIFIER_MATCHER,
-    IdentifierMatcher,
-    IdentifierUse,
-    MatcherAccumulator,
     STRUCT_CLASS_IDENTIFIER_MATCHER,
     TYPEDEF_IDENTIFIER_MATCHER,
     USING_IDENTIFIER_MATCHER,
+    IdentifierMatcher,
+    IdentifierUse,
+    MatcherAccumulator,
 )
 
 
@@ -33,7 +32,7 @@ class TestStableShimUtils(unittest.TestCase):
         result = {}
         for li, line in enumerate(sample.split("\n"), 1):
             matcher.process_line(line)
-            res = matcher.information()
+            res = matcher.identifiers_used()
             if res:
                 result[li] = [match.identifier for match in res]
                 for match in res:
@@ -185,7 +184,7 @@ class TestStableShimUtils(unittest.TestCase):
         result = {}
         for li, line in enumerate(sample.split("\n"), 1):
             matcher.process_line(line)
-            res = matcher.information()
+            res = matcher.identifiers_used()
             if res:
                 result[li] = res
 
