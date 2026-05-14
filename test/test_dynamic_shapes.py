@@ -1630,6 +1630,66 @@ class f(torch.nn.Module):
             A = torch.empty((m, n), device="meta")
             Q, R = torch.linalg.qr(A)
 
+    def _make_unbacked_size(self, shape_env):
+        u = shape_env.create_unbacked_symint()
+        torch._check_is_size(u)
+        torch._check(u >= 1)
+        return u
+
+    def test_avg_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        make_u = lambda: self._make_unbacked_size(shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, make_u(), make_u()), device="meta")
+            torch.ops.aten.avg_pool2d(x, [2, 2], [2, 2], [0, 0])
+
+    def test_max_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        make_u = lambda: self._make_unbacked_size(shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, make_u(), make_u()), device="meta")
+            torch.ops.aten.max_pool2d_with_indices(x, [2, 2], [2, 2])
+
+    def test_avg_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        make_u = lambda: self._make_unbacked_size(shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, make_u(), make_u(), make_u()), device="meta")
+            torch.ops.aten.avg_pool3d(x, [2, 2, 2], [2, 2, 2])
+
+    def test_max_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        make_u = lambda: self._make_unbacked_size(shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, make_u(), make_u(), make_u()), device="meta")
+            torch.ops.aten.max_pool3d_with_indices(x, [2, 2, 2], [2, 2, 2])
+
+    def test_avg_pool1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.avg_pool1d(x, [2], [2])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"

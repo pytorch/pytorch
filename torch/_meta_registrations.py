@@ -4762,13 +4762,8 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python // is floor division, matching C++ at::divide_floor_integer.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4867,8 +4862,10 @@ def pool2d_shape_check(
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        sym_and(outputWidth >= 1, outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -4940,9 +4937,11 @@ def pool3d_shape_check(
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            sym_and(itime >= kT, iheight >= kH, iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -4950,7 +4949,7 @@ def pool3d_shape_check(
         )
 
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        sym_and(kT / 2 >= pT, kW / 2 >= pW, kH / 2 >= pH),
         lambda: (
             f"pad should be smaller than or equal to half of kernel size, but got "
             f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
@@ -4958,7 +4957,7 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        sym_and(otime >= 1, owidth >= 1, oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
