@@ -143,12 +143,12 @@ def _split_tmi_and_router_operands(
     )
 
 
-def _swiglu(y1: torch.Tensor) -> torch.Tensor:
+def _swiglu_reference(y1: torch.Tensor) -> torch.Tensor:
     gate, up = y1.chunk(2, dim=-1)
     return F.silu(gate) * up
 
 
-def _swiglu_backward(
+def _swiglu_backward_reference(
     dy2: torch.Tensor,
     y1: torch.Tensor,
 ) -> torch.Tensor:
@@ -157,6 +157,17 @@ def _swiglu_backward(
     dgate = dy2 * up * sig * (1 + gate * (1 - sig))
     dup = dy2 * F.silu(gate)
     return torch.cat((dgate, dup), dim=-1)
+
+
+def _swiglu(y1: torch.Tensor) -> torch.Tensor:
+    return torch.ops._flex_ep.swiglu_forward(y1)
+
+
+def _swiglu_backward(
+    dy2: torch.Tensor,
+    y1: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops._flex_ep.swiglu_backward(dy2, y1)
 
 
 def _moe_block_forward_bf16(
@@ -1132,6 +1143,12 @@ _flex_ep_lib.define(
     "float timeout_s=5.0) -> Tensor"
 )
 _flex_ep_lib.define(
+    "barrier_wait_no_clone(Tensor(a) input, Tensor cuda_ptrs, int offs_flag, "
+    "Tensor expected, float timeout_s=5.0) -> Tensor(a)"
+)
+_flex_ep_lib.define("swiglu_forward(Tensor y1) -> Tensor")
+_flex_ep_lib.define("swiglu_backward(Tensor dy2, Tensor y1) -> Tensor")
+_flex_ep_lib.define(
     "zfill_ranges_inplace(Tensor input, Tensor begin_ofs, Tensor end_ofs, "
     "int max_values_per_batch) -> Tensor"
 )
@@ -1145,6 +1162,7 @@ _FLEX_EP_SIDE_EFFECT_OPS = [
         "router_combine",
         "barrier_arrive",
         "barrier_wait",
+        "barrier_wait_no_clone",
         "zfill_ranges_inplace",
         "fill_i64_inplace",
     )
@@ -1166,6 +1184,8 @@ _INDUCTOR_ROUTER_OP_NAMES = {
     "router_combine": "flex_ep_router_combine",
     "barrier_arrive": "flex_ep_barrier_arrive",
     "barrier_wait": "flex_ep_barrier_wait",
+    "swiglu_forward": "flex_ep_swiglu_forward",
+    "swiglu_backward": "flex_ep_swiglu_backward",
     "zfill_ranges_inplace": "flex_ep_zfill_ranges_inplace",
 }
 
@@ -1579,6 +1599,24 @@ def _barrier_wait(
     return input.clone()
 
 
+@torch.library.impl(_flex_ep_lib, "barrier_wait_no_clone", "CompositeExplicitAutograd")
+def _barrier_wait_no_clone(
+    input: torch.Tensor,
+    cuda_ptrs: torch.Tensor,
+    offs_flag: int,
+    expected: torch.Tensor,
+    timeout_s: float = 5.0,
+) -> torch.Tensor:
+    op = _inductor_router_op("barrier_wait")
+    if op is not None:
+        op(cuda_ptrs, offs_flag, expected, timeout_s)
+        return input
+    if cuda_ptrs.numel() != 1:
+        _require_inductor_router_op("barrier_wait")
+    del offs_flag, expected, timeout_s
+    return input
+
+
 @torch.library.register_fake("_flex_ep::barrier_arrive")
 def _barrier_arrive_fake(
     flag: torch.Tensor,
@@ -1599,6 +1637,57 @@ def _barrier_wait_fake(
 ) -> torch.Tensor:
     del cuda_ptrs, offs_flag, expected, timeout_s
     return torch.empty_like(input)
+
+
+@torch.library.register_fake("_flex_ep::barrier_wait_no_clone")
+def _barrier_wait_no_clone_fake(
+    input: torch.Tensor,
+    cuda_ptrs: torch.Tensor,
+    offs_flag: int,
+    expected: torch.Tensor,
+    timeout_s: float = 5.0,
+) -> torch.Tensor:
+    del cuda_ptrs, offs_flag, expected, timeout_s
+    return input
+
+
+@torch.library.impl(_flex_ep_lib, "swiglu_forward", "CompositeExplicitAutograd")
+def _swiglu_forward_impl(y1: torch.Tensor) -> torch.Tensor:
+    op = _inductor_router_op("swiglu_forward")
+    if (
+        op is not None
+        and y1.is_cuda
+        and y1.dtype == torch.bfloat16
+        and y1.is_contiguous()
+    ):
+        return op(y1)
+    return _swiglu_reference(y1)
+
+
+@torch.library.register_fake("_flex_ep::swiglu_forward")
+def _swiglu_forward_fake(y1: torch.Tensor) -> torch.Tensor:
+    return _swiglu_reference(y1)
+
+
+@torch.library.impl(_flex_ep_lib, "swiglu_backward", "CompositeExplicitAutograd")
+def _swiglu_backward_impl(dy2: torch.Tensor, y1: torch.Tensor) -> torch.Tensor:
+    op = _inductor_router_op("swiglu_backward")
+    if (
+        op is not None
+        and dy2.is_cuda
+        and y1.is_cuda
+        and dy2.dtype == torch.bfloat16
+        and y1.dtype == torch.bfloat16
+        and dy2.is_contiguous()
+        and y1.is_contiguous()
+    ):
+        return op(dy2, y1)
+    return _swiglu_backward_reference(dy2, y1)
+
+
+@torch.library.register_fake("_flex_ep::swiglu_backward")
+def _swiglu_backward_fake(dy2: torch.Tensor, y1: torch.Tensor) -> torch.Tensor:
+    return _swiglu_backward_reference(dy2, y1)
 
 
 @torch.library.impl(_flex_ep_lib, "zfill_ranges_inplace", "CompositeExplicitAutograd")
