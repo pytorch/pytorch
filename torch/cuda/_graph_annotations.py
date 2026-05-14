@@ -74,41 +74,40 @@ def disable_annotations() -> None:
     _annotations_enabled = False
 
 
+def _probe_tools_id() -> bool:
+    """Probe whether cudaGraphNodeGetToolsId is supported by the driver.
+
+    Calls with a null node: cudaErrorInvalidValue means the API exists
+    in the driver (good), cudaErrorCallRequiresNewerDriver means it
+    does not (bad).
+    """
+    if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
+        return False
+    err, *_ = _cuda_runtime.cudaGraphNodeGetToolsId(
+        0
+    )  # pyrefly: ignore[missing-attribute]
+    if (
+        err
+        == _cuda_runtime.cudaError_t.cudaErrorCallRequiresNewerDriver  # pyrefly: ignore[missing-attribute]
+    ):
+        logger.info(
+            "cudaGraphNodeGetToolsId requires a newer driver "
+            "(missing cuda-compat?); "
+            "CUDA graph kernel annotations will be disabled"
+        )
+        return False
+    return True
+
+
 def _is_tools_id_unavailable() -> bool:
-    """Return True if we already know cudaGraphNodeGetToolsId is missing."""
+    """Return True if cudaGraphNodeGetToolsId is not usable."""
+    global _tools_id_available
     if not _HAS_CUDA_BINDINGS:
         return True
-    if _tools_id_available is False:
-        return True
-    if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
-        return True
-    return False
-
-
-def _get_tools_id(node: Any) -> int | None:
-    """Return the toolsId for a graph node, or None if unavailable."""
-    global _tools_id_available
-    if _tools_id_available is None:
-        try:
-            tools_id = _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-                    node
-                )
-            )
-        except Exception:
-            _tools_id_available = False
-            logger.info(
-                "cudaGraphNodeGetToolsId not available; "
-                "CUDA graph kernel annotations will be disabled"
-            )
-            return None
-        _tools_id_available = True
-        return tools_id
-    return _check_cuda_bindings(
-        _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-            node
-        )
-    )
+    if _tools_id_available is not None:
+        return not _tools_id_available
+    _tools_id_available = _probe_tools_id()
+    return not _tools_id_available
 
 
 def _get_capture_graph(stream: Any) -> Any:
@@ -249,8 +248,12 @@ def resolve_pending_annotations() -> None:
         # Save capture graph ID for remap_to_exec_graph.
         global _last_capture_graph_id
         if num > 0:
-            first_tid = _get_tools_id(nodes[0])
-            _last_capture_graph_id = (first_tid >> 32) if first_tid else None
+            first_tid = _check_cuda_bindings(
+                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
+                    nodes[0]
+                )
+            )
+            _last_capture_graph_id = first_tid >> 32
 
         annotatable = _get_annotatable_types()
 
@@ -294,14 +297,11 @@ def resolve_pending_annotations() -> None:
             if node_type not in annotatable:
                 continue
 
-            tools_id = _get_tools_id(node)
-            if tools_id is None:
-                logger.warning(
-                    "resolve_pending_annotations: toolsId unavailable, aborting"
+            tools_id = _check_cuda_bindings(
+                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
+                    node
                 )
-                _pending_scopes.clear()
-                _capture_graph = None
-                return
+            )
 
             if len(active_stack) == 1:
                 _kernel_annotations[tools_id].append(active_stack[0][1])

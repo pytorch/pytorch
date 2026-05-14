@@ -35,6 +35,7 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
@@ -165,6 +166,7 @@ from ..utils import (
     is_namedtuple,
     is_parameter_freezing,
     is_pybind11_enum_member,
+    is_torch_class,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -203,12 +205,15 @@ from .ctx_manager import (
 from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
-    BuiltinMethodVariable,
+    BoundBuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
+    GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodWrapperVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -240,11 +245,9 @@ from .misc import (
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
-    GetSetDescriptorVariable,
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
-    MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
     ObjectVariable,
@@ -345,19 +348,34 @@ def safe_has_grad(t: object) -> bool:
         return hasattr(t, "grad")
 
 
-def lookup_spec_from_dynamo_source(
-    source: Source, shapes_spec: ShapesSpec | None
-) -> LeafSpec:
-    """Look up the spec for a function input arg from the shapes_spec.
+def bound_builtin_method_descriptor(value: Any) -> Any | None:
+    if not isinstance(value, types.BuiltinMethodType):
+        return None
 
-    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
-    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
-    """
-    if shapes_spec is None or shapes_spec._params is None:
+    method_self = value.__self__
+    # BuiltinMethodType also covers module-level C functions like len and
+    # torch.add.  Keep those on the existing function/trace-rule path.
+    if method_self is None or isinstance(method_self, types.ModuleType):
         return None
-    if not isinstance(source, LocalSource) or not source.is_input:
+
+    # random.Random methods mutate RNG state.  Existing random handling either
+    # records RandomValueSource calls from a RandomVariable, or graph-breaks for
+    # pre-bound module helpers like random.random.
+    if isinstance(method_self, random.Random):
         return None
-    return shapes_spec._params._named_args.get(source.local_name)
+
+    owner = method_self if isinstance(method_self, type) else type(method_self)
+
+    # Torch-internal bound methods already have dedicated Dynamo paths. Do not
+    # route them through the generic bound-builtin descriptor VT, which changes
+    # graph break boundaries for calls like Tensor.mul(...).
+    if is_torch_class(owner):
+        return None
+
+    # BoundBuiltinMethodVariable needs the descriptor that created this bound
+    # method.  For class-bound methods, look on the class object itself (e.g.
+    # dict.fromkeys); for instance-bound methods, look on type(self).
+    return inspect.getattr_static(owner, value.__name__, None)
 
 
 class _missing:
@@ -425,6 +443,13 @@ class GraphArg:
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.source)
+
+    def reconstruct_pycode(self, codegen) -> str:
+        if self.source is None:
+            raise AssertionError(
+                "Expecting GraphArg to have source during python codegen."
+            )
+        return self.source.reconstruct_pycode(codegen)
 
     def erase(self) -> None:
         self._example = None
@@ -1473,11 +1498,12 @@ class VariableBuilder:
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
-        elif isinstance(
-            value, types.BuiltinMethodType
-        ) and BuiltinMethodVariable.is_supported_builtin_method(value):
+        elif (descriptor := bound_builtin_method_descriptor(value)) is not None:
             self.install_guards(GuardBuilder.ID_MATCH)
-            return BuiltinMethodVariable(value, source=self.source)
+            method_self = value.__self__
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
+            return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -1525,12 +1551,21 @@ class VariableBuilder:
             # accesses. Since these are unlikely to change during the program
             # execution, we can skip guarding on them.
             return GetSetDescriptorVariable(value)
+        elif isinstance(value, types.MemberDescriptorType):
+            return MemberDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
             # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
-            return MethodWrapperVariable(value)
+            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+            if not isinstance(descriptor, types.WrapperDescriptorType):
+                raise AssertionError(
+                    f"expected WrapperDescriptorType, got {type(descriptor)}"
+                )
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
+            return MethodWrapperVariable(descriptor, obj_vt)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -4588,7 +4623,14 @@ class SourcelessBuilder:
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
-            return MethodWrapperVariable(value)
+            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+            if not isinstance(descriptor, types.WrapperDescriptorType):
+                raise AssertionError(
+                    f"expected WrapperDescriptorType, got {type(descriptor)}"
+                )
+            return MethodWrapperVariable(
+                descriptor, SourcelessBuilder.create(tx, value.__self__)
+            )
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
@@ -4635,7 +4677,17 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, (types.GenericAlias, types.UnionType)):
+        elif isinstance(
+            value,
+            (
+                types.GenericAlias,
+                types.UnionType,
+                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
+                # `typing._UnionGenericAlias` on Python <= 3.10, not a
+                # `types.UnionType`
+                typing._UnionGenericAlias,  # type: ignore[attr-defined]
+            ),
+        ):
             return TypingVariable(value)
         elif is_namedtuple(value):
             output = [
@@ -4717,6 +4769,9 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+        handlers[types.MemberDescriptorType] = (
+            lambda tx, value: MemberDescriptorVariable(value)
         )
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
