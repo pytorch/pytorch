@@ -335,12 +335,7 @@ PyTypeObject THPEventType = {
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
-  if (PyType_Ready(&THPEventType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPEventType);
-  if (PyModule_AddObject(
-          module, "Event", reinterpret_cast<PyObject*>(&THPEventType)) < 0) {
+  if (PyModule_AddType(module, &THPEventType) < 0) {
     throw python_error();
   }
 }
