@@ -6,6 +6,7 @@ from threading import Event
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
+    get_python_gil_env,
     raise_testexc,
     SubprocException,
     SubprocPool,
@@ -28,6 +29,14 @@ class TestCompileWorker(TestCase):
             b = pool.submit(operator.sub, 100, 1)
             self.assertEqual(a.result(), 101)
             self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_subprocess_enables_gil(self):
+        pool = self.make_pool(2)
+        try:
+            self.assertEqual(pool.submit(get_python_gil_env).result(), "1")
         finally:
             pool.shutdown()
 
