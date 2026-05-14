@@ -1560,7 +1560,7 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
@@ -1610,7 +1610,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
