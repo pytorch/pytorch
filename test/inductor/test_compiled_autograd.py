@@ -5122,16 +5122,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn, ctxs):
+def make_wrapped(fn, ctx_factories):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        stack = contextlib.ExitStack()
-        for ctx in ctxs:
-            stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
-        return out
+        with contextlib.ExitStack() as stack:
+            for ctx_factory in ctx_factories:
+                stack.enter_context(ctx_factory())
+            return fn(self)
 
     return wrapped
 
@@ -5165,16 +5163,15 @@ def wrap_test_class(orig_cls):
             backend = lookup_backend(name)
             if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
-            ctxs = [
-                compiled_autograd._enable(
-                    make_compiler_fn(
-                        backend=backend,
-                        fullgraph=name not in known_graph_breaks_tests,
-                    )
-                ),
-                test_contexts.get(name, contextlib.nullcontext()),
+            compiler_fn = make_compiler_fn(
+                backend=backend,
+                fullgraph=name not in known_graph_breaks_tests,
+            )
+            ctx_factories = [
+                functools.partial(compiled_autograd._enable, compiler_fn),
+                test_contexts.get(name, contextlib.nullcontext),
             ]
-            dct[name] = make_wrapped(fn, ctxs)
+            dct[name] = make_wrapped(fn, ctx_factories)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -5186,6 +5183,33 @@ def wrap_test_class(orig_cls):
 
 
 class WrapTestClassTests(TestCase):
+    def test_make_wrapped_contexts_are_fresh_and_cleaned_up(self):
+        events = []
+
+        @contextlib.contextmanager
+        def ctx():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        def fn(self):
+            events.append("body")
+            if events.count("body") == 1:
+                raise RuntimeError("fail once")
+
+        wrapped = make_wrapped(fn, [ctx])
+
+        with self.assertRaisesRegex(RuntimeError, "fail once"):
+            wrapped(self)
+        wrapped(self)
+
+        self.assertEqual(
+            events,
+            ["enter", "body", "exit", "enter", "body", "exit"],
+        )
+
     def test_wrap_preserves_inheritance_and_super(self):
         class DummyTest(unittest.TestCase):
             def runTest(self):
@@ -5305,8 +5329,8 @@ known_graph_breaks_tests = {
 }
 
 test_contexts = {
-    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
-    "test_index_backward_does_not_save_tensor": config.patch(
+    "test_setitem_mask": lambda: config.patch(capture_dynamic_output_shape_ops=True),
+    "test_index_backward_does_not_save_tensor": lambda: config.patch(
         capture_dynamic_output_shape_ops=True
     ),
 }
