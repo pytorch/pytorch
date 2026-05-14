@@ -2599,6 +2599,20 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+        for i in range(len(output_padding_list)):
+            torch._check(
+                # pyrefly: ignore [bad-index, index-error]
+                output_padding_list[i] < stride[i]
+                # pyrefly: ignore [bad-index, index-error]
+                or output_padding_list[i] < dilation[i],
+                lambda i=i: (
+                    "output padding must be smaller than either stride or dilation, "
+                    f"but got output_padding[{i}]={output_padding_list[i]}, "
+                    # pyrefly: ignore [bad-index, index-error]
+                    f"stride[{i}]={stride[i]}, dilation[{i}]={dilation[i]}"
+                ),
+            )
+
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
         if output_padding_list:
@@ -2712,6 +2726,24 @@ def meta_conv(
         groups,
         output_padding if is_transposed else None,
     )
+
+    if bias is not None:
+        if is_transposed:
+            expected_bias_size = weight.shape[1] * groups
+            torch._check(
+                bias.ndim == 1 and bias.shape[0] == expected_bias_size,
+                lambda: f"Given transposed={is_transposed}, weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected_bias_size} elements, "
+                f"but got bias of size {list(bias.shape)} instead",
+            )
+        else:
+            expected_bias_size = weight.shape[0]
+            torch._check(
+                bias.ndim == 1 and bias.shape[0] == expected_bias_size,
+                lambda: f"Given weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected_bias_size} elements, "
+                f"but got bias of size {list(bias.shape)} instead",
+            )
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
