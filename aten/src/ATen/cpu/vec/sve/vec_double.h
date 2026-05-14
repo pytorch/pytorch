@@ -80,8 +80,7 @@ class Vectorized<double> {
       const Vectorized<double>& a,
       const Vectorized<double>& b,
       const Vectorized<double>& mask_) {
-    svbool_t mask =
-        svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+    svbool_t mask = svcmpne_s64(ptrue, svreinterpret_s64_f64(mask_), ZERO_S64);
     return svsel_f64(mask, b, a);
   }
   template <typename step_t>

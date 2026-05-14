@@ -61,11 +61,9 @@ def _propagate_use_strided_shard_flag(
         if any(isinstance(p, _StridedShard) for p in spec.placements):
             val = spec.use_strided_shard_as_shard_order
             if _use_strided is not None and _use_strided != val:
-                raise ValueError(
-                    "Conflicting use_strided_shard_as_shard_order across "
-                    f"input specs: got both {_use_strided} and {val}"
-                )
-            _use_strided = val
+                _use_strided = True
+            else:
+                _use_strided = val
 
     if _use_strided is None:
         return

@@ -1,14 +1,16 @@
 # Owner(s): ["module: scatter & gather ops"]
 
 import random
+import unittest
 
 import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM, serialTest)
+    (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
+     subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
@@ -280,6 +282,74 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res0[0, :], m * torch.ones(n, device=device, dtype=dtype), atol=0, rtol=0)
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.float32, torch.half, torch.bfloat16)
+    def test_scatter_add_large(self, device, dtype):
+        # test larger shapes that exercise the vectorized/TMA scatter_add path
+        # and verify large launch configs don't produce invalid kernel launches
+        if dtype in (torch.float32, torch.float64):
+            atol, rtol = 1e-5, 1e-3
+        elif dtype == torch.half:
+            atol, rtol = 2e-2, 2e-2
+        else:
+            atol, rtol = 0.2, 0.5
+        # The large shape tests grid.y clipping at maxGridSize[1]=65535.
+        # Use it only for small dtypes to avoid OOM on CI (22GB GPUs).
+        shapes = [(4096, 3072, 4096), (4096, 3072, 4100)]
+        if dtype.itemsize <= 2:
+            shapes.append((4, 4, 16384 * 8192))
+        else:
+            shapes.append((4, 4, 16384 * 256))
+        for (m, n, k) in shapes:
+            torch.cuda.empty_cache()
+            self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
+            src = make_tensor((n, k), device=device, dtype=dtype)
+            # contiguous + aligned (should hit fast path on dim=0)
+            idx_1d = torch.randint(m, (n,), device=device)
+            idx_2d = idx_1d.unsqueeze(1).expand(n, k)
+            res = self_tensor.clone().scatter_add_(0, idx_2d, src)
+            ref_cpu = torch.zeros(m, k, dtype=dtype).scatter_add_(0, idx_2d.cpu(), src.cpu())
+            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
+
+            # discontiguous src (should fall back to element-wise)
+            alloc = torch.empty(n, 2 * k, device=device, dtype=dtype)
+            src_discontig = alloc[:, ::2].copy_(src)
+            res = self_tensor.clone().scatter_add_(0, idx_2d, src_discontig)
+            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
+
+            # misaligned self (should fall back)
+            alloc_self = torch.empty(m * k + 1, device=device, dtype=dtype)
+            self_misaligned = alloc_self[1:].view(m, k)
+            self_misaligned.zero_()
+            res = self_misaligned.scatter_add_(0, idx_2d, src)
+            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
+
+            # dim=1 (fast path is dim=0 only)
+            self_t1 = torch.zeros(k, m, device=device, dtype=dtype)
+            src_t1 = make_tensor((k, n), device=device, dtype=dtype)
+            idx_1d_d1 = torch.randint(m, (n,), device=device)
+            idx_2d_d1 = idx_1d_d1.unsqueeze(0).expand(k, n)
+            res_d1 = self_t1.clone().scatter_add_(1, idx_2d_d1, src_t1)
+            ref_d1 = torch.zeros(k, m, dtype=dtype).scatter_add_(1, idx_2d_d1.cpu(), src_t1.cpu())
+            self.assertEqual(res_d1.cpu(), ref_d1, atol=atol, rtol=rtol)
+
+            # sliced tensors: contiguous within slice, aligned, but stride != D
+            # this passes eligibility checks and must use the actual stride
+            K = 256
+            self_full = torch.zeros(m, K, device=device, dtype=dtype)
+            src_full = make_tensor((n, K), device=device, dtype=dtype)
+            self_sliced = self_full[:, 64:192]  # shape [m, 128], stride [256, 1]
+            src_sliced = src_full[:, 64:192]
+            idx_1d_s = torch.randint(m, (n,), device=device)
+            idx_2d_s = idx_1d_s.unsqueeze(1).expand(n, 128)
+            res = self_sliced.clone().scatter_add_(0, idx_2d_s, src_sliced)
+            ref_cpu = self_sliced.cpu().clone().scatter_add_(0, idx_2d_s.cpu(), src_sliced.cpu())
+            self.assertEqual(res.cpu(), ref_cpu, atol=atol, rtol=rtol)
+
+            del self_tensor, src, alloc, alloc_self, self_misaligned
+            del self_t1, src_t1, self_full, src_full
+
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
@@ -460,6 +530,256 @@ class TestScatterGather(TestCase):
         helper([50, 1], 100)
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
+
+# ---------------------------------------------------------------------------
+# CuTeDSL scatter_add override tests. Two surfaces:
+#   (a) dispatch conds: call the eligibility predicates directly to verify
+#       the routing matrix (dtypes, shapes, outer-strided, int32 index,
+#       deterministic mode). No kernel execution.
+#   (b) correctness: run torch.scatter_add on shapes the conds accept and
+#       compare to a naive reference. Covers both TMA and vec-scatter
+#       paths via the shape parameters.
+# ---------------------------------------------------------------------------
+
+
+def _expanded_idx(index_1d, trailing_shape):
+    """Build the expanded-1D index (stride 0 on every axis > 0)."""
+    idx = index_1d
+    for s in trailing_shape:
+        idx = idx.unsqueeze(-1).expand(*idx.shape, s)
+    return idx
+
+
+def _make_override_triple(
+    M_out, M_src, shape_tail, *, dtype=torch.float32,
+    idx_dtype=torch.int64, outer_pad_self=0, outer_pad_src=0,
+):
+    """Build a (self, idx_2d, src, idx_1d) triple for the expanded-1D
+    scatter_add pattern. ``outer_pad_*`` widens the allocated buffer's
+    inner dim, then slices, producing a view with stride(-1)==1 but
+    outer stride != prod(shape[1:]).
+    """
+    N = 1
+    for s in shape_tail:
+        N *= s
+    if outer_pad_self:
+        big = torch.zeros(M_out, N + outer_pad_self, device="cuda", dtype=dtype)
+        self_t = big[:, :N].view(M_out, *shape_tail)
+    else:
+        self_t = torch.zeros(M_out, *shape_tail, device="cuda", dtype=dtype)
+    if outer_pad_src:
+        big = torch.randn(M_src, N + outer_pad_src, device="cuda", dtype=dtype)
+        src = big[:, :N].view(M_src, *shape_tail)
+    else:
+        src = torch.randn(M_src, *shape_tail, device="cuda", dtype=dtype)
+    index_1d = torch.randint(0, M_out, (M_src,), device="cuda", dtype=idx_dtype)
+    return self_t, _expanded_idx(index_1d, shape_tail), src, index_1d
+
+
+def _naive_scatter_add(self_t, idx_1d, src, alpha=1.0):
+    """Reference implementation. Works on any stride pattern."""
+    ref = self_t.clone().float()
+    src_f = src.float()
+    for i, r in enumerate(idx_1d.tolist()):
+        ref[r] += alpha * src_f[i]
+    return ref.to(self_t.dtype)
+
+
+def _override_tol(dtype):
+    return 1e-4 if dtype == torch.float32 else 0.5
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestScatterAddOverrideConds(TestCase):
+    """Unit tests for the dispatch predicates in
+    torch._native.ops.scatter_add.cutedsl_impl."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cls.impl = cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    def _conds(self, self_t, idx, src):
+        return (
+            self.impl._is_tma_supported(self_t, 0, idx, src),
+            self.impl._is_vec_scatter_supported(self_t, 0, idx, src),
+        )
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    @parametrize("N", [128, 256, 512, 1024])
+    def test_accepts_contig_supported_shapes(self, dtype, N):
+        self_t, idx, src, _ = _make_override_triple(100, 50, (N,), dtype=dtype)
+        tma, vec = self._conds(self_t, idx, src)
+        self.assertTrue(tma)
+        self.assertTrue(vec)
+
+    def test_rejects_row_bytes_not_16_aligned(self):
+        # fp32 D=129 -> row_bytes=516, 516 % 16 != 0 -> TMA rejects
+        # (cp.reduce.async.bulk requires 16-aligned gmem operands).
+        # 129 % 4 != 0 -> vec also rejects.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_tma_accepts_row_not_chunk_multiple(self):
+        # bf16 D=264 -> row_bytes=528, 16-aligned but not a multiple of
+        # chunk_bytes (512). TMA descriptor handles the partial final
+        # chunk via OOB-clamp-to-zero; cond should accept.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (264,), dtype=torch.bfloat16)
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_rejects_unsupported_dtype(self):
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,), dtype=torch.float64)
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_rejects_dim_nonzero(self):
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        self.assertFalse(self.impl._is_tma_supported(self_t, 1, idx, src))
+        self.assertFalse(self.impl._is_vec_scatter_supported(self_t, 1, idx, src))
+
+    def test_rejects_non_expanded_index(self):
+        # Materialized 2D index (not a broadcast view) has nonzero stride
+        # on every axis -> the stride(i) == 0 check fails.
+        self_t = torch.zeros(100, 128, device="cuda")
+        src = torch.randn(50, 128, device="cuda")
+        bad_idx = torch.randint(0, 100, (50, 128), device="cuda", dtype=torch.int64)
+        self.assertEqual(self._conds(self_t, bad_idx, src), (False, False))
+
+    def test_rejects_inner_non_contig(self):
+        # permute(1, 0) -> trailing axis has stride 100 (not 1).
+        big_self = torch.zeros(128, 100, device="cuda").permute(1, 0)
+        big_src = torch.randn(128, 50, device="cuda").permute(1, 0)
+        idx = _expanded_idx(
+            torch.randint(0, 100, (50,), device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertEqual(self._conds(big_self, idx, big_src), (False, False))
+
+    def test_accepts_outer_strided(self):
+        self_t, idx, src, _ = _make_override_triple(
+            100, 50, (128,), outer_pad_self=64
+        )
+        self.assertFalse(self_t.is_contiguous())
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    @parametrize("idx_dtype", [torch.int32, torch.int64])
+    def test_accepts_int32_and_int64_index(self, idx_dtype):
+        self_t, idx, src, _ = _make_override_triple(
+            100, 50, (128,), idx_dtype=idx_dtype
+        )
+        self.assertEqual(self._conds(self_t, idx, src), (True, True))
+
+    def test_rejects_deterministic_mode(self):
+        # The determinism gate lives in _base_cond_ok (the shared
+        # prelude), not the per-path support_check. Call the wrapped
+        # cond to exercise the full dispatch-layer predicate.
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        with DeterministicGuard(True):
+            self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
+            self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
+
+    def test_rejects_empty_self(self):
+        # self.shape[0] == 0 with a non-empty src would have every index
+        # out of range. Cond must reject so aten raises the index error
+        # instead of our kernel silently writing OOB.
+        self_t = torch.zeros(0, 128, device="cuda", dtype=torch.float32)
+        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+
+@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@skipIfNoCuteDSL
+class TestScatterAddOverrideCorrectness(TestCase):
+    """End-to-end: torch.scatter_add vs a naive reference on shapes the
+    conds accept (TMA-eligible and vec-scatter-only)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cutedsl_impl.register_to_dispatch()
+
+    @parametrize("dtype,shape_tail", [
+        subtest((torch.float32, (128,)), name="fp32_N128"),       # TMA, single chunk
+        subtest((torch.float32, (1024,)), name="fp32_N1024"),     # TMA, full chunks
+        subtest((torch.bfloat16, (128,)), name="bf16_N128"),
+        subtest((torch.bfloat16, (1024,)), name="bf16_N1024"),
+        subtest((torch.float16, (256,)), name="fp16_N256"),
+        subtest((torch.float32, (132,)), name="fp32_N132_partial"),   # TMA partial final chunk
+        subtest((torch.bfloat16, (264,)), name="bf16_N264_partial"),  # TMA partial final chunk
+        subtest((torch.float32, (4, 32)), name="fp32_3d"),        # nD flatten
+    ])
+    def test_matches_reference(self, dtype, shape_tail):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, shape_tail, dtype=dtype)
+        got = torch.scatter_add(self_t, 0, idx, src)
+        ref = _naive_scatter_add(
+            self_t.reshape(self_t.shape[0], -1),
+            idx_1d,
+            src.reshape(src.shape[0], -1),
+        ).reshape(self_t.shape)
+        tol = _override_tol(dtype)
+        self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("variant", ["functional", "out", "inplace"])
+    def test_op_variants(self, variant):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        if variant == "functional":
+            got = torch.scatter_add(self_t, 0, idx, src)
+        elif variant == "out":
+            got = torch.empty_like(self_t)
+            torch.scatter_add(self_t, 0, idx, src, out=got)
+        else:
+            got = self_t.clone()
+            ret = got.scatter_add_(0, idx, src)
+            self.assertIs(ret, got)
+        self.assertEqual(got, ref)
+
+    @parametrize("outer_pad_self,outer_pad_src", [(64, 0), (0, 64), (64, 64)])
+    def test_outer_strided(self, outer_pad_self, outer_pad_src):
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(
+            200, 100, (128,),
+            outer_pad_self=outer_pad_self, outer_pad_src=outer_pad_src,
+        )
+        got = torch.scatter_add(self_t, 0, idx, src)
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        self.assertEqual(got, ref)
+
+    def test_repeated_index_accumulates(self):
+        # All indices target row 0: result[0] == sum(src).
+        torch.manual_seed(0)
+        src = torch.randn(64, 128, device="cuda")
+        self_t = torch.zeros(10, 128, device="cuda")
+        idx = _expanded_idx(
+            torch.zeros(64, device="cuda", dtype=torch.int64), (128,)
+        )
+        got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(got[0], src.sum(0), atol=1e-3, rtol=1e-3)
+        self.assertEqual(got[1:].abs().sum().item(), 0)
+
+    def test_deterministic_mode_uses_aten(self):
+        # Under use_deterministic_algorithms(True), the cond rejects and
+        # scatter_add falls through to aten's deterministic path. Verify
+        # end-to-end numerics match a naive reference.
+        torch.manual_seed(0)
+        self_t, idx, src, idx_1d = _make_override_triple(200, 100, (128,))
+        ref = _naive_scatter_add(self_t, idx_1d, src)
+        with DeterministicGuard(True):
+            got = torch.scatter_add(self_t, 0, idx, src)
+        self.assertEqual(got, ref)
+
+
+
+instantiate_parametrized_tests(TestScatterAddOverrideConds)
+instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
+
 
 # Generic Device Test Framework instantiation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
