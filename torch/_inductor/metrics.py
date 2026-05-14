@@ -58,9 +58,9 @@ num_auto_chunking: int = 0
 # counter for parallel reduction.
 parallel_reduction_count = 0
 
-codegen_mix_order_reduction = 0
-rejected_mix_order_reduction_fusion = 0
-codegen_nested_reduction = 0
+codegen_mix_order_reduction: int = 0
+rejected_mix_order_reduction_fusion: int = 0
+codegen_nested_reduction: int = 0
 
 
 # reset all counters
