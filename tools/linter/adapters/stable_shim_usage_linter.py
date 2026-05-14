@@ -75,8 +75,8 @@ def get_shim_functions(
         tracker = PreprocessorTracker(IDENTIFIER_MATCHERS)
 
         for line in lines:
-            is_directive_or_comment = tracker.process_line(line)
-            for identifier_version in is_directive_or_comment:
+            tracker.process_line(line)
+            for identifier_version in tracker.identifiers_used():
                 # Only look for function declarations if not a comment/directive and inside a version block
                 if identifier_version.version is None:
                     continue
@@ -153,8 +153,8 @@ def check_file(
     tracker = PreprocessorTracker(matchers)
 
     for line_num, line in enumerate(lines, 1):
-        identifier_use = tracker.process_line(line)
-        for identifier_version in identifier_use:
+        tracker.process_line(line)
+        for identifier_version in tracker.identifiers_used():
             version_of_block = identifier_version.version
             func_name = identifier_version.identifier
             required_version = shim_functions[func_name]

@@ -280,7 +280,7 @@ class PreprocessorTracker:
 
         self._identifier_accumulator = MatcherAccumulator(matchers)
 
-    def process_line(self, line: str) -> list[IdentifierUse]:
+    def process_line(self, line: str) -> bool:
         """
         Process a line and update the preprocessor state.
 
@@ -301,11 +301,11 @@ class PreprocessorTracker:
         if self.in_block_comment:
             if "*/" in line:
                 self.in_block_comment = False
-            return []  # Skip the line if we're in a block comment
+            return True  # Skip the line if we're in a block comment
 
         # Skip line comments - they're not active code
         if stripped.startswith("//"):
-            return []
+            return True
 
         # Track #if directives
         if stripped.startswith("#if"):
@@ -319,12 +319,12 @@ class PreprocessorTracker:
             else:
                 # Regular #if (not a version block)
                 self.preprocessor_stack.append((False, None))
-            return []
+            return True
 
         # Track #ifdef and #ifndef directives (not version blocks)
         if stripped.startswith(("#ifdef", "#ifndef")):
             self.preprocessor_stack.append((False, None))
-            return []
+            return True
 
         # Track #endif directives
         if stripped.startswith("#endif"):
@@ -337,7 +337,7 @@ class PreprocessorTracker:
                         if self.preprocessor_stack[i][0]:
                             self.version_of_block = self.preprocessor_stack[i][1]
                             break
-            return []
+            return True
 
         # Track #else directives
         # #else replaces the previous #if or #elif, so we pop and push
@@ -347,7 +347,7 @@ class PreprocessorTracker:
             # #else is never versioned, so push (False, None)
             self.preprocessor_stack.append((False, None))
             self.version_of_block = None
-            return []
+            return True
 
         # Track #elif directives
         # #elif replaces the previous #if or #elif, so we pop and push
@@ -368,13 +368,18 @@ class PreprocessorTracker:
             else:
                 # Not a version elif, treat as regular conditional
                 self.preprocessor_stack.append((False, None))
-            return []
+            return True
 
+        # This is a line with code, so process it with the matcher.
         self._identifier_accumulator.set_scope_version(self.version_of_block)
         self._identifier_accumulator.process_line(line)
 
-        res = self._identifier_accumulator.identifiers_used()
-        return res if res is not None else []
+        # Not a preprocessor directive or comment
+        return False
+
+    def identifiers_used(self) -> list[IdentifierUse]:
+        found = self._identifier_accumulator.identifiers_used()
+        return found if found is not None else []
 
 
 def get_current_version() -> tuple[int, int, int]:

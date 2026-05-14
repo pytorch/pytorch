@@ -14,18 +14,17 @@ import re
 import sys
 from pathlib import Path
 
-
 # Add repo root to sys.path so we can import from tools.setup_helpers
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
-    get_current_version,
+    IDENTIFIER_MATCHERS,
     LintMessage,
     LintSeverity,
     PreprocessorTracker,
+    get_current_version,
 )
-
 
 LINTER_CODE = "STABLE_SHIM_VERSION"
 
@@ -149,7 +148,7 @@ def check_file(filename: str) -> list[LintMessage]:
         lines = f.readlines()
 
     # Use PreprocessorTracker to handle preprocessor directives
-    tracker = PreprocessorTracker()
+    tracker = PreprocessorTracker(IDENTIFIER_MATCHERS)
 
     # Track extern "C" blocks separately
     inside_extern_c = False
@@ -157,13 +156,6 @@ def check_file(filename: str) -> list[LintMessage]:
     # Patterns for extern "C" blocks
     extern_c_pattern = re.compile(r'extern\s+"C"\s*{')
     extern_c_end_pattern = re.compile(r'}\s*//\s*extern\s+"C"')
-
-    # Function declaration patterns - looking for AOTI_TORCH_EXPORT or typedef
-    function_decl_patterns = [
-        re.compile(r"^\s*AOTI_TORCH_EXPORT\s+\w+"),  # AOTI_TORCH_EXPORT functions
-        re.compile(r"^\s*typedef\s+.*\(\*\w+\)"),  # typedef function pointers
-        re.compile(r"^\s*using\s+\w+\s*="),  # using declarations
-    ]
 
     for line_num, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -188,17 +180,13 @@ def check_file(filename: str) -> list[LintMessage]:
 
         # Check for function declarations
         if inside_extern_c:
-            is_function_decl = any(
-                pattern.match(stripped) for pattern in function_decl_patterns
-            )
-
-            if is_function_decl:
+            for identifier_version in tracker.identifiers_used():
                 # Check if this is a newly added line
                 is_new_line = line_num in added_lines
 
                 # Get current version state from tracker
-                inside_version_block = tracker.is_in_version_block()
-                tracker_version = tracker.get_version_of_block()
+                inside_version_block = identifier_version.version is not None
+                tracker_version = identifier_version.version
                 version_of_block_macro = (
                     f"TORCH_VERSION_{tracker_version[0]}_{tracker_version[1]}_0"
                     if tracker_version
