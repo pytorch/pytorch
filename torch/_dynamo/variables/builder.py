@@ -321,10 +321,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 log = logging.getLogger(__name__)
@@ -508,7 +505,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         source: Source,
         allow_lazy_constant: bool = True,
     ) -> None:
@@ -4576,11 +4573,11 @@ class SourcelessBuilder:
 
     @staticmethod
     def make_type_handlers() -> dict[
-        type, Callable[["InstructionTranslator", Any], VariableTracker]
+        type, Callable[["InstructionTranslatorBase", Any], VariableTracker]
     ]:
         create = SourcelessBuilder.create
         handlers: dict[
-            type, Callable[[InstructionTranslator, Any], VariableTracker]
+            type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
@@ -4653,7 +4650,7 @@ class SourcelessBuilder:
             )
         )
 
-        def passthrough(tx: "InstructionTranslator", value: T) -> T:
+        def passthrough(tx: "InstructionTranslatorBase", value: T) -> T:
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
@@ -4675,7 +4672,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())

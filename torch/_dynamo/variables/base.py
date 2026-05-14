@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from ..codegen import PyCodegen
     from ..side_effects import SideEffects
-    from ..symbolic_convert import InstructionTranslator
+    from ..symbolic_convert import InstructionTranslatorBase
     from .constant import ConstantVariable
     from .functions import UserFunctionVariable
 
@@ -453,7 +453,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def bool_impl(self, tx: InstructionTranslator) -> VariableTracker | None:
+    def bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
@@ -474,7 +474,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return True
 
-    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
 
         PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
@@ -529,9 +529,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError
 
-    # TODO[@lucaskabela] - change this type to `InstructionTranslatorBase`
-    # and cascade that (large blast radius)
-    def const_getattr(self, tx: InstructionTranslator, name: str) -> Any:
+    def const_getattr(self, tx: InstructionTranslatorBase, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
@@ -556,7 +554,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
+    def var_getattr(self, tx: InstructionTranslatorBase, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -648,7 +646,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             fn(v)
 
     def call_obj_hasattr(
-        self, tx: InstructionTranslator, name: str
+        self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
         unimplemented(
             gb_type="Unsupported hasattr call",
@@ -660,7 +658,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+    def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
         Implements PyObject_GetIter semantics (tp_iter slot).
         Subclasses override this to support iteration.
@@ -709,7 +707,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def mp_subscript_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
@@ -725,7 +723,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_item_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
@@ -1119,7 +1117,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def get_id(self, tx: InstructionTranslator) -> int | None:
+    def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.
 
         The base implementation uses source resolution for sourceful VTs.

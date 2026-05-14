@@ -151,7 +151,7 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.side_effects import SideEffects
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
     from .dicts import DunderDictVariable
@@ -278,7 +278,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return GuardBuilder.CLASS_MATCH
         return None
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if self.source:
             try:
                 install_guard(self.source.make_guard(GuardBuilder.CLASS_MATCH))
@@ -384,7 +384,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return NO_SUCH_SUBOBJ
 
     def get_source_by_walking_mro(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> DictGetItemSource:
         source = self.source
         if source is None:
@@ -435,7 +435,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def bool_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> "VariableTracker":
         from .constant import ConstantVariable
 
@@ -448,7 +448,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -463,7 +463,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
 
         # --- Dynamo-specific pre-checks ---
@@ -557,7 +559,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def resolve_meta_data_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         meta_attr: object,
         source: Source | None,
@@ -588,7 +590,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def resolve_cls_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         cls_attr: object,
         source: Source | None,
@@ -725,7 +727,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def resolve_cls_plain_attr(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         cls_attr: object,
         source: Source | None,
@@ -741,7 +743,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def invoke_cls_descriptor_get(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         descriptor: object,
         source: Source | None,
@@ -765,7 +767,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source=descriptor_get_source,
         ).call_function(tx, [none_var, self], {})
 
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def len_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__len__")
         if m:
             source = self.source and AttrSource(self.source, "__len__")
@@ -774,21 +776,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ).call_function(tx, [], {})
         raise_type_error(tx, f"object of type {self.python_type_name()} has no length")
 
-    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.len_impl(tx)
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.len_impl(tx)
 
     def sq_contains(
-        self, tx: "InstructionTranslator", item: VariableTracker
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         m = self._maybe_get_baseclass_method("__contains__")
         if m:
             return self.call_method(tx, "__contains__", [item], {})
         return super().sq_contains(tx, item)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__iter__")
         if m:
             source = self.source and AttrSource(self.source, "__iter__")
@@ -804,7 +806,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             pass
         return super().tp_iter_impl(tx)
 
-    def nb_negative_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def nb_negative_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__neg__")
         if m:
             source = self.source and AttrSource(self.source, "__neg__")
@@ -815,7 +817,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tx, f"object of type {self.python_type_name()} has no negative"
         )
 
-    def nb_positive_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def nb_positive_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         m = self._maybe_get_baseclass_method("__pos__")
         if m:
             source = self.source and AttrSource(self.source, "__pos__")
@@ -828,7 +830,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def _call_cross_entropy_loss(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -899,7 +901,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -992,7 +994,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list["VariableTracker"]:
         if isinstance(self.value, type) and issubclass(self.value, enum.Enum):
             return [VariableTracker.build(tx, item) for item in self.value]
@@ -1000,7 +1002,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1460,7 +1462,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return new_fn is object.__new__
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if self.source:
             install_guard(
@@ -1470,7 +1472,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         return VariableTracker.build(tx, hasattr(self.value, name))
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
@@ -1499,7 +1501,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1526,7 +1528,7 @@ class RemovableHandleClass:
 
 
 def call_random_fn(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     args: Sequence[VariableTracker],
     kwargs: dict[str, VariableTracker],
@@ -1628,7 +1630,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
         if self.dict_vt is None:
             self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
@@ -1709,7 +1711,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _lookup_slot_type_attr(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         *,
         none_error: str = "'NoneType' object is not callable",
@@ -1726,7 +1728,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def bool_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> "VariableTracker | None":
         # Mirrors slot_nb_bool:
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/typeobject.c#L9408-L9458
@@ -1751,7 +1753,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_index_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: PyNumber_Index checks tp_as_number->nb_index.
         type_attr, source = self._lookup_slot_type_attr(tx, "__index__")
@@ -1775,7 +1777,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_int_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
@@ -1796,7 +1798,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_float_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
@@ -1817,7 +1819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_negative_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
@@ -1839,7 +1841,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_positive_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: slot_nb_positive calls __pos__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
@@ -1865,7 +1867,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 f"calling torch function on object without __torch_function__ {self}"
             )
 
-    def get_torch_fn(self, tx: "InstructionTranslator") -> VariableTracker:
+    def get_torch_fn(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         self.torch_function_check()
         from .torch_function import get_torch_function_fn
 
@@ -1873,7 +1875,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_torch_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn: VariableTracker,
         types: "TupleVariable",
         args: Sequence[Any],
@@ -1893,7 +1895,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def sq_contains(
-        self, tx: "InstructionTranslator", item: VariableTracker
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         method = self._maybe_get_baseclass_method("__contains__")
         if (
@@ -1908,7 +1910,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return method_var.call_function(tx, [item], {})
         return super().sq_contains(tx, item)
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         method = self._maybe_get_baseclass_method("__next__")
         if (
             self._base_vt is not None
@@ -1922,7 +1924,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return method_var.call_function(tx, [], {})
         return super().tp_iternext_impl(tx)
 
-    def tp_iter_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         method, source_fn = self._lookup_slot_type_attr(
             tx,
             "__iter__",
@@ -1953,7 +1955,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
@@ -1972,7 +1974,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def SLOT1BIN(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         dunder: str,
         rdunder: str,
@@ -2082,7 +2084,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2098,7 +2100,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_inplace_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
@@ -2106,7 +2108,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[Any],
         kwargs: dict[str, Any],
@@ -2206,7 +2208,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def len_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def len_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         type_attr, source = self._lookup_slot_type_attr(tx, "__len__")
         if type_attr is not NO_SUCH_SUBOBJ:
             method_var = self.resolve_type_attr(tx, "__len__", type_attr, source)
@@ -2229,7 +2231,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if (
             self._base_vt is not None
             and self._base_methods is not None
@@ -2238,7 +2240,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self._base_vt.sq_length(tx)
         return self.len_impl(tx)
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if (
             self._base_vt is not None
             and self._base_methods is not None
@@ -2249,7 +2251,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def method_setattr_standard(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
     ) -> VariableTracker:
@@ -2426,7 +2428,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             inspect.getattr_static(self.value, "__setattr__", None)
         ) and not isinstance(self.value, threading.local)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         if self._base_vt is not None and self._base_methods is not None:
             iter_method = self._maybe_get_baseclass_method("__iter__")
             if iter_method is not None and iter_method in self._base_methods:
@@ -2447,7 +2451,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         from .builder import SourcelessBuilder
 
         try:
@@ -2458,7 +2462,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return False
 
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         from .builder import SourcelessBuilder
 
@@ -2484,7 +2488,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -2619,7 +2623,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._subobj_from_class[name] = result
         return result
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
+    def has_key_in_generic_dict(
+        self, tx: "InstructionTranslatorBase", key: str
+    ) -> bool:
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self, key, AttrMutationKind.INSTANCE_DICT
         ):
@@ -2630,7 +2636,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def get_source_by_walking_mro(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> DictGetItemSource:
         if self.cls_source is None:
             raise AssertionError("cls_source must not be None for MRO walk")
@@ -2711,7 +2717,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def generic_getattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
@@ -2876,7 +2882,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -2899,7 +2907,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def resolve_data_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         type_attr: object,
         source: Source | None,
@@ -2978,7 +2986,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def resolve_type_attr(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         type_attr: object,
         source: Source | None,
@@ -3063,7 +3071,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def invoke_descriptor_get(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         descriptor: object,
         source: Source | None,
@@ -3087,7 +3095,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def maybe_wrap_nn_module_source_for_instance(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         source: Source | None,
     ) -> Source | None:
@@ -3107,7 +3115,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return source
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if self.source:
             install_guard(
@@ -3131,7 +3139,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Unknown C hashes are hashable but graph-break in hash_impl.
         return type(self.value).__hash__ is not None
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Mirrors CPython's slot_tp_hash which looks up __hash__ via the MRO:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9521-L9565
         # __hash__ = None → PyObject_HashNotImplemented:
@@ -3234,7 +3242,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_tree_map_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
         rest: "collections.abc.Sequence[VariableTracker]",
@@ -3331,7 +3339,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_tree_map_with_path_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
         rest: "collections.abc.Sequence[VariableTracker]",
@@ -3474,7 +3482,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython's frozen dataclass __hash__ is generated by _hash_add:
         # https://github.com/python/cpython/blob/e76aa128fe/Lib/dataclasses.py#L886-L892
         # It computes hash(tuple(field_values)), i.e. tuplehash applied to
@@ -3515,7 +3523,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -3546,7 +3554,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -3570,7 +3578,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str):
+    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
         if name in (
             "args",
             "__cause__",
@@ -3628,7 +3636,9 @@ class InspectVariable(UserDefinedObjectVariable):
     def is_matching_class(obj: object) -> bool:
         return obj in InspectVariable._PROPERTY_REDIRECTS
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
         if name in redirects:
             return super().var_getattr(tx, redirects[name])
@@ -3650,7 +3660,9 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             raise AssertionError(f"Expected KeyedJaggedTensor, got {type(value)}")
         super().__init__(value, **kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if (
             torch._dynamo.config.force_unspec_int_unbacked_size_like_on_torchrec_kjt
             and self.source is not None
@@ -3722,7 +3734,7 @@ class RemovableHandleVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -3792,14 +3804,14 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             raise AssertionError("_base_vt must not be None in len")
         return self._base_vt.len()  # type: ignore[union-attr]
 
-    def sq_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Dict implements __len__ via mp_length (mapping protocol), not
         # sq_length (sequence protocol). Redirect so generic_len works.
         return self.mp_length(tx)
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
@@ -3821,7 +3833,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -3889,7 +3901,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
         return collections.OrderedDict(self._base_vt.as_python_constant())
 
     def nb_or_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker, reverse: bool = False
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327C5-L339
         if not issubclass(other.python_type(), dict):
@@ -3906,7 +3921,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
         return new
 
     def nb_inplace_or_impl(
-        self, tx: "InstructionTranslator", other: VariableTracker
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L323-L325
         self.call_method(tx, "update", [other], {})
@@ -3914,7 +3929,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -4057,7 +4072,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def var_getattr(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
     ) -> VariableTracker:
         if name == "default_factory":
@@ -4066,7 +4081,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def _missing_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__missing__: auto-vivification via default_factory.
@@ -4088,7 +4103,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
@@ -4100,7 +4115,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -4143,7 +4158,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -4383,7 +4398,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     def resolve_data_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         type_attr: object,
         source: Source | None,
@@ -4402,7 +4417,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -4477,7 +4492,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     def call_tree_map_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
         rest: "collections.abc.Sequence[VariableTracker]",
@@ -4506,7 +4521,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     def call_tree_map_with_path_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
         rest: "collections.abc.Sequence[VariableTracker]",
@@ -4557,7 +4572,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
     def resolve_data_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         type_attr: object,
         source: Source | None,
@@ -4590,7 +4605,7 @@ class StructSequenceVariable(UserDefinedTupleVariable):
 
     def resolve_data_descriptor(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         type_attr: object,
         source: Source | None,
@@ -4622,7 +4637,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def method_setattr_standard(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
     ) -> VariableTracker:
@@ -4656,7 +4671,9 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
         return super().method_setattr_standard(tx, name, value)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
         # update the __dict__ attribute. The parent class
         # (UserDefinedObjectVariable) implements __dict__ lookups using a VT
@@ -4669,7 +4686,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         else:
             return super().var_getattr(tx, name)
 
-    def mp_length(self, tx: "InstructionTranslator") -> VariableTracker:
+    def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
         return super().mp_length(tx)
