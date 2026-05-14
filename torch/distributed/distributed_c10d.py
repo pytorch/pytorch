@@ -1728,14 +1728,17 @@ def init_process_group(
             When TORCH_NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
 
         group_name (str, optional, deprecated): Group name. This argument is ignored
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (Backend.Options, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. As of now, the only
-            options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
-            backend, ``is_high_priority_stream`` can be specified so that
-            the nccl backend can pick up high priority cuda streams when
-            there're compute kernels waiting. For other available options to config nccl,
+            the construction of specific process groups. Each backend
+            provides its own ``Options`` subclass (e.g.,
+            :class:`~torch.distributed.ProcessGroupNCCL.Options`,
+            :class:`~torch.distributed.ProcessGroupGloo.Options`).
+            For the ``nccl`` backend, ``is_high_priority_stream`` can be
+            specified so that the nccl backend can pick up high priority
+            cuda streams when there are compute kernels waiting.
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            for other NCCL configuration options.
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
             optimizations.  Currently this has two effects, only under
@@ -5500,9 +5503,11 @@ def split_group(
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
-            the construction of specific process groups. i.e.``is_high_priority_stream``
-            can be specified so that process group can pick up high priority cuda streams.
+        pg_options (Backend.Options, optional): additional options to pass
+            during the construction of the process group. Each backend provides
+            its own ``Options`` subclass. For example,
+            ``ProcessGroupNCCL.Options`` supports ``is_high_priority_stream``
+            so that the process group can pick up high priority cuda streams.
         group_desc (str, optional): a string to describe the process group.
         backend (str or Backend, optional): selects a subset of the parent process
             group's per-device backends to retain in the child group. The string
@@ -5744,12 +5749,15 @@ def new_group(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (Backend.Options, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. i.e. for the ``nccl``
-            backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams. For other available options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
+            the construction of specific process groups. Each backend provides
+            its own ``Options`` subclass. For the ``nccl`` backend,
+            ``is_high_priority_stream`` can be specified so that the process
+            group can pick up high priority cuda streams. See
+            https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            for other NCCL configuration options.
+        use_local_synchronization
             (bool, optional): perform a group-local barrier at the end of the process group creation.
             This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
@@ -5971,11 +5979,12 @@ def new_subgroups(
             ``Backend.GLOO``). If ``None`` is passed in, the backend
             corresponding to the default process group will be used. Default is
             ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (Backend.Options, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. i.e. for the ``nccl``
-            backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams.
+            the construction of specific process groups. Each backend provides
+            its own ``Options`` subclass. For the ``nccl`` backend,
+            ``is_high_priority_stream`` can be specified so that the process
+            group can pick up high priority cuda streams.
         group_desc (str, optional): A string describing the group. Each subgroup will
             inherit its group_desc
 
@@ -6065,11 +6074,12 @@ def new_subgroups_by_enumeration(
              ``Backend.GLOO``). If ``None`` is passed in, the backend
              corresponding to the default process group will be used. Default is
              ``None``.
-        pg_options (ProcessGroupOptions, optional): process group options
+        pg_options (Backend.Options, optional): process group options
             specifying what additional options need to be passed in during
-            the construction of specific process groups. i.e. for the ``nccl``
-            backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams.
+            the construction of specific process groups. Each backend provides
+            its own ``Options`` subclass. For the ``nccl`` backend,
+            ``is_high_priority_stream`` can be specified so that the process
+            group can pick up high priority cuda streams.
         group_desc (str, optional): A string describing the group. Each subgroup will
             inherit its group_desc.
 
@@ -6209,7 +6219,7 @@ def shrink_group(
             ``SHRINK_ABORT`` will attempt to terminate ongoing operations
             in the parent communicator before shrinking.
             Defaults to ``SHRINK_DEFAULT``.
-        pg_options (ProcessGroupOptions, optional): Backend-specific options to apply
+        pg_options (Backend.Options, optional): Backend-specific options to apply
             to the shrunken process group. If provided, the backend will use
             these options when creating the new group. If omitted, the new group
             inherits defaults from the parent.
