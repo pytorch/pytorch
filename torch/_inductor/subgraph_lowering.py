@@ -5,7 +5,7 @@ import operator
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -14,7 +14,7 @@ from torch.utils._ordered_set import OrderedSet
 from . import ir
 from .exc import SubgraphLoweringException
 from .graph import GraphLowering
-from .ops_handler import SimpleCSEHandler
+from .ops_handler import OpsHandler, SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
 
 
@@ -137,7 +137,7 @@ class InputDescriptor:
 class TracingOpsHandler(WrapperHandler):
     def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
-        super().__init__(parent)
+        super().__init__(cast(OpsHandler[Any], parent))
         self.tracer = tracer
 
         self.placeholders = [

@@ -169,7 +169,10 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
 
     Returns:
         dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
-            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types for which
+              tensors can be allocated on the accelerator and type conversion across
+              supported dtypes are supported. Any operator support outside of that
+              is not guaranteed
 
     Examples:
         >>> # xdoctest: +SKIP("requires cuda")

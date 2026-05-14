@@ -30,18 +30,16 @@ class TritonKernelCompileResult:
     mangled_name: str
     num_warps: int
     shared_mem: int
-    xblock: int
-    yblock: int
-    zblock: int
-    r0block: int
+    xblocks: list[int]
+    yblocks: list[int]
+    zblocks: list[int]
+    r0blocks: list[int]
     rsplit: int
     rsplit_size: int
     config_index: int | None
     global_scratch: int | None
     profile_scratch: int | None
 
-
-_pending_kernels: dict[str, Any] = {}
 
 _async_compile: Any = None
 
@@ -98,25 +96,31 @@ def _wrap_tma_args(args: list[Any], kernel_fn: CachingAutotuner) -> list[Any]:
     return wrapped
 
 
-def start_kernel_compile(kernel_name: str, kernel_source: str) -> None:
+def start_kernel_compile(
+    pending_kernels: dict[str, Any], kernel_name: str, kernel_source: str
+) -> None:
     """
     This function is called from C++ at model initialization time for each kernel.
     It starts the compilation in a background process but does NOT wait for it.
     The actual kernel execution happens later in run_triton_kernel_with_autotune().
+
+    The pending_kernels dict is per-module, created in C++ and passed through
+    to avoid global state collisions across compiled modules.
     """
-    if kernel_name in _pending_kernels:
+    if kernel_name in pending_kernels:
         return
 
     async_compile = _get_async_compile()  # noqa: F841 (used by eval below)
 
     # Evaluate the kernel source to get the Future or CachingAutotuner
     # The kernel_source is like: async_compile.triton('name', '''...''', ...)
-    kernel_obj = eval(kernel_source.strip())  # noqa: S307
+    kernel_obj = eval(kernel_source.strip())
 
-    _pending_kernels[kernel_name] = kernel_obj
+    pending_kernels[kernel_name] = kernel_obj
 
 
 def run_triton_kernel_with_autotune(
+    pending_kernels: dict[str, Any],
     kernel_name: str,
     stream: Any,
     args: list[Any],
@@ -127,9 +131,9 @@ def run_triton_kernel_with_autotune(
     from torch._inductor.codecache import CodeCacheFuture, CudaKernelParamCache
     from torch._inductor.runtime.triton_heuristics import config_to_dict
 
-    if kernel_name not in _pending_kernels:
-        raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels. ")
-    kernel_obj = _pending_kernels.pop(kernel_name)
+    if kernel_name not in pending_kernels:
+        raise RuntimeError(f"Kernel {kernel_name} not found in pending kernels.")
+    kernel_obj = pending_kernels[kernel_name]
 
     if isinstance(kernel_obj, CodeCacheFuture):
         kernel_fn = kernel_obj.result()
@@ -160,19 +164,38 @@ def run_triton_kernel_with_autotune(
     from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
     cubin_path_name = get_cpp_wrapper_cubin_path_name()
-    for key in (cubin_path_name, "mangled_name", "num_warps", "shared_mem"):
-        if key not in cached_params:
-            raise RuntimeError(f"{key} not found in cached params for {kernel_name}")
+    for key_name in (cubin_path_name, "mangled_name", "num_warps", "shared_mem"):
+        if key_name not in cached_params:
+            raise RuntimeError(
+                f"{key_name} not found in cached params for {kernel_name}"
+            )
     cubin_path = cached_params[cubin_path_name]
     mangled_name = cached_params["mangled_name"]
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
 
     config = config_to_dict(launcher.config) if launcher.config else {}
-    xblock = config.get("XBLOCK", 128)
-    yblock = config.get("YBLOCK", 1)
-    zblock = config.get("ZBLOCK", 1)
-    r0block = config.get("R0_BLOCK", 1)
+
+    # For combo/foreach kernels, the autotuned config may have empty kwargs
+    # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
+    # In that case, use the default_config from combo_grid_meta
+    combo_grid_meta = inductor_meta.get("combo_grid_meta") if inductor_meta else None
+    default_config = combo_grid_meta.get("default_config") if combo_grid_meta else None
+    if default_config:
+        config = {**default_config, **config}
+
+    # Extract per-subkernel block sizes for combo kernels, or single block sizes.
+    num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
+    if num_kernels > 1 and "XBLOCK_0" in config:
+        xblocks = [config.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
+        yblocks = [config.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
+        zblocks = [config.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
+        r0blocks = [config.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+    else:
+        xblocks = [config.get("XBLOCK", 128)]
+        yblocks = [config.get("YBLOCK", 1)]
+        zblocks = [config.get("ZBLOCK", 1)]
+        r0blocks = [config.get("R0_BLOCK", 1)]
     rsplit = config.get("RSPLIT", 1)
     rsplit_size = config.get("RSPLIT_SIZE", 1)
 
@@ -193,16 +216,16 @@ def run_triton_kernel_with_autotune(
 
     log.debug(
         "Successfully autotuned Triton kernel: cubin_path=%s, mangled_name=%s, "
-        "num_warps=%d, shared_mem=%d, xblock=%d, yblock=%d, zblock=%d, r0block=%d, "
+        "num_warps=%d, shared_mem=%d, xblocks=%s, yblocks=%s, zblocks=%s, r0blocks=%s, "
         "rsplit=%d, rsplit_size=%d, config_index=%s, global_scratch=%s, profile_scratch=%s",
         cubin_path,
         mangled_name,
         num_warps,
         shared_mem,
-        xblock,
-        yblock,
-        zblock,
-        r0block,
+        xblocks,
+        yblocks,
+        zblocks,
+        r0blocks,
         rsplit,
         rsplit_size,
         config_index,
@@ -210,18 +233,19 @@ def run_triton_kernel_with_autotune(
         profile_scratch,
     )
 
-    return TritonKernelCompileResult(
+    result = TritonKernelCompileResult(
         cubin_path=cubin_path,
         mangled_name=mangled_name,
         num_warps=num_warps,
         shared_mem=shared_mem,
-        xblock=xblock,
-        yblock=yblock,
-        zblock=zblock,
-        r0block=r0block,
+        xblocks=xblocks,
+        yblocks=yblocks,
+        zblocks=zblocks,
+        r0blocks=r0blocks,
         rsplit=rsplit,
         rsplit_size=rsplit_size,
         config_index=config_index,
         global_scratch=global_scratch,
         profile_scratch=profile_scratch,
     )
+    return result

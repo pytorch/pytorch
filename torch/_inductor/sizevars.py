@@ -60,6 +60,14 @@ _GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
 )
 
 
+# Threshold above which we skip sympy reasoning that scales poorly in the
+# number of symbols. Past this point, polynomial-domain conversions inside
+# sympy (e.g. gcd, Mod) dominate compile time on wide concat/sum expressions
+# (see https://github.com/sympy/sympy/issues/28200). Chosen empirically from
+# AOT-partitioned bwd graphs with ~60-variable shape expressions.
+_MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
+
+
 def statically_known_true(
     shape_env: ShapeEnv,
     expr: sympy.Basic | bool,
@@ -68,6 +76,17 @@ def statically_known_true(
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
+
+    # Hint fast-path: if the current concrete hints make `expr` evaluate to
+    # False, it cannot be universally True, so bail out without running the
+    # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
+    # us conclude universal truth, so we still fall through in that case.)
+    try:
+        hinted = expr.xreplace(shape_env.backed_var_to_val)
+        if hinted is sympy.S.false:
+            return False
+    except Exception:
+        pass
 
     try:
         simplified = shape_env._maybe_evaluate_static(
@@ -219,21 +238,28 @@ class SizeVarAllocator:
             if not statically_known(base >= 0):
                 return base
 
+            from torch.utils._sympy.functions import safe_gcd
+
             for v in base.free_symbols:
                 if v in var_ranges:
-                    # var smaller than divisor can be removed
-                    # if the rest is guaranteed to be multiple of divisor
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
-                        gcd = sympy.gcd(m[rest], divisor)
-                        if gcd == divisor:
-                            if statically_known(v < divisor):
-                                base = m[rest]
+                        gcd = safe_gcd(m[rest], divisor)
+                        if statically_known(v < gcd):
+                            base = m[rest]
             return base
 
         def visit_indexing_div(base, divisor):
-            return FloorDiv(remove_zero_terms(base, divisor), divisor)
+            base = remove_zero_terms(base, divisor)
+            if statically_known(base >= 0) and statically_known(base < divisor):
+                return sympy.S.Zero
+            # FloorDiv(ModularIndexing(b, d1, m), d2) = ModularIndexing(b, d1*d2, m//d2)
+            if isinstance(base, ModularIndexing) and isinstance(divisor, sympy.Integer):
+                b, d1, m = base.args
+                if m % divisor == 0:
+                    return ModularIndexing(b, d1 * divisor, FloorDiv(m, divisor))
+            return FloorDiv(base, divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -404,18 +430,80 @@ class SizeVarAllocator:
         expr = left > right
         return self.statically_known_true(expr)
 
+    def _is_multiple_of(self, numerator: Expr, denominator: int) -> bool:
+        """
+        Structural divisibility check: returns True only if numerator is
+        provably a multiple of denominator.  Recurses over sympy expression
+        structure before falling back to statically_known_true.
+        """
+        # Rule 1 — concrete value
+        if isinstance(numerator, (int, sympy.Integer)):
+            return int(numerator) % denominator == 0
+
+        # Rule 2 — product: any factor divisible → product divisible
+        if isinstance(numerator, sympy.Mul):
+            for factor in numerator.args:
+                if self._is_multiple_of(factor, denominator):
+                    return True
+            const = 1
+            for factor in numerator.args:
+                if isinstance(factor, (int, sympy.Integer)):
+                    const *= int(factor)
+            if const != 1 and const % denominator == 0:
+                return True
+
+        # Rule 3 — sum: all terms divisible → sum divisible
+        if isinstance(numerator, sympy.Add):
+            if all(self._is_multiple_of(term, denominator) for term in numerator.args):
+                return True
+
+        # Rule 4 — FloorDiv(a, b): if a is multiple of b*n
+        if isinstance(numerator, FloorDiv):
+            a, b = numerator.args
+            if isinstance(b, (int, sympy.Integer)):
+                if self._is_multiple_of(a, int(b) * denominator):
+                    return True
+
+        # Rule 5 — Mod(a, b): Mod(a,b) = a - b*floor(a/b), so if both a and b
+        # are multiples of n, then Mod(a,b) is too.
+        if isinstance(numerator, (Mod, sympy.Mod)):
+            a, b = numerator.args
+            if self._is_multiple_of(a, denominator) and self._is_multiple_of(
+                b, denominator
+            ):
+                return True
+
+        # Rule 6 — cheap gcd check before expensive sympy fallback.
+        from torch.utils._sympy.functions import simple_floordiv_gcd
+
+        gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
+        if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
+            return True
+
+        # Rule 7 — full sympy fallback (expensive on many-variable exprs).
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
+        return self.statically_known_true(expr)
+
     def statically_known_multiple_of(
         self, numerator: Expr, denominator: Expr | int
     ) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
+        # Use cheap structural equality, not statically_known_equals —
+        # the latter constructs sympy.Eq(wide, wide) which has measurable
+        # overhead (~30s on 64-variable expressions).
+        if numerator is denominator or numerator == denominator:
+            return True
 
-        if len(free_symbols(numerator)) > 20:
+        if isinstance(denominator, (int, sympy.Integer)):
+            return self._is_multiple_of(numerator, int(denominator))
+
+        # Symbolic denominator: only the sympy fallback can prove this.
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
             return False
-
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
@@ -548,6 +636,20 @@ class SizeVarAllocator:
             return left
         if right == gcd:
             return right
+
+        # Min/Max fallback: we can prove Min(a, b) <= c when any arg <= c, but
+        # sympy doesn't simplify this yet. So, evaluate it here. Same for Max.
+        for lhs, rhs in [(left, right), (right, left)]:
+
+            def le_rhs(a: Expr) -> bool:
+                return self.guard_or_false(sympy.Le(a, rhs))
+
+            # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
+            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+                return lhs
+            # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
+            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+                return lhs
 
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"

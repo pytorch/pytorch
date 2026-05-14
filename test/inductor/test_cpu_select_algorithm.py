@@ -20,8 +20,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_quantization import (
-    _static_quantized_linear_binary_module,
-    _static_quantized_linear_module,
+    _static_reference_quantized_linear_module,
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
@@ -32,7 +31,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    requires_mkl,
+    requires_onednn,
     TEST_MKL,
+    xfailIf,
 )
 
 
@@ -61,10 +63,13 @@ def patches(fn):
         timings = benchmark(choices)
         for choice, timing in timings.items():
             if isinstance(choice, select_algorithm.ExternKernelCaller):
-                # we intentionally make ATEN kernel slower to cover the cases
+                # We intentionally make ATEN kernel slower to cover the cases
                 # where template kernels are always chosen with fusions applied
-                # and correctness checks at runtime.
-                timings[choice] = timing * 1000
+                # and correctness checks at runtime. On k8s ARC runner pods,
+                # CPU contention from parallel tests can make cpp template
+                # benchmarks 2-3x slower than normal, so the multiplier needs
+                # to be large enough to still exceed those inflated times.
+                timings[choice] = timing * 1000000
         return timings
 
     for patcher in [
@@ -152,7 +157,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (1, 2, 1000))
     @parametrize("in_features", (1, 1000))
     @parametrize("out_features", (1, 1024))
@@ -188,7 +193,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True,))
@@ -217,7 +222,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bias", (True, False))
     @dtypes(torch.float)
     def test_linear_input_transpose(self, bias, dtype):
@@ -244,7 +249,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
@@ -327,7 +333,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (128, 129))
@@ -470,7 +476,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (3,))
     @parametrize("linear_in_features", (384,))
@@ -541,7 +547,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (128,))
     @parametrize("size_0", (4,))
@@ -673,7 +679,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
@@ -717,7 +723,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384,))
@@ -751,7 +757,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @set_num_threads(1)
     @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
     @parametrize("batch_size", (256,))
@@ -803,7 +810,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -838,7 +846,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (128,))
     @parametrize("in_features_2", (196,))
@@ -1016,6 +1024,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @inductor_config.patch({"freezing": True})
     @patches
+    @requires_onednn
     @torch.no_grad
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (3,))
@@ -1309,7 +1318,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_onednn
+    @requires_mkl
     @parametrize(
         "batch_size",
         (
@@ -1340,26 +1350,21 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _static_quantized_linear_module(
-                    N=out_features,
-                    K=in_features,
-                    bias=bias,
-                    example_input=input,
-                    epilogue=epilogue,
-                    output_dtype=torch.uint8,
+                self.linear = _static_reference_quantized_linear_module(
+                    N=out_features, K=in_features, bias=bias, example_input=input
                 )
-                self.linear2 = _static_quantized_linear_module(
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = _static_reference_quantized_linear_module(
                     N=out_features,
                     K=out_features,
                     bias=bias,
-                    example_input=self.linear.linear(input),
-                    epilogue=epilogue,
-                    output_dtype=dtype,
+                    example_input=self.epilogue(self.linear.linear(input)),
                 )
+                self.epilogue2 = _get_epilogue(epilogue)
 
             def forward(self, x):
-                res = self.linear(x)
-                res = self.linear2(res)
+                res = self.epilogue(self.linear(x))
+                res = self.epilogue2(self.linear2(res))
                 return res
 
         counters.clear()
@@ -1371,9 +1376,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         atol, rtol = 5e-3, 1e-3
         if dtype == torch.bfloat16:
             atol, rtol = 5e-2, 5e-2
-
-        # Mark feature dimension as static to avoid symbolic shapes
-        torch._dynamo.mark_static(input, input.dim() - 1)
 
         with (
             patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
@@ -1397,7 +1399,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64, 65))
@@ -1443,68 +1446,46 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias, input_3d):
                 super().__init__()
-                self.linear = _static_quantized_linear_binary_module(
-                    N=out_features,
-                    K=in_features,
-                    bias=bias,
-                    example_input=input,
-                    example_binary_input=other,
-                    binary_post_op="add",
-                    epilogue=epilogue,
-                    output_dtype=torch.uint8,
+                self.linear = _static_reference_quantized_linear_module(
+                    N=out_features, K=in_features, bias=bias, example_input=input
                 )
                 self.epilogue = _get_epilogue(epilogue)
                 example_input = self.epilogue(self.linear.linear(input) + other)
-
-                self.linear2 = _static_quantized_linear_binary_module(
+                self.linear2 = _static_reference_quantized_linear_module(
                     N=out_features,
                     K=out_features,
                     bias=bias,
                     example_input=example_input,
-                    example_binary_input=other2,
-                    binary_post_op="sum",
-                    epilogue=epilogue,
-                    output_dtype=dtype,
                 )
+                self.epilogue2 = _get_epilogue(epilogue)
                 self.input_3d = input_3d
 
             def forward(self, x, other, other2):
+                res = self.epilogue(self.linear(x) + other)
                 # Avoid hitting qlinear inplace sum fusion with intentionally mismatched shapes
                 if self.input_3d:
                     other2 = other2.view(2, other2.size(0) // 2, other2.size(1))
                 else:
                     other2 = other2.view(other2.size(1), other2.size(2))
-                res = self.linear(x, other)
-                res = self.linear2(res, other2)
+                res = self.epilogue2(self.linear2(res) + other2)
                 return res
 
         class M2(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _static_quantized_linear_binary_module(
-                    N=out_features,
-                    K=in_features,
-                    bias=bias,
-                    example_input=input2,
-                    example_binary_input=other,
-                    binary_post_op="sum",
-                    epilogue=epilogue,
-                    output_dtype=dtype,
+                self.linear = _static_reference_quantized_linear_module(
+                    N=out_features, K=in_features, bias=bias, example_input=input2
                 )
-                self.linear2 = _static_quantized_linear_binary_module(
-                    N=out_features,
-                    K=out_features,
-                    bias=bias,
-                    example_input=input3,
-                    example_binary_input=other2,
-                    binary_post_op="sum",
-                    epilogue=epilogue,
-                    output_dtype=dtype,
+                self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = _static_reference_quantized_linear_module(
+                    N=out_features, K=out_features, bias=bias, example_input=input3
                 )
+                self.epilogue2 = _get_epilogue(epilogue)
 
             def forward(self, x0, x1, other):
-                res = self.linear(x0, other)
-                res = self.linear2(x1, res)
+                # test qlinear sum -> qlinear sum
+                res = self.epilogue(self.linear(x0) + other)
+                res = self.epilogue2(self.linear2(x1) + res)
                 return res
 
         counters.clear()
@@ -1519,25 +1500,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ref_quantized_mod2, inputs2, strict=True
         ).module()
         atol, rtol = 5e-2, 5e-2
-        # Mark static dimensions to avoid generating ReinterpretView from symbolic shapes
-        torch._dynamo.mark_static(input, input.dim() - 1)  # in_features must be static
-        torch._dynamo.mark_static(other, other.dim() - 1)  # out_features must be static
-        torch._dynamo.mark_static(other2, other2.dim() - 1)
-        torch._dynamo.mark_static(input2, input2.dim() - 1)
-        torch._dynamo.mark_static(input3, input3.dim() - 1)
-        torch._dynamo.mark_static(other_clone, other_clone.dim() - 1)
-
         with (
             patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
             torch.no_grad(),
             torch.autocast("cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16),
         ):
-            ref_res = ref_quantized_mod(input, other.clone(), other2.clone())
+            ref_res = ref_quantized_mod(*inputs)
             cfn = torch.compile(ref_quantized_mod)
-            ref_res2 = ref_quantized_mod2(input2, input3, other_clone.clone())
+            ref_res2 = ref_quantized_mod2(*inputs2)
             cfn2 = torch.compile(ref_quantized_mod2)
 
-            res = cfn(input, other.clone(), other2.clone())
+            res = cfn(*inputs)
             self.assertEqual(
                 res,
                 ref_res,
@@ -1547,7 +1520,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 exact_dtype=True,
             )
 
-            res2 = cfn2(input2, input3, other_clone.clone())
+            res2 = cfn2(*inputs2)
             self.assertEqual(
                 res2,
                 ref_res2,
@@ -1564,7 +1537,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1580,7 +1554,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _static_quantized_linear_module(
+                self.linear = _static_reference_quantized_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=v
                 )
 
@@ -1652,6 +1626,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @requires_onednn
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
@@ -1718,6 +1693,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True, "cpp.enable_concat_linear": True})
     @patches
     @torch.no_grad
+    @requires_onednn
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
@@ -1803,7 +1779,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1887,9 +1864,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        if torch.cpu._is_amx_tile_supported():
-            # Only AMX ISA based micro-kernel is currently supported for da8w8
-            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        # Only AMX ISA based micro-kernel is currently supported for da8w8
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1932,7 +1908,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2003,7 +1980,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.use_small_dequant_buffer": True})
@@ -2046,9 +2024,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             _target_code_check = f"constexpr int64_t Kc_blocks = {group_size // kr};"
             torch._C.FileCheck().check(_target_code_check).run(code)
 
-    @unittest.expectedFailure  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
+    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (5.4x rel diff, 5.8% mismatch)
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2117,9 +2096,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @unittest.expectedFailure  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
+    @xfailIf(IS_ARM64)  # Int4 kernel numerical errors (43.5x rel diff, 10.7% mismatch)
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_concat_linear": True})
@@ -2210,7 +2190,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.gemm_max_k_slices": 0})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (2,))
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (2,))
@@ -2247,7 +2227,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.gemm_cache_blocking": "2,2,2"})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @set_num_threads(1)
     @parametrize("batch_size", (512,))
     @parametrize("in_features", (1024,))
@@ -2276,7 +2256,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.gemm_thread_factors": "4,2,7"})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @set_num_threads(56)
     @parametrize("batch_size", (1024,))
     @parametrize("in_features", (1024,))
@@ -2304,7 +2284,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
@@ -2355,7 +2335,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2406,7 +2387,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2458,7 +2440,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2546,7 +2529,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
@@ -2602,7 +2585,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"coordinate_descent_tuning": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_cpp_coordinate_descent_tuning(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2624,7 +2607,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("batch_size", (2,))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
@@ -2650,7 +2633,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_cpp_weight_prune(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2672,7 +2655,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (1, 50))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))
@@ -2696,7 +2679,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (2,))
     @parametrize("Mdim", (16, 32))
     @parametrize("Kdim", (32,))
@@ -2726,7 +2709,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("bs", (1,))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))
@@ -2752,7 +2736,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (1,))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))
@@ -2777,7 +2761,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("Ndim", (64, 61))
     @parametrize(
         "order",
@@ -2831,7 +2815,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (5,))
     @parametrize("Mdim", (64,))
     @parametrize("Kdim", (96,))
@@ -2853,7 +2837,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
+    @requires_onednn
     @parametrize("bs", (5,))
     @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
@@ -2874,7 +2859,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (5,))
     @parametrize("Mdim", (16,))
     @parametrize("Kdim", (32,))
@@ -2900,7 +2885,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (5,))
     @parametrize("Mdim", (384,))
     @parametrize("Kdim", (96,))
@@ -2937,7 +2922,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @dtypes(torch.float32, torch.bfloat16, torch.half)
     def test_bmm_with_fused_epilogues(self, dtype):
         class M(torch.nn.Module):
@@ -3031,7 +3016,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @set_num_threads(1)  # avoid k_slicing to make the test deterministic
     @parametrize(
         "out_features1",
@@ -3112,7 +3097,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (u, v))
 
     @unittest.skipIf(
-        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
+        "AMX ISA support is required",
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -3198,7 +3184,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (5,))
     @parametrize("Mdim", (384,))
     @parametrize("Kdim", (96,))
@@ -3228,7 +3214,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @parametrize("bs", (5,))
     @parametrize("Mdim", (384,))
     @parametrize("Kdim", (96,))
@@ -3265,7 +3251,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @dtypes(torch.float, torch.bfloat16)
     def test_bmm_epilogue_dynamic_reshape(self, dtype):
         bs = 5
@@ -3325,7 +3311,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
     @patches
     @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_bmm_dynamic_bm_stride(self):
         bs = 8
         Mdim = 256

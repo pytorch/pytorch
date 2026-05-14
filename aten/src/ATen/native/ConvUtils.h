@@ -10,65 +10,81 @@
 
 namespace at::native {
 
+// Shared dispatch signatures. Many backward ops have identical shapes;
+// one alias per shape avoids N near-duplicate typedefs. The stub name passed
+// to DECLARE_DISPATCH is what makes each registration unique.
+
+// 2-output backward (depthwise2d): 4 IntArrayRef params.
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 2>);
-DECLARE_DISPATCH(conv_depthwise2d_backward_fn, conv_depthwise2d_backward_stub)
-using conv_depthwise3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+
+// 3-output backward with 4 IntArrayRef params (depthwise3d, slow_conv_dilated2d/3d).
+using conv_dilated_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(conv_depthwise3d_backward_fn, conv_depthwise3d_backward_stub)
+
+// 3-output slow transpose backward with 5 IntArrayRef params (slow_conv_transpose2d/3d).
+using slow_conv_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
+
+// 3-output backward, forward shape (mps, mkldnn): 3 IARs + groups.
+using conv_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, int64_t, std::array<bool,3>);
+
+// 3-output backward, transpose shape (mkldnn_transpose): 4 IARs + groups.
+using conv_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
+
+// cuDNN backward (2-output, carries benchmark/deterministic/allow_tf32).
 using cudnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub)
-using mps_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mps_convolution_backward_fn, mps_convolution_backward_stub)
 using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub)
+
+// MIOpen backward (3-output, carries benchmark/deterministic).
 using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub)
 using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub)
-using miopen_depthwise_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_depthwise_convolution_backward_fn, miopen_depthwise_convolution_backward_stub)
-using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub)
+
+// MKLDNN forward transpose (not a backward).
 using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const std::optional<Tensor>&,
     IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+
+// Depthwise.
+DECLARE_DISPATCH(conv_depthwise2d_backward_fn, conv_depthwise2d_backward_stub)
+DECLARE_DISPATCH(conv_dilated_backward_fn, conv_depthwise3d_backward_stub)
+
+// cuDNN.
+DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub)
+DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub)
+
+// MPS.
+DECLARE_DISPATCH(conv_backward_fn, mps_convolution_backward_stub)
+
+// MIOpen.
+DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub)
+DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub)
+DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_depthwise_convolution_backward_stub)
+
+// MKLDNN.
+DECLARE_DISPATCH(conv_backward_fn, mkldnn_convolution_backward_stub)
 DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub)
-using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub)
-using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated2d_backward_fn, slow_conv_dilated2d_backward_stub)
-using slow_conv_dilated3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated3d_backward_fn, slow_conv_dilated3d_backward_stub)
-using slow_conv_transpose2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose2d_backward_fn, slow_conv_transpose2d_backward_stub)
-using slow_conv_transpose3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backward_stub)
+DECLARE_DISPATCH(conv_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub)
+
+// Slow conv (CPU reference).
+DECLARE_DISPATCH(conv_dilated_backward_fn, slow_conv_dilated2d_backward_stub)
+DECLARE_DISPATCH(conv_dilated_backward_fn, slow_conv_dilated3d_backward_stub)
+DECLARE_DISPATCH(slow_conv_transpose_backward_fn, slow_conv_transpose2d_backward_stub)
+DECLARE_DISPATCH(slow_conv_transpose_backward_fn, slow_conv_transpose3d_backward_stub)
 
 namespace {
   bool is_cudnnv8_heuristic_mode_b() {
@@ -326,35 +342,35 @@ inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
-  // disable NHWC for float64 input.
-  if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
-      input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
+// Shared logic for memory-format suggestions
+// enabled: backend gate (compiled-with-X && not-float64). If false, return Contiguous.
+// Dispatches by weight.ndim: 4 -> CL, 5 -> CL3d, else Contiguous.
+inline at::MemoryFormat _conv_suggest_memory_format_impl(
+    const at::Tensor& input, const at::Tensor& weight, bool enabled) {
+  if (!enabled) {
     return at::MemoryFormat::Contiguous;
   }
-  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
+  auto input_mf = input.suggest_memory_format();
+  auto weight_mf = weight.suggest_memory_format();
   auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
-  if (can_use_cudnn_channels_last_2d) {
+  if (weight_ndim == 4 &&
+      (input_mf == at::MemoryFormat::ChannelsLast ||
+       weight_mf == at::MemoryFormat::ChannelsLast)) {
     return at::MemoryFormat::ChannelsLast;
   }
-
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
-  if (can_use_cudnn_channels_last_3d) {
+  if (weight_ndim == 5 &&
+      (input_mf == at::MemoryFormat::ChannelsLast3d ||
+       weight_mf == at::MemoryFormat::ChannelsLast3d)) {
     return at::MemoryFormat::ChannelsLast3d;
   }
-
   return at::MemoryFormat::Contiguous;
+}
+
+inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
+  bool enabled = at::detail::getCUDAHooks().compiledWithCuDNN() &&
+      input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
+  return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
 // controls whether emptyCache will be called following cudnn conv benchmarking
@@ -363,39 +379,13 @@ TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
 inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
-  // disable NHWC for float64 input.
-  if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
-      input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
-    return at::MemoryFormat::Contiguous;
-  }
-
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+  bool enabled = at::detail::getCUDAHooks().compiledWithMIOpen() &&
+      input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble;
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen.
   // See https://github.com/pytorch/pytorch/issues/64427.
-  // non static variable is used to be able to change environment variable in runtime for testing
-  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
-
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-  auto weight_ndim = weight.ndimension();
-
-  bool can_use_miopen_channels_last_2d = suggest_nhwc && (weight_ndim == 4) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
-  if (can_use_miopen_channels_last_2d) {
-    return at::MemoryFormat::ChannelsLast;
-  }
-
-  bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
-  if (can_use_miopen_channels_last_3d) {
-    return at::MemoryFormat::ChannelsLast3d;
-  }
-
-  return at::MemoryFormat::Contiguous;
+  // Non-static read so tests can toggle the env var at runtime.
+  enabled &= c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
+  return _conv_suggest_memory_format_impl(input, weight, enabled);
 }
 
 // deprecated, but to remove would be BC-breaking
@@ -403,31 +393,32 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
   return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
 }
 
+// Shared "is either tensor channels-last (2d or 3d)?" check.
+// enabled: backend gate (e.g. dtype/device checks) -- if false, return false.
+// exact_match=true requires exact-stride classification (needed by MPS;
+// see https://github.com/pytorch/pytorch/issues/180984 -- MPS reads raw
+// buffers assuming packed NHWC, so misclassifying a channel slice or
+// degenerate 1x1 weight would corrupt the read).
+inline bool _conv_use_channels_last_impl(
+    const at::Tensor& input, const at::Tensor& weight, bool enabled, bool exact_match) {
+  if (!enabled) {
+    return false;
+  }
+  if (!input.defined() || input.is_sparse()) {
+    return false;
+  }
+  auto is_channel_last = [exact_match](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format(exact_match);
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
+}
+
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // disable NHWC for float64 input.
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
-    return false;
-  }
-
-  // disable NHWC for MkldnnCPU tensor.
-  if (input.is_mkldnn() || weight.is_mkldnn()) {
-    return false;
-  }
-
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-
-  bool can_use_mkldnn_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
-
-  bool can_use_mkldnn_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
-
-  return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
+  // Disable NHWC for float64 input and for MkldnnCPU tensors.
+  bool enabled = input.scalar_type() != at::kDouble && weight.scalar_type() != at::kDouble &&
+      !input.is_mkldnn() && !weight.is_mkldnn();
+  return _conv_use_channels_last_impl(input, weight, enabled, /*exact_match=*/false);
 }
 
 inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
@@ -443,39 +434,13 @@ inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tenso
 }
 
 inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // check layout only for xpu tensor.
-  if (!input.is_xpu() || !weight.is_xpu()) {
-    return false;
-  }
-  if (!input.defined() || input.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format();
-    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
-  };
-  return is_channel_last(input) || is_channel_last(weight);
+  return _conv_use_channels_last_impl(
+      input, weight, input.is_xpu() && weight.is_xpu(), /*exact_match=*/false);
 }
 
 inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
-  // check layout only for mps tensor.
-  if (!input.is_mps() || !weight.is_mps()) {
-    return false;
-  }
-  if (!input.defined() || input.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  auto is_channel_last = [](const at::Tensor& t) {
-    auto fmt = t.suggest_memory_format();
-    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
-  };
-  return is_channel_last(input) || is_channel_last(weight);
+  return _conv_use_channels_last_impl(
+      input, weight, input.is_mps() && weight.is_mps(), /*exact_match=*/true);
 }
 
 } // namespace at::native

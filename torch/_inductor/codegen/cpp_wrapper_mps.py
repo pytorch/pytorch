@@ -45,6 +45,7 @@ class CppWrapperMps(CppWrapperGpu):
         inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
+        current_stream_idx: int | None = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
@@ -218,8 +219,7 @@ class CppWrapperMps(CppWrapperGpu):
         )
 
     @staticmethod
-    def get_device_include_path(device: str) -> str:
-        assert V.graph.aot_mode
+    def get_device_include_path_aot(device: str) -> str:
         return (
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"

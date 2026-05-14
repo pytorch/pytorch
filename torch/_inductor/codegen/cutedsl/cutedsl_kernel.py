@@ -5,6 +5,7 @@ import logging
 import textwrap
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import patch
 
 import sympy
 
@@ -15,6 +16,7 @@ from torch._inductor.codegen.common import (
     CSEVariable,
     IndentedBuffer,
     Kernel,
+    PythonPrinter,
     ValueRanges,
 )
 from torch._inductor.ir import (
@@ -31,7 +33,7 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
-from .cutedsl_op_overrides import CuteDSLOpOverrides
+from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -40,6 +42,7 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+cutedsl_pexpr = PythonPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
@@ -127,9 +130,39 @@ class CuteDSLTemplateKernel(Kernel):
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
 
+        # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
+        # reinterpret_tensor for view captures in the python_argdefs loop.
+        self._capture_input_nodes: dict[str, Any] = {}
+
+    def set_capture_input_nodes(self, nodes_by_name: dict[str, Any]) -> None:
+        """Set captured inputs collected while rendering the CuteDSL template."""
+        self._capture_input_nodes = nodes_by_name
+
+    def _get_capture_input_node(self, name: str) -> Any | None:
+        """Return the IR node for a captured input name, if known."""
+        graph_captures = getattr(V.graph, "_cutedsl_capture_nodes", {})
+        return self._capture_input_nodes.get(name, graph_captures.get(name))
+
+    @contextlib.contextmanager
+    def _patch_get_dtype_for_captures(self):
+        """Teach python_argdefs to resolve synthetic captured input names."""
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name: str) -> torch.dtype:
+            capture = self._get_capture_input_node(name)
+            if capture is not None:
+                return capture.get_dtype()
+            return original_get_dtype(name)
+
+        with patch.object(V.graph, "get_dtype", get_dtype):
+            yield
+
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        return str(expr)
+        return cutedsl_pexpr(expr)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CuteDSLCSEVariable(*args, **kwargs)
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
@@ -289,7 +322,8 @@ class CuteDSLTemplateKernel(Kernel):
             params = [arg_name for arg_name, _ in self._template_input_args]
 
             # Get additional args from python_argdefs (output, sizevars, etc.)
-            arg_defs, _, _, _ = self.args.python_argdefs()
+            with self._patch_get_dtype_for_captures():
+                arg_defs, _, _, _ = self.args.python_argdefs()
             for arg_def in arg_defs:
                 if arg_def.full_name() not in self._seen_input_args:
                     params.append(arg_def.full_name())
@@ -375,14 +409,23 @@ class CuteDSLTemplateKernel(Kernel):
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         # Add additional args from python_argdefs (output, sizevars, ..)
-        orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
+        with self._patch_get_dtype_for_captures():
+            orig_arg_defs, orig_call_args, _, orig_arg_types = (
+                self.args.python_argdefs()
+            )
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
         ):
-            # dedupe
-            if arg_def.full_name() not in self._seen_input_args:
+            if arg_def.full_name() in self._seen_input_args:
+                continue
+            capture = self._get_capture_input_node(call_arg)
+            if isinstance(capture, ReinterpretView):
+                # Pass the original view expression so stride/offset metadata is
+                # preserved at the kernel call site.
+                call_args.append(capture.codegen_reference())
+            else:
                 call_args.append(call_arg)
-                arg_types.append(arg_type)
+            arg_types.append(arg_type)
 
         # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
@@ -491,7 +534,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         if name not in self.fixed_inputs:
             var = self._add_kernel_input(name)
-            buffer = V.graph.get_buffer(name)
+            buffer = self.kernel._get_capture_input_node(name)
+            if buffer is None:
+                buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
@@ -530,6 +575,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 final_expr,
                 dtype=var_dtype,
                 bounds=ValueRanges.unknown(),
+                shape=(1,),
             )
             return out
 
@@ -544,11 +590,19 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
     ) -> str:
         """
-        Convert SSA expression to indexable scalar for tensor loads.
+        Convert expression to indexable scalar for tensor loads.
 
         Workaround for lack of gather support: SSA values cannot be used directly
-        as indices. This generates code to convert SSA → indexable scalar.
+        as indices in tensor loads. This generates code to convert SSA → indexable
+        scalar. Compile-time integer constants are already indexable and are
+        returned directly without the SSA round-trip.
         """
+        # Constant integer expressions (e.g. sympy-folded offsets like "0")
+        # are already valid indices — skip the ssa_to_indexable round-trip
+        # which only accepts TensorSSA, not bare Python ints.
+        if expr_str.lstrip("-").isdigit():
+            return expr_str
+
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
             f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"

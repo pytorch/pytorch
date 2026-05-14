@@ -23,7 +23,7 @@
 namespace torch::jit {
 
 static inline bool PyNone_Check(PyObject* o) {
-  return o == Py_None;
+  return Py_IsNone(o);
 }
 
 std::pair<TypePtr, bool> MergeInferredType(

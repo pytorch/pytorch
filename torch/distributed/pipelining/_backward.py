@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import torch
@@ -140,6 +140,40 @@ def get_param_groups(
     return unique_param_groups
 
 
+def _autograd_grad_for_inputs(
+    outputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor],
+    grad_outputs: Sequence[torch.Tensor | None] | None = None,
+    retain_graph: bool = False,
+    allow_unused: bool = False,
+) -> tuple[torch.Tensor | None, ...]:
+    """Compute input gradients, returning ``None`` for non-grad inputs."""
+    # Some inputs may not be used or may not require gradients, so we filter them out
+    # before calling autograd.grad and place None for those positions in the result.
+    grad_indices: list[int] = []
+    inputs_requiring_grad: list[torch.Tensor] = []
+    for i, inp in enumerate(inputs):
+        if isinstance(inp, torch.Tensor) and inp.requires_grad:
+            grad_indices.append(i)
+            inputs_requiring_grad.append(inp)
+
+    if not inputs_requiring_grad:
+        return tuple(None for _ in inputs)
+
+    grads = torch.autograd.grad(
+        outputs=outputs,
+        inputs=inputs_requiring_grad,
+        grad_outputs=grad_outputs,
+        retain_graph=retain_graph,
+        allow_unused=allow_unused,
+    )
+
+    result: list[torch.Tensor | None] = [None] * len(inputs)
+    for idx, g in zip(grad_indices, grads, strict=True):
+        result[idx] = g
+    return tuple(result)
+
+
 def stage_backward_input(
     stage_outputs_or_loss: list[torch.Tensor],
     output_grads: list[torch.Tensor] | None,
@@ -196,20 +230,20 @@ def stage_backward_input(
             torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
         ]
 
-    # Some inputs may not be used or may not require gradients, so we filter them out
-    input_values = [inp for inp in input_values if inp.requires_grad]
-    dinputs = torch.autograd.grad(
+    dinputs = _autograd_grad_for_inputs(
         stage_outputs_or_loss,
-        inputs=input_values,
-        grad_outputs=output_grads,
+        input_values,
+        output_grads,
         retain_graph=True,
     )
-    # Update the gradients for inputs
+
+    # Accumulate into .grad
     for inp, dinput in zip(input_values, dinputs):
-        if inp.grad is None:
-            inp.grad = dinput
-        else:
-            inp.grad += dinput
+        if isinstance(inp, torch.Tensor) and dinput is not None:
+            if inp.grad is None:
+                inp.grad = dinput
+            else:
+                inp.grad += dinput
 
     # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
     # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory

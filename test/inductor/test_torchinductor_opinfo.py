@@ -196,6 +196,7 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if IS_MACOS and IS_X86:
@@ -221,6 +222,7 @@ inductor_skips["cuda"] = {
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     "_batch_norm_with_update": {f16, f32, f64},
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
 if not SM80OrLater:
@@ -231,11 +233,14 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {}
+inductor_skips["xpu"] = {
+    "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
+}
 
 # torch-xpu-ops: #2956
 inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -246,7 +251,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "multinomial": {f16, f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -264,7 +268,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -284,7 +287,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -300,25 +302,6 @@ inductor_expected_failures_single_sample["xpu"] = {
         i32,
         i64,
     },  # align with cuda.
-    # could not create a primitive
-    "fft.fft": {f16},
-    "fft.fft2": {f16},
-    "fft.fftn": {f16},
-    "fft.hfft": {f16},
-    "fft.hfft2": {f16},
-    "fft.hfftn": {f16},
-    "fft.rfft": {f16},
-    "fft.rfft2": {f16},
-    "fft.rfftn": {f16},
-    "fft.ifft": {f16},
-    "fft.ifft2": {f16},
-    "fft.ifftn": {f16},
-    "fft.ihfft": {f16},
-    "fft.ihfft2": {f16},
-    "fft.ihfftn": {f16},
-    "fft.irfft": {f16},
-    "fft.irfft2": {f16},
-    "fft.irfftn": {f16},
 }
 
 
@@ -1250,6 +1233,7 @@ class TestInductorOpInfo(TestCase):
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
+    @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1287,7 +1271,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1299,7 +1283,7 @@ class TestInductorOpInfo(TestCase):
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 

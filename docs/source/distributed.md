@@ -18,6 +18,66 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.api
+```
+
+```{eval-rst}
+.. autofunction:: get_env_variable_or_raise
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.distributed
+```
+
+```{eval-rst}
+.. autofunction:: get_free_port
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.log_level
+```
+
+```{eval-rst}
+.. autofunction:: get_log_level
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.elastic.utils.logging
+```
+
+```{eval-rst}
+.. autofunction:: get_logger
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.rendezvous
+```
+
+```{eval-rst}
+.. autofunction:: register_rendezvous_handler
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters
+```
+
+```{eval-rst}
+.. autofunction:: average_parameters_or_parameter_groups
+```
+
+```{eval-rst}
+.. autofunction:: get_params_to_average
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed
+```
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
@@ -343,11 +403,27 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: get_backend_config
+```
+
+```{eval-rst}
 .. autofunction:: get_rank
 ```
 
 ```{eval-rst}
 .. autofunction:: get_world_size
+```
+
+```{eval-rst}
+.. autofunction:: get_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: get_node_local_rank
+```
+
+```{eval-rst}
+.. autofunction:: get_pg_count
 ```
 
 ## Shutdown
@@ -409,6 +485,14 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```{eval-rst}
 .. autofunction:: get_process_group_ranks
 
+```
+
+```{eval-rst}
+.. autofunction:: split_group
+```
+
+```{eval-rst}
+.. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
 ## DeviceMesh
@@ -533,6 +617,10 @@ if rank == 0:
 ```
 
 ```{eval-rst}
+.. autofunction:: all_reduce_coalesced
+```
+
+```{eval-rst}
 .. autofunction:: reduce
 ```
 
@@ -546,6 +634,10 @@ if rank == 0:
 
 ```{eval-rst}
 .. autofunction:: all_gather_object
+```
+
+```{eval-rst}
+.. autofunction:: all_gather_coalesced
 ```
 
 ```{eval-rst}
@@ -663,6 +755,10 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.record_comm
+```
+
 ## Optimization with Symmetric Memory
 
 ### Copy Engine Collectives
@@ -757,6 +853,85 @@ the new backend.
 :::{warning}
 The support of third-party backend is experimental and subject to change.
 :::
+
+## TorchComms backend
+
+[TorchComms](https://github.com/meta-pytorch/torchcomms) is an optional
+communication backend for ``torch.distributed``. When enabled, it
+overrides the normal backend instantiation in {func}`init_process_group`
+so that all process groups are created through TorchComms instead of
+the built-in ``ProcessGroup`` implementations.
+
+:::{note}
+TorchComms is experimental and must be installed separately.
+The ``torchcomms`` package must be importable for the flags below to
+take effect.
+:::
+
+### Enabling TorchComms
+
+Set the ``TORCH_DISTRIBUTED_USE_TORCHCOMMS`` environment variable
+before calling {func}`init_process_group`:
+
+```bash
+export TORCH_DISTRIBUTED_USE_TORCHCOMMS=1
+```
+
+Or set the config flag programmatically:
+
+```python
+import torch.distributed.config as dist_config
+
+dist_config.use_torchcomms = True
+```
+
+The ``backend`` argument to {func}`init_process_group` (e.g. ``"nccl"``,
+``"gloo"``) is still respected -- it is forwarded to TorchComms, which
+selects the corresponding vendor plugin. No other application code
+changes are required; all ``torch.distributed`` collective APIs continue
+to work as before.
+
+### Behavior when enabled
+
+When TorchComms is enabled, {func}`init_process_group` changes its
+backend instantiation path for every device/backend pair in the process
+group (except the ``fake`` backend, which is always handled natively):
+
+1. A TorchComms communicator is created via ``torchcomms.new_comm()``
+   using the requested backend string and device.
+2. The communicator is wrapped in a ``_BackendWrapper`` that implements
+   the ``c10d::Backend`` C++ interface, making it a drop-in replacement
+   for the native ``ProcessGroup`` backends.
+3. A ``FlightRecorderHook`` is automatically registered on the
+   communicator. The hook respects the ``TORCH_FR_BUFFER_SIZE`` and
+   ``TORCH_NCCL_TRACE_BUFFER_SIZE`` environment variables for
+   configuring the trace buffer size.
+4. {func}`destroy_process_group` calls ``finalize()`` on TorchComms
+   communicators during cleanup.
+5. {func}`split_group` creates sub-communicators through TorchComms'
+   native splitting rather than constructing a new process group from
+   scratch.
+
+### Eager initialization
+
+TorchComms communicators are eagerly initialized during
+{func}`init_process_group` and only support a single backend device per
+group. The ``device_id`` argument must be specified at initialization
+time:
+
+```python
+dist.init_process_group(backend="nccl", device_id=torch.device("cuda", local_rank))
+```
+
+### Point-to-point operation concurrency
+
+Each TorchComms process group maps 1:1 to a single underlying
+communicator. Point-to-point operations (``send``/``recv``) issued on
+the same group and stream are **not guaranteed to run concurrently**.
+Code that relies on concurrent point-to-point operations must either:
+
+- Use the batched P2P APIs ({func}`batch_isend_irecv`), or
+- Issue the operations on separate groups or communicators.
 
 (distributed-launch)=
 
@@ -1255,6 +1430,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.collective_utils
+
+.. autofunction:: torch.distributed.collective_utils.all_gather_object_enforce_type
 ```
 
 ```{eval-rst}

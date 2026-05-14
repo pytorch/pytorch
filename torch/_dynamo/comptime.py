@@ -210,9 +210,10 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert not val.is_dynamic(), (
-            "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
-        )
+        if val.is_dynamic():
+            raise AssertionError(
+                "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+            )
 
     def print_graph(self, *, verbose: bool = True, file: TextIO | None = None) -> None:
         """
@@ -228,7 +229,7 @@ class ComptimeContext:
 
     def __get_tx(self, stacklevel: int) -> Any:
         tx = self.__tx
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore [bad-assignment, non-convergent-recursion]
         for _ in range(stacklevel):
             tx = tx.parent  # type: ignore[assignment]
         return tx

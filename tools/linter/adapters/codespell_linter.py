@@ -142,7 +142,7 @@ def check_dictionary(filename: str) -> list[LintMessage]:
         words_set = set(words)
         if len(words) != len(words_set):
             raise ValueError("The dictionary file contains duplicate entries.")
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         uncased_words = list(map(str.lower, words))
         if uncased_words != sorted(uncased_words):
             raise ValueError(
