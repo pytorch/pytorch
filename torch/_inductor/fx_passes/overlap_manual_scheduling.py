@@ -312,8 +312,9 @@ class ManualOverlapScheduler(OverlapScheduler):
                 last_compute = node
 
         if last_compute is not None:
-            ancestors_view = self.node_ancestors[last_compute]
-            if not any(ag in ancestors_view for ag in picked_ag):
+            if not any(
+                self.node_ancestors.is_ancestor(ag, last_compute) for ag in picked_ag
+            ):
                 for ag in picked_ag:
                     overlap_deps[last_compute].add(ag)
 

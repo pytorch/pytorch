@@ -2330,84 +2330,93 @@ class TestBitsetAncestors(TestCase):
         return g, [a, b, c, d, e]
 
     def test_membership(self):
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        self.assertIn(a, ancestors[b])
-        self.assertIn(a, ancestors[c])
-        self.assertIn(a, ancestors[d])
-        self.assertIn(b, ancestors[d])
-        self.assertIn(c, ancestors[d])
-        self.assertIn(a, ancestors[e])
-        self.assertIn(d, ancestors[e])
+        self.assertTrue(ancestors.is_ancestor(a, b))
+        self.assertTrue(ancestors.is_ancestor(a, c))
+        self.assertTrue(ancestors.is_ancestor(a, d))
+        self.assertTrue(ancestors.is_ancestor(b, d))
+        self.assertTrue(ancestors.is_ancestor(c, d))
+        self.assertTrue(ancestors.is_ancestor(a, e))
+        self.assertTrue(ancestors.is_ancestor(d, e))
 
-        self.assertNotIn(b, ancestors[c])
-        self.assertNotIn(c, ancestors[b])
-        self.assertNotIn(d, ancestors[a])
-        self.assertNotIn(e, ancestors[a])
+        self.assertFalse(ancestors.is_ancestor(b, c))
+        self.assertFalse(ancestors.is_ancestor(c, b))
+        self.assertFalse(ancestors.is_ancestor(d, a))
+        self.assertFalse(ancestors.is_ancestor(e, a))
 
     def test_empty_ancestors(self):
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        self.assertEqual(len(ancestors[a]), 0)
+        self.assertEqual(list(ancestors.iter_ancestors(a)), [])
 
     def test_iteration(self):
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        d_ancestors = list(ancestors[d])
+        d_ancestors = list(ancestors.iter_ancestors(d))
         self.assertEqual(len(d_ancestors), 3)
         self.assertIn(a, d_ancestors)
         self.assertIn(b, d_ancestors)
         self.assertIn(c, d_ancestors)
 
     def test_len(self):
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        self.assertEqual(len(ancestors[a]), 0)
-        self.assertEqual(len(ancestors[b]), 1)
-        self.assertEqual(len(ancestors[d]), 3)
-        self.assertEqual(len(ancestors[e]), 4)
+        self.assertEqual(len(list(ancestors.iter_ancestors(a))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(b))), 1)
+        self.assertEqual(len(list(ancestors.iter_ancestors(d))), 3)
+        self.assertEqual(len(list(ancestors.iter_ancestors(e))), 4)
+
+    def test_has_dep(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertTrue(ancestors.has_dep(a, d))
+        self.assertTrue(ancestors.has_dep(d, a))
+        self.assertFalse(ancestors.has_dep(b, c))
+        self.assertFalse(ancestors.has_dep(c, b))
 
     def test_intersection(self):
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        """White-box test: verifies raw _bits AND matches expected common ancestors."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g, [a, b, c, d, e] = self._make_graph()
         ancestors = BitsetAncestors([a, b, c, d, e])
 
-        common = ancestors[d] & ancestors[e]
-        self.assertEqual(len(common), 3)
-        self.assertIn(a, common)
-        self.assertIn(b, common)
-        self.assertIn(c, common)
+        d_idx = ancestors._node_to_idx[d]
+        e_idx = ancestors._node_to_idx[e]
+        common_bits = ancestors._bits[d_idx] & ancestors._bits[e_idx]
+        self.assertEqual(common_bits.bit_count(), 3)
 
     def test_extra_inputs(self):
         """Extra edges beyond the FX graph (e.g. hiding-interval deps)."""
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
         from torch.utils._ordered_set import OrderedSet
 
         g, [a, b, c, d, e] = self._make_graph()
         extra = {e: OrderedSet([c])}
         ancestors = BitsetAncestors([a, b, c, d, e], extra_inputs=extra)
 
-        # c is now a direct extra input of e, so c and its ancestor a are ancestors of e
-        # (they were already ancestors via d, but this tests the extra_inputs path)
-        self.assertIn(c, ancestors[e])
-        self.assertIn(a, ancestors[e])
+        self.assertTrue(ancestors.is_ancestor(c, e))
+        self.assertTrue(ancestors.is_ancestor(a, e))
 
     def test_linear_chain(self):
         """N-node linear chain: node i's ancestors are 0..i-1."""
-        from torch._inductor.fx_passes.overlap_scheduling import BitsetAncestors
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         g = fx.Graph()
         nodes = [g.placeholder("x")]
@@ -2416,11 +2425,11 @@ class TestBitsetAncestors(TestCase):
         g.output(nodes[-1])
 
         ancestors = BitsetAncestors(nodes)
-        self.assertEqual(len(ancestors[nodes[0]]), 0)
-        self.assertEqual(len(ancestors[nodes[50]]), 50)
-        self.assertEqual(len(ancestors[nodes[99]]), 99)
-        self.assertIn(nodes[0], ancestors[nodes[99]])
-        self.assertNotIn(nodes[99], ancestors[nodes[0]])
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[0]))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[50]))), 50)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[99]))), 99)
+        self.assertTrue(ancestors.is_ancestor(nodes[0], nodes[99]))
+        self.assertFalse(ancestors.is_ancestor(nodes[99], nodes[0]))
 
 
 if __name__ == "__main__":

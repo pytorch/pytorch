@@ -1277,6 +1277,9 @@ class aten_distributed_optimizations:
     # copy engine instead of SMs, freeing SMs for overlapping compute.
     enable_low_contention_collectives: bool = False
 
+    # Replace collectives unconditionally, without checking for overlap.
+    low_contention_skip_overlap_check: bool = False
+
     # Minimum per-rank bytes for LC replacement. Below this, LC barrier
     # overhead exceeds the benefit. Set to 0 to disable.
     low_contention_min_bytes_per_rank: int = 16 * 1024 * 1024
@@ -2088,6 +2091,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_ALLOW_MULTI_STAGES", "1")
         == "1"
     )
+
+    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
+    # by per-block amax over a small group dimension like FP8 block size)
+    # into a single kernel with two sequential reduction passes.
+    nested_reduction = False
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder

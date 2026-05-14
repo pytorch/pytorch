@@ -19,13 +19,13 @@ from torch._inductor.fx_passes.bucketing import (
 )
 from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather
 from torch._inductor.fx_passes.overlap_scheduling import (
-    BitsetAncestors,
     CollBucket,
     CollectiveInfo,
     get_group_name,
     is_compute_node,
     log as overlap_scheduling_log,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -534,7 +534,7 @@ class OverlapPreservingBucketer:
 
     def _ancestor_dep(self, n1: fx.Node, n2: fx.Node) -> bool:
         """Check if there's an ancestor relationship between two nodes."""
-        return n1 in self.node_ancestors[n2] or n2 in self.node_ancestors[n1]
+        return self.node_ancestors.has_dep(n1, n2)
 
     def _get_intervals(
         self, event: PGEvent
@@ -827,28 +827,22 @@ class OverlapPreservingBucketer:
         candidate_wait = candidate_info.wait_node
 
         for coll in bucket_info.collectives:
-            if (
-                coll in self.node_ancestors[candidate]
-                or candidate in self.node_ancestors[coll]
-            ):
+            if self.node_ancestors.has_dep(coll, candidate):
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if (
-                coll_wait in self.node_ancestors[candidate_wait]
-                or candidate_wait in self.node_ancestors[coll_wait]
-            ):
+            if self.node_ancestors.has_dep(coll_wait, candidate_wait):
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if candidate_wait in self.node_ancestors[old_hiding_node]:
+                if self.node_ancestors.is_ancestor(candidate_wait, old_hiding_node):
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if coll_wait in self.node_ancestors[new_hiding_node]:
+                if self.node_ancestors.is_ancestor(coll_wait, new_hiding_node):
                     return True
 
         return False
