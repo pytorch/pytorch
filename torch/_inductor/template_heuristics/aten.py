@@ -9,6 +9,7 @@ from ..kernel.mm import (
     aten__fp8_mm,
     aten__int_mm,
     aten_addmm,
+    aten_addmm_dtype,
     aten_bias_addmm,
     aten_mm,
     aten_mm_dtype,
@@ -57,6 +58,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 # None here indicates that this is valid for all device types on that op
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+@register_template_heuristic(aten_addmm_dtype.uid, "cuda", op_name="addmm")
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
@@ -86,6 +88,9 @@ class ATenBiasAddMMConfigHeuristics(
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
-        # Conditions should be checked in tuned_addmm before adding this template
-        assert bias.get_stride()[0] == 0 and inductor_config.triton.autotune_cublasLt
+        assert (
+            len(bias.get_size()) == 2
+            and bias.get_stride()[0] == 0
+            and inductor_config.triton.autotune_cublasLt
+        )
         yield from super()._get_template_configs_impl(kernel_inputs, op_name)

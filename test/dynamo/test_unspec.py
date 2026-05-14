@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import math
 import random
 import unittest
@@ -11,8 +12,9 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import requires_cuda, skipIfWindows
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -62,50 +64,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @requires_cuda
-    def test_no_recompilations_with_efficient_attention(self):
-        def fn(q, k, v, attn_mask):
-            from torch.nn.attention import sdpa_kernel, SDPBackend
-            from torch.nn.functional import scaled_dot_product_attention
-
-            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-                return scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_mask, scale=1.0
-                )
-
-        def make_q_k_v_mask(batch, num_heads, head_dim, seq_len_kv):
-            from collections import namedtuple
-            from functools import partial
-
-            dtype = torch.float16
-            device = "cuda"
-            make_tensor = partial(
-                torch.rand, device=device, dtype=dtype, requires_grad=True
-            )
-            seq_len_q = 64
-            SdpaShape = namedtuple(
-                "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
-            )
-            query = make_tensor(SdpaShape(batch, num_heads, seq_len_q, head_dim))
-            kv_shape = SdpaShape(batch, num_heads, seq_len_kv, head_dim)
-            key, value = make_tensor(kv_shape), make_tensor(kv_shape)
-            mask = torch.randn(
-                (batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype
-            )
-
-            return query, key, value, mask
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-
-        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 15)
-        opt_fn(q, k, v, mask)
-
-        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 16)
-        opt_fn(q, k, v, mask)
-
-        self.assertEqual(cnts.frame_count, 1)
-
     @unittest.expectedFailure  # array scalars decay to 0D arrays
     def test_builtin_max_min(self):
         # test unspecialized primitive max/min
@@ -124,7 +82,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):
             torch.manual_seed(123)
-            x = torch.randn(shape, device="cpu") * random.randint(30, 100)
+            x = torch.randn(shape) * random.randint(30, 100)
             return x
 
         shape = [2, 3]
@@ -314,6 +272,75 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y2 = opt_fn(inp, *get_rng())
         self.assertEqual(y1, y2)
 
+    def test_random_in_dynamo(self):
+        # test that system random calls still work even
+        # if Dynamo calls random methods.
+
+        exit_stack = contextlib.ExitStack()
+
+        def patch_fn_with_rng_burn(name):
+            orig_fn = eval(name)
+
+            def bad(*args, **kwargs):
+                # burn random call within dynamo
+                random.random()
+                return orig_fn(*args, **kwargs)
+
+            exit_stack.enter_context(unittest.mock.patch(name, bad))
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+        # we don't guard against random calls in eval_frame.py today
+        # patch_fn_with_rng_burn("torch._dynamo.eval_frame._maybe_set_eval_frame")
+        patch_fn_with_rng_burn("torch._dynamo.convert_frame._compile")
+        patch_fn_with_rng_burn(
+            "torch._dynamo.symbolic_convert.InstructionTranslator.run"
+        )
+
+        def f1(x):
+            # simple test
+            r1 = random.randint(1, 9)
+            y = x + random.uniform(10, 20)
+            r2 = random.randrange(0, 10)
+            return y + r1, r2
+
+        random.seed(1)
+        ref1 = f1(x)
+        opt_f1 = torch.compile(f1, backend="eager", fullgraph=True)
+        random.seed(1)
+        res1 = opt_f1(x)
+        self.assertEqual(ref1, res1)
+
+        def f2(x):
+            # test with graph breaks
+            r1 = random.randint(1, 9)
+            x = x + r1
+            torch._dynamo.graph_break()
+            r2 = random.randint(10, 19)
+            x = x + r2
+            return x, r1, r2
+
+        random.seed(2)
+        ref2 = f2(x)
+        opt_f2 = torch.compile(f2, backend="eager")
+        random.seed(2)
+        res2 = opt_f2(x)
+        self.assertEqual(ref2, res2)
+
+        def f3(x):
+            # test consecutive calls
+            return x + random.randint(1, 10)
+
+        random.seed(3)
+        ref3 = f3(x)
+        ref3_ = f3(x)
+        opt_f3 = torch.compile(f3, backend="eager", fullgraph=True)
+        random.seed(3)
+        res3 = opt_f3(x)
+        res3_ = opt_f3(x)
+        self.assertEqual(ref3, res3)
+        self.assertEqual(ref3_, res3_)
+
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -487,7 +514,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return z
 
         z = fn(x)
-        self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
+        self.assertEqual(z._dynamo_propagated_dynamic_indices, {0})
 
     def test_rshift_dynamic(self):
         def shift_right(tensor: torch.Tensor) -> torch.Tensor:
@@ -528,7 +555,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_to_tensor(self):
         def f1():
             a = np.random.uniform(low=-1, high=1, size=(20, 1))
-            return torch.tensor([a, a, a, a], dtype=torch.float64, device="cpu")
+            return torch.tensor([a, a, a, a], dtype=torch.float64)
 
         def f2():
             a = torch.tensor([[[123]]])
@@ -915,8 +942,83 @@ def forward(self):
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
 
+    def test_float_guard_source_on_recompile(self):
+        # Regression test: when a float attribute triggers recompilation and
+        # becomes dynamic, the guard produced by produce_guards_verbose should
+        # have a proper source annotation, not "(unknown source)".
+        cache = {}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            for key in [1.0, 2.0, 3.0]:
+                model = torch.compile(Module(key))
+                model(x)
+
+        guard_log = log_stream.getvalue()
+        self.assertNotIn("unknown source", guard_log)
+
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Platform does not support efficient attention",
+    )
+    def test_no_recompilations_with_efficient_attention(self, device):
+        if self.device_type == "cpu":
+            raise unittest.SkipTest("EFFICIENT_ATTENTION requires a non-CPU device")
+
+        def fn(q, k, v, attn_mask):
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            from torch.nn.functional import scaled_dot_product_attention
+
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                return scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, scale=1.0
+                )
+
+        def make_q_k_v_mask(batch, num_heads, head_dim, seq_len_kv):
+            from collections import namedtuple
+            from functools import partial
+
+            dtype = torch.float16
+            make_tensor = partial(
+                torch.rand, device=device, dtype=dtype, requires_grad=True
+            )
+            seq_len_q = 64
+            SdpaShape = namedtuple(
+                "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
+            )
+            query = make_tensor(SdpaShape(batch, num_heads, seq_len_q, head_dim))
+            kv_shape = SdpaShape(batch, num_heads, seq_len_kv, head_dim)
+            key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+            mask = torch.randn(
+                (batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype
+            )
+
+            return query, key, value, mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 15)
+        opt_fn(q, k, v, mask)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 16)
+        opt_fn(q, k, v, mask)
+
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_builtin_functions_on_device(self, device):
         def fn(x, scaler):
             m = torch.nn.ReLU()
@@ -928,16 +1030,13 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         scaler = 0.23  # 0.23 is unspecialized
         ref = fn(x, scaler)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, scaler)
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
 
 
-devices = ["cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(UnspecTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

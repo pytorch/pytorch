@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 """Provide an API for writing protocol buffers to event files to be consumed by TensorBoard for visualization."""
+from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -300,11 +301,11 @@ class SummaryWriter:
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
-              name of the hyper parameter and it's corresponding value.
+              name of the hyper parameter and its corresponding value.
               The type of the value can be one of `bool`, `string`, `float`,
               `int`, or `None`.
             metric_dict (dict): Each key-value pair in the dictionary is the
-              name of the metric and it's corresponding value. Note that the key used
+              name of the metric and its corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
@@ -728,7 +729,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", list["Figure"]],
+        figure: Figure | list[Figure],
         global_step: int | None = None,
         close: bool = True,
         walltime: float | None = None,

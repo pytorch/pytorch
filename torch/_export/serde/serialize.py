@@ -152,6 +152,9 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.float8_e5m2: ScalarType.FLOAT8E5M2,
     torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
+    torch.float8_e8m0fnu: ScalarType.FLOAT8E8M0FNU,
+    torch.uint32: ScalarType.UINT32,
+    torch.uint64: ScalarType.UINT64,
 }
 
 
@@ -892,7 +895,7 @@ class GraphModuleSerializer(metaclass=Final):
 
                 constexpr_keys = {p.name for p in kernel.params if p.is_constexpr}
                 found_constexpr = False
-                args_new = ()
+                inputs_new = []
                 i = 0
 
                 if not isinstance(node.kwargs["kwargs"], dict):
@@ -914,7 +917,13 @@ class GraphModuleSerializer(metaclass=Final):
 
                     if k in output_keys:
                         output_indices.append(i)
-                    args_new += (v,)  # type: ignore[assignment]
+                    inputs_new.append(
+                        NamedArgument(
+                            name=k,
+                            arg=self.serialize_input(v),
+                            kind=ArgumentKind.POSITIONAL,
+                        )
+                    )
                     i += 1
 
                 if not isinstance(node.kwargs["grid"], list):
@@ -979,7 +988,15 @@ class GraphModuleSerializer(metaclass=Final):
                 ex_node = Node(
                     name=node.name,
                     target=self.serialize_operator(node.target),
-                    inputs=self.serialize_hoo_inputs(args_new, kwargs_new),
+                    inputs=inputs_new
+                    + [
+                        NamedArgument(
+                            name=name,
+                            arg=self.serialize_input(a),
+                            kind=ArgumentKind.KEYWORD,
+                        )
+                        for name, a in kwargs_new.items()
+                    ],
                     outputs=self.serialize_hoo_outputs(node),
                     metadata=self.serialize_metadata(node),
                     is_hop_single_tensor_return=_is_hop_single_tensor_return(node),
@@ -1016,6 +1033,16 @@ class GraphModuleSerializer(metaclass=Final):
                 target=f"#{namespace}:{op_name}",
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
+                metadata=self.serialize_metadata(node),
+            )
+        elif callable(node.target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
+            # as plain Python function call_function nodes in pre_dispatch graphs.
+            ex_node = Node(
+                name=node.name,
+                target=self.serialize_operator(node.target),
+                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
         else:
@@ -1274,7 +1301,7 @@ class GraphModuleSerializer(metaclass=Final):
                     )
                 elif type(attr).__name__ == "LoweredBackendModule":
                     # Special handling for executorch_call_delegate HOP
-                    # It's first argument is a LoweredBackendModule, for which we
+                    # Its first argument is a LoweredBackendModule, for which we
                     # serialize name and backend id of the lowered module
                     module_name = getattr(attr, "module_name", None)
                     backend_id = getattr(attr, "backend_id", None)
@@ -1519,6 +1546,12 @@ class GraphModuleSerializer(metaclass=Final):
             ):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
+            elif all(
+                isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
+                for a in arg
+            ):
+                # list of float lists (List[List[float]])
+                return Argument.create(as_float_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -1954,7 +1987,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
-            elif isinstance(meta, FakeTensor):
+            elif isinstance(meta, torch.Tensor):
                 if not isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
                 ):
@@ -1975,17 +2008,15 @@ class GraphModuleSerializer(metaclass=Final):
                         f"expected ListType with TensorType element, got {type(return_schema.real_type).__name__}"
                     )
                 user_node = self._output_node_at_index(node, idx)
-                if user_node is None:
-                    raise AssertionError(
-                        f"user_node should not be None for list output at index {idx}"
-                    )
-
                 args = []
                 for i, m in enumerate(meta):
                     if m is None:
                         continue
-                    sub_user_node_name = self._output_node_name_at_index(user_node, i)
-                    args.append(self.serialize_tensor_output(sub_user_node_name, m))
+                    if user_node is None:
+                        name = f"{node.name}_unused_{idx}_{i}"
+                    else:
+                        name = self._output_node_name_at_index(user_node, i)
+                    args.append(self.serialize_tensor_output(name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
             elif isinstance(meta, (int, SymInt, float, SymFloat)):
                 user_node_name = self._output_node_name_at_index(node, idx)
@@ -2009,11 +2040,6 @@ class GraphModuleSerializer(metaclass=Final):
                 user_node = self._output_node_at_index(node, i)
                 if isinstance(element_meta_val, list):
                     # e.g "-> Tensor[]"
-                    if user_node is None:
-                        raise AssertionError(
-                            f"user_node should not be None for list output at index {i}"
-                        )
-
                     tensors = []
                     for j, m in enumerate(element_meta_val):
                         if not isinstance(m, torch.Tensor):
@@ -2021,7 +2047,10 @@ class GraphModuleSerializer(metaclass=Final):
                                 f"Serialize list output with type {type(m)} nyi"
                             )
 
-                        name = self._output_node_name_at_index(user_node, j)
+                        if user_node is None:
+                            name = f"{node.name}_unused_{i}_{j}"
+                        else:
+                            name = self._output_node_name_at_index(user_node, j)
                         tensors.append(self.serialize_tensor_output(name, m))
                     outputs.append(Argument.create(as_tensors=tensors))
 
@@ -2178,7 +2207,14 @@ class ExportedProgramSerializer(metaclass=Final):
 
         self.pickle_protocol = pickle_protocol
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
+    def serialize(
+        self,
+        exported_program: ep.ExportedProgram,
+        *,
+        serialize_state_dict: bool = True,
+        serialize_constants: bool = True,
+        serialize_example_inputs: bool = True,
+    ) -> _SerializedProgram:
         """
         Args:
             exported_program: Exported Program to serialize
@@ -2222,13 +2258,29 @@ class ExportedProgramSerializer(metaclass=Final):
         new_state_dict = remove_proxy_from_state_dict(
             exported_program.state_dict, in_place=False
         )
+        serialized_state_dict = b""
+        if serialize_state_dict:
+            serialized_state_dict = serialize_torch_artifact(
+                new_state_dict, self.pickle_protocol
+            )
+
+        serialized_constants = b""
+        if serialize_constants:
+            serialized_constants = serialize_torch_artifact(
+                constants, self.pickle_protocol
+            )
+
+        serialized_example_inputs = b""
+        if serialize_example_inputs:
+            serialized_example_inputs = serialize_torch_artifact(
+                exported_program.example_inputs, self.pickle_protocol
+            )
+
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(new_state_dict, self.pickle_protocol),
-            serialize_torch_artifact(constants, self.pickle_protocol),
-            serialize_torch_artifact(
-                exported_program.example_inputs, self.pickle_protocol
-            ),
+            serialized_state_dict,
+            serialized_constants,
+            serialized_example_inputs,
         )
 
 
@@ -2550,11 +2602,21 @@ class GraphModuleDeserializer(metaclass=Final):
         output_node = self.graph.output(outputs)
 
         if serialized_graph.is_single_tensor_return:
-            output_node.meta["val"] = output_node.args[0].meta["val"]
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, torch.fx.Node):
+                raise AssertionError(
+                    f"Expected Node for single tensor return, got {type(first_arg)}"
+                )
+            output_node.meta["val"] = first_arg.meta["val"]
         else:
+            first_arg = output_node.args[0]
+            if not isinstance(first_arg, (tuple, list)):
+                raise AssertionError(
+                    f"Expected tuple/list for multi tensor return, got {type(first_arg)}"
+                )
             output_node.meta["val"] = tuple(
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in output_node.args[0]
+                for arg in first_arg
             )
 
         # recompute unbacked bindings
@@ -2658,6 +2720,14 @@ class GraphModuleDeserializer(metaclass=Final):
                 )
 
             args, kwargs = self.deserialize_inputs(target, serialized_node)
+            fx_node = self.graph.create_node(
+                "call_function", target, args, kwargs, name
+            )
+            self.deserialize_outputs(serialized_node, fx_node)
+        elif callable(target):
+            # Handle predispatch wrapper functions (vmap, JVP, etc.)
+            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
             )
@@ -3003,10 +3073,10 @@ class GraphModuleDeserializer(metaclass=Final):
         args = []
         kwargs = {}
         for input_ in inputs:
-            if input_.name != "":
-                kwargs[input_.name] = self.deserialize_input(input_.arg)
-            else:
+            if input_.kind == ArgumentKind.POSITIONAL or input_.name == "":
                 args.append(self.deserialize_input(input_.arg))
+            else:
+                kwargs[input_.name] = self.deserialize_input(input_.arg)
         return (tuple(args), kwargs)
 
     def deserialize_input(self, inp: Argument) -> Any:
@@ -3074,6 +3144,8 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
+            elif typ_ == "as_float_lists":
+                return [list(floats) for floats in value]
             elif typ_ == "as_nested_tensors":
                 # nested list of tensors (List[List[Tensor]])
                 return [
@@ -3593,11 +3665,20 @@ def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    *,
+    serialize_state_dict: bool = True,
+    serialize_constants: bool = True,
+    serialize_example_inputs: bool = True,
 ) -> SerializedArtifact:
     with _enable_graph_inputs_of_type_nn_module(exported_program.example_inputs):
         serialized_program = ExportedProgramSerializer(
             opset_version, pickle_protocol
-        ).serialize(exported_program)
+        ).serialize(
+            exported_program,
+            serialize_state_dict=serialize_state_dict,
+            serialize_constants=serialize_constants,
+            serialize_example_inputs=serialize_example_inputs,
+        )
     if not isinstance(serialized_program.exported_program, ExportedProgram):
         raise AssertionError(
             f"expected ExportedProgram, got {type(serialized_program.exported_program).__name__}"
@@ -3762,6 +3843,8 @@ def _canonicalize_graph(
         elif a.type == "as_operator":
             return None
         elif a.type == "as_int_lists":
+            return None
+        elif a.type == "as_float_lists":
             return None
         elif a.type == "as_string_to_argument":
             return None

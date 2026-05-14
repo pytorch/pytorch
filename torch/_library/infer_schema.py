@@ -8,7 +8,11 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_reference_type, is_opaque_type
+from .opaque_object import (
+    _resolve_opaque_type_info,
+    is_opaque_reference_type,
+    is_opaque_type,
+)
 
 
 # This is used as a negative test for
@@ -127,7 +131,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type].class_name
+                schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -230,7 +234,7 @@ def derived_types(
 
     def derived_seq_types(typ: type | typing._SpecialForm):
         return (
-            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
+            typing.Sequence[typ],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),
@@ -300,7 +304,7 @@ def parse_return(annotation, error_fn):
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
             if is_opaque_reference_type(annotation):
-                return _OPAQUE_TYPES[annotation].class_name
+                return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
@@ -319,7 +323,7 @@ def parse_return(annotation, error_fn):
     def _return_type_str(arg):
         if ty := SUPPORTED_RETURN_TYPES.get(arg):
             return ty
-        return _OPAQUE_TYPES[arg].class_name
+        return _resolve_opaque_type_info(arg).class_name  # type: ignore[union-attr]
 
     output_ty = ", ".join(_return_type_str(arg) for arg in args)
 
@@ -343,14 +347,11 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
-    type_args = getattr(tuple_type, "__args__", None)
-    # Account for different python versions, e.g. python 3.8 would give ()
-    # but python 3.12 would give None.
+    type_args = typing.get_args(tuple_type)
     if (
         tuple_type is typing.Tuple  # noqa: UP006
         or tuple_type is tuple
-        or type_args == ()
-        or type_args is None
+        or not type_args
     ):
         # Handle the case of an empty tuple type
         return list
@@ -360,4 +361,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP045
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP007

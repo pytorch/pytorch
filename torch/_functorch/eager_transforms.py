@@ -14,15 +14,12 @@ from typing_extensions import ParamSpec, TypeVar
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch._C._functorch import (
-    _assert_wrapped_functional,  # type: ignore[attr-defined]
-    _func_decrement_nesting,  # type: ignore[attr-defined]
-    _func_increment_nesting,  # type: ignore[attr-defined]
+    _assert_wrapped_functional,
+    _func_decrement_nesting,
+    _func_increment_nesting,
     _grad_decrement_nesting,
     _grad_increment_nesting,
-    _jvp_decrement_nesting,
-    _jvp_increment_nesting,
-    _propagate_functional_input_mutation,  # type: ignore[attr-defined]
-    _unwrap_for_grad,
+    _propagate_functional_input_mutation,
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -30,6 +27,11 @@ from torch._C._functorch import (
     get_unwrapped,
     is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
+)
+from torch._functorch.predispatch import (
+    _jvp_decrement_nesting,
+    _jvp_increment_nesting,
+    _unwrap_for_grad,
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -336,6 +338,23 @@ def vjp(
 
 
 @contextlib.contextmanager
+def _disable_inference_mode() -> Generator[None, None, None]:
+    # Disable inference_mode without clobbering grad_mode / fw_grad_mode.
+    # torch.inference_mode(False) unconditionally sets grad_mode=True and
+    # fw_grad_mode=True; we save and restore those to avoid that.
+    # No-op when inference_mode is already off.
+    if not torch.is_inference_mode_enabled():
+        yield
+        return
+    prev_grad = torch.is_grad_enabled()
+    prev_fw_grad = torch._C._is_fwd_grad_enabled()
+    with torch.inference_mode(False):
+        torch._C._set_grad_enabled(prev_grad)
+        torch._C._set_fwd_grad_enabled(prev_fw_grad)
+        yield
+
+
+@contextlib.contextmanager
 def grad_increment_nesting() -> Generator[int, None, None]:
     try:
         grad_level = _grad_increment_nesting()
@@ -438,17 +457,27 @@ def _vjp_with_argnums(
                     f"cotangents: {treespec_pprint(cotangents_spec)}, "
                     f"primal output: {treespec_pprint(primals_out_spec)}"
                 )
-            result = _autograd_grad(
-                flat_primals_out,
-                flat_diff_primals,
-                flat_cotangents,
-                retain_graph=retain_graph,
-                create_graph=create_graph,
+            # This closure runs after grad_increment_nesting exits, so
+            # inference_mode may have been restored. Disable it for autograd.
+            # Skip under Dynamo — tracing through the generator CM emits
+            # spurious _enter_inference_mode nodes.
+            ctx = (
+                contextlib.nullcontext()
+                if torch.compiler.is_compiling()
+                else _disable_inference_mode()
             )
+            with ctx:
+                result = _autograd_grad(
+                    flat_primals_out,
+                    flat_diff_primals,
+                    flat_cotangents,
+                    retain_graph=retain_graph,
+                    create_graph=create_graph,
+                )
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
-        return results, wrapper, aux  # type: ignore[possibly-unbound]
+        return results, wrapper, aux
     else:
         return results, wrapper
 
@@ -736,10 +765,10 @@ def jacrev(
                         )
                     return flat_results
 
-                for r, sr in zip(flat_results, stacked_results):  # type: ignore[possibly-unbound]
+                for r, sr in zip(flat_results, stacked_results):
                     sr[idx * chunk_size : (idx + 1) * chunk_size].copy_(r)
 
-            return stacked_results  # type: ignore[possibly-unbound]
+            return stacked_results
 
         if _preallocate_and_copy:
             flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
@@ -781,7 +810,7 @@ def jacrev(
             )
         output_input = tree_unflatten(flat_output_input, output_spec)
         if has_aux:
-            return output_input, aux  # type: ignore[possibly-unbound]
+            return output_input, aux
         return output_input
 
     return wrapper_fn
@@ -1205,7 +1234,7 @@ def _jvp_with_argnums(
                 primals_out_unflatten = tree_unflatten(primals_out, spec)
                 tangents_out_unflatten = tree_unflatten(tangents_out, spec)
                 if has_aux:
-                    return primals_out_unflatten, tangents_out_unflatten, aux  # type: ignore[possibly-unbound]
+                    return primals_out_unflatten, tangents_out_unflatten, aux
 
                 return primals_out_unflatten, tangents_out_unflatten
 
@@ -1388,7 +1417,7 @@ def jacfwd(
         if isinstance(argnums, int):
             jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
         if has_aux:
-            return tree_unflatten(jac_outs_ins, spec), aux  # type: ignore[possibly-unbound]
+            return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
 
     return wrapper_fn
@@ -1898,7 +1927,7 @@ def linearize(
                 f"the same argspec as the primals {primals_argspec}"
             )
 
-        forward_ad_checks(flat_tangents)  # type: ignore[arg-type]
+        forward_ad_checks(flat_tangents)
 
         flat_output = const_folded_jvp_graph(*flat_tangents)
         # const folded graph can return flat output,

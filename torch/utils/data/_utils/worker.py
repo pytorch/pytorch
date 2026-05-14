@@ -11,7 +11,7 @@ import os
 import queue
 import random
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._utils import ExceptionWrapper
@@ -72,7 +72,7 @@ else:
             return not self.manager_dead
 
 
-_worker_info: Optional[WorkerInfo] = None
+_worker_info: WorkerInfo | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,8 +92,8 @@ class WorkerInfo:
     num_workers: int
     seed: int
     dataset: Dataset
-    rng: Optional[_RNG] = None
-    worker_method: Optional[str] = "multiprocessing"
+    rng: _RNG | None = None
+    worker_method: str | None = "multiprocessing"
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -156,7 +156,7 @@ class _RNG:
 
     random_generator: random.Random
     torch_generator: torch.Generator
-    numpy_generator: Optional[object] = None
+    numpy_generator: object | None = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`

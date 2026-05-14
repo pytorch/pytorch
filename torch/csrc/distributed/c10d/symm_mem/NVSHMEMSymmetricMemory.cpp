@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
@@ -10,13 +11,18 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
+#include <c10/util/flat_hash_map.h>
+
+#include <mutex>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
 // include only the nvshmem host library headers:
 // #include <nvshmem_host.h>
 // It translates into the following two lines:
+#if !defined(USE_ROCM)
 #include <host/nvshmem_api.h>
 #include <host/nvshmemx_api.h>
+#endif
 // For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d {
@@ -51,6 +57,7 @@ struct NVSHMEMAllocation {
 };
 
 // A map from group name to rank-to-global rank mapping
+static std::mutex rank_map_mutex;
 static std::unordered_map<std::string, std::vector<int>>
     rank_to_global_rank_map{};
 // A map from group name to rank-to-global rank device array
@@ -78,6 +85,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 
     // Exchange rank to global rank mapping for this group.
     // If it is already available, skip the exchange.
+    std::lock_guard<std::mutex> rank_map_lock(rank_map_mutex);
     auto it = rank_to_global_rank_map.find(group_name);
     if (it == rank_to_global_rank_map.end()) {
       auto global_group = resolve_process_group("0");
@@ -142,12 +150,14 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         arr_size,
         cudaMemcpyHostToDevice));
 
+#if !defined(USE_ROCM) // Multi-cast is not supported on ROCm yet
     // Initialize multicast address
     // On unsupported platforms, this API returns a nullptr.
     auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
     auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
     auto team = team_manager.get_team(group_name, rank_to_global_rank);
     mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
+#endif
   }
 
  private:
@@ -257,6 +267,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   const std::vector<int>& get_rank_to_global_rank() override {
+    std::lock_guard<std::mutex> lock(rank_map_mutex);
     auto it = rank_to_global_rank_map.find(group_name_);
     if (it == rank_to_global_rank_map.end()) {
       TORCH_CHECK(false, "Group name not found in rank_to_global_rank_map");
@@ -265,6 +276,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   };
 
   int* get_rank_to_global_rank_dev() override {
+    std::lock_guard<std::mutex> lock(rank_map_mutex);
     auto it = rank_to_global_rank_dev_map.find(group_name_);
     if (it == rank_to_global_rank_dev_map.end()) {
       TORCH_CHECK(false, "Group name not found in rank_to_global_rank_dev_map");
@@ -341,9 +353,11 @@ static void initialize_nvshmem_with_store(
   is_initialized = true;
 
   // Print version
+#if !defined(USE_ROCM)
   int major, minor;
   ::nvshmem_info_get_version(&major, &minor);
   LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
+#endif
 }
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
@@ -366,18 +380,21 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
     TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
-    // TODO: thread safety
-    allocations_.try_emplace(
-        ptr, std::make_unique<NVSHMEMAllocation>(ptr, size, device_idx));
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      allocations_.try_emplace(
+          ptr, std::make_unique<NVSHMEMAllocation>(ptr, size, device_idx));
+    }
     return ptr;
   }
 
   void free(void* ptr) override {
-    // TODO: thread safety
+    std::lock_guard<std::mutex> lock(mutex_);
     allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = allocations_.find(ptr);
     if (it == allocations_.end()) {
       TORCH_CHECK(
@@ -390,8 +407,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
+    std::lock_guard<std::mutex> lock(mutex_);
     {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      auto it = symm_mems_.find(SymmMemKey{ptr, *group_name});
       if (it != symm_mems_.end()) {
         return it->second;
       }
@@ -416,7 +434,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // Search again using allocation base ptr (which is the key we use for
     // caching, see below)
-    auto it = symm_mems_.find(std::make_tuple(allocation->ptr, *group_name));
+    auto it = symm_mems_.find(SymmMemKey{allocation->ptr, *group_name});
     c10::intrusive_ptr<NVSHMEMSymmetricMemory> symm_mem;
     if (it != symm_mems_.end()) {
       // Base allocation has been rendezvoused
@@ -428,7 +446,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
 
     // Cache rendezvous using allocation's base address as key
-    symm_mems_[std::make_tuple(allocation->ptr, *group_name)] = symm_mem;
+    symm_mems_[SymmMemKey{allocation->ptr, *group_name}] = symm_mem;
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
@@ -449,6 +467,18 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return device_has_multicast_support(device_idx);
   }
 
+  bool has_allocation(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto alloc_it = std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+          auto base_ptr = reinterpret_cast<uintptr_t>(pair.second->ptr);
+          return ptr_int >= base_ptr &&
+              ptr_int < base_ptr + pair.second->buffer_size;
+        });
+    return alloc_it != allocations_.end();
+  }
+
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
   }
@@ -458,10 +488,12 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+  std::mutex mutex_;
   std::unordered_map<void*, std::unique_ptr<NVSHMEMAllocation>> allocations_;
-  std::map<
-      std::tuple<void*, std::string>,
-      c10::intrusive_ptr<NVSHMEMSymmetricMemory>>
+  ska::flat_hash_map<
+      SymmMemKey,
+      c10::intrusive_ptr<NVSHMEMSymmetricMemory>,
+      SymmMemKeyHash>
       symm_mems_;
 };
 
