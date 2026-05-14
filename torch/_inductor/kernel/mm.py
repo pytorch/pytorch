@@ -147,13 +147,6 @@ aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
 )
 
-aten_addmm_dtype = ExternKernelChoice(
-    torch.addmm,
-    "at::_addmm_dtype_out_cuda",
-    name="addmm_dtype",
-    op_overload=aten.addmm.dtype_out,
-)
-
 aten__int_mm = ExternKernelChoice(
     torch._int_mm, "at::_int_mm_out", op_overload=aten._int_mm.out
 )
@@ -614,7 +607,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
-def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None):
+def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
@@ -631,50 +624,21 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
         return lowerings[aten.add](arg1, arg2)
 
-    if out_dtype is not None:
-        input_dtype = mat1.get_dtype()
-        torch._check(
-            mat2.get_dtype() == input_dtype,
-            lambda: "input dtypes must be the same",
-        )
-        torch._check(
-            inp.get_dtype() == input_dtype,
-            lambda: "input dtypes must be the same",
-        )
-        torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
-        )
-        torch._check(
-            out_dtype == input_dtype
-            or (
-                out_dtype == torch.float32
-                and input_dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
-
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
-        mat1, mat2, inp, layout=layout, out_dtype=out_dtype
-    )
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        [inp_expanded, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
-        out_dtype=out_dtype,
+        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
     kernel_inputs_aten = MMKernelInputs(
-        [inp, mat1, mat2],
-        scalars=dict(alpha=alpha, beta=beta),
-        out_dtype=out_dtype,
+        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
 
     choices: list[ChoiceCaller] = []
-    kwarg_overrides: dict[str, dict[str, Any]] = {}
+
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
     log.info(
@@ -686,23 +650,14 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         mat2.get_dtype(),
         layout,
     )
-    aten_handler: ExternKernelChoice = aten_addmm
-    aten_extra_kwargs: dict[str, Any] = {}
-    if out_dtype is not None:
-        aten_handler = aten_addmm_dtype
-        aten_extra_kwargs = {"out_dtype": out_dtype}
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
-        if aten_extra_kwargs:
-            kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
-
         choices.extend(
             V.choices.get_template_configs(
                 kernel_inputs_aten,
-                [aten_handler],
+                [aten_addmm],
                 name,
-                kwarg_overrides=kwarg_overrides,
             )
         )
         node, _ = autotune_select_algorithm(
@@ -713,12 +668,9 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
     if use_aten_gemm_kernels():
-        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_handler]
-        if aten_extra_kwargs:
-            kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
+        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
-            out_dtype is None
-            and inp.get_stride()[0] == 0
+            inp.get_stride()[0] == 0
             and len(inp.get_size()) == 2
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
@@ -727,19 +679,10 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
         # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
         choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs_aten,
-                aten_templates,
-                name,
-                kwarg_overrides=kwarg_overrides,
-            )
+            V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
         )
 
-    if (
-        out_dtype is None
-        and is_nonzero
-        and use_triton_template(layout, check_max_autotune=False)
-    ):
+    if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
         if use_triton_blackwell_tma_template(
@@ -756,55 +699,46 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
 
     # Single unified call for all templates
     choices.extend(
-        V.choices.get_template_configs(
-            kernel_inputs, templates_to_use, name, kwarg_overrides=kwarg_overrides
-        )
+        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    if out_dtype is not None:
-        log.warning(
-            "Skipping CUTLASS, CK, and CPP GEMM backends because out_dtype is not None "
-            "(out_dtype=%s). These backends do not currently support explicit output dtype.",
-            out_dtype,
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op(name)
+    ):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            # reorder here because CUTLASS expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
         )
-    else:
-        if (
-            is_nonzero
-            and use_cutlass_template(layout, m, n, k)
-            and _use_cutlass_for_op(name)
-        ):
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-                choices,
-                layout,
-                # reorder here because CUTLASS expects (x, w, bias) but torch
-                # is bias, x, w
-                kernel_inputs.nodes(reorder=[1, 2, 0]),
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
 
-        if is_nonzero and use_ck_gemm_template(layout, m, n, k):
-            CKGemmTemplate.add_ck_gemm_choices(
-                choices,
-                layout,
-                # reorder here because CK expects (x, w, bias) but torch
-                # is bias, x, w
-                kernel_inputs.nodes(reorder=[1, 2, 0]),
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices,
+            layout,
+            # reorder here because CK expects (x, w, bias) but torch
+            # is bias, x, w
+            kernel_inputs.nodes(reorder=[1, 2, 0]),
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
 
-        if use_cpp_gemm_template(layout, mat1, mat2):
-            CppGemmTemplate.add_choices(
-                choices,
-                layout,
-                kernel_inputs.nodes(),
-                alpha=alpha,
-                beta=beta,
-                has_bias=True,
-            )
+    if use_cpp_gemm_template(layout, mat1, mat2):
+        CppGemmTemplate.add_choices(
+            choices,
+            layout,
+            kernel_inputs.nodes(),
+            alpha=alpha,
+            beta=beta,
+            has_bias=True,
+        )
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
     return node
