@@ -22,6 +22,7 @@ use_experimental_benchmarker = (
 
 
 MILLISECONDS_PER_SECOND = 1000
+INVALID_CONFIG_ERR_SUBSTR = "Invalid Configuration"
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -386,7 +387,7 @@ class TritonBenchmarker(Benchmarker):
             # ErrorInvalidConfiguration
             # Return inf to skip this config during autotuning
             error_str = str(e).lower()
-            if "invalid configuration" in error_str:
+            if INVALID_CONFIG_ERR_SUBSTR.lower() in error_str:
                 logger.warning(
                     "Skipping benchmark due to invalid configuration error: %s",
                     error_str,
