@@ -501,21 +501,11 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     state-changing functions detected by a no-node-arguments heuristic.
     """
     if node.op == "call_method":
-        # Node.is_impure() returns False for all call_method nodes, but
-        # in-place methods (e.g. .requires_grad_(), .copy_()) mutate state.
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op != "call_function":
         return True
-    # Node.is_impure() covers: mutable OpOverload schemas, effects system,
-    # _side_effectful_functions, and random ops.
     if node.is_impure():
         return False
-    # Non-OpOverload call_function targets need four checks:
-    # 1. In-place functions (name ending with '_') mutate their inputs.
-    # 2. Python in-place operators (operator.iadd, etc.) mutate their first arg.
-    # 3. out= kwarg with a Node value indicates mutation (e.g. torch.add(y, 1, out=x)).
-    # 4. Targets with no FX Node arguments are likely state-changing operations
-    #    (e.g., _vmap_increment_nesting, _set_fwd_grad_enabled).
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
         if name.endswith("_"):
@@ -524,7 +514,14 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        return bool(node.all_input_nodes)
+        # Targets with no FX Node arguments are likely state-changing
+        # (e.g., _vmap_increment_nesting, _set_fwd_grad_enabled).
+        if not node.all_input_nodes:
+            return False
+        # functorch batch dim ops modify the vmap interpreter stack.
+        if name in ("_add_batch_dim", "_remove_batch_dim"):
+            return False
+        return True
     return True
 
 
@@ -542,49 +539,42 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
     Uses Kahn's algorithm with a canonical tiebreaker:
     - Placeholders sorted by grapharg source name
     - get_attr nodes sorted by target
-    - Computation nodes sorted by canonical indices of their inputs
+    - Computation nodes sorted by (target, canonical indices of inputs)
 
-    Nodes that aren't provably pure act as barriers — they are chained in
+    Nodes that aren't provably pure act as barriers: they are chained in
     original order, and pure nodes are confined to their barrier segment.
 
     Operates in-place on the graph to preserve node object identity (required
     by GraphRegionTracker and other infrastructure that holds node references).
     """
-    indeg: dict[fx.Node, int] = dict.fromkeys(graph.nodes, 0)
-
-    # Build standard data-dependency edges
-    for node in graph.nodes:
-        for user in node.users:
-            indeg[user] += 1
+    indeg: dict[fx.Node, int] = {
+        node: len(node.all_input_nodes) for node in graph.nodes
+    }
 
     # Nodes that aren't provably pure act as barriers. We partition the graph
     # into segments separated by barrier nodes and add synthetic edges:
-    #   prev_barrier → reorderable_nodes_in_segment → next_barrier
-    # This prevents reorderable nodes from crossing barrier boundaries while
-    # still allowing canonical reordering within each segment.
+    #   prev_barrier -> reorderable_nodes_in_segment -> next_barrier
     extra_users: dict[fx.Node, list[fx.Node]] = collections.defaultdict(list)
     prev_barrier: fx.Node | None = None
     segment_reorderable: list[fx.Node] = []
     for node in graph.nodes:
         if node.op in ("placeholder", "get_attr", "output"):
             continue
-        if not _is_safe_to_reorder(node):
-            if prev_barrier is not None:
-                extra_users[prev_barrier].append(node)
-                indeg[node] += 1
+        is_barrier = not _is_safe_to_reorder(node)
+        if is_barrier:
             for reorderable in segment_reorderable:
                 extra_users[reorderable].append(node)
                 indeg[node] += 1
             segment_reorderable = []
+        if prev_barrier is not None:
+            extra_users[prev_barrier].append(node)
+            indeg[node] += 1
+        if is_barrier:
             prev_barrier = node
         else:
-            if prev_barrier is not None:
-                extra_users[prev_barrier].append(node)
-                indeg[node] += 1
             segment_reorderable.append(node)
 
     canonical_idx: dict[fx.Node, int] = {}
-    counter = 0
 
     def _canonical_key(node: fx.Node) -> tuple[Any, ...]:
         if node.op == "placeholder":
@@ -600,14 +590,12 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
             return (3,)
         else:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, input_indices)
+            return (2, str(node.target), input_indices)
 
-    # Seed the heap with nodes that have no dependencies
-    ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
+    ready: list[tuple[tuple[Any, ...], str, fx.Node]] = []
     for node in graph.nodes:
         if indeg[node] == 0:
-            heapq.heappush(ready, (_canonical_key(node), counter, node))
-            counter += 1
+            heapq.heappush(ready, (_canonical_key(node), node.name, node))
 
     canonical_order: list[fx.Node] = []
 
@@ -619,8 +607,7 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
         for user in itertools.chain(cur.users, extra_users.get(cur, ())):
             indeg[user] -= 1
             if indeg[user] == 0:
-                heapq.heappush(ready, (_canonical_key(user), counter, user))
-                counter += 1
+                heapq.heappush(ready, (_canonical_key(user), user.name, user))
 
     if len(canonical_order) != len(list(graph.nodes)):
         remaining = [n for n in indeg if indeg[n] != 0]
@@ -629,15 +616,24 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
             f"{len(list(graph.nodes))} nodes. Remaining: {remaining}"
         )
 
-    # Reorder nodes in-place: move each node after the previously placed one.
-    # graph._root is the sentinel; inserting after it places at the front.
+    # Reorder nodes in-place to preserve node object identity.
     cursor = graph._root  # type: ignore[attr-defined]
     for node in canonical_order:
         cursor.append(node)
         cursor = node
 
-    # Rename nodes to canonical names based on target (same naming scheme that
-    # FX Graph.create_node uses for auto-generated names).
+    _rename_nodes_to_canonical(graph)
+
+    return graph
+
+
+def _rename_nodes_to_canonical(graph: fx.Graph) -> None:
+    """Rename all nodes in the graph to canonical names based on their target.
+
+    Uses the same naming scheme as FX Graph.create_node (auto-generated names
+    from the target string). After renaming, replaces the graph's namespace so
+    future node creation stays consistent.
+    """
     from torch.fx.graph import _Namespace
 
     ns = _Namespace()
@@ -645,10 +641,7 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
         candidate = graph._target_to_str(node.target)
         new_name = ns.create_name(candidate, node)
         node.name = new_name
-    # Replace the graph's namespace so future node creation stays consistent
     graph._graph_namespace = ns
-
-    return graph
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -702,6 +695,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         shape_env: ShapeEnv | None = None,
         export_metadata: ExportMetaData | None = None,
         tracked_fakes_id_to_source: dict[int, list[Source]] | None = None,
+        output_pycode: list[list[str] | None] | None = None,
     ) -> None:
         super().__init__(
             output_graph_guards_state.local_scope,
@@ -732,6 +726,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         self.tracked_fakes_id_to_source: dict[int, list[Source]] = (
             tracked_fakes_id_to_source or {}
         )
+        self.output_pycode = output_pycode or []
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -898,6 +893,7 @@ class OutputGraph(OutputGraphCommon):
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
+        self.output_pycode: list[list[str] | None] = []
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
@@ -2207,16 +2203,18 @@ class OutputGraph(OutputGraphCommon):
             # no side effects, so no new cells created - no need to call side_effects.codegen_save_tempvars
             cell_cg = PyCodegen(self.root_tx)
             self.codegen_cells(tx, cell_cg)
+            instructions, pycode = self.compile_and_call_fx_graph(
+                tx, list(reversed(stack_values_flat)), root
+            )
             self.add_output_instructions(
                 [
                     # load in reverse since UNPACK_SEQUENCE will reverse
-                    *self.compile_and_call_fx_graph(
-                        tx, list(reversed(stack_values_flat)), root
-                    ),
+                    *instructions,
                     *cell_cg.get_instructions(),
                     *create_swap(2),
                     create_instruction("UNPACK_SEQUENCE", arg=len(stack_values_flat)),
-                ]
+                ],
+                pycode=pycode,
             )
             # function output will be moved to the correct places below
         else:
@@ -2320,10 +2318,12 @@ class OutputGraph(OutputGraphCommon):
                         )
 
             output = []
+            subgraph_pycode = None
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                instructions, subgraph_pycode = self.compile_and_call_fx_graph(
+                    tx, pass2.graph_output_vars(), root
                 )
+                output.extend(instructions)
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
@@ -2334,7 +2334,10 @@ class OutputGraph(OutputGraphCommon):
                 # NB: Important to run compiler collective even when there is
                 # a graph break
                 self.run_compiler_collective()
-            self.add_output_instructions(output + pass2.get_instructions())
+            self.add_output_instructions(output, pycode=subgraph_pycode)
+            self.add_output_instructions(
+                pass2.get_instructions(), pycode=pass2.get_pycode()
+            )
 
         # store all stack and locals for each frame
         # current state of the stack:
@@ -2792,13 +2795,17 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
-    ) -> list[Instruction]:
+    ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
 
         Code is generated w.r.t. self.root_tx.
         tx is only used for preserving GraphModule metadata
+
+        Returns a tuple of (instructions, pycode) where pycode is a string
+        representation of the generated Python code if generate_pycode_prologue
+        is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
             from .decorators import disable
@@ -2810,7 +2817,7 @@ class OutputGraph(OutputGraphCommon):
 
             self.run_compiler_collective()
             if count_calls(self.graph) == 0 and len(rv) == 0:
-                return []
+                return [], None
 
             name = unique_id("__compiled_fn", with_uuid=True)
 
@@ -3113,7 +3120,8 @@ class OutputGraph(OutputGraphCommon):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
             cg.make_call_generated_code(name)
-            return cg.get_instructions()
+
+            return cg.get_instructions(), cg.get_pycode()
 
     @property
     def placeholders(self) -> list[fx.Node]:
@@ -3454,12 +3462,20 @@ class OutputGraph(OutputGraphCommon):
                     self.remove_node(u)
                 self.remove_node(node)
 
-    def add_output_instructions(self, prefix: list[Instruction]) -> None:
+    def add_output_instructions(
+        self, prefix: list[Instruction], pycode: list[str] | None = None
+    ) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
+        An optional pycode argument can be passed to add python codegen along with
+        the bytecode. The generated python code should match the bytecode behavior
+        from the `prefix` argument.
         """
         self.output_instructions.extend(prefix)
+        if not isinstance(pycode, (list, type(None))):
+            raise AssertionError("pycode must be a list of python code or None")
+        self.output_pycode.append(pycode)
         self.should_exit = True
 
     def install_resume_function_global(
