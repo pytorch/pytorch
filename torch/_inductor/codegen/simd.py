@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import sympy
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from ..ir import IRNode
 
+from ..ops_handler import WrapperHandler
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
@@ -50,6 +51,7 @@ from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
+    decompose_index,
     expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
@@ -76,6 +78,7 @@ from .simd_kernel_features import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
+    from torch._inductor.codegen.triton import TritonKernel
     from torch._inductor.tiling_utils import CoalesceVarAnalysis
 
 
@@ -389,7 +392,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
     """A root with reduced numel/block_size derived from a parent tree.
 
     Used for the grouped reduction output: if the parent R tree covers 1024
-    columns with group_size=128, the derived root covers 8 groups. It shares
+    columns with local_reduction_size=128, the derived root covers 8 groups. It shares
     the parent's loop structure (same is_loop, prefix, loop variable) but
     has its own block geometry:
 
@@ -1122,9 +1125,21 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         simp_index = self.simplify_indexing(index)
 
-        # Now that we are done simplifying we can unwrap Identity so that downstream handling
-        # for its contained expression will work. previously, tl.full wrapping of sympy.Integer
-        # would not occur
+        singleton_replacements = {}
+        for tree in self.active_range_trees():
+            if not V.graph.sizevars.statically_known_equals(tree.numel, 1):
+                continue
+            # Any active loop var ranging over a singleton extent is
+            # semantically equal to zero. Canonicalizing those symbols here is
+            # globally safe and lets degenerate tiles CSE identical loads/stores.
+            for symbol in tree.var_list:
+                singleton_replacements[symbol] = sympy.S.Zero
+        if singleton_replacements:
+            simp_index = sympy_subs(simp_index, singleton_replacements)
+
+        # Now that we are done simplifying we can unwrap Identity so downstream
+        # handling for its contained expression will work. In particular,
+        # backend index/mask analysis needs to recognize wrapped constants.
         simp_index = (
             simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
         )
@@ -1413,6 +1428,493 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pass
 
 
+@dataclasses.dataclass(frozen=True)
+class _IterationSpace:
+    """Source domain used to remap a pointwise body.
+
+    ``groups`` are source-domain extents. ``values`` are the matching
+    codegen-side symbolic index expressions in the outer kernel.
+
+    For a grouped reduction body with logical ranges [B, D // G, G],
+    ``groups`` may be [B, D // G, G] while ``values`` are the concrete
+    symbols the parent kernel is using for those coordinates.
+    """
+
+    groups: Sequence[sympy.Expr]
+    values: Sequence[sympy.Expr]
+
+
+@dataclasses.dataclass
+class _DerivedIterationFamily:
+    """Iteration family for a nested-reduction consumer stage.
+
+    Two configurations:
+      - reduced-output: swaps in a derived grouped-axis tree; ``index_subs``
+        rewrites body vars to the active tree symbols
+      - parent-full: reuses outer trees; store_cache values are broadcast-lifted
+        lazily through CSE when needed
+    """
+
+    # Trees to swap onto the kernel while this stage runs
+    range_trees: tuple[IterationRangesRoot, ...]
+    # Rewrite body iter-var symbols to derived tree symbols (reduced-output)
+    index_subs: dict[sympy.Symbol, sympy.Expr] = dataclasses.field(default_factory=dict)
+    _headers_emitted: bool = False
+
+    def remap_index(self, index: sympy.Expr) -> sympy.Expr:
+        return index.subs(self.index_subs)
+
+    def is_active_on(self, kernel: SIMDKernel[Any]) -> bool:
+        if len(kernel.range_trees) != len(self.range_trees):
+            return False
+        return all(
+            active is expected
+            for active, expected in zip(kernel.range_trees, self.range_trees)
+        )
+
+    @contextlib.contextmanager
+    def ensure_active(self, kernel: SIMDKernel[Any]):
+        """Activate this family if it isn't already active on ``kernel``."""
+        if self.is_active_on(kernel):
+            yield
+        else:
+            with self.activate(kernel):
+                yield
+
+    def ensure_headers(self, kernel: SIMDKernel[Any]) -> None:
+        # Called lazily from activate(). Reduced-output families may activate
+        # more than once (the grouped reduction stores through the family, then
+        # reduced-output epilogues run inside it), so emit derived headers once.
+        # Parent-full families reuse the outer trees, so this stays a no-op.
+        if self._headers_emitted:
+            return
+        for tree in self.range_trees:
+            if isinstance(tree, DerivedIterationRangesRoot):
+                # Looped derived trees depend on the current reduction-loop
+                # offset, so emit them in the loop-local indexing buffer.
+                # Non-looped trees can be emitted once in the kernel prologue.
+                emit_in_loop_body = tree.is_loop and kernel.inside_reduction
+                target = kernel.indexing_code if emit_in_loop_body else kernel.body
+                kernel.iteration_ranges_codegen_header(tree, target)
+        self._headers_emitted = True
+
+    @contextlib.contextmanager
+    def activate(self, kernel: SIMDKernel[Any]) -> Iterator[None]:
+        # Temporarily switch the kernel's active iteration family so normal
+        # load/store/indexing code interprets indices in this family's space.
+        self.ensure_headers(kernel)
+        with kernel.use_range_trees(self.range_trees):
+            yield
+
+
+@dataclasses.dataclass(frozen=True)
+class _GroupedReductionVars:
+    """Variables used to call the grouped-reduction body.
+
+    ``iter_remapped`` and ``reduce_remapped`` are the iteration/reduction
+    arguments passed to the grouped reduction's loop body. ``passthrough`` is
+    the non-grouped axis, while ``group_index`` and ``local_reduction`` are
+    the two pieces of the grouped parent axis after it is split into
+    [num_groups, local_reduction_size]. ``group_index_var`` is None only for
+    the single-group case, where the group index is the constant 0.
+    """
+
+    iter_remapped: list[sympy.Expr]
+    reduce_remapped: list[sympy.Expr]
+    passthrough_iter_var: sympy.Symbol
+    group_index_var: sympy.Symbol | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _GroupedReductionLayout:
+    """Geometry of the grouped reduction (the consumer reduction in a
+    nested-reduction pair). Describes how the outer kernel's tile is
+    reshaped into [num_groups, local_reduction_size], which axis is reduced,
+    and how reduced values are lifted back for epilogues.
+    """
+
+    x_tree: IterationRangesRoot
+    r_tree: IterationRangesRoot
+    local_reduction_size: sympy.Integer
+
+    @classmethod
+    def from_kernel(
+        cls,
+        kernel: SIMDKernel[Any],
+        local_reduction_size: sympy.Integer,
+    ) -> _GroupedReductionLayout:
+        assert len(kernel.range_trees) == 2
+        x_tree, r_tree = kernel.range_trees
+        assert x_tree.prefix == "x"
+        return cls(
+            x_tree=x_tree,
+            r_tree=r_tree,
+            local_reduction_size=local_reduction_size,
+        )
+
+    @property
+    def group_tree(self) -> IterationRangesRoot:
+        """The tree decomposed into [num_groups, local_reduction_size]."""
+        return self.r_tree
+
+    @property
+    def passthrough_tree(self) -> IterationRangesRoot:
+        """The tree that passes through unchanged (not grouped)."""
+        return self.x_tree
+
+    @property
+    def parent_axis(self) -> int:
+        # Axis of the grouped parent dimension within the 2D [x, r] tile.
+        return 1
+
+    @property
+    def group_prefix(self) -> str:
+        return "nested_" + self.group_tree.prefix.upper().removesuffix("_")
+
+    @property
+    def local_reduction_size_sym(self) -> sympy.Symbol:
+        return sympy.Symbol(
+            f"{self.group_prefix}_LOCAL_REDUCTION_SIZE",
+            integer=True,
+            positive=True,
+        )
+
+    @property
+    def reduced_block_sym(self) -> sympy.Symbol:
+        return sympy.Symbol(
+            f"{self.group_prefix}_REDUCED_BLOCK",
+            integer=True,
+            positive=True,
+        )
+
+    @property
+    def parent_block(self) -> str:
+        return self.group_tree.block_size_str()
+
+    @property
+    def passthrough_block(self) -> str:
+        return self.passthrough_tree.block_size_str()
+
+    @property
+    def num_groups(self) -> sympy.Expr:
+        return FloorDiv(self.group_tree.numel, self.local_reduction_size)
+
+    @property
+    def num_groups_str(self) -> str:
+        return str(self.reduced_block_sym)
+
+    @property
+    def local_reduction_size_dim(self) -> str:
+        return str(self.local_reduction_size_sym)
+
+    @property
+    def reshape_shape(self) -> tuple[str, str, str]:
+        """Shape used before the local group reduction."""
+        return (
+            self.passthrough_block,
+            self.num_groups_str,
+            self.local_reduction_size_dim,
+        )
+
+    @property
+    def reduce_axis(self) -> int:
+        """Axis reduced in [passthrough, num_groups, local_reduction_size]."""
+        return 2
+
+    @property
+    def output_shape(self) -> tuple[str, str]:
+        return (self.passthrough_block, self.num_groups_str)
+
+    def construct_group_reduction_vars(
+        self,
+        body: Any,
+    ) -> _GroupedReductionVars:
+        if V.graph.sizevars.statically_known_equals(self.num_groups, 1):
+            # Degenerate grouped axis: the parent dimension is exactly one
+            # group. Reuse the parent full-range symbol for the group lane so
+            # remapped shared-input loads CSE with the outer-reduction load.
+            group_index_expr = sympy.S.Zero
+            group_index_var = None
+            local_reduction_var = self.group_tree.full_range().symbol()
+        else:
+            group_index_var, local_reduction_var = self.group_tree.construct(
+                [self.num_groups, self.local_reduction_size]
+            )
+            group_index_expr = group_index_var
+        # The passthrough axis is not split; it is reconstructed as a single
+        # loop variable so the grouped body can still address the unchanged
+        # parent-tile dimension.
+        passthrough_var = self.passthrough_tree.construct(
+            [self.passthrough_tree.numel]
+        )[0]
+
+        reduce_remapped = [local_reduction_var]
+        if len(body.iter_vars) == 2:
+            iter_remapped = [passthrough_var, group_index_expr]
+        elif len(body.iter_vars) == 1:
+            # 1 iter var: flatten passthrough_tree and group index into one index.
+            iter_remapped = [passthrough_var * self.num_groups + group_index_expr]
+        else:
+            raise AssertionError("nested grouped reduction expects 1 or 2 iter vars")
+
+        return _GroupedReductionVars(
+            iter_remapped,
+            reduce_remapped,
+            passthrough_var,
+            group_index_var,
+        )
+
+    def make_reduced_output_family(
+        self,
+        group_reduction_vars: _GroupedReductionVars,
+    ) -> _DerivedIterationFamily:
+        def build(tree: IterationRangesRoot) -> IterationRangesRoot:
+            if tree is not self.group_tree:
+                # Only the grouped axis changes shape in the reduced-output
+                # family. Reuse the passthrough tree directly so we do not emit
+                # duplicate index/mask headers like reduced_xindex = xindex.
+                return tree
+            local_reduction_size_const = (
+                self.local_reduction_size_sym,
+                self.local_reduction_size,
+                True,
+            )
+            reduced_block_const = (
+                self.reduced_block_sym,
+                FloorDiv(tree.block_size(), self.local_reduction_size_sym),
+                True,
+            )
+            return DerivedIterationRangesRoot(
+                tree,
+                numel=FloorDiv(tree.numel, self.local_reduction_size),
+                block_size=self.reduced_block_sym,
+                block_offset=FloorDiv(
+                    tree.block_offset(), self.local_reduction_size_sym
+                ),
+                named_constants=(local_reduction_size_const, reduced_block_const),
+            )
+
+        reduced_x_tree = build(self.x_tree)
+        reduced_r_tree = build(self.r_tree)
+        index_subs: dict[sympy.Symbol, sympy.Expr] = {}
+        index_subs[group_reduction_vars.passthrough_iter_var] = (
+            reduced_x_tree.full_range().symbol()
+        )
+        if group_reduction_vars.group_index_var is not None:
+            # The single-group case uses constant 0 for the group lane, so
+            # there is no constructed group-index symbol to rewrite.
+            index_subs[group_reduction_vars.group_index_var] = (
+                reduced_r_tree.full_range().symbol()
+            )
+        return _DerivedIterationFamily(
+            index_subs=index_subs,
+            range_trees=(reduced_x_tree, reduced_r_tree),
+        )
+
+    def make_parent_full_family(
+        self,
+    ) -> _DerivedIterationFamily:
+        return _DerivedIterationFamily(
+            range_trees=(self.x_tree, self.r_tree),
+        )
+
+    def maybe_broadcast_value_to_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        assert value.dtype is not None
+        if value.shape is None or len(value.shape) < 2:
+            # Some scalar or opaque CSE values do not carry block-shape
+            # metadata. Pointwise consumers can still rely on Triton
+            # broadcasting, unlike grouped-reduction reshape inputs.
+            return value
+
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=False,
+        )
+
+    def ensure_parent_tile_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        assert value.dtype is not None
+        assert value.shape is not None and len(value.shape) >= 2, (
+            "grouped reduction input must have a known parent-tile shape"
+        )
+
+        return self._broadcast_value_to_parent_resolution(
+            kernel,
+            value,
+            materialize_singleton=True,
+        )
+
+    def _broadcast_value_to_parent_resolution(
+        self,
+        kernel: TritonKernel,
+        value: CSEVariable,
+        *,
+        materialize_singleton: bool,
+    ) -> CSEVariable:
+        assert value.dtype is not None
+        assert value.shape is not None and len(value.shape) >= 2
+        parent_dim = str(value.shape[self.parent_axis])
+        if parent_dim == self.parent_block or (
+            parent_dim == "1" and not materialize_singleton
+        ):
+            return value
+
+        passthrough_extent = self.passthrough_block
+        parent_extent = self.parent_block
+        if parent_dim == "1":
+            # A parent-axis singleton already broadcasts semantically, but the
+            # grouped reduction still needs a full parent tile before reshape.
+            pre_broadcast_shape = (passthrough_extent, 1)
+            broadcast_shape = (passthrough_extent, parent_extent)
+            final_shape = (passthrough_extent, parent_extent)
+        else:
+            # The reduced grouped value is a register CSE variable, not a memory
+            # buffer, so IR-level expand/broadcast can't handle it. Broadcast it
+            # from [X, num_groups] -> [X, num_groups, 1] ->
+            # [X, num_groups, local_reduction_size] -> [X, RBLOCK] on first
+            # parent-full load.
+            num_groups = self.num_groups_str
+            local_reduction_size = self.local_reduction_size_dim
+            pre_broadcast_shape = (passthrough_extent, num_groups, 1)
+            broadcast_shape = (passthrough_extent, num_groups, local_reduction_size)
+            final_shape = (passthrough_extent, parent_extent)
+        value = kernel.emit_broadcast_via_reshape(
+            value=value,
+            pre_broadcast_shape=pre_broadcast_shape,
+            broadcast_shape=broadcast_shape,
+            final_shape=final_shape,
+            dtype=value.dtype,
+            out_shape=final_shape,
+        )
+        return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _ParentFullLoadTransform:
+    """Lift loaded values to parent-full resolution when needed."""
+
+    kernel: TritonKernel
+    layout: _GroupedReductionLayout
+
+    def apply(self, value: CSEVariable) -> CSEVariable:
+        return self.layout.maybe_broadcast_value_to_parent_resolution(
+            self.kernel,
+            value,
+        )
+
+
+class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
+    """Group-reduction stage handler: reshape parent-full tile into
+    [num_groups, local_reduction_size], reduce over the local axis, and store
+    the result.
+    Loads go through the normal CSE path, then may be lifted to parent
+    resolution before the reshape.
+    """
+
+    def __init__(
+        self,
+        inner,
+        kernel: TritonKernel,
+        *,
+        layout: _GroupedReductionLayout,
+        family: _DerivedIterationFamily,
+        load_transform: _ParentFullLoadTransform | None = None,
+    ):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._layout = layout
+        self._family = family
+        self._load_transform = load_transform
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        value = self._inner.load(name, index)
+        if self._load_transform is not None:
+            # Used when a nested stage reads reduced values that must be lifted
+            # back to parent-tile resolution before this body consumes them.
+            value = self._load_transform.apply(value)
+        return value
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: str,
+        value: CSEVariable,
+    ) -> CSEVariable:
+        """Reshape the parent-full tile and reduce over the local reduction."""
+        k = self._kernel
+        value = self._layout.ensure_parent_tile_resolution(k, value)
+        # The grouped-reduction reshape uses the grouped-axis named constants
+        # from the reduced-output family, so emit the derived headers before
+        # we materialize the reshape line.
+        self._family.ensure_headers(k)
+        reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
+        k.num_reduction += 1
+        return k.emit_reduce(
+            reshaped,
+            reduction_type,
+            self._layout.reduce_axis,
+            dtype,
+            self._layout.output_shape,
+        )
+
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(self._kernel):
+            self._inner.store(name, remapped_index, value)
+
+
+class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
+    """Pointwise bodies at a remapped iteration range.
+
+    Unlike _GroupedReductionOpsHandler (which performs reshape+reduce), this
+    handler runs pure pointwise bodies for reduced/parent-full prologues
+    and epilogues. Loads use the normal CSE path after index remapping, then
+    may be lifted to parent resolution.
+    """
+
+    def __init__(
+        self,
+        inner,
+        kernel: SIMDKernel,
+        *,
+        family: _DerivedIterationFamily,
+        load_transform: _ParentFullLoadTransform | None = None,
+    ):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._family = family
+        self._load_transform = load_transform
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(self._kernel):
+            value = self._inner.load(name, remapped_index)
+        if self._load_transform is not None:
+            value = self._load_transform.apply(value)
+        return value
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: Any = None,
+    ) -> None:
+        k = self._kernel
+        remapped_index = self._family.remap_index(index)
+        with self._family.ensure_active(k):
+            self._inner.store(name, remapped_index, value, mode=mode)
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -1452,6 +1954,17 @@ class SIMDScheduling(BaseScheduling):
                 from torch._inductor.scheduler import MixOrderReduction
 
                 reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
+
+            if not reduction_can_fuse:
+                # Scheduler legality creates the fused nested node, but SIMD
+                # still runs this backend fusion gate. The regular
+                # numel/rnumel checks reject nested reductions because the two
+                # reductions intentionally use different iteration spaces.
+                from torch._inductor.scheduler import NestedReduction
+
+                reduction_can_fuse = NestedReduction._is_dependent_reduction_pair(
+                    node1, node2
+                ) and NestedReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
                 why(
@@ -1930,6 +2443,347 @@ class SIMDScheduling(BaseScheduling):
             self._codegen_nodes(node2_epilogue)
 
         self.free_buffers_in_scheduler()
+
+    def codegen_nested_reduction(self, node):
+        """
+        Generate a single kernel with an outer reduction, a group
+        reduction, and optional reduced/parent-full epilogues for
+        dependent cross-axis reductions that share a large input.
+
+        The local group splits the outer reduction's R tree:
+        outer=(B, DIM), grouped=(B*DIM/G, G). Codegen reshapes
+        RBLOCK -> [XBLOCK, RBLOCK/G, G] and reduces axis 2.
+        """
+        outer_node, grouped_node = node.node1, node.node2
+        _, (outer_numel, outer_rnumel) = outer_node.group
+        _, (grouped_numel, grouped_rnumel) = grouped_node.group
+        local_reduction_size = node.group_size
+        local_reduction_size_hint = int(local_reduction_size)
+        nested_pointwise_domains = (
+            scheduler.NestedReduction._classify_nested_pointwise_nodes(
+                outer_node,
+                grouped_node,
+                node.domain_context,
+            )
+        )
+        assert nested_pointwise_domains is not None
+        pointwise_domain_by_node: dict[
+            BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
+        ] = dict(nested_pointwise_domains)
+        outer_grouped_full_pointwise = [
+            sn
+            for sn, domain in nested_pointwise_domains
+            if sn in outer_node.get_nodes()
+            and (
+                domain
+                is scheduler.NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT
+            )
+        ]
+        outer_grouped_full_pointwise_set = OrderedSet(outer_grouped_full_pointwise)
+        outer_codegen_nodes = [
+            sn
+            for sn in outer_node.get_nodes()
+            if sn not in outer_grouped_full_pointwise_set
+        ]
+        grouped_reduction: scheduler.SchedulerNode = node.grouped_reduction
+        grouped_schedule: list[NodeScheduleEntry] = self.generate_node_schedule(
+            grouped_node.get_nodes(),
+            grouped_numel,
+            grouped_rnumel,
+        )
+        assert any(sn is grouped_reduction for sn in grouped_schedule)
+        grouped_reduction_body = grouped_reduction._body
+
+        combined_schedule = self.generate_node_schedule(
+            outer_codegen_nodes,
+            outer_numel,
+            outer_rnumel,
+        )
+        coalesce_analysis = (
+            outer_node.get_coalesce_analysis()
+            if torch._inductor.config.triton.coalesce_tiling_analysis
+            else None
+        )
+        kernel_features = SIMDKernelFeatures(
+            combined_schedule,
+            outer_numel,
+            outer_rnumel,
+            coalesce_analysis,
+        )
+        # The outer reduction owns the grid and persistent/tiling choice. The
+        # grouped reduction is emitted inside that tile, so its accesses do not
+        # feed these heuristics yet.
+        tiling, tiling_score = self.get_tiling_and_scores(
+            combined_schedule,
+            outer_numel,
+            outer_rnumel,
+            coalesce_analysis,
+        )
+        assert "y" not in tiling and "z" not in tiling, (
+            "nested reduction does not support tiled reductions"
+        )
+
+        metrics.codegen_nested_reduction += 1
+        kernel_kwargs: dict[str, Any] = {
+            "features": kernel_features,
+            "override_cooperative_reduction": False,
+            "tiling_scores": tiling_score,
+        }
+        kernel = cast(
+            "TritonKernel",
+            self.create_kernel_choices(
+                kernel_features,
+                [tiling],
+                kernel_kwargs,
+            )[0],
+        )
+
+        kernel.min_rblock = local_reduction_size_hint
+
+        # Emit the first stage through the normal scheduler path so its loads,
+        # stores, CSE state, masks, and reduction setup are identical to an
+        # ordinary SIMD reduction kernel. Nested handlers append later stages.
+        self.codegen_node_schedule_with_kernel(combined_schedule, kernel)
+
+        with kernel:
+            # Flush the outer reduction code:
+            # - Persistent: one pass, no loops
+            # - Looped: disable_reduction already flushed loop 1
+            #   and post-loop code, but pending buffers may still have the next
+            #   pass. Flush it now so later nested stages can consume it.
+            kernel.codegen_body()
+
+            layout: _GroupedReductionLayout = _GroupedReductionLayout.from_kernel(
+                kernel,
+                local_reduction_size,
+            )
+            group_reduction_vars: _GroupedReductionVars = (
+                layout.construct_group_reduction_vars(grouped_reduction_body)
+            )
+            reduced_output_family: _DerivedIterationFamily = (
+                layout.make_reduced_output_family(group_reduction_vars)
+            )
+            parent_full_family: _DerivedIterationFamily = (
+                layout.make_parent_full_family()
+            )
+            parent_full_source: _IterationSpace = self._parent_full_iteration_values(
+                grouped_reduction_body,
+                group_reduction_vars.iter_remapped,
+                group_reduction_vars.reduce_remapped,
+            )
+            self._codegen_remapped_pointwise(
+                kernel,
+                outer_grouped_full_pointwise,
+                parent_full_family,
+                parent_full_source,
+                load_transform=_ParentFullLoadTransform(kernel, layout),
+            )
+            self._codegen_nested_grouped_schedule(
+                kernel,
+                grouped_schedule,
+                grouped_reduction,
+                layout,
+                group_reduction_vars.iter_remapped,
+                group_reduction_vars.reduce_remapped,
+                pointwise_domain_by_node,
+                reduced_output_family,
+                parent_full_family,
+            )
+
+            kernel.codegen_body()
+
+        self._finalize_nested_reduction_kernel(
+            kernel,
+            combined_schedule,
+            node,
+            [
+                *combined_schedule,
+                *outer_grouped_full_pointwise,
+                *grouped_schedule,
+            ],
+        )
+
+    def _finalize_nested_reduction_kernel(
+        self,
+        kernel,
+        combined_schedule,
+        node,
+        config_patch_schedule=None,
+    ) -> None:
+        config_patches = self._collect_config_patches(
+            config_patch_schedule or combined_schedule
+        )
+        with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            src_code = kernel.codegen_kernel()
+        kernel.kernel_name = self.define_kernel(
+            src_code,
+            combined_schedule,
+            kernel,
+        )
+        kernel.code_hash = code_hash(src_code)
+
+        with V.set_kernel_handler(kernel):
+            for sn in node.get_nodes():
+                sn.mark_run()
+
+        base_scheduler_nodes = [
+            node for node in combined_schedule if isinstance(node, BaseSchedulerNode)
+        ]
+        self._launch_kernel_and_cleanup(kernel, base_scheduler_nodes)
+
+    def _codegen_nested_grouped_schedule(
+        self,
+        kernel,
+        grouped_schedule,
+        grouped_reduction: scheduler.SchedulerNode,
+        layout: _GroupedReductionLayout,
+        iter_remapped,
+        reduce_remapped,
+        pointwise_domain_by_node: dict[
+            BaseSchedulerNode, scheduler.NestedReduction.PointwiseDomain
+        ],
+        reduced_output_family,
+        parent_full_family,
+    ) -> None:
+        """Interpret the grouped reduction schedule with nested emitters."""
+        grouped_reduction_body = grouped_reduction._body
+        parent_full_source = self._parent_full_iteration_values(
+            grouped_reduction_body,
+            iter_remapped,
+            reduce_remapped,
+        )
+        reduced_source = _IterationSpace(
+            [
+                grouped_reduction_body.var_ranges[v]
+                for v in grouped_reduction_body.iter_vars
+            ],
+            iter_remapped,
+        )
+        parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
+        for sn in grouped_schedule:
+            if sn in (DisableReduction, EnableReduction):
+                # These markers only control standalone reduction-loop
+                # emission. Nested codegen lowers the grouped reduction as a
+                # local reshape+reduce inside the outer kernel, so there is no
+                # grouped loop to close or reopen here.
+                continue
+            assert isinstance(sn, scheduler.SchedulerNode)
+            if sn is grouped_reduction:
+                self._codegen_grouped_reduction(
+                    kernel,
+                    sn,
+                    layout,
+                    iter_remapped,
+                    reduce_remapped,
+                    reduced_output_family,
+                )
+                continue
+            domain = pointwise_domain_by_node.get(sn)
+            assert domain is not None
+            if domain is scheduler.NestedReduction.PointwiseDomain.REDUCED:
+                self._codegen_remapped_pointwise(
+                    kernel,
+                    [sn],
+                    reduced_output_family,
+                    reduced_source,
+                )
+            else:
+                self._codegen_remapped_pointwise(
+                    kernel,
+                    [sn],
+                    parent_full_family,
+                    parent_full_source,
+                    load_transform=parent_full_load_transform,
+                )
+
+    def _codegen_grouped_reduction(
+        self,
+        kernel,
+        grouped_reduction: scheduler.SchedulerNode,
+        layout: _GroupedReductionLayout,
+        iter_remapped,
+        reduce_remapped,
+        reduced_output_family,
+    ) -> None:
+        grouped_reduction_body = grouped_reduction._body
+        load_transform = _ParentFullLoadTransform(kernel, layout)
+        handler = _GroupedReductionOpsHandler(
+            V.get_ops_handler(),
+            kernel=kernel,
+            layout=layout,
+            family=reduced_output_family,
+            load_transform=load_transform,
+        )
+        with V.set_ops_handler(handler), kernel.set_current_node(grouped_reduction):
+            grouped_reduction_body(
+                iter_remapped,
+                reduce_remapped,
+                allow_same_symbol_in_index=True,
+            )
+
+    @classmethod
+    def _map_iteration_values_to_node_sizes(
+        cls,
+        source: _IterationSpace,
+        lengths: Sequence[Sequence[sympy.Expr]],
+    ) -> list[list[sympy.Expr]]:
+        groups = source.groups
+        values = source.values
+        assert len(groups) == len(values)
+
+        def split_values_by_ranges(
+            *new_ranges: Sequence[sympy.Expr],
+        ) -> list[list[sympy.Expr]]:
+            return [
+                decompose_index(value, ranges)
+                for value, ranges in zip(values, new_ranges)
+            ]
+
+        return SIMDKernel.map_kernel_groups_to_node_sizes(
+            groups,
+            lengths,
+            split_values_by_ranges,
+        )
+
+    def _parent_full_iteration_values(
+        self,
+        body,
+        iter_remapped,
+        reduce_remapped,
+    ) -> _IterationSpace:
+        body_vars = [*body.iter_vars, *body.reduce_vars]
+        groups = [body.var_ranges[v] for v in body_vars]
+        return _IterationSpace(groups, [*iter_remapped, *reduce_remapped])
+
+    def _codegen_remapped_pointwise(
+        self,
+        kernel,
+        pointwise_nodes,
+        family: _DerivedIterationFamily,
+        source: _IterationSpace,
+        *,
+        load_transform: _ParentFullLoadTransform | None = None,
+    ) -> None:
+        """Emit pointwise nodes under an explicit nested iteration family.
+
+        `source` describes the coordinate space whose values are remapped into
+        each pointwise node's own loop ranges.
+        """
+        with family.activate(kernel):
+            for sn in pointwise_nodes:
+                iter_vars, reduction_vars = self._map_iteration_values_to_node_sizes(
+                    source,
+                    sn.get_ranges(),
+                )
+                assert not reduction_vars
+                handler = _PointwiseRemapHandler(
+                    V.get_ops_handler(),
+                    kernel=kernel,
+                    family=family,
+                    load_transform=load_transform,
+                )
+                with V.set_ops_handler(handler), kernel.set_current_node(sn):
+                    sn._body(iter_vars)
 
     def _codegen_nodes(
         self,
