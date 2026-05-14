@@ -857,7 +857,13 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ]
 
         init_idx = torch.zeros((), dtype=torch.int64)
-        init_grad_carries = filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        # Upstream reductions can pass expanded zero-stride gradients. The
+        # generated backward while_loop needs stable carry metadata across
+        # iterations, so materialize those gradients before they become carries.
+        init_grad_carries = tuple(
+            grad.clone() if isinstance(grad, torch.Tensor) else grad
+            for grad in filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        )
         init_grad_additional_inputs = tuple(
             torch.zeros_like(t)
             for need_keep, t in zip(
