@@ -349,7 +349,7 @@ def minifier(
         granularity = max(1, granularity // 2)
         output: fx.Node | None = None
         for idx, node in enumerate(cur_graph.nodes):
-            node.idx = idx
+            node.idx = idx  # type: ignore[attr-defined]
             if node.op == "output":
                 output = node
                 break

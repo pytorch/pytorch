@@ -207,7 +207,7 @@ def propagate(amplifier_node: Node) -> None:
 
 def propagate_single_node(
     queue: Queue, fwd_filter: dict[Node, bool], bwd_filter: dict[Node, bool], node: Node
-) -> None:
+) -> None:  # type: ignore[type-arg]
     log.debug("Propagate_single_node: %s", node.format_node())
 
     if node.op != "call_function":

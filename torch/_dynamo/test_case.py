@@ -23,7 +23,7 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -75,8 +75,8 @@ class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(
+        cls._exit_stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
@@ -230,8 +230,8 @@ class CPythonTestCase(TestCase):
             )
 
         super().setUpClass()
-        cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(
+        cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
+        cls._stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 enable_trace_unittest=True,
                 enable_trace_load_build_class=True,

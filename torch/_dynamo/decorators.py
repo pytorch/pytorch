@@ -114,7 +114,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
         return wrap(fn)
 
 
-_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__
+_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
 skip_code(_nonrecursive_disable_wrapper_code)
 
 
@@ -178,7 +178,7 @@ class set_stance(_DecoratorContextManager):
 
 
 def assume_constant_result(fn):  # type: ignore[no-untyped-def]
-    fn._dynamo_marked_constant = True
+    fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
     return fn
 
 
@@ -754,13 +754,13 @@ def leaf_function(
             mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
             hook_fn=inner._torchdynamo_leaf_hook_fn,  # type: ignore[attr-defined]
             hook_fake_fn=inner._torchdynamo_leaf_hook_fake_fn,  # type: ignore[attr-defined]
-        )
+        )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
         frozenset(mutates_args) if mutates_args else frozenset()
-    )
+    )  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_hook_fn = None  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
@@ -1073,7 +1073,7 @@ def substitute_in_graph(
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
 
-        return wrapped
+        return wrapped  # type: ignore[return-value]
 
     return wrapper
 
@@ -1174,7 +1174,7 @@ def mark_unbacked(
                 t._dynamo_strict_unbacked_indices = set()
 
             t._dynamo_strict_unbacked_indices.add(index)
-            t._has_dynamo_dim_marking = True
+            t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
             return
 
         if not hasattr(t, "_specialized_on"):
@@ -1210,7 +1210,7 @@ def mark_unbacked(
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
         t._dynamo_unbacked_indices.add(index)
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1299,7 +1299,7 @@ def mark_dynamic(
 
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -1334,7 +1334,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
-        t._has_dynamo_dim_marking = True
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
     if not isinstance(index, (list, tuple)):
@@ -1478,7 +1478,7 @@ def _allow_in_graph_einops() -> None:
         # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
-        _patch_einops_symint_compat(einops.einops)
+        _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
         allow_in_graph(einops.rearrange)
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):

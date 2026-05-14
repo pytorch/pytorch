@@ -140,7 +140,7 @@ class AutotuneHint(Enum):
 class DeviceProperties(typing.NamedTuple):
     """Copy device properties into a data structure not requiring torch to be imported"""
 
-    type: str
+    type: str  # type: ignore[assignment]
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
