@@ -132,11 +132,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -557,13 +553,28 @@ def check_model(
     actual_flat = pytree.tree_leaves(actual)
 
     def to_dtype_preserve_strides(src, dtype):
-        if any(s == 0 for s in src.stride()):
-            return src.to(dtype)
+        expanded_dims = []
+        src_slice = src
+
+        for dim in reversed(range(src.dim())):
+            if src.size(dim) > 1 and src.stride(dim) == 0:
+                expanded_dims.append(dim)
+                src_slice = src_slice.select(dim, 0)
+
         # Preserve strides when casting.
         result = torch.empty_strided(
-            src.size(), src.stride(), device=src.device, dtype=dtype
+            src_slice.size(),
+            src_slice.stride(),
+            device=src.device,
+            dtype=dtype,
         )
-        result.copy_(src)
+        result.copy_(src_slice)
+
+        for dim in reversed(expanded_dims):
+            result = result.unsqueeze(dim)
+
+        if expanded_dims:
+            return result.expand(src.size())
         return result
 
     def reference_to_expect(actual_flat, correct_flat):
@@ -5404,6 +5415,99 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_bwd_weight_backends": "TRITON",
+            "max_autotune_conv_bwd_input_backends": "TRITON",
+        }
+    )
+    @parametrize("dilation", (1, 2))
+    @parametrize("stride", (1, 2))
+    @parametrize("padding", (0, 1))
+    @parametrize("kernel", (1, 3))
+    @parametrize(
+        "channels_groups",
+        (
+            [3, 4, 1],
+            [4, 128, 1],
+            [4, 128, 4],
+            [61, 151, 1],
+            [128, 128, 1],
+            [128, 128, 128],
+        ),
+    )
+    @parametrize("nhwc", (False, True))
+    @with_tf32_off
+    def test_conv2d_backward_parametrized(
+        self,
+        channels_groups: list,
+        stride: int,
+        dilation: int,
+        padding: int,
+        kernel: int,
+        nhwc: bool,
+    ):
+        in_channels = channels_groups[0]
+        out_channels = channels_groups[1]
+        groups = channels_groups[2]
+
+        if is_dynamic_shape_enabled() and (dilation != 1 or groups == 1):
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            # TODO: Remove this workaround once TF32 settings are properly passed to subprocess
+            # Currently, subprocess mode starts with default TF32 settings (cudnn.allow_tf32=True)
+            # even if parent process has set allow_tf32=False.
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(grad_output, inp, weight):
+            conv_backward = torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [out_channels],
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                False,
+                [0, 0],
+                groups,
+                [True, True, True],
+            )
+            return conv_backward
+
+        input_h = 16
+        input_w = 16
+        output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+
+        if TEST_WITH_ROCM:
+            # using the same error tolerance as test_convolution1.
+            atol = 6e-5
+            rtol = 0.001
+        else:
+            # Greatest absolute difference: 0.0001675300 at index (100, 120, 0, 0) (up to 6e-05 allowed)
+            # Greatest relative difference: 0.1761541813 at index (10, 0, 0, 0) (up to 0.001 allowed)
+            atol = 2e-4
+            rtol = 0.001
+
+        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        if nhwc:
+            weight = weight.to(memory_format=torch.channels_last)
+        self.common(
+            fn,
+            (
+                torch.randn([2, out_channels, output_h, output_w]),
+                torch.randn([2, in_channels, input_h, input_w]),
+                weight,
+            ),
+            atol=atol,
+            rtol=rtol,
+            check_lowp=False,
+        )
+
     @parametrize(
         "use_block_ptr",
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
@@ -8639,6 +8743,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
+
+    def test_multinomial(self):
+        # aten.multinomial output is stochastic so we can only check shape/range,
+        # not exact values. Verifies the op compiles and runs without error.
+        def fn(weights):
+            return torch.multinomial(weights, num_samples=4, replacement=True)
+
+        cfn = torch.compile(fn)
+        weights = torch.rand(10, dtype=torch.float32, device=self.device)
+        result = cfn(weights)
+        self.assertEqual(result.shape, torch.Size([4]))
+        self.assertTrue((result >= 0).all() and (result < 10).all())
+
+        # 2D: each row sampled independently
+        weights2d = torch.rand(4, 8, dtype=torch.float32, device=self.device)
+        result2d = torch.compile(
+            lambda w: torch.multinomial(w, num_samples=3, replacement=True)
+        )(weights2d)
+        self.assertEqual(result2d.shape, torch.Size([4, 3]))
+        self.assertTrue((result2d >= 0).all() and (result2d < 8).all())
 
     def test_long_tensor(self):
         def fn(a):
@@ -14279,6 +14403,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    @requires_gpu()
+    @parametrize("inplace", [False, True])
+    def test_index_add_device_mismatch(self, inplace):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires GPU for device mismatch test")
+
+        def fn(x, source):
+            index = torch.randperm(x.size(0))
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 3, device=self.device)
+        source = torch.randn(10, 3, device=self.device)
+
+        with self.assertRaises(RuntimeError):
+            fn(x, source)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
@@ -14735,10 +14882,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         result = f(torch.tensor([20]))
         self.assertTrue(len(result) == 3)
-
-    def test_complex_memory_overlap(self):
-        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
-        self.assertFalse(complex_memory_overlap(t))
 
     @xfail_if_mps
     def test_generate_rand_fp8(self):
@@ -18416,6 +18559,51 @@ if RUN_GPU:
                 " ".join(code),
                 "Expected Triton sort codegen for kthvalue",
             )
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        def test_multinomial_lowering_no_graph_break(self):
+            # aten.multinomial must be handled by a registered lowering (extern fallback)
+            def fn(weights):
+                w = weights * 2.0
+                return torch.multinomial(w, num_samples=3, replacement=True)
+
+            inp = torch.rand(8, device=GPU_TYPE)
+            torch._dynamo.reset()
+            explanation = torch._dynamo.explain(fn)(inp)
+
+            self.assertEqual(
+                explanation.graph_break_count,
+                0,
+                f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
+            )
+
+            result = torch.compile(fn)(inp)
+            self.assertEqual(result.shape, torch.Size([3]))
+            self.assertTrue(result.min() >= 0)
+            self.assertTrue(result.max() < 8)
+
+        def test_sort_dynamic(self):
+            def fn(a):
+                return torch.sort(a, dim=-1, stable=True)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
+            expected = fn(inp)
+            torch.testing.assert_close(result[0], expected[0])
+            torch.testing.assert_close(result[1], expected[1])
+
+        def test_median_dynamic(self):
+            def fn(a):
+                return torch.median(a, dim=1)
+
+            inp = torch.randn(8, 16, device=GPU_TYPE)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=True)
+            result = compiled(inp)
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
