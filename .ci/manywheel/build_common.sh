@@ -454,7 +454,7 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     else
         cp /$WHEELHOUSE_DIR/torch*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
         # Also copy rocm-composable-kernel wheel for ROCm builds
-        if ls /$WHEELHOUSE_DIR/rocm_composable_kernel*.whl >/dev/null 2>&1; then
+        if [[ -f /$WHEELHOUSE_DIR/rocm_composable_kernel*.whl ]]; then
             cp /$WHEELHOUSE_DIR/rocm_composable_kernel*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
         fi
     fi
