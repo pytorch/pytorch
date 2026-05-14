@@ -947,7 +947,7 @@ class SideEffects:
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                    var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = TempLocalSource(cg.tempvars[var])
                 elif var.source is None:
                     var.source = LocalCellSource(var.local_name)
             elif var.is_tensor():
@@ -990,7 +990,7 @@ class SideEffects:
                             raise AssertionError(
                                 "base_cls_vt is None in load_new_method"
                             )
-                        cg(var.base_cls_vt)  # type: ignore[attr-defined]
+                        cg(var.base_cls_vt)
                         cg.extend_output([cg.create_load_attr("__new__")])
 
                     cg.add_push_null(load_new_method)
@@ -999,8 +999,18 @@ class SideEffects:
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
                 if var.mutation_type.cls_source is None:
-                    raise AssertionError(
-                        "cls_source is None on mutation_type in codegen_save_tempvars"
+                    unimplemented(
+                        gb_type="Reconstruct user defined class without a source",
+                        context=f"Class: {var.python_type().__name__}",
+                        explanation=(
+                            f"Cannot reconstruct an instance of {var.python_type().__name__} "
+                            "that escapes the compiled region. This happens when the class is "
+                            "defined dynamically (e.g., inside the compiled function) and the "
+                            "class object itself has no source that can be reconstructed. "
+                            "To fix this, move the class definition outside the compiled function "
+                            "or prevent the object from escaping the compiled region."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 cg(var.mutation_type.cls_source)
 
@@ -1244,7 +1254,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
-                cg(var.source)  # type: ignore[attr-defined]
+                cg(var.source)
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -1299,12 +1309,12 @@ class SideEffects:
                 # (5) update the original dictionary with the dict created in (2)
 
                 if var.has_new_items():
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.load_method("update")
                     cg(var, allow_cache=False)  # Don't codegen via source
 
                     if var.should_reconstruct_all:
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg.load_method("clear")
 
                     suffixes.append(
@@ -1403,7 +1413,7 @@ class SideEffects:
                         ]
                     )
 
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1450,7 +1460,7 @@ class SideEffects:
                     for name in _manual_list_update.__code__.co_varnames:
                         varname_map[name] = cg.tx.output.new_var()
 
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.extend_output(
                         [
                             create_instruction(
@@ -1505,10 +1515,10 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
+                        if not isinstance(var.source, GlobalSource):
                             raise AssertionError(
                                 f"Expected GlobalSource for NewGlobalVariable, "
-                                f"got {type(var.source)}"  # type: ignore[attr-defined]
+                                f"got {type(var.source)}"
                             )
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
@@ -1532,7 +1542,7 @@ class SideEffects:
                                 utils.__name__, "object_setattr_ignore_descriptor"
                             )
                         )
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         suffixes.append(
@@ -1549,7 +1559,7 @@ class SideEffects:
                         # __setattr__ is defined on this object, so call object.__setattr__ directly
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
-                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(var.source)
                         cg(variables.ConstantVariable(name))
                         cg(value)
                         suffixes.append(
@@ -1570,7 +1580,7 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
                     )
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.call_function(1, False)
                     cg.pop_top()
                 _maybe_log_side_effect(var)
@@ -1579,14 +1589,14 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
                     )
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.call_function(1, False)
                     cg.pop_top()
                 _maybe_log_side_effect(var)
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
                 def gen_fn() -> None:
-                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(var.source)
                     cg.load_attr("setstate")
 
                 cg.add_push_null(gen_fn)
