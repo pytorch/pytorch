@@ -122,7 +122,8 @@ SM100_AUX_SCORE_MOD_CASES = (
     (128, "kv_mod_4", lambda seq_len: (_sm100_bias(4),), 4, True),
     # Inductor copies/normalizes sliced inputs, so this case verifies that a
     # normalized zero-offset aux layout can still autovec. A surviving nonzero
-    # offset is covered by test_direct_aux_load_vec_size_requires_contiguous_aligned_vector_dim.
+    # offset is covered by
+    # test_direct_aux_load_vec_size_requires_contiguous_aligned_vector_dim.
     (
         128,
         "kv_sliced_storage_offset",

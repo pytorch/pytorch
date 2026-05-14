@@ -94,7 +94,7 @@ def _select_aux_score_mod_vec_size(
 
     capture_to_buffer = dict(zip(placeholders[5:], score_mod_other_buffers))
     selected_vec_size = 8
-    found_direct_vector_load = False
+    found_vectorizable_load = False
     for node in graph_module.graph.nodes:
         if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
             continue
@@ -107,9 +107,9 @@ def _select_aux_score_mod_vec_size(
         if max_vec_size is None:
             return 1
         selected_vec_size = min(selected_vec_size, max_vec_size)
-        found_direct_vector_load = True
+        found_vectorizable_load = True
 
-    return selected_vec_size if found_direct_vector_load else 1
+    return selected_vec_size if found_vectorizable_load else 1
 
 
 def _max_direct_aux_load_vec_size(
