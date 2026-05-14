@@ -227,7 +227,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
 }
 
 c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
-    c10::cuda::MempoolId_t mempool_id) {
+    c10::cuda::MempoolId_t mempool_id,
+    bool include_traces) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -293,6 +294,14 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support attachOutOfMemoryObserver. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+void CUDAPluggableAllocator::attachOomRejectionObserver(
+    c10::cuda::CUDACachingAllocator::OomRejectionObserver observer) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "CUDAPluggableAllocator does not yet support attachOomRejectionObserver. "
       "If you need it, please file an issue describing your use case.");
 }
 

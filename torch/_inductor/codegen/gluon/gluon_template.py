@@ -10,7 +10,7 @@ implementation is kept minimal and reuses Triton's compilation pipeline.
 import functools
 import hashlib
 import itertools
-from typing import Any, Optional
+from typing import Any
 
 from ...ir import ChoiceCaller
 from ..common import KernelTemplate
@@ -211,7 +211,7 @@ class GluonTemplate(KernelTemplate):
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
-    ) -> Optional[NotImplementedError]:
+    ) -> NotImplementedError | None:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -226,7 +226,7 @@ class GluonTemplate(KernelTemplate):
         except Exception as e:
             return NotImplementedError(f"Gluon template failed: {e}")
 
-    def generate(self, **kwargs: Any) -> Optional[ChoiceCaller]:  # type: ignore[override]
+    def generate(self, **kwargs: Any) -> ChoiceCaller | None:  # type: ignore[override]
         """
         Generate a Gluon kernel choice.
 

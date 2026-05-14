@@ -19,6 +19,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -581,56 +582,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor arg = pop(stack).toTensor();
           push(stack, arg.element_size());
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::numel(Tensor self) -> int"),
-        [](Stack& stack) {
-          at::Tensor arg = pop(stack).toTensor();
-          push(stack, arg.numel());
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::dim(Tensor self) -> int"),
-        dim,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("get_device", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              at::get_device((std::move(peek(stack, 0, 1))).toTensor());
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::storage_offset(Tensor self) -> int"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("storage_offset", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::is_contiguous(Tensor self) -> bool"),
-        [](Stack& stack) {
-          RECORD_FUNCTION("is_contiguous", c10::ArrayRef<const c10::IValue>{});
-          auto result =
-              ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
-          drop(stack, 1);
-          pack(stack, result);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
-        [](Stack& stack) {
-          auto memory_format = pop(stack).toMemoryFormat();
-          auto t = pop(stack).toTensor();
-          push(stack, t.is_contiguous(memory_format));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1752,7 +1703,8 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str"),
         [](Stack& stack) {
-          std::string chars = pop(stack).toStringRef();
+          auto charsIValue = pop(stack);
+          std::string_view chars = charsIValue.toStringRef();
           std::string string = pop(stack).toStringRef();
           auto rindex = string.find_last_not_of(chars);
           if (rindex != std::string::npos) {
@@ -1766,7 +1718,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           } else {
             string = "";
           }
-          push(stack, string);
+          push(stack, std::move(string));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

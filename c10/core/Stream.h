@@ -112,6 +112,11 @@ class C10_API Stream final {
     return id_;
   }
 
+  // Returns an opaque, backend-specific handle to the underlying stream.
+  // The handle is non-owning and its concrete type is backend-defined
+  // (e.g., a CUDA stream or a SYCL queue).
+  void* native_handle() const;
+
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked
   // for recording. In that case the stream stops processing
@@ -128,6 +133,10 @@ class C10_API Stream final {
   // Wait (by blocking the calling thread) until all asynchronous work enqueued
   // on this stream has completed running on the device.
   void synchronize() const;
+
+  // Return the stream is currently recording work for graph capture. True while
+  // the stream is in capture mode, false otherwise.
+  bool is_capturing() const;
 
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole

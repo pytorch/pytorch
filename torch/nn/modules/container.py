@@ -46,7 +46,7 @@ def _addindent(s_, numSpaces):
 
 @deprecated(
     "`nn.Container` is deprecated. "
-    "All of it's functionality is now implemented in `nn.Module`. Subclass that instead.",
+    "All of its functionality is now implemented in `nn.Module`. Subclass that instead.",
     category=FutureWarning,
 )
 class Container(Module):
@@ -778,11 +778,9 @@ class ParameterList(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
 
@@ -1015,11 +1013,9 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

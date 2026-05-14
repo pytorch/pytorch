@@ -22,12 +22,9 @@ def strict_mode(callable, operands):
     if torch.compiler.is_dynamo_compiling():
         return strict_mode_op(callable, operands)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(strict_mode_op, backend=backend, fullgraph=True)(
-            callable, operands
-        )
+    return _hop_compile_and_call(strict_mode_op, (callable, operands))
 
 
 class StrictMode(HigherOrderOperator):
@@ -45,7 +42,8 @@ strict_mode_op = StrictMode()
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def strict_mode_op_dense(callable, operands):
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     return callable(*operands)
 
 

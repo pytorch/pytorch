@@ -320,3 +320,48 @@ TEST(TCPStoreTest, testMultiTenantStores) {
 TEST(TCPStoreTest, testMultiTenantStoresUV) {
   testMultiTenantStores(true);
 }
+
+void testBarrier(bool useLibUV) {
+  constexpr int numWorkers = 4;
+  auto serverTCPStore = _createServer(useLibUV, numWorkers);
+
+  std::vector<std::thread> threads;
+  c10d::TCPStoreOptions client_opts{};
+  client_opts.port = serverTCPStore->getPort();
+  client_opts.numWorkers = numWorkers;
+  client_opts.useLibUV = useLibUV;
+
+  for (int i = 0; i < numWorkers; ++i) {
+    threads.emplace_back([=, &client_opts] {
+      auto store =
+          c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
+      store->barrier(
+          "test_barrier", numWorkers, std::chrono::seconds(defaultTimeout));
+    });
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+}
+
+TEST(TCPStoreTest, testBarrier) {
+  testBarrier(false);
+}
+
+TEST(TCPStoreTest, testBarrierUV) {
+  testBarrier(true);
+}
+
+void testBarrierTimeout(bool useLibUV) {
+  auto store = _createServer(useLibUV, 1);
+  auto timeout = std::chrono::milliseconds(100);
+  EXPECT_THROW(store->barrier("timeout_key", 2, timeout), c10::DistStoreError);
+}
+
+TEST(TCPStoreTest, testBarrierTimeout) {
+  testBarrierTimeout(false);
+}
+
+TEST(TCPStoreTest, testBarrierTimeoutUV) {
+  testBarrierTimeout(true);
+}

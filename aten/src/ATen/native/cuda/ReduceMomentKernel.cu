@@ -8,6 +8,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 
+#include <thrust/pair.h>
+
 namespace at::native {
 
 template <typename scalar_t, typename out_t=scalar_t>

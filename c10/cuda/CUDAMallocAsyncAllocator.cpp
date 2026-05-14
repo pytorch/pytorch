@@ -668,6 +668,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  void attachOomRejectionObserver(OomRejectionObserver observer) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachOomRejectionObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
     TORCH_CHECK(
         false,
@@ -783,15 +790,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
   }
 
-  SnapshotInfo snapshot(MempoolId_t mempool_id) override {
+  SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {
     TORCH_CHECK(
         false,
         "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
         "(For backend:native, snapshot returns a detailed summary of all "
         "blocks tracked by the allocator, but the cudaMallocAsync backend "
         "does not track individual blocks.)");
-    // Alternative: TORCH_WARN
-    return {};
   }
 
   // CUDAGraph interactions

@@ -288,14 +288,6 @@ int munmap(void* addr, size_t length) {
 #endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
-  } while (0)
-
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
 // symbol and link it into the final .so.
@@ -346,6 +338,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 #elif defined(USE_XPU)
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
@@ -505,6 +498,9 @@ class AOTInductorModelBase {
       delete *run_finished_;
       run_finished_.reset();
     }
+    if (stream == nullptr) {
+      aoti_torch_get_current_xpu_stream(this->device_idx_, (void**)&stream);
+    }
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
 #endif
@@ -576,6 +572,11 @@ class AOTInductorModelBase {
     run_finished_ = true;
 #endif // USE_CUDA
 
+    // Wait for the constant folding kernels to complete. The folded
+    // constants may be read by inference on a different stream after
+    // swap_constant_buffer(), which has no GPU synchronization.
+    wait_for_completion();
+
     return folded_constants;
   }
 
@@ -595,15 +596,15 @@ class AOTInductorModelBase {
     // so we need a separate secondary blob for them.
     std::vector<size_t> constants_internal_offset(
         num_constants - num_folded_constants);
-    std::vector<size_t> secondary_cpu_constants_internal_offset(
+    std::vector<size_t> aux_cpu_constants_internal_offset(
         num_constants - num_folded_constants);
     size_t blob_size = 0;
-    size_t secondary_cpu_blob_size = 0;
+    size_t aux_cpu_blob_size = 0;
     compute_constant_blob(
         blob_size,
         constants_internal_offset,
-        secondary_cpu_blob_size,
-        secondary_cpu_constants_internal_offset);
+        aux_cpu_blob_size,
+        aux_cpu_constants_internal_offset);
 
     if (!force && !include_weights) {
       return;
@@ -619,13 +620,13 @@ class AOTInductorModelBase {
     }
 
     // Allocate secondary blob on CPU
-    if (secondary_cpu_blob_size > 0) {
-      secondary_cpu_constant_blob_ = RAII_cpuMalloc(secondary_cpu_blob_size);
+    if (aux_cpu_blob_size > 0) {
+      aux_cpu_constant_blob_ = RAII_cpuMalloc(aux_cpu_blob_size);
     }
 
     size_t bytes_read = 0;
     size_t main_blob_idx = 0;
-    size_t secondary_cpu_blob_idx = 0;
+    size_t aux_cpu_blob_idx = 0;
 
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
@@ -636,6 +637,21 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       int32_t const_device_type = this->constant_device_type(i);
       bool device_type_matches = const_device_type == device_type_;
+
+      // Mixed-device constants are only supported when the secondary device is
+      // CPU. If a constant was compiled for a non-CPU device but we're loading
+      // on a different device, we cannot safely create the tensor.
+      AOTI_RUNTIME_CHECK(
+          device_type_matches ||
+              const_device_type == aoti_torch_device_type_cpu(),
+          "Mixed-device constants are only supported when the secondary "
+          "device is CPU. Constant '" +
+              name +
+              "' was compiled for a non-CPU device. "
+              "Hint: This can happen if you compiled on GPU but are loading "
+              "on CPU, which is not supported. In AOTI, you must compile and "
+              "load on the same device type.");
+
       uint8_t* internal_ptr = nullptr;
       if (data_size != 0) {
         if (device_type_matches) {
@@ -645,10 +661,10 @@ class AOTInductorModelBase {
               data_size,
               /* skip_copy = */ false);
         } else {
-          auto* secondary_cpu_constants_ptr =
-              static_cast<uint8_t*>(secondary_cpu_constant_blob_.get());
-          internal_ptr = secondary_cpu_constants_ptr +
-              secondary_cpu_constants_internal_offset[secondary_cpu_blob_idx];
+          auto* aux_cpu_constants_ptr =
+              static_cast<uint8_t*>(aux_cpu_constant_blob_.get());
+          internal_ptr = aux_cpu_constants_ptr +
+              aux_cpu_constants_internal_offset[aux_cpu_blob_idx];
           memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
         }
       }
@@ -658,7 +674,7 @@ class AOTInductorModelBase {
       if (device_type_matches) {
         main_blob_idx++;
       } else {
-        secondary_cpu_blob_idx++;
+        aux_cpu_blob_idx++;
       }
 
       bytes_read += data_size;
@@ -701,6 +717,10 @@ class AOTInductorModelBase {
 
   RAIIDataPtr&& release_constant_blob() {
     return std::move(constant_blob_);
+  }
+
+  RAIIDataPtr&& release_aux_cpu_constant_blob() {
+    return std::move(aux_cpu_constant_blob_);
   }
 
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
@@ -754,13 +774,13 @@ class AOTInductorModelBase {
   void compute_constant_blob(
       size_t& blob_size,
       std::vector<size_t>& constants_internal_offset,
-      size_t& secondary_cpu_blob_size,
-      std::vector<size_t>& secondary_cpu_constants_internal_offset) {
+      size_t& aux_cpu_blob_size,
+      std::vector<size_t>& aux_cpu_constants_internal_offset) {
     size_t num_constants = this->num_constants();
     blob_size = 0;
-    secondary_cpu_blob_size = 0;
+    aux_cpu_blob_size = 0;
     size_t main_idx = 0;
-    size_t secondary_idx = 0;
+    size_t aux_idx = 0;
 
     for (size_t i = 0; i < num_constants; i++) {
       if (this->constant_from_folded(i)) {
@@ -768,7 +788,7 @@ class AOTInductorModelBase {
       }
 
       size_t data_size = this->constant_data_size(i);
-      // ok to use same AOTI_CONST_ALIGNMENT for both main and secondary blobs
+      // ok to use same AOTI_CONST_ALIGNMENT for both main and auxiliary blobs
       if (data_size % AOTI_CONST_ALIGNMENT) {
         data_size = AOTI_CONST_ALIGNMENT +
             (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
@@ -778,9 +798,8 @@ class AOTInductorModelBase {
         constants_internal_offset[main_idx++] = blob_size;
         blob_size += data_size;
       } else {
-        secondary_cpu_constants_internal_offset[secondary_idx++] =
-            secondary_cpu_blob_size;
-        secondary_cpu_blob_size += data_size;
+        aux_cpu_constants_internal_offset[aux_idx++] = aux_cpu_blob_size;
+        aux_cpu_blob_size += data_size;
       }
     }
   }
@@ -1057,8 +1076,8 @@ class AOTInductorModelBase {
 
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
-  // For mixed-device models, secondary_cpu_constant_blob_ holds CPU constants
-  RAIIDataPtr secondary_cpu_constant_blob_;
+  // For mixed-device models, aux_cpu_constant_blob_ holds CPU constants
+  RAIIDataPtr aux_cpu_constant_blob_;
 
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights

@@ -72,6 +72,8 @@ struct AllocatorConfigInfo {
   bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
+  size_t max_round_threshold;
+  size_t max_cached_size;
 };
 
 struct SnapshotInfo {
@@ -95,14 +97,26 @@ using OutOfMemoryObserver = std::function<void(
     size_t device_total,
     size_t device_free)>;
 
+// Observer called when an allocation is preemptively rejected due to
+// throw_on_cudamalloc_oom policy. Parameters:
+//   - device: GPU device index
+//   - alloc_size: size of the rejected allocation request
+//   - total_allocated: total memory allocated before the request
+//   - device_total: total GPU memory
+using OomRejectionObserver = std::function<void(
+    int64_t device,
+    size_t alloc_size,
+    size_t total_allocated,
+    size_t device_total)>;
+
 struct ShareableHandle {
   ptrdiff_t offset;
   std::string handle;
 };
 
 struct StreamSegmentSize {
-  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
-      : stream(s), is_small_pool(small), total_size(sz) {}
+  StreamSegmentSize(cudaStream_t s, bool small_, size_t sz)
+      : stream(s), is_small_pool(small_), total_size(sz) {}
   cudaStream_t stream;
   bool is_small_pool;
   size_t total_size;
@@ -128,7 +142,9 @@ class CUDAAllocator : public DeviceAllocator {
     CUDAStream cuda_stream = CUDAStream(stream);
     recordStream(ptr, cuda_stream);
   }
-  virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
+  virtual SnapshotInfo snapshot(
+      MempoolId_t mempool_id = {0, 0},
+      bool include_traces = true) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -136,6 +152,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  // Notify the allocator that a CUDA stream capture has actually started /
+  // ended. Distinct from begin/endAllocateToPool, which only routes
+  // allocations into a private mempool and can be invoked without an active
+  // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
+  // registration, or inductor cudagraph_trees warmup).
+  virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
+  virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -194,6 +217,10 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support recordHistory. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual std::shared_ptr<GatheredContext> getContextForPointer(
+      const void* ptr) {
+    return nullptr;
+  }
   virtual void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
@@ -210,6 +237,7 @@ class CUDAAllocator : public DeviceAllocator {
     return "";
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
+  virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
   // per-device allocator lock is held. Any additional locks taken from within
@@ -336,8 +364,10 @@ inline void resetPeakStats(c10::DeviceIndex device) {
   get()->resetPeakStats(device);
 }
 
-inline SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) {
-  return get()->snapshot(mempool_id);
+inline SnapshotInfo snapshot(
+    MempoolId_t mempool_id = {0, 0},
+    bool include_traces = true) {
+  return get()->snapshot(mempool_id, include_traces);
 }
 
 inline std::shared_ptr<AllocatorState> getCheckpointState(
@@ -362,6 +392,14 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
+}
+
+inline void markCaptureBegin(c10::DeviceIndex device) {
+  get()->markCaptureBegin(device);
+}
+
+inline void markCaptureEnd(c10::DeviceIndex device) {
+  get()->markCaptureEnd(device);
 }
 
 inline void recordHistory(
@@ -397,6 +435,10 @@ inline bool isHistoryEnabled() {
   return get()->isHistoryEnabled();
 }
 
+inline std::shared_ptr<GatheredContext> getContextForPointer(const void* ptr) {
+  return get()->getContextForPointer(ptr);
+}
+
 inline bool checkPoolLiveAllocations(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
@@ -407,6 +449,10 @@ inline bool checkPoolLiveAllocations(
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   get()->attachOutOfMemoryObserver(std::move(observer));
+}
+
+inline void attachOomRejectionObserver(OomRejectionObserver observer) {
+  get()->attachOomRejectionObserver(std::move(observer));
 }
 
 inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {

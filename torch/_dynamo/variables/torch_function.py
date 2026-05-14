@@ -31,7 +31,7 @@ import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -157,8 +157,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def __init__(
         self,
-        value: Optional[TorchFunctionMode],
-        source: Optional[Source] = None,
+        value: TorchFunctionMode | None,
+        source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         if value is not None:
@@ -166,11 +166,14 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.value = value
         # needed for BC with calling enter from CM code
         self.cm_obj = value  # type: ignore[assignment]
-        self.source = source  # type: ignore[assignment]
+        self.source = source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # This shouldn't be called unless we have a source
-        assert self.source
+        if not self.source:
+            raise AssertionError(
+                "TorchFunctionModeVariable requires a source for reconstruct"
+            )
         self.source.reconstruct(codegen)
 
     def module_name(self) -> str:
@@ -192,7 +195,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
     ) -> VariableTracker:
         return call_torch_function(
             tx,
-            get_torch_function_fn(tx, self),  # type: ignore[arg-type]
+            get_torch_function_fn(tx, self),
             fn,
             types,
             args,
@@ -245,9 +248,9 @@ class TorchFunctionModeStackStateManager:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         set_torch_function_mode_stack(self.stack)
         self.stack = []
@@ -266,7 +269,7 @@ torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
-    def __init__(self, py_stack: Iterable[Any]) -> None:
+    def __init__(self, py_stack: Iterable[Any], skip_next: bool) -> None:
         # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
         # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
         # These are their definitions:
@@ -281,6 +284,13 @@ class SymbolicTorchFunctionState:
         # This is important because now if a mode is pushed while dynamo is tracing, we know whether
         # or not torch function modes are enabled and whether we should trace it.
         self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
+
+        # Mirrors PythonTorchFunctionTLS::skip_next in C++.
+        # Set by _skip_one_hop_torch_function, consumed by has_torch_function.
+        # The real TLS flag is consumed by save_global_state in
+        # OutputGraph.__init__ (which runs before this) and passed in here.
+        # On tracing failure, restore_graphstate restores the real TLS.
+        self.skip_next = skip_next
 
         # This differs from the C API of the same name
         # this will only be false iff we have entered torch._C.DisableTorchFunction
@@ -441,7 +451,8 @@ def _flatten_vts(vts: Iterable[VariableTracker]) -> list[VariableTracker]:
 
 
 def _get_subclass_type(var: VariableTracker) -> type:
-    assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
+    if not isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable)):
+        raise AssertionError(f"Unexpected type {type(var)}")
     return var.python_type()
 
 
@@ -481,13 +492,15 @@ def call_torch_function(
     types: TupleVariable,
     args: Iterable[Any],
     kwargs: dict[str, Any],
+    *,
+    is_subclass_dispatch: bool = False,
 ) -> Any:
     # This emulates calling __torch_function__, which has a signature
     #   def __torch_function__(cls, func, types, args=(), kwargs=None):
     #
     # Also notice the `cls` is not explicitly passed in the reference
     # implementations:
-    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374  # noqa: B950
+    # 1. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/python_arg_parser.cpp#L368-L374
     # 2. https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/overrides.py#L1741-L1743
     tf_args = [
         fn,
@@ -495,7 +508,20 @@ def call_torch_function(
         VariableTracker.build(tx, tuple(args)),
         VariableTracker.build(tx, kwargs),
     ]
-    return torch_function_var.call_function(tx, tf_args, {})
+    # Mirror the C++ THPModule_disable_torch_function behavior: disable
+    # __torch_function__ subclass dispatch during the call to prevent
+    # re-entrant dispatch on operations inside __torch_function__.
+    # Only do this for subclass dispatch, not mode dispatch. Modes need
+    # subclass dispatch to remain enabled because the mode's
+    # __torch_function__ may re-dispatch to the subclass.
+    tf_state = tx.symbolic_torch_function_state
+    old_subclass_enabled = tf_state.torch_function_subclass_enabled
+    if is_subclass_dispatch and old_subclass_enabled:
+        tf_state.torch_function_subclass_enabled = False
+    try:
+        return torch_function_var.call_function(tx, tf_args, {})
+    finally:
+        tf_state.torch_function_subclass_enabled = old_subclass_enabled
 
 
 def get_torch_function_fn(
@@ -504,10 +530,9 @@ def get_torch_function_fn(
     # The underlying function could be a classmethod, staticmethod, regular
     # function or a function with C-implementation. It doesn't matter as long as
     # they satisfy the calling convention in `call_torch_function`.
-    from .builtin import BuiltinVariable
 
-    args = [vt, ConstantVariable("__torch_function__")]
-    func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
+    args = [vt, VariableTracker.build(tx, "__torch_function__")]
+    func_vt = VariableTracker.build(tx, getattr).call_function(tx, args, {})
     return func_vt
 
 
@@ -556,12 +581,13 @@ def dispatch_torch_function(
         )
 
         if not res.is_constant_match(NotImplemented):
+            tx.output.torch_function_subclass_inlined = True
             return res
 
     unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
-        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        explanation=f"All __torch_function__ overrides for function {fn} returned NotImplemented",
         hints=[
             *graph_break_hints.USER_ERROR,
         ],
@@ -588,11 +614,13 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
-        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter) or issubclass(
-            input_tensor_type, torch.Tensor
-        ), (
-            f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
-        )
+        if not (
+            input_tensor_type in (torch.Tensor, torch.nn.Parameter)
+            or issubclass(input_tensor_type, torch.Tensor)
+        ):
+            raise AssertionError(
+                f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
+            )
         var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
         return var
@@ -679,7 +707,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
                     getter = attr.fget
-                    getter_var = VariableTracker.build(tx, getter, source=getter_source)
+                    getter_var = VariableTracker.build(
+                        tx, getter, source=getter_source, realize=True
+                    )
                     return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):
@@ -720,6 +750,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             types,
             args,
             kwargs,
+            is_subclass_dispatch=True,
         )
 
     def call_method(
