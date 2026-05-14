@@ -1,5 +1,3 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
 import ast
 import copy
 import functools
@@ -31,7 +29,7 @@ class AST_Rewriter(ast.NodeTransformer):
     # a disable here. This function is an optimization pass and not really
     # suitable for dynamo tracing anyways.
     @torch._dynamo.disable
-    def rewrite(self, fn: FunctionType):
+    def rewrite(self, fn: FunctionType) -> FunctionType:
         # Normalize the source lines
         sourcelines, _ = inspect.getsourcelines(fn)
         sourcelines = normalize_source_lines(sourcelines)
@@ -53,7 +51,9 @@ class AST_Rewriter(ast.NodeTransformer):
         fn_compiled = globals_dict[new_keys[0]]
 
         # return the compiled function with the original globals
-        def change_func_globals(f, globals):
+        def change_func_globals(
+            f: FunctionType, globals: dict[str, object]
+        ) -> FunctionType:
             """Based on https://stackoverflow.com/a/13503277/2988730 (@unutbu)"""
             # __globals__ is a private member of the function class
             # so we have to copy the function, f, all of its member, except f.__globals__
@@ -66,12 +66,12 @@ class AST_Rewriter(ast.NodeTransformer):
             )
             g = functools.update_wrapper(g, f)
             g.__kwdefaults__ = copy.copy(f.__kwdefaults__)  # type:ignore[attr-defined]
-            return g
+            return g  # pyrefly: ignore [bad-return]
 
         # Return the correct FunctionType object
         return change_func_globals(fn_compiled, globals=fn.__globals__)
 
-    def visit_Assert(self, node):
+    def visit_Assert(self, node: ast.Assert) -> ast.Expr:
         """
         Swap out the Assert node (Python's `assert`) with a callsite to the
         symbolically-traceable torch._assert function
@@ -93,7 +93,7 @@ class AST_Rewriter(ast.NodeTransformer):
         # a replacement for the original _assert node
         return ast.copy_location(expr_wrapper, node)
 
-    def visit_AnnAssign(self, node):
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.Assign:
         """
         Swap out Python's AnnAssign with an Assign node where the annotation function is called.
         Example:
@@ -106,6 +106,7 @@ class AST_Rewriter(ast.NodeTransformer):
             targets=[node.target],
             value=ast.Call(
                 func=ast.Name(id="annotate", ctx=ast.Load()),
+                # pyrefly: ignore [bad-argument-type]
                 args=[node.value, node.annotation],
                 keywords=[],
             ),
@@ -115,20 +116,22 @@ class AST_Rewriter(ast.NodeTransformer):
 class RewritingTracer(Tracer):
     def trace(
         self,
-        root: torch.nn.Module | Callable,
+        root: torch.nn.Module | Callable[..., Any],
         concrete_args: dict[str, Any] | None = None,
     ) -> Graph:
         return super().trace(_rewrite(root), concrete_args)
 
 
-def _rewrite(fn: torch.nn.Module | Callable) -> torch.nn.Module | Callable:
+def _rewrite(
+    fn: torch.nn.Module | Callable[..., Any],
+) -> torch.nn.Module | Callable[..., Any]:
     if isinstance(fn, torch.nn.Module):
         # Rewrite this module's `forward` as well as the `forward`s of
         # all of this module's recursive descendents. Return the new,
         # rewritten module hierarchy.
-        def rewrite_module(m: torch.nn.Module):
+        def rewrite_module(m: torch.nn.Module) -> torch.nn.Module:
             class RewrittenModule(torch.nn.Module):
-                def __init__(self, orig):
+                def __init__(self, orig: torch.nn.Module) -> None:
                     super().__init__()
                     for k, v in orig.__dict__.items():
                         if isinstance(v, torch.nn.Module):
