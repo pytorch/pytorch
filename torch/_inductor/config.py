@@ -2092,6 +2092,11 @@ class triton:
         == "1"
     )
 
+    # Fuse dependent cross-axis reductions (e.g., RMSNorm over D followed
+    # by per-block amax over a small group dimension like FP8 block size)
+    # into a single kernel with two sequential reduction passes.
+    nested_reduction = False
+
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     debug_dump_kernel_inputs: dict[str, int] = {}

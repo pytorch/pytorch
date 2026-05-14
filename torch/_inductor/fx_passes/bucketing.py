@@ -429,8 +429,11 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
+    # Build forward adjacency list for incremental descendant tracking
+    children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
+    for node in g.nodes:
+        for inp in node._input_nodes:
+            children[inp].append(node)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -451,6 +454,16 @@ def greedy_bucket_collective_by_mb(
 
     if len(cur_group) > 1:
         nodes_groups.append(cur_group)
+
+    def _add_descendants(node: torch.fx.Node, desc: OrderedSet[torch.fx.Node]) -> None:
+        """Forward BFS from node, adding all reachable nodes to desc."""
+        stack = [node]
+        while stack:
+            n = stack.pop()
+            for child in children[n]:
+                if child not in desc:
+                    desc.add(child)
+                    stack.append(child)
 
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
@@ -481,7 +494,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendents[node]
+            _add_descendants(node, cur_bucket_descendents)
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
@@ -598,7 +611,7 @@ def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
@@ -635,7 +648,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
 
 
@@ -647,7 +660,7 @@ def reduce_scatter_merge_fn_to_trace(
     reduce_dtype: torch.dtype,
     device: torch.device,
 ) -> list[torch.Tensor]:
-    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
 
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     new_out_numels = [x.numel() // group_size for x in rs_ins]
@@ -660,7 +673,7 @@ def reduce_scatter_merge_fn_to_trace(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
 
 
@@ -677,14 +690,14 @@ def reduce_scatter_merge_fn_coalesced(
     Avoids cat-ing inputs into one buffer; instead passes the tensor list
     directly to reduce_scatter_tensor_coalesced for zero-copy batching.
     """
-    rs_ins_flat = [x.reshape(-1) for x in rs_ins]
+    rs_ins_flat = [x.view(-1) for x in rs_ins]
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
 
     rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
         rs_ins_flat, reduce_op, group_size, group_name
     )
     rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
-    return [o.reshape(s) for o, s in zip(rs_outs, new_out_sizes)]
+    return [o.view(s) for o, s in zip(rs_outs, new_out_sizes)]
 
 
 def all_reduce_merge_fn_to_trace(
@@ -694,14 +707,14 @@ def all_reduce_merge_fn_to_trace(
     reduce_dtype: torch.dtype,
     device: torch.device,
 ) -> list[torch.Tensor]:
-    ar_ins_flattened = [x.reshape(-1) for x in ar_ins]
+    ar_ins_flattened = [x.view(-1) for x in ar_ins]
     new_ar_in = torch.cat(ar_ins_flattened)
     new_ar_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_reduce.default(new_ar_in, reduce_op, group_name)
     )
     split_sizes = [x.numel() for x in ar_ins]
     new_outs_flat = new_ar_out.split(split_sizes)
-    new_outs = [x.reshape(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
+    new_outs = [x.view(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
     return new_outs
 
 

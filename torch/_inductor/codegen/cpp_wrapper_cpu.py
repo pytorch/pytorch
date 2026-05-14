@@ -1943,16 +1943,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
         maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
         # In AOT mode, emit runtime checks for potential division/modulo by zero
-        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0.
         if V.graph.aot_mode:
             for divisor, op_name in self._extract_divisors_from_expr(
                 maybe_simplified_x
             ):
-                divisor_str = cexpr(divisor)
-                self.wrapper_call.writeline_aot(
-                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
-                )
+                self.write_assert_div_by_zero(cexpr(divisor), op_name)
         return cexpr(maybe_simplified_x)
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target).
+
+        Uses writeline_aot so the check is routed to the AOTI side only in
+        dual-wrapper mode; on plain buffers writeline_aot has the expected
+        single-stream behavior (AotOnlyBuffer delegates to writeline, plain
+        IndentedBuffer is a no-op).
+        """
+        code.writeline_aot(
+            f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+        )
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
@@ -2891,7 +2902,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # to its side of the dual buffer via set_writeline.
         if V.graph.aot_mode:
             aot_ctx = (
-                self.set_writeline(self.wrapper_call.writeline_aot)
+                self.set_writeline(self.wrapper_call, self.wrapper_call.writeline_aot)
                 if V.graph.is_dual_wrapper_mode
                 else contextlib.nullcontext()
             )
@@ -2905,7 +2916,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode or V.graph.is_dual_wrapper_mode:
             jit_ctx = (
-                self.set_writeline(self.wrapper_call.writeline_jit)
+                self.set_writeline(self.wrapper_call, self.wrapper_call.writeline_jit)
                 if V.graph.is_dual_wrapper_mode
                 else contextlib.nullcontext()
             )
