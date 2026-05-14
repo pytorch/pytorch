@@ -226,7 +226,7 @@ def _convert_to_0d_constant(
 
     tensor_box.realize()
 
-    from .ir import GenericView, ExternKernel
+    from .ir import ExternKernel, GenericView
 
     if isinstance(tensor_box.data, GenericView):
         tensor_box = ir.TensorBox(ExternKernel.require_contiguous(tensor_box.data))
