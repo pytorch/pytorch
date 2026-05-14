@@ -74,10 +74,16 @@ def philox_rand_offset(
         blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
         num = cast(int, numel)
         grid_size = (num + block_size - 1) // block_size
-        grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
-        return ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+        grid_size = min(
+            grid_size, device_property.multi_processor_count * blocks_per_sm
+        )
+        return (
+            (num - 1) // (block_size * grid_size * unroll) + 1
+        ) * curand4_engine_calls
     elif device.type == "xpu":
-        unroll = 4  # rand4_engine_calls are equal to unroll in XPU DistributionTemplates.h
+        unroll = (
+            4  # rand4_engine_calls are equal to unroll in XPU DistributionTemplates.h
+        )
         device_property = torch.xpu.get_device_properties(torch.xpu.current_device())
         max_sub_group_size = max(device_property.sub_group_sizes)
         # group_size mirrors syclMaxWorkItemsPerSubSlice() in torch-xpu-ops
