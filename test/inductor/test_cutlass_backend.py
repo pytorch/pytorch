@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import contextlib
-import functools
 import gc
 import itertools
 import logging
@@ -14,6 +12,31 @@ import unittest.mock as mock
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
+
+import torch
+
+_CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
+
+
+def _maybe_set_cutlass_dir_env_from_checkout() -> None:
+    # Set this before importing torch._inductor.config below.
+    if _CUTLASS_DIR_ENV_VAR in os.environ:
+        return
+
+    default_cutlass_dir = (
+        Path(torch.__file__).resolve().parent.parent / "third_party" / "cutlass"
+    )
+    if (default_cutlass_dir / "python").is_dir():
+        return
+
+    checkout_cutlass_dir = (
+        Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
+    )
+    if (checkout_cutlass_dir / "python").is_dir():
+        os.environ[_CUTLASS_DIR_ENV_VAR] = str(checkout_cutlass_dir)
+
+
+_maybe_set_cutlass_dir_env_from_checkout()
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
@@ -31,7 +54,6 @@ try:
 except ImportError:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 
-import torch
 import torch._inductor.codecache
 import torch.version
 from torch._dynamo import config as dynamo_config
@@ -85,7 +107,6 @@ if HAS_CUDA_AND_TRITON:
 
 
 log = logging.getLogger(__name__)
-_CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
 
 
 def _get_path_without_sccache() -> str:
@@ -99,68 +120,6 @@ def _get_path_without_sccache() -> str:
 
 def _get_cutlass_dir() -> str:
     return config.xpu.cutlass_dir if GPU_TYPE == "xpu" else config.cutlass.cutlass_dir
-
-
-@functools.cache
-def _get_requested_cutlass_dir() -> str | None:
-    return os.environ.get(_CUTLASS_DIR_ENV_VAR)
-
-
-@functools.cache
-def _get_checkout_cutlass_dir() -> str | None:
-    checkout_cutlass_dir = (
-        Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
-    )
-    return str(checkout_cutlass_dir) if checkout_cutlass_dir.is_dir() else None
-
-
-@contextlib.contextmanager
-def _maybe_patch_cutlass_dir_from_checkout(*, patch_env: bool = False):
-    try_import_cutlass.cache_clear()
-    cutlass_dir = _get_cutlass_dir()
-    cutlass_dir_config = (
-        "xpu.cutlass_dir" if GPU_TYPE == "xpu" else "cutlass.cutlass_dir"
-    )
-    cutlass_dir_config_keys = (
-        (cutlass_dir_config,)
-        if GPU_TYPE == "xpu"
-        else (cutlass_dir_config, "cuda.cutlass_dir")
-    )
-
-    with contextlib.ExitStack() as stack:
-        if (
-            not try_import_cutlass()
-            and _get_requested_cutlass_dir() is None
-            and not (Path(cutlass_dir) / "python").is_dir()
-        ):
-            checkout_cutlass_dir_str = _get_checkout_cutlass_dir()
-            if checkout_cutlass_dir_str is not None:
-                if patch_env:
-                    stack.enter_context(
-                        mock.patch.dict(
-                            os.environ,
-                            {_CUTLASS_DIR_ENV_VAR: checkout_cutlass_dir_str},
-                        )
-                    )
-                stack.enter_context(
-                    config.patch(
-                        dict.fromkeys(cutlass_dir_config_keys, checkout_cutlass_dir_str)
-                    )
-                )
-                # config.patch is thread-local, but CUTLASS precompilation uses
-                # worker threads that also need to find the checkout headers.
-                for key in cutlass_dir_config_keys:
-                    stack.enter_context(
-                        mock.patch.object(
-                            config._config[key], "default", checkout_cutlass_dir_str
-                        )
-                    )
-
-        try_import_cutlass.cache_clear()
-        try:
-            yield
-        finally:
-            try_import_cutlass.cache_clear()
 
 
 def _check_if_instances_equal(op1, op2) -> bool:
@@ -347,19 +306,21 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        with _maybe_patch_cutlass_dir_from_checkout():
-            self.assertTrue(try_import_cutlass())
+        try_import_cutlass.cache_clear()
+        self.addCleanup(try_import_cutlass.cache_clear)
+        self.assertTrue(try_import_cutlass())
 
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
-            import cutlass_library  # noqa: F401
+        import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+        import cutlass_library  # noqa: F401
 
     @skipXPUIf(not Xe2_Or_Later, "")
     def test_cutlass_key(self):
-        with _maybe_patch_cutlass_dir_from_checkout():
-            self.assertTrue(try_import_cutlass())
-            from torch._inductor.codecache import cutlass_key
+        try_import_cutlass.cache_clear()
+        self.addCleanup(try_import_cutlass.cache_clear)
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
 
-            self.assertIsNotNone(cutlass_key())
+        self.assertIsNotNone(cutlass_key())
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -374,43 +335,44 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        with _maybe_patch_cutlass_dir_from_checkout(patch_env=True):
-            cutlass_dir = _get_cutlass_dir()
-            self.assertTrue(
-                try_import_cutlass(),
-                "CUTLASS backend is required by this test but could not be imported. "
-                "Set TORCHINDUCTOR_CUTLASS_DIR to a valid CUTLASS checkout; "
-                f"current cutlass_dir={cutlass_dir!r}.",
-            )
+        try_import_cutlass.cache_clear()
+        self.addCleanup(try_import_cutlass.cache_clear)
+        cutlass_dir = _get_cutlass_dir()
+        self.assertTrue(
+            try_import_cutlass(),
+            "CUTLASS backend is required by this test but could not be imported. "
+            "Set TORCHINDUCTOR_CUTLASS_DIR to a valid CUTLASS checkout; "
+            f"current cutlass_dir={cutlass_dir!r}.",
+        )
 
-            # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
-            # between CUTLASS and ATen in half precision.
-            a = random_matrix_with_scaled_reduction_dim(
-                M, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
-            )
-            b = random_matrix_with_scaled_reduction_dim(
-                N, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
-            ).t()
+        # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
+        # between CUTLASS and ATen in half precision.
+        a = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        )
+        b = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        ).t()
 
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "autotune_in_subproc": True,
-                    "max_autotune_gemm_backends": "CUTLASS",
-                    "compile_threads": 4,
-                    "cutlass.cutlass_max_profiling_configs": 4,
-                }
-            ):
-                Y_compiled = torch.compile(torch.mm)(a, b)
-                Y = torch.mm(a, b)
-                if GPU_TYPE == "xpu":
-                    atol = 1e-3  # default is 1e-5
-                    rtol = 1e-3  # default is 1e-3
-                else:
-                    atol = None
-                    rtol = None
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "compile_threads": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
+            }
+        ):
+            Y_compiled = torch.compile(torch.mm)(a, b)
+            Y = torch.mm(a, b)
+            if GPU_TYPE == "xpu":
+                atol = 1e-3  # default is 1e-5
+                rtol = 1e-3  # default is 1e-3
+            else:
+                atol = None
+                rtol = None
 
-                self.assertEqual(Y_compiled, Y, atol=atol, rtol=rtol)
+            self.assertEqual(Y_compiled, Y, atol=atol, rtol=rtol)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
