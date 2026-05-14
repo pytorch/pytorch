@@ -342,23 +342,17 @@ def insert_deferred_runtime_asserts(
                     for i, s in enumerate(t.size()):
                         match_symbol(
                             s,
-                            lambda: graph.call_function(
-                                torch.ops.aten.sym_size.int, (node, i)
-                            ),
+                            lambda: graph.create_size_node(node, i),
                         )
                     if not is_sparse_any(t):
                         for i, s in enumerate(t.stride()):
                             match_symbol(
                                 s,
-                                lambda: graph.call_function(
-                                    torch.ops.aten.sym_stride.int, (node, i)
-                                ),
+                                lambda: graph.create_stride_node(node, i),
                             )
                         match_symbol(
                             t.storage_offset(),
-                            lambda: graph.call_function(
-                                torch.ops.aten.sym_storage_offset.default, (node,)
-                            ),
+                            lambda: graph.create_storage_offset_node(node),
                         )
 
             # Handle asserts that aren't associated with any symbol.  This
@@ -494,18 +488,12 @@ def insert_deferred_runtime_asserts(
                         ):
                             if keypath[0].name == "size":
                                 return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_size.int,
-                                        (node, keypath[1].idx),
-                                    ),
+                                    graph.create_size_node(node, keypath[1].idx),
                                     keypath[2:],
                                 )
                             if keypath[0].name == "stride":
                                 return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_stride.int,
-                                        (node, keypath[1].idx),
-                                    ),
+                                    graph.create_stride_node(node, keypath[1].idx),
                                     keypath[2:],
                                 )
 
@@ -518,10 +506,7 @@ def insert_deferred_runtime_asserts(
                         elif isinstance(keypath[0], CallMethodKey):
                             if keypath[0].name == "storage_offset":
                                 return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_storage_offset.default,
-                                        (node,),
-                                    ),
+                                    graph.create_storage_offset_node(node),
                                     keypath[1:],
                                 )
 

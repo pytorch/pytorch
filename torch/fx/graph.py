@@ -1533,6 +1533,20 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
+        from torch.utils._pytree import tree_map
+
+        def _check_symint(val: object) -> object:
+            if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                raise RuntimeError(
+                    f"Raw {type(val).__name__} value ({val}) passed as argument to "
+                    f"Graph.create_node(op='{op}', target={target}). "
+                    f"Use create_*_node() helpers (e.g. create_size_node, create_numel_node) instead."
+                )
+            return val
+
+        tree_map(_check_symint, args)
+        tree_map(_check_symint, kwargs)
+
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
@@ -1887,6 +1901,47 @@ class Graph:
         return self.create_node(
             "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
+
+    @staticmethod
+    def _get_tensor_meta_val(tensor_node: Node) -> Any:
+        """Read the example tensor stored on ``tensor_node`` under either
+        ``meta['val']`` (export / proxy_tensor convention) or
+        ``meta['example_value']`` (dynamo convention).
+        """
+        if "val" in tensor_node.meta:
+            return tensor_node.meta["val"]
+        if "example_value" in tensor_node.meta:
+            return tensor_node.meta["example_value"]
+        return None
+
+    @compatibility(is_backward_compatible=False)
+    def create_size_node(self, tensor_node: Node, dim: int) -> Node:
+        """Create an FX node for ``tensor_node.size(dim)``."""
+        val = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(torch.ops.aten.sym_size.int, (tensor_node, dim))
+        if val is not None:
+            node.meta["val"] = val.size(dim)
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_stride_node(self, tensor_node: Node, dim: int) -> Node:
+        """Create an FX node for ``tensor_node.stride(dim)``."""
+        val = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(torch.ops.aten.sym_stride.int, (tensor_node, dim))
+        if val is not None:
+            node.meta["val"] = val.stride(dim)
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_storage_offset_node(self, tensor_node: Node) -> Node:
+        """Create an FX node for ``tensor_node.storage_offset()``."""
+        val = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(
+            torch.ops.aten.sym_storage_offset.default, (tensor_node,)
+        )
+        if val is not None:
+            node.meta["val"] = val.storage_offset()
+        return node
 
     @compatibility(is_backward_compatible=True)
     def node_copy(
