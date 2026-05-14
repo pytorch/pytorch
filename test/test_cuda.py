@@ -4821,18 +4821,17 @@ class TestResizeStorageWithAddr(TestCase):
         TEST_CUDAMALLOCASYNC,
         "CUDAMallocAsync does not support exact-address allocation",
     )
-    def test_resize_storage_with_addr_out_of_pool_errors(self):
+    def test_resize_storage_with_addr_misaligned_address_errors(self):
         pool = torch.cuda.MemPool()
         with torch.cuda.use_mem_pool(pool):
             t = torch.empty(4096, dtype=torch.uint8, device="cuda")
 
         original_ptr = t.untyped_storage().data_ptr()
-        original_size = t.untyped_storage().nbytes()
         t.untyped_storage().resize_(0)
 
-        with self.assertRaisesRegex(RuntimeError, "exact address"):
+        with self.assertRaisesRegex(RuntimeError, "aligned to kMinBlockSize"):
             with torch.cuda.use_mem_pool(pool):
-                t.untyped_storage()._resize_with_addr_(original_size, original_ptr - 1)
+                t.untyped_storage()._resize_with_addr_(2048, original_ptr + 1)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,

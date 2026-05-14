@@ -1959,6 +1959,14 @@ class DeviceCachingAllocator {
   }
 
   Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
+    const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
+    TORCH_CHECK(
+        requested_addr % kMinBlockSize == 0,
+        "mallocWithAddress: addr must be aligned to kMinBlockSize (",
+        kMinBlockSize,
+        " bytes), got ",
+        addr);
+
     // done outside the lock because we don't know what locks the recorder needs
     // to have.
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1983,7 +1991,6 @@ class DeviceCachingAllocator {
         CUDAAllocatorConfig::expandable_segments() && !active_user_pool;
     const auto stat_types = get_stat_types_for_pool(pool);
     const auto block_begin = reinterpret_cast<uintptr_t>(containing_block->ptr);
-    const auto requested_addr = reinterpret_cast<uintptr_t>(addr);
     const size_t prefix_size = requested_addr - block_begin;
 
     // mallocWithAddress may allocate both prefix block and requested block,
