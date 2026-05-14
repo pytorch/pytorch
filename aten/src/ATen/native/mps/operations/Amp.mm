@@ -29,7 +29,6 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
   }
   TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
   TORCH_CHECK(scaled_grad.numel() <= std::numeric_limits<uint32_t>::max(), "scaled_grad is too large");
-  float inv_scale_val = inv_scale.item<float>();
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto ampPipelineState =
@@ -43,7 +42,7 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     auto computeEncoder = stream->commandEncoder();
     [computeEncoder setComputePipelineState:ampPipelineState];
-    mtl_setArgs(computeEncoder, scaled_grad, found_inf, inv_scale_val);
+    mtl_setArgs(computeEncoder, scaled_grad, found_inf, inv_scale);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
   });
 }

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, TypeGuard
 from typing_extensions import final, override, Self
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
@@ -31,7 +31,6 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -473,7 +472,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
+            log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
         # Triton kernel wrapper nodes contain references to the kernel_side_table

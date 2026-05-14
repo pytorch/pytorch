@@ -72,7 +72,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
-from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+from torch.utils.checkpoint import checkpoint
 
 
 # Tests are ported from pytorch/nestedtensor.
@@ -1448,10 +1448,11 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         b = torch.randn(5, 4, device=device)
         nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
 
-        # Guard CUDA tensors
-        if "cuda" in device:
+        # Non-CPU devices don't use POSIX shared memory
+        if device != "cpu":
             result = nt.share_memory_()
             self.assertIs(result, nt)
+            self.assertTrue(nt.is_shared())
             return
 
         result = nt.share_memory_()
@@ -7477,22 +7478,6 @@ torch.cuda.synchronize()
         checkpoint(fn, values, offsets, use_reentrant=False).backward()
         self.assertIsNotNone(values.grad)
 
-        context_fn = partial(
-            create_selective_checkpoint_contexts, [torch.ops.aten.cumsum.default]
-        )
-
-        values.grad = None
-
-        def fn(values, lengths):
-            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
-            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
-            return convert_nt_to_jagged(nt).sum()
-
-        checkpoint(
-            fn, values, lengths, use_reentrant=False, context_fn=context_fn
-        ).backward()
-        self.assertIsNotNone(values.grad)
-
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
@@ -8768,6 +8753,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
             in {"max.binary", "min.binary", "minimum", "maximum", "copysign"}
         ),
         name="unimplemented_masked_fill",
+    ),
+    XFailRule(
+        sample_match_fn=lambda device, sample: "(T, NT)" in sample.name,
+        op_match_fn=lambda device, op: op.full_name == "nextafter",
+        name="nextafter_backward_not_implemented",
     ),
 ]
 

@@ -234,7 +234,7 @@ def derived_types(
 
     def derived_seq_types(typ: type | typing._SpecialForm):
         return (
-            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
+            typing.Sequence[typ],  # type: ignore[valid-type]
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),
@@ -347,14 +347,11 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
-    type_args = getattr(tuple_type, "__args__", None)
-    # Account for different python versions, e.g. python 3.8 would give ()
-    # but python 3.12 would give None.
+    type_args = typing.get_args(tuple_type)
     if (
         tuple_type is typing.Tuple  # noqa: UP006
         or tuple_type is tuple
-        or type_args == ()
-        or type_args is None
+        or not type_args
     ):
         # Handle the case of an empty tuple type
         return list

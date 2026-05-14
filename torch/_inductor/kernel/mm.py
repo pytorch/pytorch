@@ -16,7 +16,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import ScalingType
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, distributed_autotune
@@ -669,22 +669,18 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
-        # For ROCm, check original inp since kernel_inputs_aten uses inp (not inp_expanded)
-        bias_to_check = inp if torch.version.hip else inp_expanded
         if (
-            bias_to_check.get_stride()[0] == 0
+            inp.get_stride()[0] == 0
+            and len(inp.get_size()) == 2
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
             aten_templates.append(aten_bias_addmm)
 
         # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
-        if torch.version.hip:
-            choices.extend(
-                V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
-            )
-        else:
-            templates_to_use.extend(aten_templates)
+        choices.extend(
+            V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
+        )
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
@@ -694,7 +690,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
-            templates_to_use.append(persistent_tma_mm_template)
+            if torch.version.hip is None:
+                templates_to_use.append(persistent_tma_mm_template)
+            else:
+                templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
 
@@ -887,7 +886,7 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_scaled_mm(
     mat_a,
     mat_b,
@@ -1058,8 +1057,8 @@ def tuned_scaled_mm(
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
-            kernel_inputs.nodes(),  # type: ignore[arg-type]
-            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
+            kernel_inputs.nodes(),
+            use_fast_accum=use_fast_accum,
         )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
