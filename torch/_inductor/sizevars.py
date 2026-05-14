@@ -390,7 +390,7 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
+        return self.statically_known_true(sympy.Eq(left, right))
 
     def statically_known_list_equals(
         self, left: Sequence[Expr], right: Sequence[Expr]
@@ -505,7 +505,7 @@ class SizeVarAllocator:
         if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
             return False
         expr = sympy.Eq(Mod(numerator, denominator), 0)
-        return self.statically_known_true(expr)  # type: ignore[arg-type]
+        return self.statically_known_true(expr)
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
@@ -614,9 +614,9 @@ class SizeVarAllocator:
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         if self.guard_or_false(sympy.Le(left, right)):
             return left
         if self.guard_or_false(sympy.Le(right, left)):
@@ -682,8 +682,8 @@ class SizeVarAllocator:
         return [self.guard_int(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
-        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
-            return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
         return expr
 
     def replace_backed_symbols_with_hints(
@@ -965,8 +965,8 @@ class SizeVarAllocator:
         support_vars: Sequence[sympy.Symbol] | None = None,
     ) -> list[int]:
         for v in index.free_symbols:
-            if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
-                index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
+            if symbol_is_type(v, SymT.INDIRECT):
+                index = sympy_subs(index, {v: 0})
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             result.append(self.optimization_hint(s, fallback=0))

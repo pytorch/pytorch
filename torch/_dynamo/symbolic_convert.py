@@ -1429,7 +1429,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn is not None and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+        self.push(fn.call_function(self, args, kwargs))
 
     def inline_generator_function(
         self,
@@ -2092,7 +2092,7 @@ class InstructionTranslatorBase(
             {},
         )
 
-    def STORE_DEREF(self, inst: Instruction) -> None:  # type: ignore[override]
+    def STORE_DEREF(self, inst: Instruction) -> None:
         if inst.argval not in self.cell_and_freevars():
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
@@ -2106,17 +2106,17 @@ class InstructionTranslatorBase(
                 "expected isinstance(cell, CellVariable) to be true"
             )  # tame mypy
         if cell.local_name is not None:
-            val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
+            val.set_name_hint(cell.local_name)
 
     LOAD_CLOSURE = LOAD_FAST
 
     def _load_const(self, inst: Instruction) -> VariableTracker:
         i = inst.arg
         if i is None:
-            return ConstantVariable.create(value=inst.argval)  # type: ignore[return-value]
+            return ConstantVariable.create(value=inst.argval)
         val = self._constants_cache[i]
         if not val:
-            self._constants_cache[i] = ConstantVariable.create(value=inst.argval)  # type: ignore[call-overload]
+            self._constants_cache[i] = ConstantVariable.create(value=inst.argval)
             val = self._constants_cache[i]
         if val is None:
             raise AssertionError("expected val is not None to be true")
@@ -2465,7 +2465,7 @@ class InstructionTranslatorBase(
             and isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
@@ -2484,7 +2484,7 @@ class InstructionTranslatorBase(
             # set_context=False for re-raises (RERAISE, RAISE_VARARGS 0) to
             # match CPython semantics: __context__ is set only at the original
             # raise site, so user code in finally blocks can clear it.
-            self.exn_vt_stack.set_current_exception(val, set_context=set_context)  # type: ignore[arg-type]
+            self.exn_vt_stack.set_current_exception(val, set_context=set_context)
 
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             # Pass the stored python_stack to preserve the original exception location
@@ -2541,7 +2541,7 @@ class InstructionTranslatorBase(
                     "__setattr__",
                     [VariableTracker.build(self, "__cause__"), cause],
                     {},
-                )  # type: ignore[arg-type, union-attr, assignment]
+                )
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -3060,7 +3060,7 @@ class InstructionTranslatorBase(
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
         result = VariableTracker.build(self, getattr).call_function(
-            self,  # type: ignore[arg-type]
+            self,
             [obj, VariableTracker.build(self, attr)],
             {},
         )
@@ -3081,7 +3081,7 @@ class InstructionTranslatorBase(
     def STORE_ATTR(self, inst: Instruction) -> None:
         val, obj = self.popn(2)
         VariableTracker.build(self, setattr).call_function(
-            self,  # type: ignore[arg-type]
+            self,
             [obj, VariableTracker.build(self, inst.argval), val],
             {},
         )
@@ -3090,7 +3090,7 @@ class InstructionTranslatorBase(
         obj = self.pop()
         self._maybe_sync_dealloc_attr(obj, inst.argval)
         VariableTracker.build(self, delattr).call_function(
-            self,  # type: ignore[arg-type]
+            self,
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
@@ -3755,7 +3755,7 @@ class InstructionTranslatorBase(
         items = [
             VariableTracker.build(self, dict).call_function(self, [x], {})
             for x in items
-        ]  # type: ignore[arg-type]
+        ]
         result: dict[Any, Any] = {}
         for x in items:
             if not isinstance(x, ConstDictVariable):
@@ -4016,11 +4016,11 @@ class InstructionTranslatorBase(
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
         if flag == 1:
-            return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, str).call_function(self, [value], {})
         elif flag == 2:
-            return VariableTracker.build(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, repr).call_function(self, [value], {})
         elif flag == 3:
-            return VariableTracker.build(self, ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, ascii).call_function(self, [value], {})
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
@@ -4128,7 +4128,7 @@ class InstructionTranslatorBase(
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
         self.push(
             VariableTracker.build(self, tuple).call_function(self, [self.pop()], {})
-        )  # type: ignore[arg-type]
+        )
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
         # wrap the generator body in a try: ... except StopIteration: ... which
@@ -4141,7 +4141,7 @@ class InstructionTranslatorBase(
             raise AssertionError("expected self._isinstance_exception(val) to be true")
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
-                self,  # type: ignore[arg-type]
+                self,
                 [VariableTracker.build(self, "generator raised StopIteration")],
                 {},
             )
@@ -4918,7 +4918,7 @@ class InstructionTranslatorBase(
                 traceback.format_list(stack_above_dynamo)
             )
         else:
-            user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
+            user_stack = get_stack_above_dynamo() + user_stack
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
@@ -4964,7 +4964,7 @@ class InstructionTranslatorBase(
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add((gb_type, frame_loc_chain))  # type: ignore[arg-type]
+            and graph_break_dup_warning_checker.add((gb_type, frame_loc_chain))
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
@@ -5979,7 +5979,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     torch.package.package_importer._package_imported_modules[
                         module_name
                     ]
-                )  # type: ignore[assignment]
+                )
             else:
                 fglobals_value = _import_module(module_name)
             # Dont use lazy vt because we will do a setattr afterwards
@@ -5992,7 +5992,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 "___unnamed_scope", self.f_globals
             )
             globals_source = GlobalSource(globals_name)
-            fglobals_value = self.f_globals  # type: ignore[assignment]
+            fglobals_value = self.f_globals
             # Dont use lazy vt because we will do a setattr afterwards
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
@@ -6077,7 +6077,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
+            res = VariableTracker.build(self, iter).call_function(self, [tos], {})
             self.push(res)
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
@@ -6140,7 +6140,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         ):
             if val.is_constant_none():
                 try:
-                    val = tos.next_variable(self)  # type: ignore[arg-type]
+                    val = tos.next_variable(self)
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code

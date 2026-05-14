@@ -452,7 +452,7 @@ class ContinueExecutionCache:
             old_hook_target_remap = {}
             stack_i = 0
             null_i = 0
-            stack_ctx_vars_d = dict(stack_ctx_vars)  # type: ignore[var-annotated,arg-type]
+            stack_ctx_vars_d = dict(stack_ctx_vars)
             for i in range(nstack + len(null_idxes)):
                 if null_i < len(null_idxes) and null_idxes[null_i] == i:
                     prefix.append(create_instruction("PUSH_NULL"))

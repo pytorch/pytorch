@@ -466,7 +466,7 @@ class MultiKernelCall:
             assert picked_kernel_name is not None
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
-        run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
+        run = self.kernels[self.picked_kernel].run
         filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
 
@@ -591,7 +591,7 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             assert picked_kernel_name is not None
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
-        run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
+        run = self.kernels[self.picked_kernel].run
         filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
 

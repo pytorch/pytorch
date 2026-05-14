@@ -212,7 +212,7 @@ class CppBmmTemplate(CppGemmTemplate):
 
         return options
 
-    def render(  # type: ignore[override, return]
+    def render(
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: ir.CppTemplateBuffer | None = None,

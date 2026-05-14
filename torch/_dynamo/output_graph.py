@@ -64,7 +64,7 @@ from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
-from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
+from torch.fx._lazy_graph_module import _make_graph_module
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
@@ -1403,7 +1403,7 @@ class OutputGraph(OutputGraphCommon):
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
             {},
-            {},  # type: ignore[arg-type]
+            {},
         )
 
     def count_calls(self) -> int:
@@ -1624,7 +1624,7 @@ class OutputGraph(OutputGraphCommon):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
                 return VariableTracker.build(
-                    self,  # type: ignore[arg-type]
+                    self,
                     target,
                     ConstantSource(source_name=module_key),
                 )
@@ -2132,7 +2132,7 @@ class OutputGraph(OutputGraphCommon):
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
+                            and (source := getattr(vt.source, "base", None))
                             and getattr(source, "is_input", False)
                         ):
                             self.export_metadata.output_return_type[idx] = (
@@ -3831,7 +3831,7 @@ class SubgraphTracer(fx.Tracer):
             kwargs,
             name,
             type_expr,
-            proxy_factory_fn,  # type: ignore[arg-type]
+            proxy_factory_fn,
         )
 
         # append stack trace to fx node
