@@ -1079,7 +1079,7 @@ class DictKeysVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1106,7 +1106,7 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement nb_or and nb_inplace_or
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None
+    nb_inplace_or = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
@@ -1253,7 +1253,7 @@ class DictItemsVariable(DictViewVariable):
                 return VariableTracker.build(tx, NotImplemented)
             return VariableTracker.build(
                 tx,
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 

@@ -106,7 +106,7 @@ from .utils import (
 def _unwrap_tensor_subclasses_no_symints(
     args: list[Any],
 ) -> list[Any]:
-    return runtime_unwrap_tensor_subclasses(args, append_symints=False)
+    return runtime_unwrap_tensor_subclasses(args, append_symints=False)  # type: ignore[arg-type]
 
 
 zip = strict_zip
@@ -967,7 +967,7 @@ def _create_runtime_wrapper(
         def _replay_alias(self, orig_inputs, fw_outs):
             return _codegen_alias_fn(orig_inputs, fw_outs)
 
-        runtime_epilogue._replay_output_aliases = types.MethodType(
+        runtime_epilogue._replay_output_aliases = types.MethodType(  # type: ignore[attr-defined]
             _replay_alias,
             runtime_epilogue,
         )
@@ -1058,7 +1058,7 @@ def _create_runtime_wrapper(
         )
         import types
 
-        runtime_epilogue._apply_input_mutations = types.MethodType(
+        runtime_epilogue._apply_input_mutations = types.MethodType(  # type: ignore[attr-defined]
             lambda self, orig_inputs, updated_inputs: codegen_apply_mutations(
                 orig_inputs, updated_inputs
             ),
@@ -1724,7 +1724,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         )
         from .subclass_codegen import _compile_and_exec_source
 
-        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(
+        wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(  # type: ignore[assignment]
             source,
             {"compiled_fn": compiled_fn},
             "inner_fn",
@@ -3304,6 +3304,7 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
         )
+
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
         # wrapping, _unsafe_view, and non-differentiable output collection with
