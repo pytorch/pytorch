@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -5932,7 +5932,6 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
         try:
@@ -5993,7 +5992,6 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
