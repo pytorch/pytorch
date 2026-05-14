@@ -6,7 +6,7 @@ import math
 import sys
 from collections import namedtuple
 from collections.abc import Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -104,6 +104,7 @@ def get_promote_dtype(args):
         # pyrefly: ignore [no-matching-overload]
         functools.reduce(
             torch.promote_types,  # type: ignore[arg-type]
+            # pyrefly: ignore [bad-argument-type]
             [n.dtype for n in args if isinstance(n, CppCSEVariable)],
         )
         if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
@@ -146,7 +147,7 @@ class CppCSEVariable(CSEVariable):
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         shape: BlockShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
@@ -185,10 +186,10 @@ class CppCSEVariable(CSEVariable):
         """
         for s in index.free_symbols:
             if s in V.kernel.itervars:
-                self.dependent_itervars.add(s)  # type: ignore[arg-type]
-            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
+                self.dependent_itervars.add(s)
+            elif s.name in V.kernel.cse.varname_map:
                 self.dependent_itervars.update(
-                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
+                    V.kernel.cse.varname_map[s.name].dependent_itervars
                 )
 
     def depends_on(self, itervar: sympy.Symbol):
@@ -206,6 +207,7 @@ class CppPrinter(_CppPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            # pyrefly: ignore [missing-attribute]
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -250,13 +252,13 @@ def rewrite_index_for_function(
         f"x{len(call_ranges) - (idx + 1)}"
         for idx in range(len(local_buf.get_layout().size))
     ]
-    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
     replacements = {}
     for x in sorted_symbols:
-        if x.name.startswith("x") and x.name not in indices_to_keep:  # type: ignore[attr-defined]
+        if x.name.startswith("x") and x.name not in indices_to_keep:
             # Only keep index used by local buffer
             replacements[x] = sympy.core.numbers.Zero()
-    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+    index = sympy_subs(index, replacements)
     return index
 
 
@@ -377,7 +379,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[list[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: list[ir.Buffer] | None = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer

@@ -246,7 +246,8 @@ def sig_for_ops(opname: str) -> list[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
+    if not (opname.endswith("__") and opname.startswith("__")):
+        raise AssertionError(f"Unexpected op {opname}")
 
     name = opname[2:-2]
     if name == "rpow":
@@ -255,9 +256,12 @@ def sig_for_ops(opname: str) -> list[str]:
         ]
     elif name in arithmetic_ops:
         if name.startswith("i"):
-            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`.
+            # `__idiv__` is not a real Python 3 in-place dunder (Python 3 uses `__itruediv__` /
+            # `__ifloordiv__`), so ruff's PYI034 doesn't fire on it and the noqa would be unused.
+            suffix = "" if name == "idiv" else "  # noqa: PYI034"
             return [
-                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...{suffix}"
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
@@ -990,11 +994,12 @@ def gather_docstrs() -> dict[str, str]:
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
-        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        if not hint.endswith("..."):
+            raise AssertionError(f"Hint `{hint}` does not end with '...'")
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1070,7 +1075,7 @@ def gen_pyi(
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
                         "copy: _bool | None = None",
-                        "requires_grad: _bool = False",
+                        "requires_grad: _bool | None = None",
                     ],
                     "Tensor",
                 )
@@ -1484,7 +1489,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1904,7 +1912,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 

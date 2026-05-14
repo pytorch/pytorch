@@ -1,11 +1,22 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <torch/custom_class.h>
+
 #include <atomic>
+#include <mutex>
 
 namespace {
 
 using namespace c10d::symmetric_memory;
+
+// Register SymmetricMemory as a TorchBind custom class so that dispatcher
+// schemas can accept/return it via
+// __torch__.torch.classes.c10d.SymmetricMemory. Note: SymmetricMemory is
+// abstract; instances are produced by backend rendezvous and may be of a
+// derived type stored behind an intrusive_ptr.
+static auto symm_mem_torchbind_class =
+    torch::class_<SymmetricMemory>("c10d", "SymmetricMemory");
 
 static bool is_finalizing_ = false;
 
@@ -27,16 +38,19 @@ class AllocatorMap {
   void register_allocator(
       c10::DeviceType device_type,
       c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    std::lock_guard<std::mutex> lock(mutex_);
     map_[device_type] = std::move(allocator);
   }
 
   void register_availability(
       const std::string& name,
       c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    std::lock_guard<std::mutex> lock(mutex_);
     avail_map_[name] = std::move(allocator);
   }
 
   void set_backend(const std::string& name) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = avail_map_.find(name);
     TORCH_CHECK(
         it != avail_map_.end(),
@@ -52,10 +66,11 @@ class AllocatorMap {
       }
       TORCH_CHECK(!in_use_, "Backend can not be changed after use.");
     }
-    register_allocator(device_type, it->second);
+    map_[device_type] = it->second;
   }
 
   std::optional<std::string> get_backend(c10::DeviceType device_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = map_.find(device_type);
     if (it == map_.end()) {
       return std::nullopt;
@@ -65,6 +80,7 @@ class AllocatorMap {
 
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = map_.find(device_type);
     TORCH_CHECK(
         it != map_.end(),
@@ -75,6 +91,7 @@ class AllocatorMap {
   }
 
   bool has_allocator(c10::DeviceType device_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = map_.find(device_type);
     return it != map_.end();
   }
@@ -86,6 +103,7 @@ class AllocatorMap {
  private:
   AllocatorMap() = default;
 
+  std::mutex mutex_;
   std::unordered_map<
       c10::DeviceType,
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
@@ -103,9 +121,11 @@ class AllocatorMap {
   bool in_use_ = false;
 };
 
+static std::mutex group_info_mutex;
 static std::unordered_map<std::string, GroupInfo> group_info_map{};
 
 // Data structures for tracking persistent allocations
+static std::mutex persistent_alloc_mutex;
 static std::unordered_map<uint64_t, void*> alloc_id_to_dev_ptr{};
 static std::unordered_map<uint64_t, c10::weak_intrusive_ptr<c10::StorageImpl>>
     alloc_id_to_storage{};
@@ -117,6 +137,7 @@ static at::Tensor empty_strided_p2p_persistent(
     c10::Device device,
     const std::optional<std::string>& group_name,
     uint64_t alloc_id) {
+  std::lock_guard<std::mutex> lock(persistent_alloc_mutex);
   // Make the allocation fails if a previous allocation with the same alloc_id
   // is still active.
   auto storage = alloc_id_to_storage.find(alloc_id);
@@ -217,6 +238,7 @@ void set_group_info(
     int rank,
     int world_size,
     c10::intrusive_ptr<Store> store) {
+  std::lock_guard<std::mutex> lock(group_info_mutex);
   TORCH_CHECK(group_info_map.find(group_name) == group_info_map.end());
   GroupInfo group_info;
   group_info.rank = rank;
@@ -226,6 +248,7 @@ void set_group_info(
 }
 
 GroupInfo& get_group_info(const std::string& group_name) {
+  std::lock_guard<std::mutex> lock(group_info_mutex);
   TORCH_CHECK(
       group_info_map.find(group_name) != group_info_map.end(),
       "get_group_info: no group info associated with the group name ",
@@ -270,6 +293,14 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
     const std::optional<std::string>& group_name) {
   auto allocator = get_allocator(tensor.device().type());
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
+}
+
+TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
+  if (!has_allocator(tensor.device().type())) {
+    return false;
+  }
+  auto allocator = get_allocator(tensor.device().type());
+  return allocator->has_allocation(tensor.storage().data_ptr().get());
 }
 
 TORCH_API bool has_multicast_support(
@@ -529,6 +560,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
+      "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
+  m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
@@ -540,6 +573,41 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
   m.def(
       "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
+
+  // Dispatcher-visible (TorchBind) SymmetricMemory API.
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
+  m.def(
+      "_rendezvous(Tensor tensor, str? group_name=None) -> __torch__.torch.classes.c10d.SymmetricMemory");
+  m.def("_barrier(__torch__.torch.classes.c10d.SymmetricMemory symm) -> ()");
+
+  // One-sided communication APIs.
+  // The op defined here is backend-specific. Backend dispatching is handled in
+  // torch/distributed/_symmetric_memory/__init__.py by looking at runtime
+  // backend setting.
+  m.def(
+      "nccl_put_signal(Tensor src, __torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
+  m.def(
+      "nccl_wait_signal(__torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
+}
+
+c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
+    const at::Tensor& tensor,
+    std::optional<std::string> group_name) {
+  return c10d::symmetric_memory::rendezvous(tensor, group_name);
+}
+
+void barrier_op(const c10::intrusive_ptr<SymmetricMemory>& symm) {
+  // Keep the dispatcher signature minimal for now; use the common default
+  // semantics (channel=0, timeout_ms=0).
+  symm->barrier(/*channel=*/0, /*timeout_ms=*/0);
+}
+
+TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
+  m.impl("_rendezvous", rendezvous_op);
+  m.impl("_barrier", barrier_op);
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

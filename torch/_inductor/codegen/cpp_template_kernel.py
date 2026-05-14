@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -56,9 +56,9 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: dict[str, ir.Buffer],
         outputs: dict[str, ir.Buffer],
-        aliases: Optional[dict[str, str]] = None,
+        aliases: dict[str, str] | None = None,
         function_name: str = "",
-        extra_sizevars: Optional[list[sympy.Expr]] = None,
+        extra_sizevars: list[sympy.Expr] | None = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -178,7 +178,7 @@ class CppTemplateKernel(CppKernel):
     def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data  # type: ignore[arg-type]
+        return L.view(node, sizes).data
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -186,10 +186,12 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    def maybe_codegen_profile(self) -> str:
+    def maybe_codegen_profile(self, prefix_kernel_name: str | None = None) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            if prefix and prefix_kernel_name:
+                prefix += prefix_kernel_name + "_"
             handle_str = (
                 "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                 f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
@@ -245,8 +247,8 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         nodes: list[ir.IRNode],
-        offsets: Optional[list[sympy.Expr]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        offsets: list[sympy.Expr] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -273,7 +275,7 @@ class CppTemplateKernel(CppKernel):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -309,7 +311,7 @@ class CppTemplateKernel(CppKernel):
         dst: tuple[ir.Buffer],
         nodes: list[ir.IRNode],
         offsets: list[sympy.Expr],
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+        reindexers: list[Callable[[list[Any]], list[Any]] | None],
         output_names: list[str],
     ) -> str:
         ref_dst = dst[0]
@@ -335,7 +337,7 @@ class CppTemplateKernel(CppKernel):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -370,10 +372,10 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        orig_src: ir.Buffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -384,7 +386,7 @@ class CppTemplateKernel(CppKernel):
         1. `src` and `dst` buffer could be the same buffer in which case we are doing in-place compute
            and stores. In case `epilogue_nodes` are not provided, we do nothing.
         2. The `epilogue_nodes`, if exist, have computations on `src` before storing to `dst` but since
-           they come form the original Inductor IR, they might need to be adjusted before working with
+           they come from the original Inductor IR, they might need to be adjusted before working with
            `src` and `dst` as outlined below:
            a) `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes`work on.
               In this case, the `offsets` could be provided to adjust the indices passed to
@@ -412,7 +414,7 @@ class CppTemplateKernel(CppKernel):
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
                     dst,
-                    epilogue_nodes,  # type: ignore[arg-type]
+                    epilogue_nodes,
                     offsets,
                     reindexers,
                 )
@@ -432,11 +434,11 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: tuple[ir.Buffer],
         src: tuple[ir.IRNode],
-        orig_src: Optional[tuple[ir.IRNode]] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-        multi_output_buffers: Optional[tuple[ir.MultiOutput, ...]] = None,
+        orig_src: tuple[ir.IRNode] | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
+        multi_output_buffers: tuple[ir.MultiOutput, ...] | None = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
@@ -567,15 +569,14 @@ class CppTemplateCaller(ir.ChoiceCaller):
             [
                 ir.CppTemplateBuffer,
                 bool,
-                Optional[list[ir.IRNode]],
+                list[ir.IRNode] | None,
             ],
             str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
-        info_kwargs: Optional[
-            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
-        ] = None,
+        info_kwargs: dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]
+        | None = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -605,7 +606,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:

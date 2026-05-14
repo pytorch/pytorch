@@ -112,9 +112,9 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
 
     // dq_acc: (split, total_q, nheads, hdim)
     ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
-    ck_tile::index_t batch_stride_dq_acc = 0;
+    ck_tile::long_index_t batch_stride_dq_acc = 0;
     ck_tile::index_t stride_dq_acc = dq_acc.stride(1);
-    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(2);
+    ck_tile::long_index_t nhead_stride_dq_acc = dq_acc.stride(2);
 
     float p_undrop = 1.0 - p_dropout;
 
@@ -164,7 +164,10 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          dq_acc.data_ptr(), // dq_acc
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
+                         nullptr, // seqlen_q_ptr
                          nullptr, // seqlen_k_ptr
+                         nullptr, // cu_seqlen_q_ptr
+                         nullptr, // cu_seqlen_k_ptr
                          total_q,
                          total_k,
                          b,
@@ -398,8 +401,10 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
 
     uint64_t drop_seed = 1, drop_offset = 0;
 
-    drop_seed = *philox_seed.data_ptr<uint64_t>();
-    drop_offset = *philox_offset.data_ptr<uint64_t>();
+    if (is_dropout) {
+        drop_seed = *reinterpret_cast<uint64_t*>(philox_seed.data_ptr());
+        drop_offset = *reinterpret_cast<uint64_t*>(philox_offset.data_ptr());
+    }
     auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
 
     if (max_seqlen_q > 0) {

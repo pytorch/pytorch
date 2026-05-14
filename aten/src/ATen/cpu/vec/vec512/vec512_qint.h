@@ -179,6 +179,36 @@ at::vec::Vectorized<uint8_t> inline convert_float_to_int8(
 }
 
 template <typename T>
+at::vec::Vectorized<T> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src);
+
+template <>
+at::vec::Vectorized<int8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // Convert from float32 to int32 with round nearest
+  __m512i int32_src_round = _mm512_cvt_roundps_epi32(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  // Convert from int32 to int8 with saturate
+  __m128i int8_src = _mm512_cvtsepi32_epi8(int32_src_round);
+  return _mm512_castsi128_si512(int8_src);
+}
+
+template <>
+at::vec::Vectorized<uint8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // Clamp float32 to unsigned int range
+  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
+  __m512 float32_min_val = _mm512_set1_ps(float(min_val));
+  __m512 float32_src = _mm512_max_ps(src, float32_min_val);
+  // Convert from float32 to int32 with round nearest
+  __m512i int32_src_round = _mm512_cvt_roundps_epi32(
+      float32_src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  // Convert from int32 to int8 with saturate
+  __m128i int8_src = _mm512_cvtusepi32_epi8(int32_src_round);
+  return _mm512_castsi128_si512(int8_src);
+}
+
+template <typename T>
 __FORCE_INLINE void QuantizeAvx512(
     const float* src,
     T* dst,
@@ -356,7 +386,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m512i vals_) {
     vals = vals_;
@@ -370,7 +400,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -392,7 +422,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -416,7 +446,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       float scale,
       int32_t zero_point,
       float inverse_scale [[maybe_unused]]) {
-    Vectorized<c10::qint32> retval;
+    Vectorized<c10::qint32> retval = {};
     auto rhs_data = (__m512)rhs[0];
     at::native::quantize_vec<c10::qint32, /*precision=*/32>(
         scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 16);
@@ -572,7 +602,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
  public:
   using Vectorizedqi::Vectorizedqi;
 
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(__m512i vals_) {
     vals = vals_;
   }
@@ -594,7 +624,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -616,7 +646,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -808,7 +838,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
  public:
   using Vectorizedqi::Vectorizedqi;
-  Vectorized() {}
+  Vectorized() = default;
 
   Vectorized(__m512i vals_) {
     vals = vals_;
@@ -829,7 +859,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
   void store(void* ptr, int count = size()) const {
     if (count != size()) {
-      memcpy(ptr, &vals, count * sizeof(value_type));
+      memcpy(ptr, &vals, std::min<int64_t>(count, size()) * sizeof(value_type));
     } else {
       _mm512_storeu_si512((__m512i*)ptr, vals);
     }
@@ -851,7 +881,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1060,7 +1090,10 @@ struct VectorizedQuantizedConverter {
   }
 
   void store(void* ptr, int count = size()) const {
-    memcpy(ptr, vals.data(), count * sizeof(value_type));
+    memcpy(
+        ptr,
+        vals.data(),
+        std::min<int64_t>(count, size()) * sizeof(value_type));
   }
 
   float_vec_return_type dequantize(
@@ -1103,7 +1136,7 @@ struct VectorizedQuantizedConverter {
   }
 
  protected:
-  VectorizedQuantizedConverter() {}
+  VectorizedQuantizedConverter() = default;
 };
 
 template <>
@@ -1150,7 +1183,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1302,7 +1335,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 
@@ -1443,7 +1476,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     std::memcpy(
         tmp_values,
         reinterpret_cast<const value_type*>(ptr),
-        count * sizeof(value_type));
+        std::min<int64_t>(count, size()) * sizeof(value_type));
     return loadu(tmp_values);
   }
 

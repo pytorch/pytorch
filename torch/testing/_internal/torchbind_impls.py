@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 import contextlib
 from pathlib import Path
-from typing import Optional
 
 import torch
 
 
 _TORCHBIND_IMPLS_INITIALIZED = False
 
-_TENSOR_QUEUE_GLOBAL_TEST: Optional[torch.ScriptObject] = None
+_TENSOR_QUEUE_GLOBAL_TEST: torch.ScriptObject | None = None
 
 
 def init_torchbind_implementations():
@@ -97,7 +96,6 @@ def register_fake_operators():
 
 
 def register_fake_classes():
-    # noqa: F841
     @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
     class FakeFoo:
         def __init__(self, x: int, y: int):

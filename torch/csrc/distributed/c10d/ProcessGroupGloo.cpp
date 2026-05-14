@@ -1522,10 +1522,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts) {
-  if (outputTensors.size() != inputTensors.size()) {
-    TORCH_CHECK(
-        false, "requires input/output tensor lists to have the same length");
-  }
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, msg);
+  };
+  assertInputOutputTensorListsSameSize(
+      invalidArgument, outputTensors.size(), inputTensors.size());
   const auto rank = getRank();
   const auto worldSize = getSize();
   std::vector<at::Tensor> buffers;
@@ -1723,25 +1724,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
-  if (input_list.empty()) {
-    invalidArgument("requires non-empty input tensor list");
-  }
-
-  if (output_lists.size() != static_cast<size_t>(getSize())) {
-    invalidArgument("output lists should be equal to world size");
-  }
+  assertNonEmptyInputTensorList(invalidArgument, input_list.size());
+  assertAllgatherCoalescedOutputTensorLists(
+      invalidArgument, output_lists, input_list.size(), getSize());
 
   assertSameDevice(invalidArgument, input_list);
 
   // Expect i'th tensor of each list from 'output_lists' match i'th tensor
   // from 'input_list' in type and size.
   for (const auto& output_list : output_lists) {
-    if (output_list.size() != input_list.size()) {
-      invalidArgument(
-          "invalid output size: (expected length " +
-          std::to_string(input_list.size()) + ", got " +
-          std::to_string(output_list.size()) + ")");
-    }
     for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
@@ -1953,26 +1944,13 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputs[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputs, getSize());
 
     const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
-    if (!outputs.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputs);
   }
 
   const auto& device = inputs[0].device();
@@ -2166,25 +2144,12 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
   assertDense(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element input list containing a list with "
-         << getSize() << " tensors";
-      invalidArgument(ss.str());
-    } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect input list size " << inputs[0].size()
-         << ". Input list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertScatterInputTensorList(invalidArgument, inputs, getSize());
     const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
-    if (!inputs.empty()) {
-      invalidArgument("requires empty input on non-root");
-    }
+    assertEmptyInputTensorList(invalidArgument, inputs);
   }
 
   const auto& device = outputs[0].device();
@@ -2234,14 +2199,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     const ReduceScatterOptions& opts) {
   const auto rank = getRank();
   const auto worldSize = getSize();
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, msg);
+  };
 
   TORCH_CHECK(outputs.size() == 1, "reduce_scatter only supports 1 output");
-  TORCH_CHECK(
-      outputs.size() == inputs.size(),
-      "requires input/output tensor lists to have the same length");
-  TORCH_CHECK(
-      static_cast<int>(inputs[0].size()) == worldSize,
-      "invalid input tensor list size, must be world size");
+  assertInputOutputTensorListsSameSize(
+      invalidArgument, outputs.size(), inputs.size());
+  assertInputTensorListSizeEqualsWorldSize(
+      invalidArgument, inputs[0].size(), worldSize);
 
   std::vector<at::Tensor> buffers;
   for (const auto i : c10::irange(worldSize)) {
@@ -2464,6 +2430,233 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
   } else {
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
+  enqueue(work);
+  return work;
+}
+
+namespace {
+
+class AsyncAlltoallListWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAlltoallListWork(
+      std::shared_ptr<gloo::Context> context,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      uint32_t tag,
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : ProcessGroupGloo::AsyncWork(
+            std::move(context),
+            {outputTensors},
+            OpType::ALLTOALL,
+            seq,
+            timeout,
+            "gloo:all_to_all",
+            inputTensors),
+        outputTensors(outputTensors),
+        inputTensors(inputTensors),
+        tag(tag) {}
+
+  std::vector<at::Tensor> outputTensors;
+  std::vector<at::Tensor> inputTensors;
+  const uint32_t tag;
+
+  void alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) {
+    const auto scalarType = inputTensors[0].scalar_type();
+    gloo::AlltoallOptions opts(context_);
+    opts.setTag(tag);
+    opts.setTimeout(getTimeout());
+
+    // Flatten input tensors into a single buffer
+    at::Tensor flatInputTensor = flattenDenseTensors(inputTensors);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
+
+    // Allocate flat output tensor with same total size
+    at::Tensor flatOutputTensor = newLikeFlat(outputTensors);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
+
+    // Perform the all-to-all operation
+    gloo::alltoall(opts);
+
+    // Unflatten output into individual tensors
+    for (const auto i : c10::irange(outputTensors.size())) {
+      outputTensors[i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
+    }
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputTensors;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return outputTensors;
+  }
+
+  void run() override {
+    alltoall(outputTensors, inputTensors);
+  }
+};
+
+class AsyncAlltoallListCUDAWork : public AsyncAlltoallListWork {
+ public:
+  AsyncAlltoallListCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      uint32_t tag,
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncAlltoallListWork(
+            context,
+            outputTensors,
+            inputTensors,
+            tag,
+            seq,
+            timeout) {
+    initializeStreamsEvents(inputTensors, inputStreams, inputEvents);
+    initializeStreamsEvents(outputTensors, outputStreams, outputEvents);
+
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    tmpInputs.reserve(inputTensors.size());
+    c10::OptionalStreamGuard guard;
+    for (const auto i : c10::irange(inputTensors.size())) {
+      guard.reset_stream(inputStreams[i]);
+      tmpInputs.push_back(
+          pinnedLike(inputTensors[i]).copy_(inputTensors[i], true));
+    }
+
+    tmpOutputs.reserve(outputTensors.size());
+    for (const auto i : c10::irange(outputTensors.size())) {
+      guard.reset_stream(outputStreams[i]);
+      tmpOutputs.push_back(pinnedLike(outputTensors[i]));
+    }
+  }
+
+  void run() override {
+    // Synchronize with copy operations.
+    for (const auto i : c10::irange(inputTensors.size())) {
+      inputStreams[i].synchronize();
+    }
+    for (const auto i : c10::irange(outputTensors.size())) {
+      outputStreams[i].synchronize();
+    }
+
+    // Run alltoall on host side tensors.
+    alltoall(tmpOutputs, tmpInputs);
+
+    // Kick off copy back to the CUDA tensors.
+    c10::OptionalStreamGuard guard;
+    for (const auto i : c10::irange(outputTensors.size())) {
+      guard.reset_stream(outputStreams[i]);
+      outputTensors[i].copy_(tmpOutputs[i], /* non_blocking */ true);
+      outputEvents[i].record(outputStreams[i]);
+    }
+  }
+
+  void synchronize() override {
+    // Synchronize with the copy back to CUDA tensors.
+    for (const auto i : c10::irange(outputTensors.size())) {
+      c10::Device device = outputTensors[i].device();
+      outputEvents[i].block(
+          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+    }
+  }
+
+  std::vector<at::Tensor> tmpInputs;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
+
+  std::vector<at::Tensor> tmpOutputs;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
+};
+
+} // namespace
+
+c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllToAllOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, "ProcessGroupGloo::alltoall: " + msg);
+  };
+
+  // Validate input and output tensor lists
+  assertAllToAllTensorListSizes(
+      invalidArgument, outputTensors.size(), inputTensors.size(), getSize());
+
+  assertDense(invalidArgument, inputTensors);
+  assertDense(invalidArgument, outputTensors);
+
+  // Check that all tensors are on the same device
+  assertSameDevice(invalidArgument, inputTensors);
+  assertSameDevice(invalidArgument, outputTensors);
+
+  // Check that all input tensors have the same type and size
+  const auto& options = inputTensors[0].options();
+  const auto& sizes = inputTensors[0].sizes();
+  assertTypeAndSizesMatch(invalidArgument, inputTensors, options, sizes);
+
+  // Check that all output tensors have the same type and size
+  const auto& outputOptions = outputTensors[0].options();
+  const auto& outputSizes = outputTensors[0].sizes();
+  assertTypeAndSizesMatch(
+      invalidArgument, outputTensors, outputOptions, outputSizes);
+
+  // Check input and output tensors have compatible types
+  if (!options.type_equal(outputOptions)) {
+    invalidArgument("input and output tensors must have the same type");
+  }
+
+  // Check input and output tensors have compatible sizes
+  if (sizes != outputSizes) {
+    invalidArgument("input and output tensors must have the same size");
+  }
+
+  // Check device type
+  const auto& device = inputTensors[0].device();
+  TORCH_CHECK(
+      outputTensors[0].device() == device,
+      "input and output tensors must be on the same device");
+
+  switch (device.type()) {
+    case at::kCPU:
+      break;
+    case at::kCUDA:
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
+      break;
+    default:
+      invalidArgument(c10::str("unsupported device type ", device.type()));
+  }
+
+  c10::intrusive_ptr<AsyncAlltoallListWork> work;
+  auto tag = nextTag();
+  auto context = getContext(tag);
+  ++seq_;
+
+  if (device.type() == at::kCPU) {
+    work = c10::make_intrusive<AsyncAlltoallListWork>(
+        std::move(context),
+        outputTensors,
+        inputTensors,
+        tag,
+        seq_,
+        opts.timeout);
+  } else if (device.type() == at::kCUDA) {
+    work = c10::make_intrusive<AsyncAlltoallListCUDAWork>(
+        std::move(context),
+        outputTensors,
+        inputTensors,
+        tag,
+        seq_,
+        opts.timeout);
+  } else {
+    TORCH_CHECK(false, "Invalid backend");
+  }
+
   enqueue(work);
   return work;
 }

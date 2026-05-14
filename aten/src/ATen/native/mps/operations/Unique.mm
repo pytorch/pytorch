@@ -7,8 +7,10 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_unique.h>
 #include <ATen/ops/_unique2.h>
 #include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/cat.h>
@@ -316,6 +318,11 @@ std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,
   return _unique_impl_mps(self, return_inverse, return_counts, false, std::nullopt);
 }
 
+std::tuple<Tensor, Tensor> _unique_mps(const Tensor& self, const bool sorted, const bool return_inverse) {
+  auto [output, inverse_indices, _] = _unique_impl_mps(self, return_inverse, false, false, std::nullopt);
+  return std::make_tuple(std::move(output), std::move(inverse_indices));
+}
+
 static Tensor lexsort_rows_perm_mps(const Tensor& mat_2d) {
   const auto rows = mat_2d.size(0), cols = mat_2d.size(1);
   if (rows <= 1 || cols == 0) {
@@ -325,7 +332,7 @@ static Tensor lexsort_rows_perm_mps(const Tensor& mat_2d) {
   auto perm = arange(rows, mat_2d.options().dtype(kLong));
   for (auto c = cols - 1; c >= 0; --c) {
     auto keys = mat_2d.select(1, c).index_select(0, perm);
-    const auto idx = argsort(keys, /*dim=*/0, /*descending=*/false);
+    const auto idx = argsort(keys, /*stable=*/true, /*dim=*/0, /*descending=*/false);
     perm = perm.index_select(0, idx);
   }
   return perm;

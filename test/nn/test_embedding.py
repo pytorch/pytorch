@@ -323,6 +323,38 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
                 torch.nn.functional.embedding(indices, weight)
 
+    def test_embedding_float_indices_error(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178042
+        # torch.compile should raise the same dtype error as eager when
+        # nn.Embedding receives float indices, even if the result is unused.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1)
+                self.embedding = torch.nn.Embedding(100, 32)
+                self.fc = torch.nn.Linear(16 * 32 * 32, 10)
+
+            def forward(self, x, token_ids):
+                conv_out = self.conv(x)
+                gelu_out = torch.nn.functional.gelu(conv_out)
+                self.embedding(token_ids)  # result unused (dead code)
+                return self.fc(gelu_out.view(x.size(0), -1))
+
+        model = Model().to(device)
+        x = torch.randn(2, 3, 32, 32, device=device)
+        float_indices = torch.randn(2, 8, device=device)
+
+        error_msg = "Expected tensor for argument #1 'indices'"
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            model(x, float_indices)
+
+        for backend in ["aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            compiled = torch.compile(model, backend=backend, fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                compiled(x, float_indices)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypesIfXPU(torch.float16, torch.float64)
     @dtypes(torch.float64)
@@ -541,7 +573,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 cur_offset += bag_size
 
             # embedding_bag requires first entry of offsets to be 0
-            assert offsets[0] == 0
+            if offsets[0] != 0:
+                raise AssertionError(f"Expected offsets[0] == 0, got {offsets[0]}")
 
             indices = torch.tensor(indices, device=device)
 
@@ -557,7 +590,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         def gen_2D_indices_from_1D(
             indices_1D, offsets, include_last_offset, padding_idx
         ):
-            assert offsets[0] == 0
+            if offsets[0] != 0:
+                raise AssertionError(f"Expected offsets[0] == 0, got {offsets[0]}")
             if include_last_offset:
                 offsets = offsets[:-1]
             indices_2D = torch.empty(
@@ -817,9 +851,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         min_partial_for_overflow = (2**31) // 4096
         required_indices = (min_partial_for_overflow - max_segments) * NROWS_PER_THREAD
 
-        assert num_indices > required_indices, (
-            f"Test bug: num_indices={num_indices:,} too small! Need >{required_indices:,}"
-        )
+        if num_indices <= required_indices:
+            raise AssertionError(
+                f"Test bug: num_indices={num_indices:,} too small! Need >{required_indices:,}"
+            )
 
         # Generate indices that create many partial segments
         # Strategy: ~950 unique indices, each appearing many times
@@ -836,16 +871,20 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         counts[-1] = num_indices - counts[:-1].sum()
 
         indices = torch.repeat_interleave(unique_indices, counts)
-        assert indices.numel() == num_indices
+        if indices.numel() != num_indices:
+            raise AssertionError(
+                f"Expected indices.numel() == {num_indices}, got {indices.numel()}"
+            )
 
         # Verify we'll trigger overflow
         approx_partial_segments = num_indices // NROWS_PER_THREAD + max_segments
         stride_warped = ((embedding_dim + 31) // 32) * 32
         total_threads = approx_partial_segments * stride_warped
 
-        assert total_threads > 2**31 - 1, (
-            f"Test bug: threads={total_threads:,} <= INT32_MAX, won't trigger overflow!"
-        )
+        if total_threads <= 2**31 - 1:
+            raise AssertionError(
+                f"Test bug: threads={total_threads:,} <= INT32_MAX, won't trigger overflow!"
+            )
 
         # Create gradient output
         grad_output = torch.randn(
@@ -859,8 +898,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         )
 
         # Verify output shape
-        assert grad_weight.shape == (num_weights, embedding_dim)
-        assert grad_weight.dtype == torch.bfloat16
+        if grad_weight.shape != (num_weights, embedding_dim):
+            raise AssertionError(
+                f"Expected grad_weight.shape == {(num_weights, embedding_dim)}, got {grad_weight.shape}"
+            )
+        if grad_weight.dtype != torch.bfloat16:
+            raise AssertionError(
+                f"Expected grad_weight.dtype == torch.bfloat16, got {grad_weight.dtype}"
+            )
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
@@ -873,7 +918,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         # Use a Python implementation of embedding_bag with padding_idx support
         # to check torch.nn.functional.embedding_bag correctness
         def embedding_bag_check(indices, weights, mode, sparse, padding_idx):
-            assert padding_idx is not None
+            if padding_idx is None:
+                raise AssertionError("padding_idx must not be None")
             embedding = torch.nn.functional.embedding(
                 indices, weights, padding_idx=padding_idx, sparse=sparse
             )
@@ -1154,13 +1200,20 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         per_sample_weights=None,
         include_last_offset=False,
     ):
-        assert mode == "sum" or per_sample_weights is None
-        assert offsets is not None
+        if mode != "sum" and per_sample_weights is not None:
+            raise AssertionError(
+                f"per_sample_weights must be None for mode '{mode}', got {per_sample_weights}"
+            )
+        if offsets is None:
+            raise AssertionError("offsets must not be None")
         if per_sample_weights is None:
             per_sample_weights = torch.ones(input.size()).to(
                 dtype=weight.dtype, device=weight.device
             )
-        assert input.numel() == per_sample_weights.numel()
+        if input.numel() != per_sample_weights.numel():
+            raise AssertionError(
+                f"Expected input.numel() == per_sample_weights.numel(), got {input.numel()} vs {per_sample_weights.numel()}"
+            )
 
         bags = []
         long_input = input.to(torch.long)
@@ -1186,7 +1239,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                             embeddings.narrow(0, offset, length).sum(0).div(length)
                         )
                     else:
-                        assert mode == "max"
+                        if mode != "max":
+                            raise AssertionError(
+                                f"Expected mode == 'max', got '{mode}'"
+                            )
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         else:
             for index, offset in enumerate(offsets):
@@ -1209,7 +1265,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                             embeddings.narrow(0, offset, length).sum(0).div(length)
                         )
                     else:
-                        assert mode == "max"
+                        if mode != "max":
+                            raise AssertionError(
+                                f"Expected mode == 'max', got '{mode}'"
+                            )
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
@@ -1500,10 +1559,16 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else:
                 ref_output = e(input).sum(1)
         elif mode == "mean":
-            assert not test_per_sample_weights
+            if test_per_sample_weights:
+                raise AssertionError(
+                    "test_per_sample_weights must be False for mean mode"
+                )
             ref_output = e(input).mean(1)
         elif mode == "max":
-            assert not test_per_sample_weights
+            if test_per_sample_weights:
+                raise AssertionError(
+                    "test_per_sample_weights must be False for max mode"
+                )
             ref_output = e(input).max(1)[0]
 
         self.assertEqual(output, ref_output, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
