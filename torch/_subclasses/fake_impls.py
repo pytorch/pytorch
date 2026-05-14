@@ -5,6 +5,7 @@ import itertools
 import math
 import operator
 import sys
+import warnings
 from functools import reduce
 from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -68,6 +69,16 @@ op_implementations_checks = []
 
 
 aten = torch._ops.ops.aten
+_MKLDNN_DISPATCH_KEYS = torch._C.DispatchKeySet(
+    torch._C._dispatch_key_parse("MkldnnCPU")
+)
+_MKLDNN_DTYPES = {
+    torch.float32,
+    torch.bfloat16,
+    torch.float16,
+    torch.uint8,
+    torch.int8,
+}
 
 
 def ordered_set(*items: _T) -> dict[_T, bool]:
@@ -1361,6 +1372,152 @@ def has_meta(func: OpOverload) -> bool:
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
+def maybe_to_dense_mkldnn(
+    fake_mode: FakeTensorMode,
+    a: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> object:
+    if not isinstance(a, FakeTensor) or not a.is_mkldnn:
+        return NotImplemented
+
+    out_dtype = dtype if dtype is not None else a.dtype
+    if a.dtype not in _MKLDNN_DTYPES:
+        raise RuntimeError(
+            "mkldnn_to_dense expects float, bfloat16, half, uint8, int8 tensor input"
+        )
+    if out_dtype not in _MKLDNN_DTYPES:
+        raise RuntimeError(
+            "mkldnn tensor only can be converted to be a float, bfloat16, Half, "
+            "uint8, int8 cpu tensor"
+        )
+    if a.dtype in (torch.uint8, torch.int8) and out_dtype != a.dtype:
+        raise RuntimeError(
+            "For int8, uint8 mkldnn_tensor input, we should not change the data type."
+        )
+    shape = tuple(a.shape)
+    with in_kernel_invocation_manager(fake_mode):
+        out = torch.empty_strided(
+            shape,
+            make_contiguous_strides_for(shape),
+            dtype=out_dtype,
+            device="meta",
+        )
+    return FakeTensor(fake_mode, out, a.fake_device)
+
+
+class _ToDenseMkldnn(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx: Any,
+        self: torch.Tensor,
+        dtype: torch.dtype | None,
+        masked_grad: bool | None,
+    ) -> torch.Tensor:
+        ctx.input_dtype = self.dtype
+        return aten._to_dense.default(self, dtype, masked_grad)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def backward(ctx: Any, grad: torch.Tensor) -> tuple[torch.Tensor, None, None]:
+        return aten.to_mkldnn.default(grad, ctx.input_dtype), None, None
+
+
+def to_dense_composite_impl(
+    self: torch.Tensor,
+    dtype: torch.dtype | None = None,
+    *,
+    masked_grad: bool | None = None,
+) -> torch.Tensor:
+    if self.is_mkldnn:
+        return _ToDenseMkldnn.apply(self, dtype, masked_grad)
+    if self.layout in {
+        torch.sparse_coo,
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }:
+        return aten._to_dense.default(self, dtype, masked_grad)
+    torch._check(
+        self.layout == torch.strided,
+        lambda: f"to_dense does not support layout {self.layout}",
+    )
+    if dtype is not None:
+        return self.to(dtype=dtype)
+    return self
+
+
+_to_dense_composite_lib = torch.library.Library(
+    "aten", "IMPL", "CompositeImplicitAutograd"
+)
+# Fake MKLDNN tensors keep MKLDNN-ness in a side channel because the backing
+# meta tensor is strided.  The native composite reads TensorImpl::layout()
+# directly, so mirror it in Python to consult FakeTensor.is_mkldnn.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="Warning only once for all operators.*",
+        category=UserWarning,
+    )
+    _to_dense_composite_lib.impl("to_dense", to_dense_composite_impl)
+
+
+@register_op_impl(aten.to_mkldnn.default)
+def to_mkldnn(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    dtype: torch.dtype | None = None,
+) -> object:
+    if not isinstance(a, FakeTensor):
+        return NotImplemented
+
+    out_dtype = dtype if dtype is not None else a.dtype
+    if a.fake_device.type != "cpu":
+        raise RuntimeError("dense_to_mkldnn expects CPU tensor input")
+    if a.layout != torch.strided:
+        raise RuntimeError("dense_to_mkldnn expects strided tensor input")
+    if a.dtype not in _MKLDNN_DTYPES:
+        raise RuntimeError(
+            "dense_to_mkldnn expects float, bfloat16, half, uint8, int8 tensor input"
+        )
+    if a.dim() > 5:
+        raise RuntimeError("Can't convert cpu tensor with the number of dimensions > 5")
+    if a.dtype in (torch.uint8, torch.int8) and out_dtype != a.dtype:
+        raise RuntimeError(
+            "For int8, uint8 cpu_tensor input, we should not change the data type."
+        )
+    if out_dtype not in _MKLDNN_DTYPES:
+        raise RuntimeError(
+            "cpu tensor only can be converted to be a float, bfloat16, half, "
+            "uint8, int8 mkldnn tensor"
+        )
+    shape = tuple(a.shape)
+    with in_kernel_invocation_manager(fake_mode):
+        out = torch.empty_strided(
+            shape,
+            (1,) + (0,) * (len(shape) - 1),
+            dtype=out_dtype,
+            device="meta",
+        )
+    return FakeTensor(
+        fake_mode, out, a.fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
+    )
+
+
+@register_op_impl(aten.to_dense.default)
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> object:
+    return maybe_to_dense_mkldnn(fake_mode, a, dtype, masked_grad)
+
+
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
     lambda func: is_builtin(func)
@@ -1871,9 +2028,16 @@ def fast_detach(
 ) -> FakeTensor:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
+    dispatch_keys = x.dispatch_keys
     if include_real:
-        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
-    return FakeTensor(fake_mode, out, x.device)
+        return FakeTensor(
+            fake_mode,
+            out,
+            x.device,
+            real_tensor=x.real_tensor,
+            dispatch_keys=dispatch_keys,
+        )
+    return FakeTensor(fake_mode, out, x.device, dispatch_keys=dispatch_keys)
 
 
 @functools.cache
