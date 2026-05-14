@@ -1411,7 +1411,7 @@ class OverlapScheduler:
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
-        # Backward BFS from target, stopping at scheduled nodes.
+        # Backward BFS from target; stops at scheduled nodes.
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         seen: OrderedSet[fx.Node] = OrderedSet()
         parent_lists = self._parent_lists
