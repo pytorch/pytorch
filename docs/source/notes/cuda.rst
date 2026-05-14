@@ -314,6 +314,8 @@ As an exception, several functions such as :meth:`~torch.Tensor.to` and
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
 
+.. _cuda-stream-semantics:
+
 CUDA streams
 ^^^^^^^^^^^^
 

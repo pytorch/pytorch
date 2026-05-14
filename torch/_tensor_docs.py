@@ -1218,6 +1218,13 @@ Args:
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect. Default: ``False``
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the copy is issued on a
+    non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 """,
 )
 
@@ -5291,6 +5298,13 @@ Here are the ways to call ``to``:
     `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the conversion is issued on
+    a non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 
 Example::
 
