@@ -41,12 +41,6 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import (
-    create_binary_op,
-    create_call_method,
-    create_compare_op,
-    create_load_method,
-)
 from ..exc import (
     ObservedAttributeError,
     ObservedUserStopIteration,
@@ -234,55 +228,6 @@ _SET_LIKE_OP_SUPPORT: tuple[type[VariableTracker], ...] = (
     SetVariable,
     UserDefinedObjectVariable,
 )
-
-
-def _make_binary_op_reconstruct_fn(
-    op: Callable[..., Any],
-) -> Callable[[Any, list[VariableTracker]], None] | None:
-    """Create a reconstruct_fn for a binary, comparison, or method operation.
-
-    Returns a function that generates bytecode to recompute the result
-    by loading the operands and applying the operation.
-    Returns None if the operation is not supported.
-    """
-    # Check if this operator is supported by create_binary_op or create_compare_op
-    binary_op_inst = create_binary_op(op)
-    compare_op_inst = create_compare_op(op)
-
-    if binary_op_inst is not None:
-
-        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
-            codegen(args[0])
-            codegen(args[1])
-            codegen.append_output(create_binary_op(op))
-
-        return reconstruct_fn
-    elif compare_op_inst is not None:
-
-        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
-            codegen(args[0])
-            codegen(args[1])
-            codegen.append_output(create_compare_op(op))
-
-        return reconstruct_fn
-    elif op is str.format:
-        # str.format(format_str, *args) -> format_str.format(*args)
-        # Bytecode: LOAD format_str, LOAD_METHOD 'format', LOAD args..., CALL_METHOD
-        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
-            # First arg is the format string
-            codegen(args[0])
-            # Load the 'format' method
-            codegen.append_output(create_load_method("format"))
-            # Load remaining args
-            for arg in args[1:]:
-                codegen(arg)
-            # Call the method
-            codegen.extend_output(create_call_method(len(args) - 1))
-
-        return reconstruct_fn
-    else:
-        return None
-
 
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
@@ -1032,7 +977,9 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     # Builtins that have been promoted to their own VT classes. Creating a
     # BuiltinVariable for these is a bug; use the specialized class instead.
-    MUST_USE_SPECIALIZED: frozenset[Any] = frozenset({dict, getattr, iter, list})
+    MUST_USE_SPECIALIZED: frozenset[Any] = frozenset(
+        {dict, getattr, hasattr, iter, list, setattr}
+    )
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
         if fn in self.MUST_USE_SPECIALIZED:
@@ -1158,153 +1105,39 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import (
-            ComputedLazyConstantVariable,
-            LazyConstantVariable,
-            LazyVariableTracker,
-        )
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
         lazy_types = [t for t in arg_types if issubclass(t, LazyVariableTracker)]
         if lazy_types:
-            if not all(
-                issubclass(t, (LazyConstantVariable, ComputedLazyConstantVariable))
-                for t in lazy_types
-            ):
+            if not all(issubclass(t, LazyConstantVariable) for t in lazy_types):
                 # Realize non-constant lazy args and re-dispatch.  Any
-                # LazyConstantVariable/ComputedLazyConstantVariable args are
-                # kept and handled on the second dispatch through the branches
-                # below.
+                # LazyConstantVariable args are kept and handled on the
+                # second dispatch through the branch below.
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
                     [
                         a.realize()
                         if isinstance(a, LazyVariableTracker)
-                        and not isinstance(
-                            a, (LazyConstantVariable, ComputedLazyConstantVariable)
-                        )
+                        and not isinstance(a, LazyConstantVariable)
                         else a
                         for a in args
                     ],
                     kwargs,
                 )
 
-            # All lazy types are LazyConstantVariable (or ComputedLazy).
-            # Special handling for isinstance and type: these only need the
-            # TYPE of the value, not the specific value.
-            first_arg_is_lazy = arg_types and issubclass(
-                arg_types[0], (LazyConstantVariable, ComputedLazyConstantVariable)
-            )
-            if first_arg_is_lazy and not has_kwargs:
-                if fn is isinstance and len(arg_types) == 2:
-
-                    def handle_isinstance(
-                        tx: Any, args: Any, kwargs: Any
-                    ) -> VariableTracker | None:
-                        return obj.call_isinstance(tx, args[0], args[1])
-
-                    return handle_isinstance
-
-                if fn is type and len(arg_types) == 1:
-
-                    def handle_type(
-                        tx: Any, args: Any, kwargs: Any
-                    ) -> VariableTracker | None:
-                        return obj.call_type(tx, args[0])
-
-                    return handle_type
-
-            # Check if we can handle this lazily (all args are lazy/computed
-            # lazy constants or regular constants, and the op can be
-            # constant-folded)
-            all_constant_like = all(
-                issubclass(
-                    t,
-                    (
-                        LazyConstantVariable,
-                        ComputedLazyConstantVariable,
-                        ConstantVariable,
-                    ),
-                )
-                for t in arg_types
-            )
-            reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
-            if (
-                all_constant_like
-                and obj.can_constant_fold_through()
-                and not has_kwargs
-                and reconstruct_fn is not None
-            ):
-
-                def handle_lazy_constant(
-                    tx: Any, args: Any, kwargs: Any
-                ) -> VariableTracker | None:
-                    from .. import config
-
-                    if fn is not str.format:
-                        for arg in args:
-                            if (
-                                isinstance(arg, LazyConstantVariable)
-                                and not arg.is_realized()
-                            ):
-                                val_type = arg.peek_type()
-                                if val_type is int and not config.specialize_int:
-                                    return obj.call_function(
-                                        tx,
-                                        [
-                                            v.realize()
-                                            if isinstance(v, LazyVariableTracker)
-                                            else v
-                                            for v in args
-                                        ],
-                                        kwargs,
-                                    )
-                                if val_type is float and not config.specialize_float:
-                                    return obj.call_function(
-                                        tx,
-                                        [
-                                            v.realize()
-                                            if isinstance(v, LazyVariableTracker)
-                                            else v
-                                            for v in args
-                                        ],
-                                        kwargs,
-                                    )
-
-                    try:
-                        return ComputedLazyConstantVariable.create(
-                            fn, list(args), reconstruct_fn
-                        )
-                    except (
-                        TypeError,
-                        ValueError,
-                        AsPythonConstantNotImplementedError,
-                    ):
-                        return obj.call_function(
-                            tx,
-                            [
-                                v.realize() if isinstance(v, LazyVariableTracker) else v
-                                for v in args
-                            ],
-                            kwargs,
-                        )
-
-                return handle_lazy_constant
-
-            # Fallback: install type guards and resolve dispatch type.  If
-            # ConstantVariable (common case), delegate to a handler built for
-            # ConstantVariable.  Otherwise (e.g. specialize_int=False turned
-            # the int into SymNodeVariable), realize and re-dispatch.
+            # Only LazyConstantVariable lazy types.  Install type guards
+            # and resolve the dispatch type.  If the resolved type is
+            # ConstantVariable (the common case), delegate to a handler
+            # built for ConstantVariable.  Otherwise (e.g. specialize_int=
+            # False turned the int into a SymNodeVariable), realize and
+            # re-dispatch so the correct handler is used.
             inner_handler = BuiltinVariable._make_handler(
                 fn,
                 [
-                    ConstantVariable
-                    if issubclass(
-                        t, (LazyConstantVariable, ComputedLazyConstantVariable)
-                    )
-                    else t
+                    ConstantVariable if issubclass(t, LazyConstantVariable) else t
                     for t in arg_types
                 ],
                 has_kwargs,
@@ -1476,67 +1309,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     args: Sequence[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
-                    # First try to peek at all args as constants without realizing
-                    # This allows us to constant-fold through lazy constants
-                    peeked_args = []
-                    any_unrealized = False
-                    all_can_peek = True
-
-                    for arg in args:
-                        can_peek, is_unrealized, value = arg.try_peek_constant()
-                        if not can_peek or (
-                            not is_unrealized and not arg.is_python_constant()
-                        ):
-                            all_can_peek = False
-                            break
-                        peeked_args.append(value)
-                        if is_unrealized:
-                            any_unrealized = True
-
-                    peeked_kwargs = {}
-                    if all_can_peek:
-                        for k, v in kwargs.items():
-                            can_peek, is_unrealized, value = v.try_peek_constant()
-                            if not can_peek:
-                                all_can_peek = False
-                                break
-                            peeked_kwargs[k] = value
-                            if is_unrealized:
-                                any_unrealized = True
-
-                    if all_can_peek:
-                        try:
-                            res = fn(*peeked_args, **peeked_kwargs)
-                        except TypeError as exc:
-                            # Check if this is an "unsupported operand type" error
-                            # that should be propagated as an observed exception.
-                            # Errors like "unsupported operand type(s) for -: 'tuple' and 'set'"
-                            # are definitive and no other handler can help.
-                            exc_str = str(exc)
-                            if "unsupported operand type" in exc_str:
-                                raise_observed_exception(
-                                    TypeError,
-                                    tx,
-                                    args=list(map(ConstantVariable.create, exc.args)),
-                                )
-                            # For other TypeErrors (e.g., operator.le(torch.device, str)),
-                            # fall through to let polyfill handlers try.
-                            all_can_peek = False
-                        except Exception:
-                            # Other exceptions - fall through to let other handlers try.
-                            all_can_peek = False
-
-                    if all_can_peek:
-                        if any_unrealized:
-                            # Realize all lazy constants to install guards
-                            from .lazy import LazyVariableTracker
-
-                            LazyVariableTracker.realize_all((args, kwargs))
-
-                        # pyrefly: ignore [unbound-name]
-                        return VariableTracker.build(tx, res)
-
-                    # Fall back to the original check for UnspecializedPythonVariable
+                    # path with a runtime check
                     if check_unspec_or_constant_args(args, kwargs):
                         try:
                             res = fn(
@@ -1559,10 +1332,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 tx,
                                 args=list(exc.args),
                             )
-                        return VariableTracker.build(
-                            tx,
-                            res,  # pyrefly: ignore [unbound-name]
-                        )
+                        return VariableTracker.build(tx, res)
                     return None
 
             handlers.append(constant_fold_handler)
@@ -2774,14 +2544,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return arg.items[0]
             raise
 
-    def call_hasattr(
-        self, tx: "InstructionTranslator", obj: VariableTracker, attr: VariableTracker
-    ) -> VariableTracker | None:
-        if attr.is_python_constant():
-            name = attr.as_python_constant()
-            return obj.call_obj_hasattr(tx, name)
-        return None
-
     def call_map(
         self,
         tx: "InstructionTranslator",
@@ -2847,172 +2609,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
-
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        obj: VariableTracker,
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker | None:
-        if isinstance(
-            obj,
-            (
-                variables.DefaultDictVariable,
-                variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
-                variables.ExceptionVariable,
-                variables.TracebackVariable,
-            ),
-        ):
-            return obj.call_method(tx, "__setattr__", [name_var, val], {})
-        elif (
-            tx.output.side_effects.is_attribute_mutation(obj)
-            and name_var.is_python_constant()
-        ):
-            name = name_var.as_python_constant()
-            if obj.is_tensor():
-                from .builder import wrap_fx_proxy
-
-                # Some special handling for tensor attributes.
-                if name == "requires_grad":
-                    # TODO(voz): Make it work properly
-                    unimplemented(
-                        gb_type="setattr() on Tensor.requires_grad",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="setattr() on Tensor.requires_grad not supported. "
-                        "Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                        "the middle of the graph, which AOTAutograd does not currently know how to handle.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                elif name == "data":
-                    # See comments on `test_set_data_on_scoped_tensor` for plans
-                    # to support this.
-                    if obj.source is None:
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor created outside `torch.compile` region",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute to different dtype",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor to a new one with the same dtype",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-
-                    # Remove the old reference in tracked fakes - if we don't do this
-                    # new .data value size and shape differences will cause
-                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
-                    # coming out of set_() below will be a new one, and get
-                    # installed in tracked fakes.
-                    to_remove = [
-                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
-                    ]
-                    for tf in to_remove:
-                        tx.output.tracked_fakes.remove(tf)
-
-                    # Step 1 - disable grads
-                    with dynamo_disable_grad(tx), torch.no_grad():
-                        # Step 2 - call `set_`
-                        out = wrap_fx_proxy(
-                            tx,
-                            tx.output.create_proxy(
-                                "call_function",
-                                torch.Tensor.set_,
-                                *proxy_args_kwargs([obj, val], {}),
-                            ),
-                        )
-
-                    # Step 3 - drop the version counter - this is a step required to get
-                    # .data setting to play correctly with the autograd engine.
-                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
-                    # behavior of .data= from eager mode
-                    def _lower_version_count_by_1(x: torch.Tensor) -> torch.Tensor:
-                        version = x._version
-                        if version > 0:
-                            version = version - 1
-                        torch._C._autograd._unsafe_set_version_counter((x,), (version,))
-                        return x
-
-                    tx.output.create_proxy(
-                        "call_function",
-                        _lower_version_count_by_1,
-                        (out.as_proxy(),),
-                        {},
-                    )
-                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
-                    # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
-                    return out
-                elif name in ("_grad", "grad"):
-                    # NOTE: [Tensor "grad" and "_grad" attr]
-                    # _grad and grad share the same setter/getter, see
-                    # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other, by routing all
-                    # read/write to `grad`.
-                    name = "grad"
-                elif is_tensor_getset_descriptor(name):
-                    # Attribute like `torch.Tensor.real` has special setters we
-                    # don't yet support; it's not as simple adding an entry to
-                    # the side effect mapping.
-                    unimplemented(
-                        gb_type="Failed to set tensor attribute",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dynamo doesn't support setting these tensor attributes",
-                        hints=[
-                            f"Don't mutate attribute '{name}' on tensors, or "
-                            "move the mutation out of `torch.compile` region",
-                        ],
-                    )
-
-            tx.output.side_effects.store_attr(obj, name, val)
-            return val
-        elif isinstance(obj, variables.NNModuleVariable):
-            if not tx.output.is_root_tracer():
-                unimplemented(
-                    gb_type="nn.Module mutation in HigherOrderOp",
-                    context=f"nn.Module: {obj}",
-                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
-                    hints=[
-                        "Remove the mutation or move it outside of the HigherOrderOp.",
-                        *graph_break_hints.FUNDAMENTAL,
-                    ],
-                )
-            if name_var.is_python_constant() and isinstance(
-                val, variables.TensorVariable
-            ):
-                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
-
-                try:
-                    getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
-                except (AttributeError, ObservedAttributeError):
-                    getattr_var = None
-
-                if getattr_var is not None and getattr_var.is_tensor():
-                    # get_fake_val will get the same fake tensor
-                    existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-
-                    # same tensor identity, setattr is a no-op
-                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                    if (
-                        existing_fake_attr is assigning_fake_val
-                        and mod_setattr is torch.nn.Module.__setattr__
-                    ):
-                        return getattr_var
-
-            obj.convert_to_unspecialized(tx)
-        return None
 
     def call_delattr(
         self,
@@ -3654,7 +3250,12 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                         hints=[],
                     )
 
-        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+        # UDOV pending mutations may target slots, descriptors, or the instance
+        # dict. Route them through var_getattr so descriptor precedence matches
+        # CPython instead of returning a pending value too early.
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            obj, name
+        ) and not isinstance(obj, variables.UserDefinedObjectVariable):
             return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
@@ -3775,6 +3376,256 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return variables.GetAttrVariable(obj, name, source=source)
+
+
+class HasAttrBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `hasattr` builtin."""
+
+    _fn = hasattr
+
+    def __init__(self, value: Any = hasattr, **kwargs: Any) -> None:
+        if value is not hasattr:
+            raise AssertionError(
+                f"HasAttrBuiltinVariable value must be hasattr, got {value}"
+            )
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "HasAttrBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+            ]
+        if len(args) != 2 or kwargs:
+            raise_observed_exception(TypeError, tx)
+        obj, attr = args
+        if not attr.is_python_constant():
+            raise_observed_exception(TypeError, tx)
+        result = obj.call_obj_hasattr(tx, attr.as_python_constant())
+        if result is None:
+            unimplemented(
+                gb_type="hasattr() on unsupported type",
+                context=f"hasattr({obj}, {attr})",
+                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return result
+
+
+class SetAttrBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `setattr` builtin."""
+
+    _fn = setattr
+
+    def __init__(self, value: Any = setattr, **kwargs: Any) -> None:
+        if value is not setattr:
+            raise AssertionError(
+                f"SetAttrBuiltinVariable value must be setattr, got {value}"
+            )
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "SetAttrBuiltinVariable()"
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .lazy import LazyVariableTracker
+
+        if any(isinstance(a, LazyVariableTracker) for a in args):
+            args = [
+                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
+            ]
+        if len(args) != 3 or kwargs:
+            raise_observed_exception(TypeError, tx)
+        obj, name_var, val = args
+        result = self._call_setattr(tx, obj, name_var, val)
+        if result is not None:
+            return result
+        unimplemented(
+            gb_type="setattr() on unsupported type",
+            context=f"setattr({obj}, {name_var}, {val})",
+            explanation=f"setattr() is not supported on type {obj.python_type_name()}",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ) -> VariableTracker | None:
+        if isinstance(
+            obj,
+            (
+                variables.DefaultDictVariable,
+                variables.UserDefinedObjectVariable,
+                variables.NestedUserFunctionVariable,
+                variables.ExceptionVariable,
+                variables.TracebackVariable,
+            ),
+        ):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif (
+            tx.output.side_effects.is_attribute_mutation(obj)
+            and name_var.is_python_constant()
+        ):
+            name = name_var.as_python_constant()
+            if obj.is_tensor():
+                from .builder import wrap_fx_proxy
+
+                if name == "requires_grad":
+                    # TODO(azahed98): Make it work properly
+                    unimplemented(
+                        gb_type="setattr() on Tensor.requires_grad",
+                        context=f"setattr({obj}, {name}, {val})",
+                        explanation="setattr() on Tensor.requires_grad not supported. "
+                        "Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which AOTAutograd does not currently know how to handle.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                elif name == "data":
+                    # [Note: set_data_on_scoped_tensor]
+                    # TODO(azahed98): The plan of record is to introduce a set_data op, entirely subsume the
+                    # operation into a call_function in the fx graph, and let aot_autograd handle it.
+                    if obj.source is None:
+                        unimplemented(
+                            gb_type="Failed to mutate tensor data attribute",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dynamo only supports mutating `.data`"
+                            " of tensor created outside `torch.compile` region",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
+                        unimplemented(
+                            gb_type="Failed to mutate tensor data attribute to different dtype",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dynamo only supports mutating `.data`"
+                            " of tensor to a new one with the same dtype",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+
+                    # Remove the old reference in tracked fakes - if we don't do this
+                    # new .data value size and shape differences will cause
+                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
+                    # coming out of set_() below will be a new one, and get
+                    # installed in tracked fakes.
+                    to_remove = [
+                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
+                    ]
+                    for tf in to_remove:
+                        tx.output.tracked_fakes.remove(tf)
+
+                    # Step 1 - disable grads
+                    with dynamo_disable_grad(tx), torch.no_grad():
+                        # Step 2 - call `set_`
+                        out = wrap_fx_proxy(
+                            tx,
+                            tx.output.create_proxy(
+                                "call_function",
+                                torch.Tensor.set_,
+                                *proxy_args_kwargs([obj, val], {}),
+                            ),
+                        )
+
+                    # Step 3 - drop the version counter - this is a step required to get
+                    # .data setting to play correctly with the autograd engine.
+                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
+                    # behavior of .data= from eager mode
+                    def _lower_version_count_by_1(x: torch.Tensor) -> torch.Tensor:
+                        version = x._version
+                        if version > 0:
+                            version = version - 1
+                        torch._C._autograd._unsafe_set_version_counter((x,), (version,))
+                        return x
+
+                    tx.output.create_proxy(
+                        "call_function",
+                        _lower_version_count_by_1,
+                        (out.as_proxy(),),
+                        {},
+                    )
+                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
+                    # This handles options prop, guards and ends with a clone
+                    # Step 4 - replace all reference to the current object with the new one
+                    return out
+                elif name in ("_grad", "grad"):
+                    # NOTE: [Tensor "grad" and "_grad" attr]
+                    # _grad and grad share the same setter/getter, see
+                    # THPVariable_properties, and here we make sure setting one
+                    # enables reading `val` from the other, by routing all
+                    # read/write to `grad`.
+                    name = "grad"
+                elif is_tensor_getset_descriptor(name):
+                    # Attribute like `torch.Tensor.real` has special setters we
+                    # don't yet support; it's not as simple adding an entry to
+                    # the side effect mapping.
+                    unimplemented(
+                        gb_type="Failed to set tensor attribute",
+                        context=f"setattr({obj}, {name}, {val})",
+                        explanation="Dynamo doesn't support setting these tensor attributes",
+                        hints=[
+                            f"Don't mutate attribute '{name}' on tensors, or "
+                            "move the mutation out of `torch.compile` region",
+                        ],
+                    )
+
+            tx.output.side_effects.store_attr(obj, name, val)
+            return val
+        elif isinstance(obj, variables.NNModuleVariable):
+            if not tx.output.is_root_tracer():
+                unimplemented(
+                    gb_type="nn.Module mutation in HigherOrderOp",
+                    context=f"nn.Module: {obj}",
+                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                    hints=[
+                        "Remove the mutation or move it outside of the HigherOrderOp.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
+                )
+            if name_var.is_python_constant() and isinstance(
+                val, variables.TensorVariable
+            ):
+                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
+
+                try:
+                    getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                except (AttributeError, ObservedAttributeError):
+                    getattr_var = None
+
+                if getattr_var is not None and getattr_var.is_tensor():
+                    # get_fake_val will get the same fake tensor
+                    existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+
+                    # same tensor identity, setattr is a no-op
+                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    if (
+                        existing_fake_attr is assigning_fake_val
+                        and mod_setattr is torch.nn.Module.__setattr__
+                    ):
+                        return getattr_var
+
+            obj.convert_to_unspecialized(tx)
+        return None
 
 
 class ListBuiltinVariable(BaseBuiltinVariable):

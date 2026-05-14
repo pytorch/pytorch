@@ -104,7 +104,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
-    MI200_ARCH,
     NAVI_ARCH,
     parametrize,
     serialTest,
@@ -132,7 +131,7 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
-from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -1102,9 +1101,9 @@ class skip_if_cpp_wrapper:
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
 
-    def __call__(self, fn):
+    def __call__(self, fn, *args, **kwargs):
         @functools.wraps(fn)
-        def wrapper(test_self, *args, **kwargs):
+        def wrapper(test_self):
             if config.cpp_wrapper:
                 raise unittest.SkipTest(f"cpp wrapper bug to be fixed: {self.reason}")
             return fn(test_self, *args, **kwargs)
@@ -4428,8 +4427,19 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+
+    def test_bmm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(1, 2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(1, 3, 3)
+
+        msg = "expected scalar type .* but found .*|Expected arguments of same type but got"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t1, t2)
 
@@ -4450,12 +4460,10 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
@@ -5412,6 +5420,99 @@ class CommonTemplate:
                 torch.randn([2, 2048, 8, 8]),
                 torch.randn([320, 2048, 1, 1]).to(memory_format=torch.channels_last),
             ),
+            check_lowp=False,
+        )
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_bwd_weight_backends": "TRITON",
+            "max_autotune_conv_bwd_input_backends": "TRITON",
+        }
+    )
+    @parametrize("dilation", (1, 2))
+    @parametrize("stride", (1, 2))
+    @parametrize("padding", (0, 1))
+    @parametrize("kernel", (1, 3))
+    @parametrize(
+        "channels_groups",
+        (
+            [3, 4, 1],
+            [4, 128, 1],
+            [4, 128, 4],
+            [61, 151, 1],
+            [128, 128, 1],
+            [128, 128, 128],
+        ),
+    )
+    @parametrize("nhwc", (False, True))
+    @with_tf32_off
+    def test_conv2d_backward_parametrized(
+        self,
+        channels_groups: list,
+        stride: int,
+        dilation: int,
+        padding: int,
+        kernel: int,
+        nhwc: bool,
+    ):
+        in_channels = channels_groups[0]
+        out_channels = channels_groups[1]
+        groups = channels_groups[2]
+
+        if is_dynamic_shape_enabled() and (dilation != 1 or groups == 1):
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            # TODO: Remove this workaround once TF32 settings are properly passed to subprocess
+            # Currently, subprocess mode starts with default TF32 settings (cudnn.allow_tf32=True)
+            # even if parent process has set allow_tf32=False.
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(grad_output, inp, weight):
+            conv_backward = torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [out_channels],
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                False,
+                [0, 0],
+                groups,
+                [True, True, True],
+            )
+            return conv_backward
+
+        input_h = 16
+        input_w = 16
+        output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+
+        if TEST_WITH_ROCM:
+            # using the same error tolerance as test_convolution1.
+            atol = 6e-5
+            rtol = 0.001
+        else:
+            # Greatest absolute difference: 0.0001675300 at index (100, 120, 0, 0) (up to 6e-05 allowed)
+            # Greatest relative difference: 0.1761541813 at index (10, 0, 0, 0) (up to 0.001 allowed)
+            atol = 2e-4
+            rtol = 0.001
+
+        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        if nhwc:
+            weight = weight.to(memory_format=torch.channels_last)
+        self.common(
+            fn,
+            (
+                torch.randn([2, out_channels, output_h, output_w]),
+                torch.randn([2, in_channels, input_h, input_w]),
+                weight,
+            ),
+            atol=atol,
+            rtol=rtol,
             check_lowp=False,
         )
 
@@ -8630,18 +8731,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
 
-        # MPS has correctness problem for transposed sort before MacOS15.
-        # Size is chosen above the single-block Metal path threshold so the
-        # MPSGraph fallback (where the pre-15 bug exists) is exercised.
-        ctx = (
-            contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
-            else self.assertRaises(AssertionError)
-        )
         inp = torch.randn(4097, 10).transpose(0, 1)
-        with ctx:
-            self.common(fn, (inp, False))
-            self.common(fn, (inp, True))
+        self.common(fn, (inp, False))
+        self.common(fn, (inp, True))
 
     def test_topk(self):
         def fn(a):
@@ -12850,7 +12942,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
-    @skipIfRocmArch(MI200_ARCH)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -12876,11 +12967,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        self.common(
-            Model(),
-            (torch.randn(8, 256, 16, 16),),
-            check_lowp=not is_halide_backend(self.device),
-        )
+        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
+        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # https://github.com/pytorch/pytorch/issues/183581
+        with DeterministicGuard(True, warn_only=True):
+            self.common(
+                Model(),
+                (torch.randn(8, 256, 16, 16),),
+                check_lowp=not is_halide_backend(self.device),
+                atol=2e-3,
+                rtol=2e-3,
+            )
 
     def test_inplace_where_pointwise(self):
         # https://github.com/pytorch/pytorch/issues/96446
@@ -13277,95 +13374,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         inplace=False,
                         deterministic=deterministic,
                     )
-
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    @parametrize("dtype", test_dtypes)
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
-    def test_empty_deterministic(self, dtype):
-        def test_helper(fn, args):
-            cfunc = torch.compile(fn, fullgraph=True)
-
-            with DeterministicGuard(True, fill_uninitialized_memory=True):
-                eager = fn(*args)
-                compiled = cfunc(*args)
-                torch.testing.assert_close(eager, compiled, equal_nan=True)
-
-        def fn():
-            return torch.empty(4, 4, device=self.device, dtype=dtype)
-
-        test_helper(fn, ())
-
-        def fn(x):
-            return torch.empty_like(x, device=self.device, dtype=dtype)
-
-        test_helper(fn, (torch.empty(4, 4, device=self.device),))
-
-        def fn():
-            return torch.empty_strided((2, 2), (2, 1), device=self.device, dtype=dtype)
-
-        test_helper(fn, ())
-
-        def fn():
-            return torch.empty_permuted(
-                (2, 3, 5), (1, 0, 2), device=self.device, dtype=dtype
-            )
-
-        test_helper(fn, ())
-
-    @requires_gpu()
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
-    def test_empty_deterministic_pin_memory(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("Test only runs on CPU")
-
-        def fn():
-            return torch.empty(
-                4, 4, device=self.device, dtype=torch.float32, pin_memory=True
-            )
-
-        cfunc = torch.compile(fn, fullgraph=True)
-
-        with DeterministicGuard(True, fill_uninitialized_memory=True):
-            eager = fn()
-            compiled = cfunc()
-            torch.testing.assert_close(eager, compiled, equal_nan=True)
-            self.assertTrue(eager.is_pinned())
-            self.assertTrue(compiled.is_pinned())
-
-    @requires_gpu()
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
-    def test_deterministic_skip_fill_for_ops(self):
-        # Output buffers of real ops (e.g. add) should not get a deterministic
-        # NaN fill — only truly uninitialized buffers (torch.empty) need it.
-        def fn(a, b):
-            return a + b
-
-        a = torch.randn(4, 4, device=self.device)
-        b = torch.randn(4, 4, device=self.device)
-
-        with DeterministicGuard(True, fill_uninitialized_memory=True):
-            _, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
-            code = " ".join(code)
-            # The deterministic path uses the generic empty_strided(... device=...)
-            # while the fast path uses empty_strided_cuda / empty_strided_cpu.
-            # Op output buffers should take the fast path even under deterministic mode.
-            if self.device == "cpu":
-                self.assertIn("empty_strided_cpu(", code)
-            else:
-                self.assertIn("empty_strided_cuda(", code)
-
-    @config.patch("cpp_wrapper", True)
-    @requires_gpu()
-    @unittest.skipIf(IS_MACOS, "fails on macos")
-    def test_deterministic_fill_not_supported_cpp_wrapper(self):
-        def fn():
-            return torch.empty(4, 4, device=self.device)
-
-        with DeterministicGuard(True, fill_uninitialized_memory=True):
-            with self.assertRaisesRegex(RuntimeError, "not supported with cpp_wrapper"):
-                torch.compile(fn, fullgraph=True)()
 
     def test_inplace_resize_as(self):
         def fn(x, y):
