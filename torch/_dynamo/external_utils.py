@@ -130,7 +130,7 @@ def call_backward(
     *args: Any,
 ) -> torch.Tensor | tuple[torch.Tensor, ...]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
-    grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
+    grads = fake._forward_cls.backward(fake, *args)
 
     if not isinstance(grads, tuple):
         grads = (grads,)
