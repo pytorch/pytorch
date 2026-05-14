@@ -4364,7 +4364,7 @@ class Layout(OutputSpec):
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if V.graph.sizevars.optimization_hint(dim, fallback=2) != 1
+            if not V.graph.sizevars.statically_known_equals(dim, 1)
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
@@ -4384,11 +4384,15 @@ class Layout(OutputSpec):
         # check if it is in ascending order
         for i in range(len(order) - 1):
             expr = stride_ordered[i] > stride_ordered[i + 1]
-            if not isinstance(expr, bool):
-                expr = V.graph._shape_env.evaluate_expr(
-                    stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
-                )
-            if expr:
+            if isinstance(expr, bool):
+                if expr:
+                    return False
+                continue
+            if V.graph.sizevars.guard_or_false(expr):
+                return False
+            if not V.graph.sizevars.guard_or_false(
+                stride_ordered[i] <= stride_ordered[i + 1]
+            ):
                 return False
         return True
 
@@ -7125,9 +7129,15 @@ class ExternKernel(InputsKernel):
                     # the current size and stride already satisfies this order.
                     # However by freezing it to the required order, the layout will be changed to:
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-                    use_current_stride_order = is_stride_order_storage_and_layout(
-                        x, order
-                    ) and not free_unbacked_symbols(x.get_layout().stride)
+                    layout = x.get_layout()
+                    has_unbacked_layout = bool(
+                        free_unbacked_symbols(layout.size)
+                        or free_unbacked_symbols(layout.stride)
+                    )
+                    use_current_stride_order = (
+                        not has_unbacked_layout
+                        and is_stride_order_storage_and_layout(x, order)
+                    )
                     # fix flexiblelayout to be FixedLayout with stride_order
                     as_storage_and_layout(
                         x,

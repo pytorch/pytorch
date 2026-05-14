@@ -1,12 +1,17 @@
 # Owner(s): ["module: inductor"]
 import functools
 import unittest
+from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.exc import InternalTorchDynamoError
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, ir
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
@@ -1007,6 +1012,41 @@ class TestUnbackedSymints(InductorTestCase):
         compiled_fn = torch.compile(fn, backend=fx_pass_backend, fullgraph=True)
         result = compiled_fn(t)
         self.assertEqual(result, 8)
+
+    def test_stride_order_uses_unbacked_optimization_hint(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(seq, 16)
+
+        stride_order = ir.get_stride_order(
+            [256 * sympy.Max(1, seq.node.expr // 2), 256, 1],
+            shape_env,
+        )
+        self.assertEqual(stride_order, [2, 1, 0])
+
+    def test_stride_ordered_rejects_unhinted_unbacked_layout(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device(device),
+            torch.float32,
+            size=[seq, 2],
+            stride=[seq, 1],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertFalse(layout.is_stride_ordered([1, 0]))
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
