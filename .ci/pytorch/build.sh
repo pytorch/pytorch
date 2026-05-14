@@ -10,8 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-# shellcheck source=./rocm_utils.sh
-source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
