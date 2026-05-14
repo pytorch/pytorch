@@ -20,6 +20,7 @@ except ImportError:
 
 if HAS_CUTLASS:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
+    from torch._inductor.codegen.cutedsl.cutedsl_scheduling import CuteDSLScheduling
     from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.select_algorithm import PartialRender
 
@@ -634,6 +635,10 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
                 test_expr = "x"
                 var = kernel.cse.generate(kernel.body, test_expr, dtype=None)
                 self.assertTrue(str(var).startswith("tmp"))
+
+    def test_can_fuse_horizontal_returns_false(self):
+        sched = CuteDSLScheduling(scheduler=None)
+        self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
 
 
 if __name__ == "__main__":

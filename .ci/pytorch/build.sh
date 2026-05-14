@@ -10,6 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
@@ -330,6 +334,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       sudo rm -rf original
       popd
     fi
+
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
+    build_rocm_ck_wheel dist/
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
