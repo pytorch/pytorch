@@ -412,12 +412,18 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
+            # Prefixes for modules whose top-level imports pull in optional
+            # runtime deps (cutlass, cuda-python, triton) that aren't
+            # available in CPU-only CI. Registrations are no-ops when the
+            # runtime is missing, so it's safe to skip them here.
+            cuda_dep_prefixes = (
+                "torch._native.ops.scatter_add.",
+                "torch._vendor.quack",
+            )
             if (
                 mod in private_allowlist
                 or (mod.startswith("torch._native.ops.") and "triton" in mod)
-                # torch._vendor.quack depends on cutlass / cuda-python, which
-                # are only installed on CUDA-enabled x86 Linux builds.
-                or mod.startswith("torch._vendor.quack")
+                or mod.startswith(cuda_dep_prefixes)
             ):
                 if self._is_mod_public(mod):
                     raise AssertionError(
