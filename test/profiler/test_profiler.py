@@ -604,7 +604,7 @@ class TestProfiler(TestCase):
 
         found_mm_on_device1 = any(
             "gemm" in evt.name.lower()
-            and evt.device_type == DeviceType.CUDA
+            and evt.device_type in (DeviceType.CUDA, DeviceType.PrivateUse1)
             and evt.device_index == 1
             for evt in prof.events()
         )
