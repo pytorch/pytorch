@@ -20,7 +20,6 @@ import torch
 import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
@@ -1973,7 +1972,7 @@ class SIMDScheduling(BaseScheduling):
             if len(nodes) != len(node.get_nodes()):
                 assert self.scheduler
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
-            coalesce_analysis = analyze_memory_coalescing(node)
+            coalesce_analysis = node.get_coalesce_analysis()
         else:
             coalesce_analysis = None
 
@@ -2468,7 +2467,7 @@ class SIMDScheduling(BaseScheduling):
                     assert isinstance(
                         pn, (scheduler.FusedSchedulerNode, scheduler.SchedulerNode)
                     )
-                    coalesce_analysis = analyze_memory_coalescing(pn)
+                    coalesce_analysis = pn.get_coalesce_analysis()
                 else:
                     coalesce_analysis = None
                 features = SIMDKernelFeatures(
