@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    requires_mkl,
     skipIfXpu,
     TEST_ACL,
-    TEST_MKL,
     xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
@@ -151,13 +151,8 @@ class TestPatternMatcherBase(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=torch.float32,
-        check_quantization=False,
-        is_qat=False,
         dtype=None,
-        is_dynamic=False,
-        quantizer=None,
         compile_options={},  # noqa: B006
-        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -189,34 +184,17 @@ class TestPatternMatcherBase(TestCase):
                     f"Expected check_autocast to be torch.float32, got {check_autocast}"
                 )
             maybe_autocast = contextlib.nullcontext()
-        if check_quantization:
-            raise NotImplementedError("not supported, please migrate to torchao")
-            """
-            if quantization_with_autocast:
-                with maybe_autocast:
-                    convert_model = _generate_qdq_quantized_model(
-                        mod, inputs, is_qat, is_dynamic, quantizer
-                    )
-            else:
-                convert_model = _generate_qdq_quantized_model(
-                    mod, inputs, is_qat, is_dynamic, quantizer
+        with torch.no_grad(), maybe_autocast:
+            clone_inputs = self._clone_inputs(inputs)
+            expected = mod(*inputs)
+            actual = torch.compile(mod, **compile_options)(*clone_inputs)
+            if self.precision != 0:
+                torch.testing.assert_close(
+                    actual, expected, atol=self.precision, rtol=self.precision
                 )
-            with torch.no_grad(), maybe_autocast:
-                _ = torch.compile(convert_model)(*inputs)
-                matcher_check_fn()
-            """
-        else:
-            with torch.no_grad(), maybe_autocast:
-                clone_inputs = self._clone_inputs(inputs)
-                expected = mod(*inputs)
-                actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                if self.precision != 0:
-                    torch.testing.assert_close(
-                        actual, expected, atol=self.precision, rtol=self.precision
-                    )
-                else:
-                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-                matcher_check_fn()
+            else:
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            matcher_check_fn()
 
     def _test_code_common(
         self,
@@ -226,18 +204,11 @@ class TestPatternMatcherBase(TestCase):
         exclude_ops,
         atol=1e-5,
         rtol=1.3e-6,
-        check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
-        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
-            if check_quantization:
-                raise NotImplementedError("not supported, please migrate to torchao")
-                """
-                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
-                """
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -266,9 +237,7 @@ class TestPatternMatcherBase(TestCase):
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
                 _check_has_dynamic_shape(self, source_code)
-            if not check_quantization:
-                # Skip due to reduce range setting for Quantization on preCI system.
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
@@ -750,13 +719,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 mod,
                 (x, w, s),
                 matcher_check_fn,
-                check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
             )
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
+    # See issue #168635 and its sub-issues.
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
@@ -824,7 +794,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @reduced_f32_on_and_off()
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_fp32(self, device="cpu"):
         self.device = device
 
@@ -848,7 +818,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
 
@@ -1562,9 +1532,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @xfailIfACL
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):

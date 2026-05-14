@@ -3,7 +3,9 @@ import importlib
 import inspect
 import io
 import logging
+import os
 import pickle
+import tempfile
 import types
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack, nullcontext
@@ -82,7 +84,8 @@ class AOTCompilePickler(pickle.Pickler):
         def _() -> object:
             return val
 
-        assert _.__closure__ is not None
+        if _.__closure__ is None:
+            raise AssertionError("closure must not be None")
         return _.__closure__[0]
 
     @classmethod
@@ -171,6 +174,20 @@ class AOTCompileSaveResult:
     serialized_data: bytes
 
 
+def atomic_write_binary(file_path: str, data: bytes):
+    dir_name = os.path.dirname(file_path) or "."
+
+    with tempfile.NamedTemporaryFile(
+        dir=dir_name, delete=False, mode="wb"
+    ) as temp_file:
+        temp_path = temp_file.name
+        temp_file.write(data)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+
+    os.replace(temp_path, file_path)
+
+
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
@@ -181,9 +198,10 @@ class AOTCompiledFunction:
         f_locals: dict[str, object] = {}
         env = self._artifacts.runtime_env
         if env.closure:
-            assert env.bytecode.co_freevars and len(env.closure) == len(
+            if not env.bytecode.co_freevars or len(env.closure) != len(
                 env.bytecode.co_freevars
-            )
+            ):
+                raise AssertionError("closure length must match co_freevars length")
             f_locals = {
                 name: cell.cell_contents
                 for name, cell in zip(env.bytecode.co_freevars, env.closure)
@@ -193,7 +211,8 @@ class AOTCompiledFunction:
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = self.prepare_f_locals(*args, **kwargs)
-        assert self._artifacts.guard_manager is not None
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
@@ -216,7 +235,8 @@ class AOTCompiledFunction:
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        assert self._artifacts.guard_manager is not None
+        if self._artifacts.guard_manager is None:
+            raise AssertionError("guard_manager must not be None")
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
@@ -229,10 +249,9 @@ class AOTCompiledFunction:
     def save_compiled_function(
         self, path: str, external_data: dict[str, Any] | None = None
     ) -> AOTCompileSaveResult:
-        with open(path, "wb") as f:
-            result = type(self).serialize(self, external_data)
-            f.write(result.serialized_data)
-            return result
+        result = type(self).serialize(self, external_data)
+        atomic_write_binary(path, result.serialized_data)
+        return result
 
     @classmethod
     def serialize(
@@ -302,6 +321,9 @@ def aot_compile_fullgraph(
     from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
+    from torch._dynamo.variables.torch_function import (
+        torch_function_mode_stack_state_mgr,
+    )
     from torch._guards import TracingContext
 
     args, kwargs = example_inputs
@@ -317,10 +339,12 @@ def aot_compile_fullgraph(
         dynamo_timed("fullgraph_capture"),
         torch._functorch.config.patch(strict_autograd_cache=True),
         dynamic_ctx,
+        torch_function_mode_stack_state_mgr,
     ):
         capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
         graph_capture_output = capture_output.graph_capture_output
-        assert graph_capture_output.output_graph is not None
+        if graph_capture_output.output_graph is None:
+            raise AssertionError("output_graph must not be None")
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
@@ -344,13 +368,17 @@ def aot_compile_fullgraph(
         fn, _ = convert_frame.get_traced_fn(model)
 
         backend_input = capture_output.backend_input
-        assert backend_input is not None
+        if backend_input is None:
+            raise AssertionError("backend_input must not be None")
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
-        assert (
+        if (
             backend_input.fake_mode.shape_env
-            is graph_capture_output.output_graph.shape_env
-        )
+            is not graph_capture_output.output_graph.shape_env
+        ):
+            raise AssertionError(
+                "fake_mode.shape_env must be the same as output_graph.shape_env"
+            )
         tracing_context = TracingContext(backend_input.fake_mode)
         tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
@@ -368,12 +396,20 @@ def aot_compile_fullgraph(
             compiled_fn = backend(
                 backend_input.graph_module, backend_input.example_inputs
             )
-            # If Inductor backend is used, grab the compiled_fn from PrecompileContext
+            # If Inductor backend or AOTAutograd-based backend is used,
+            # wrap the compiled_fn for serialization.
             # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-            if isinstance(backend, torch._TorchCompileInductorWrapper) or (
-                hasattr(backend, "compiler_fn")
-                and isinstance(
-                    backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
+            if (
+                isinstance(backend, torch._TorchCompileInductorWrapper)
+                or (
+                    hasattr(backend, "compiler_fn")
+                    and isinstance(
+                        backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
+                    )
+                )
+                or (
+                    hasattr(compiled_fn, "serialize")
+                    and compiled_fn.serialize is not None
                 )
             ):
                 compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
@@ -388,11 +424,20 @@ def aot_compile_fullgraph(
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
 
-        check_fn = graph_capture_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
-        )
+        # Temporarily restore the mode stack so guard expressions that
+        # reference modes can evaluate, matching the compile_inner path.
+        build_guards_ctx = ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with build_guards_ctx:
+            check_fn = graph_capture_output.build_guards(
+                fn.__code__, hooks=hooks, save=True, strict_error=True
+            )
 
-        assert check_fn.guards_state is not None
+        if check_fn.guards_state is None:
+            raise AssertionError("guards_state must not be None")
 
         source_info = SourceInfo(inlined_sources=set())
         for traced_code in graph_capture_output.traced_code:
@@ -499,6 +544,7 @@ def aot_compile_module(
         log.info("Compiling input %s..", model_input)
         compiled_results.append(compile_single_graph(model_input))
 
-    assert len(compiled_results) > 0
+    if len(compiled_results) == 0:
+        raise AssertionError("Expected at least one compiled result")
 
     return AOTCompiledModel(model, compiled_results)

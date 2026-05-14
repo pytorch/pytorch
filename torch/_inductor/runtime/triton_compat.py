@@ -85,11 +85,9 @@ if triton is not None:
         knobs = None
 
     try:
-        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+        from triton.runtime.cache import triton_key
     except ImportError:
-        from triton.compiler.compiler import (
-            triton_key,  # type: ignore[attr-defined,no-redef]
-        )
+        from triton.compiler.compiler import triton_key
 
     try:
         from triton.runtime.errors import IntelGPUError
@@ -150,11 +148,10 @@ else:
 
 def cc_warp_size(cc: str | int) -> int:
     if torch.version.hip:
-        cc_str = str(cc)
-        if "gfx10" in cc_str or "gfx11" in cc_str:
-            return 32
-        else:
+        if "gfx9" in str(cc):
             return 64
+        else:
+            return 32
     else:
         return 32
 

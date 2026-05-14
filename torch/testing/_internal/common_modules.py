@@ -20,12 +20,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
-    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference,
+    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference, linear_cross_entropy_loss_reference,
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo)
+    skipIfTorchDynamo, skipIfXpu)
 from types import ModuleType
 import operator
 
@@ -452,8 +452,15 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
 
 
 def module_inputs_torch_nn_PoissonNLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    # Narrow the input range for fp16 so `i.exp()` summed over numel doesn't
+    # blow past 65504 in the `full` reference path; the default (-9, 9) range
+    # gives `exp(8.9) ~= 7300` and over 120 elements overflows fp16 to inf,
+    # while the fused kernel accumulates in higher precision and stays finite.
+    fp16_kwargs = {'low': -2, 'high': 2} if dtype == torch.float16 else {}
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         requires_grad=requires_grad, **fp16_kwargs)
+    make_target = partial(make_tensor, device=device, dtype=dtype,
+                          requires_grad=False, **fp16_kwargs)
 
     cases: list[tuple[str, dict]] = [
         ('', {}),
@@ -913,7 +920,10 @@ def module_inputs_torch_nn_BatchNorm1d(module_info, device, dtype, requires_grad
                     desc='3d_input_not_affine'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 9))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(10, bias=False),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='affine_not_bias'),]
 
 
 def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -936,7 +946,10 @@ def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad
                     desc='not_tracking_stats'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 2, 2))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(3, bias=False),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='affine_not_bias'),]
 
 
 def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -959,7 +972,10 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     desc='not_tracking_stats'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 2, 2, 2))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(3, bias=False),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='affine_not_bias'),]
 
 
 def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -1765,6 +1781,200 @@ def module_error_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, re
     ]
 
 
+def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs_):
+    # Return a list of module_inputs.
+    #
+    # Important: module_inputs size and the ordering of its items must
+    # be the same for all devices.  There exists tests that
+    # correctness depend on this requirement.
+
+    def make_input(batch_dims, in_features):
+        return torch.randn((*batch_dims, in_features), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def reference_fn(m, p, i, t):
+        # p[0] is linear.weight(bias=False)
+        linear_weight = p[0].reshape(m.num_classes, *m.out_features, i.shape[-1])
+        return linear_cross_entropy_loss_reference(
+            i, linear_weight, t,
+            weight=m.weight,
+            reduction=m.reduction, ignore_index=m.ignore_index, label_smoothing=m.label_smoothing)
+
+    def make_target(num_classes, shape, target_dtype):
+        if target_dtype.is_floating_point:
+            return make_tensor(shape, low=0, high=1, device=device, dtype=target_dtype, requires_grad=False)
+        else:
+            return torch.randint(
+                0,
+                num_classes,
+                shape,
+                device=device,
+                dtype=target_dtype,
+                requires_grad=False,
+            )
+
+    def sizes_and_options():
+        # TODO: the next PR in the ghstack adds the options feature.
+        for sizes in [(8, 5, 4), (None, 8, 4)]:
+            yield sizes, None
+
+    def samples():
+        for (num_batches, in_features, num_classes), options in sizes_and_options():
+            if num_batches is None:
+                batch_dims = ()
+            else:
+                batch_dims = (num_batches,)
+            weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+
+            # generate samples for LinearCrossEntropyLoss and its forward:
+            for reduction, ii, ls, w, of in product(
+                    ["sum", "mean", "none"],
+                    [None, -100, (num_classes - 1) // 2, num_classes + 5],
+                    [0.0, 0.1],
+                    weights,
+                    [(), (3, 2, 4)]):
+                if num_batches is None and of:
+                    # K-dimensional loss requires batches dimension
+                    continue
+                if ii is not None and reduction == "sum":
+                    # skip some samples, just to reduce the size of samples set
+                    continue
+                module_args = (in_features, num_classes)
+                module_kwargs = dict(
+                    out_features=of,
+                    device=device,
+                    dtype=dtype,
+                    reduction=reduction,
+                    weight=w,
+                    ignore_index=ii,
+                    label_smoothing=ls,
+                )
+                for target_dtype in [torch.int64, dtype]:
+                    if target_dtype.is_floating_point:
+                        target_shape = (*batch_dims, num_classes, *of)
+                        if ii is not None:
+                            # ignore_index is not supported for floating point target
+                            continue
+                        if options is not None:
+                            # chunking is not supported for floating point target
+                            continue
+                    else:
+                        target_shape = (*batch_dims, *of)
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, target_shape, target_dtype)
+                    if (
+                            target.device.type != "meta"
+                            and not target_dtype.is_floating_point and reduction == "mean"
+                            and ii is not None and ii >= 0 and ii < num_classes and torch.all(target == ii)
+                    ):
+                        # ensures valid normalization:
+                        target[0 if target.shape else ()] = (ii + 1) % num_classes
+
+                    yield module_args, module_kwargs, (input, target)
+
+                    if (
+                            not target_dtype.is_floating_point
+                            and target_shape
+                            and num_batches > 1
+                            and ii is not None
+                    ):
+                        # target may contain out-of-range ii values
+                        input = make_input(batch_dims, in_features)
+                        target = make_target(num_classes, target_shape, target_dtype)
+                        target[num_batches // 2] = ii
+                        if ii < 0 or ii >= num_classes:
+                            # tests the correctness of out-of-range ii
+                            # mapping to 0 (see the batch chunking
+                            # logic in the next PR)
+                            target[0] = 0
+                        yield module_args, module_kwargs, (input, target)
+
+                    if (
+                            not target_dtype.is_floating_point and reduction != "mean" and ii is not None
+                    ):
+                        # target is completely filled with ii
+                        input = make_input(batch_dims, in_features)
+                        target = torch.full_like(target, ii)
+                        yield module_args, module_kwargs, (input, target)
+
+    module_inputs = []
+    for module_args, module_kwargs, (input, target) in samples():
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(*module_args, **module_kwargs),
+                forward_input=FunctionInput(input, target),
+                reference_fn=reference_fn)
+        )
+    return module_inputs
+
+
+def module_error_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return [
+        # Non-floating-point target with same shape as input (soft-target path)
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((4, 2), device=device, dtype=torch.long),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex="Expected floating point type for target with class probabilities",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((5, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="Expected input batch_size [(]4[)] to match target batch_size [(]5[)]",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 5)),
+                    torch.zeros((4, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex="expected equal input and linear_weight last dimensions [(]in_features[)], got 5 and 3, respectively",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, weight=torch.ones(3, device=device, dtype=dtype),
+                                                device=device, dtype=dtype),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((4, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=RuntimeError,
+            error_regex="expected weight shape to be [(]2,[)], got [(]3,[)]",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 2, device=device, dtype=dtype, label_smoothing=2.0),
+                forward_input=FunctionInput(
+                    make_input((4, 3)),
+                    torch.zeros((4, 2), device=device, dtype=dtype),
+                ),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=RuntimeError,
+            error_regex="expected label_smoothing to be in range [[]0, 1[]], got 2.0",
+        ),
+    ]
+
+
 def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, requires_grad=False)
@@ -1838,6 +2048,10 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 6, 5))),
             desc='1d_affine'),
         ModuleInput(
+            constructor_input=FunctionInput(3, 6, 1e-3, bias=False),
+            forward_input=FunctionInput(make_input((4, 6, 5))),
+            desc='1d_affine_not_bias'),
+        ModuleInput(
             constructor_input=FunctionInput(3, 12, 1e-3),
             forward_input=FunctionInput(make_input((4, 12))),
             desc='1d_affine_GN'),
@@ -1858,14 +2072,17 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 6, 2, 3))),
             desc='2d_affine'),
         ModuleInput(
+            constructor_input=FunctionInput(3, 9, 1e-3, bias=False),
+            forward_input=FunctionInput(make_input((4, 9, 2, 3))),
+            desc='2d_affine_not_bias'),
+        ModuleInput(
             constructor_input=FunctionInput(3, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
             desc='2d_no_affine_IN'),
         ModuleInput(
             constructor_input=FunctionInput(1, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
-            desc='2d_no_affine_LN'),
-    ]
+            desc='2d_no_affine_LN'),]
 
 
 def module_error_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -2054,8 +2271,21 @@ def module_inputs_torch_nn_InstanceNormNd(module_info, device, dtype, requires_g
             ),
             forward_input=FunctionInput(make_input(input_no_batch_shape)),
             reference_fn=no_batch_dim_reference_fn,
-            desc='no_batch_dim')
-    ]
+            desc='no_batch_dim'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine=True) if lazy else
+                FunctionInput(num_features, eps, momentum, affine=True)
+            ),
+            forward_input=FunctionInput(make_input(input_batch_shape)),
+            desc='affine'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine=True, bias=False) if lazy else
+                FunctionInput(num_features, eps, momentum, affine=True, bias=False)
+            ),
+            forward_input=FunctionInput(make_input(input_batch_shape)),
+            desc='affine_not_bias'),]
 
 def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2255,6 +2485,47 @@ def module_inputs_torch_nn_MaxPool2d(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((1, 3, 7, 7))),
             desc='return_indices'),
     ]
+
+
+def module_error_inputs_torch_nn_MaxPool2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for MaxPool2d that test error messages for invalid inputs.
+    """
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        # Wrong input dimensions: 2D input instead of 3D/4D
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(2),
+                forward_input=FunctionInput(make_input((3, 4))),  # 2D input
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"non-empty 3D or 4D \(batch mode\) tensor expected for input"
+        ),
+        # Wrong input dimensions: 5D input
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(2),
+                forward_input=FunctionInput(make_input((1, 2, 3, 4, 5))),  # 5D input
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"non-empty 3D or 4D \(batch mode\) tensor expected for input"
+        ),
+        # Invalid padding: padding > kernel_size / 2
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, padding=5),  # kernel=3, pad=5 > 3/2
+                forward_input=FunctionInput(make_input((1, 1, 10, 10))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"pad should be at most half of effective kernel size"
+        ),
+    ]
+
 
 def module_inputs_torch_nn_MaxPool3d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2813,6 +3084,57 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
             desc='discontiguous'
         ),
     ]
+
+
+def module_error_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for Embedding that test error messages for invalid inputs.
+    """
+    samples = []
+
+    # Out of range indices: index exceeds num_embeddings
+    # Only test on CPU - CUDA triggers kernel assertion instead of Python exception
+    if torch.device(device).type == 'cpu':
+        samples.append(
+            ErrorModuleInput(
+                ModuleInput(
+                    constructor_input=FunctionInput(num_embeddings=10, embedding_dim=3),
+                    forward_input=FunctionInput(torch.tensor([0, 5, 15], device=device, dtype=torch.long)),
+                ),
+                error_on=ModuleErrorEnum.FORWARD_ERROR,
+                error_type=IndexError,
+                error_regex=r"index out of range in self"
+            )
+        )
+
+    # Float indices: wrong dtype for indices (works on all devices)
+    samples.append(
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(num_embeddings=10, embedding_dim=3),
+                forward_input=FunctionInput(torch.tensor([1.5, 2.5], device=device, dtype=torch.float32)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Expected tensor for argument.*indices.*to have.*scalar type.*Long.*Int"
+        )
+    )
+
+    # Negative num_embeddings (construction error, device-independent)
+    samples.append(
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(num_embeddings=-1, embedding_dim=3),
+                forward_input=FunctionInput(),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Trying to create tensor with negative dimension"
+        )
+    )
+
+    return samples
+
 
 
 def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -3856,6 +4178,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(skipIfXpu, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3875,7 +4199,7 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
+                   DecorateInfo(skipIfXpu, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
@@ -4074,6 +4398,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.MaxPool2d,
                module_inputs_func=module_inputs_torch_nn_MaxPool2d,
+               module_error_inputs_func=module_error_inputs_torch_nn_MaxPool2d,
                ),
     ModuleInfo(torch.nn.MaxPool3d,
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
@@ -4081,6 +4406,15 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.KLDivLoss,
                module_inputs_func=module_inputs_torch_nn_KLDivLoss,
+               decorators=(
+                   # `mean` reduction over softmaxed inputs accumulates ~1 ULP per
+                   # element in fp16; the default fp16 tolerance (atol=1e-5,
+                   # rtol=1e-3) is tight enough that small RNG perturbations push
+                   # a few elements just past the threshold.
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                                "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),
+               ),
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4204,6 +4538,37 @@ module_db: list[ModuleInfo] = [
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='xpu'),),
+               ),
+    ModuleInfo(torch.nn.LinearCrossEntropyLoss,
+               module_inputs_func=module_inputs_torch_nn_LinearCrossEntropyLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_LinearCrossEntropyLoss,
+               dtypes=get_all_fp_dtypes(include_half=True, include_bfloat16=True),
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               decorators=(
+                   # No channels_last support for loss functions,
+                   # requires at least a 3-dimensional loss to
+                   # reproduce the failure.
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-2)}), "TestModule",
+                                "test_non_contiguous_tensors", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-2, rtol=5e-2)}), "TestModule",
+                                "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
+                                "test_cpu_gpu_parity", dtypes=[torch.float16]),
+                   # Insufficient accuracy, likely related to an issue with cross_entropy
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.bfloat16], device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
+                                dtypes=[torch.bfloat16], device_type='xpu'),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
+                                "test_save_load", device_type="cuda", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=2e-3)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}), "TestModule",
+                                "test_forward", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
+                                "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
+               ),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
@@ -4354,12 +4719,17 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='mps')],
                skips=(
                    # No channels_last support for MultiheadAttention currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
+               module_error_inputs_func=module_error_inputs_torch_nn_Embedding,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                decorators=[
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),

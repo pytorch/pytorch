@@ -71,7 +71,8 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
 )
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
@@ -287,7 +288,7 @@ def _extract_fake_inputs(gm, args, kwargs):
         # fake (and symbolic) inputs. The way currently it's implemented
         # is by looking at the node.meta["val"] of the placeholder nodes.
         # This doesn't work when the graph is Dynamo flattened, because now
-        # plceholder nodes doesn't have the ordering like pytree inputs do.
+        # placeholder nodes doesn't have the ordering like pytree inputs do.
         # Instead, we need to look at how the inputs are shuffled, and map
         # the inputs to their actual fake inputs and symbolic inputs.
         # Since inputs can also contain symints, we cannot simply use the
@@ -1119,7 +1120,7 @@ def _get_forward_arg_names(
             names.append(name)
     # order of kwargs matters for input spec
     if kwargs:
-        names.extend([kwarg for kwarg, _ in kwargs.items()])
+        names.extend(kwargs.keys())
 
     return names
 
@@ -1629,9 +1630,12 @@ def _strict_export(
                     raise AssertionError(
                         "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
                     )
-                node.meta["val"] = dynamo_fake_mode.from_tensor(
-                    attr, static_shapes=True
-                )
+                if is_opaque_type(type(attr)):
+                    node.meta["val"] = maybe_to_fake_obj(dynamo_fake_mode, attr)
+                else:
+                    node.meta["val"] = dynamo_fake_mode.from_tensor(
+                        attr, static_shapes=True
+                    )
 
     # Fix the graph output signature to be tuple if scalar
     wrap_tuple = False

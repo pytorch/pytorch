@@ -7,7 +7,6 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-import torch.distributed.config as dist_config
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
@@ -16,10 +15,7 @@ from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import (
-    argminmax_handler,
-    minmax_dim_handler,
-)
+from torch.distributed.tensor._nonlinear_redux import argminmax_handler
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -51,6 +47,18 @@ except ImportError:
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
+# The C++ DTensor dispatch fast path caches whether debug logging is
+# enabled.  Wrap setLevel so the cached flag is reset automatically.
+_orig_setLevel = logger.setLevel
+
+
+def _setLevel_and_reinit(level: int) -> None:
+    _orig_setLevel(level)
+    torch._C._reinit_DTensor_dispatch_logger()
+
+
+logger.setLevel = _setLevel_and_reinit  # type: ignore[method-assign]
+
 
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
@@ -78,6 +86,15 @@ def is_same_size_handler(
     lhs = cast(torch.Tensor, args[0])
     rhs = cast(torch.Tensor, args[1])
     return lhs.shape == rhs.shape
+
+
+def is_pinned_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> bool:
+    tensor = cast(dtensor.DTensor, args[0])
+    return tensor._local_tensor.is_pinned()
 
 
 def found_inf_reduce_handler(
@@ -158,14 +175,13 @@ class OpDispatcher:
         }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
+            aten.is_pinned.default: is_pinned_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
-            aten.max.dim: minmax_dim_handler,
-            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
@@ -355,10 +371,6 @@ class OpDispatcher:
                             )
                     else:
                         # CUDA device without user generator, use HOP for traceability
-                        if dist_config.compile_on_one_rank:
-                            raise NotImplementedError(
-                                "run_dtensor_rng_op is not yet compatible with compile_on_one_rank"
-                            )
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):
@@ -378,7 +390,17 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    local_results = output_sharding.redistribute_schema.op(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -469,31 +491,17 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
-                    # update the spec to handle tensor meta changes
-                    args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
-                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
-                else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
-                    if args[0]._spec.placements != output_spec.placements:
-                        raise RuntimeError(
-                            f"{op_call}: in-place operations that require placement changes "
-                            f"are not supported. The operation would change placement from "
-                            f"{args[0]._spec.placements} to {output_spec.placements}, "
-                            f"which requires redistribution and breaks aliasing semantics. "
-                            f"Please use the out-of-place version of this operation instead."
-                        )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                # Fast path: placements unchanged (common case: add_, mul_, etc.)
+                if args[0]._spec.placements == output_spec.placements:
                     return args[0]
+
+                # Placement reindexed (e.g. squeeze_ removing a non-sharded
+                # dim: Shard(1) → Shard(0)). No redistribution — the local
+                # tensor data is unchanged, only dim indices shift.
+                # strict_view=True in sharding prop prevents the illegal
+                # case (squeezing a sharded dim) from reaching here.
+                args[0]._spec = output_spec
+                return return_and_correct_aliasing(op_call, args, kwargs, args[0])
             else:
                 return None
         elif is_out_variant_op:
@@ -580,6 +588,13 @@ class OpDispatcher:
                     new_local_args.append(reshard_arg_spec)
                 else:
                     new_local_args.append(arg_spec)
+
+        # Append extra non-tensor args from rewritten schema (e.g., dims tuple).
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)
 
