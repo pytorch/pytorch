@@ -1185,6 +1185,17 @@ class CudaReproTests(TestCase):
         FileCheck().check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
+    @skipIfXpu(msg="Test relies on CUDA/HIP libdevice naming")
+    @config.patch({"eager_numerics.use_pytorch_libdevice": True})
+    def test_log_eager_numerics_uses_libdevice(self):
+        def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float16)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
     def test_uint_view_copy(self):
         @torch.compile
         def view_copy(target, source):
