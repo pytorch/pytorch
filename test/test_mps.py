@@ -1012,6 +1012,73 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(tensor_mps.to(device="cpu"), tensor_cpu)
         self.assertEqual(tensor.to(device="cpu"), tensor_0)
 
+    def test_fill_zero_uma(self):
+        """Test UMA fast path for fill/zero on contiguous MPS tensors."""
+        dtypes = [
+            torch.float32, torch.float16, torch.bfloat16,
+            torch.int32, torch.int64, torch.int8, torch.uint8, torch.bool,
+        ]
+        shapes = [(1,), (256,), (16384,), (262144,), (4, 1024)]
+
+        for dtype in dtypes:
+            for shape in shapes:
+                # zero_()
+                t_mps = torch.ones(shape, dtype=dtype, device="mps")
+                t_cpu = torch.ones(shape, dtype=dtype, device="cpu")
+                t_mps.zero_()
+                t_cpu.zero_()
+                self.assertEqual(t_mps.cpu(), t_cpu, f"zero_() failed for {dtype} {shape}")
+
+                # fill_(0) — same codepath as zero_() but through fill stub
+                t_mps = torch.ones(shape, dtype=dtype, device="mps")
+                t_cpu = torch.ones(shape, dtype=dtype, device="cpu")
+                t_mps.fill_(0)
+                t_cpu.fill_(0)
+                self.assertEqual(t_mps.cpu(), t_cpu, f"fill_(0) failed for {dtype} {shape}")
+
+                # fill_(nonzero)
+                val = True if dtype == torch.bool else 42
+                t_mps = torch.zeros(shape, dtype=dtype, device="mps")
+                t_cpu = torch.zeros(shape, dtype=dtype, device="cpu")
+                t_mps.fill_(val)
+                t_cpu.fill_(val)
+                self.assertEqual(t_mps.cpu(), t_cpu, f"fill_({val}) failed for {dtype} {shape}")
+
+        # float fill with fractional value
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            t_mps = torch.zeros(1024, dtype=dtype, device="mps")
+            t_cpu = torch.zeros(1024, dtype=dtype, device="cpu")
+            t_mps.fill_(3.14)
+            t_cpu.fill_(3.14)
+            self.assertEqual(t_mps.cpu(), t_cpu, f"fill_(3.14) failed for {dtype}")
+
+        # storage offset: fast path should use correct byte_offset
+        t_mps = torch.ones(10, dtype=torch.float32, device="mps")
+        t_cpu = torch.ones(10, dtype=torch.float32, device="cpu")
+        t_mps[3:7].fill_(0)
+        t_cpu[3:7].fill_(0)
+        self.assertEqual(t_mps.cpu(), t_cpu, "fill with storage offset failed")
+
+        # torch.zeros correctness
+        for dtype in [torch.float32, torch.float16, torch.int32]:
+            z_mps = torch.zeros(1024, dtype=dtype, device="mps")
+            z_cpu = torch.zeros(1024, dtype=dtype, device="cpu")
+            self.assertEqual(z_mps.cpu(), z_cpu, f"torch.zeros failed for {dtype}")
+
+        # non-contiguous should still work (falls through to Metal)
+        t_mps = torch.ones(4, 4, dtype=torch.float32, device="mps")
+        t_cpu = torch.ones(4, 4, dtype=torch.float32, device="cpu")
+        t_mps[::2].fill_(0)
+        t_cpu[::2].fill_(0)
+        self.assertEqual(t_mps.cpu(), t_cpu, "non-contiguous fill failed")
+
+        # negative values
+        t_mps = torch.zeros(256, dtype=torch.float32, device="mps")
+        t_cpu = torch.zeros(256, dtype=torch.float32, device="cpu")
+        t_mps.fill_(-1.0)
+        t_cpu.fill_(-1.0)
+        self.assertEqual(t_mps.cpu(), t_cpu, "fill_(-1.0) failed")
+
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(100, 10, device=device)
