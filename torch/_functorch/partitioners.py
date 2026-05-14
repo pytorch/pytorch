@@ -2788,17 +2788,17 @@ def visualize_min_cut_graph(
         return None, None
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
-    dot_graph = pydot.graph_from_dot_data(dot_format)[0]
+    dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
     for edge in dot_graph.get_edges():
         weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
         # Set edge label to weight
-        edge.set_label(str(weight))
+        edge.set_label(str(weight))  # type: ignore[union-attr]
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
-            edge.set_color("red")
+            edge.set_color("red")  # type: ignore[union-attr]
 
     # Generate SVG content
-    svg_content = dot_graph.create_svg().decode("utf-8")
+    svg_content = dot_graph.create_svg().decode("utf-8")  # type: ignore[union-attr]
 
     # Write to local file
     svg_path = _get_unique_path("min_cut_failed", ".svg")
@@ -3617,7 +3617,7 @@ def thread_graphsafe_rng_from_hops(
                     new_hop_node_with_fixed_args = module.graph.create_node(
                         "call_function",
                         torch.ops.higher_order.invoke_subgraph,
-                        (*hop_node.args, *new_rng_inputs),
+                        (*hop_node.args, *new_rng_inputs),  # type: ignore[arg-type]
                         {},
                     )
                     hop_node.replace_all_uses_with(

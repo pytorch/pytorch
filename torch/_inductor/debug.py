@@ -692,7 +692,7 @@ class DebugFormatter:
             try:
                 node_info["size"] = str(
                     V.graph.sizevars.optimization_hints(node.get_size())
-                )
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:

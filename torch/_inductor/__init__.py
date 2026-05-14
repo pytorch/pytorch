@@ -310,7 +310,7 @@ def aot_compile(
     with _compiling_state_context():
         return compile_fx_aot(
             gm,
-            flat_example_inputs,
+            flat_example_inputs,  # type: ignore[arg-type]
             config_patches=options,
         )
 
