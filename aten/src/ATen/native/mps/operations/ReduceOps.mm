@@ -56,7 +56,6 @@ enum MPSReductionType {
   AMIN,
   PROD,
   MEAN,
-  TRACE,
 };
 
 static void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
@@ -248,12 +247,6 @@ static void reduction_out_mps(const Tensor& input_t,
         castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMIN) {
         castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
-      } else if (reduction_type == MPSReductionType::TRACE) {
-        MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
-                                                                 numLower:0
-                                                                 numUpper:0
-                                                                     name:nil];
-        castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -1105,22 +1098,7 @@ static void count_nonzero_kernel_mps(TensorIterator& iter) {
 
 Tensor trace_mps(const Tensor& self) {
   TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
-
-  Tensor output_t =
-      at::empty({}, get_dtype_from_self(self, std::nullopt, true), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  std::vector<int64_t> dims(self.dim());
-  std::iota(dims.begin(), dims.end(), 0);
-
-  reduction_out_mps(self,
-                    IntArrayRef(dims),
-                    false,
-                    std::nullopt,
-                    const_cast<Tensor&>(output_t),
-                    MPSReductionType::TRACE,
-                    "trace_mps");
-
-  return output_t;
+  return self.diagonal().sum();
 }
 
 TORCH_IMPL_FUNC(prod_out_mps)
