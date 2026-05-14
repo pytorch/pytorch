@@ -1768,6 +1768,11 @@ class triton:
     Config specific to codegen/triton.py
     """
 
+    # Select the two-pass variance algorithm for CUDA inputs whose total input
+    # working set is no larger than this fraction of the device L2 cache.
+    # Set to 0 to disable the L2-aware heuristic.
+    two_pass_variance_l2_fraction = 0.5
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 

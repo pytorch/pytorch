@@ -132,6 +132,7 @@ class CodegenInductorTest(InductorTestCase):
         x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
         config_patches = {
             "mtia.disable_welford_reduction": disable_welford_reduction,
+            "triton.two_pass_variance_l2_fraction": 0.0,
         }
         _, code = self.run_and_compare(
             func,
@@ -146,6 +147,36 @@ class CodegenInductorTest(InductorTestCase):
             self.assertEqual(welford_count, 0)
         else:
             self.assertGreater(welford_count, 0)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @parametrize(
+        "two_pass_variance_l2_fraction, expect_welford",
+        [(0.0, True), (1e-12, True), (1.0, False)],
+    )
+    def test_l2_cache_aware_two_step_variance(
+        self, two_pass_variance_l2_fraction: float, expect_welford: bool
+    ):
+        def func(x):
+            return torch.var_mean(x, dim=1)
+
+        x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
+        config_patches = {
+            "triton.two_pass_variance_l2_fraction": two_pass_variance_l2_fraction,
+        }
+        _, code = self.run_and_compare(
+            func,
+            x,
+            config_patches=config_patches,
+            atol=1e-2,
+            rtol=1e-4,
+        )
+
+        welford_count = sum(prog.count("triton_helpers.welford") for prog in code)
+        if expect_welford:
+            self.assertGreater(welford_count, 0)
+        else:
+            self.assertEqual(welford_count, 0)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")

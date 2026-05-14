@@ -6834,9 +6834,11 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
+def use_two_step_variance(x, axis, keepdim, input_dtype=None):
     # two-step algorithm can get better performance in small reductions size
     # while it can accumulate more numerical error than Welford algorithm.
+    # It is also faster for L2-sized CUDA inputs, where the second pass usually
+    # reloads from L2 instead of DRAM and avoids Welford's per-element overhead.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -6845,17 +6847,33 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    has_multiple_outputs = sympy_product(ranges) != 1
+    if not (isinstance(reduction_numel, sympy.Integer) and has_multiple_outputs):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
-    )
+        return reduction_numel <= threshold
+
+    if reduction_numel <= config.unroll_reductions_threshold:
+        return True
+
+    if device and device.type == "cuda" and config.triton.two_pass_variance_l2_fraction:
+        input_numel = x.get_numel()
+        if isinstance(input_numel, sympy.Integer):
+            if device.index is None:
+                device_idx = torch.cuda.current_device()
+            else:
+                device_idx = device.index
+            input_dtype = input_dtype or x.get_dtype()
+            l2_cache_size = torch.cuda.get_device_properties(device_idx).L2_cache_size
+            l2_threshold = l2_cache_size * config.triton.two_pass_variance_l2_fraction
+            return int(input_numel) * input_dtype.itemsize <= l2_threshold
+
+    return False
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -6916,7 +6934,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         var_mean_sum_(**kwargs)
         if (
             config.mtia.disable_welford_reduction
-            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            or use_two_step_variance(
+                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+            )
         )
         else var_mean_welford_(**kwargs)
     )
