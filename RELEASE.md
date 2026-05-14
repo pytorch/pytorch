@@ -516,3 +516,16 @@ However for release we have following :
 * XPU wheel builds, depend on : https://download.pytorch.org/whl/test/triton-xpu/ for test and https://download.pytorch.org/whl/triton-xpu/ for release
 
 Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .
+
+# Changelog
+
+## [2.9.1] - 2026-05-14
+
+### Fixed
+- Fixed accelerator context manager restoration issue
+- Fixed invalid doctest assert syntax
+- Improved cache handling for get_device_capability()
+
+### Improved
+- Better typing support
+- Safer accelerator backend restoration
