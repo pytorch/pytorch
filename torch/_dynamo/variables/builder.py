@@ -39,7 +39,7 @@ import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -79,6 +79,7 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
+from torch.fx.experimental.dynamic_spec import IntVar, LeafSpec, ShapesSpec, TensorSpec
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -345,6 +346,21 @@ DimList = list
 def safe_has_grad(t: object) -> bool:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
+
+
+def lookup_spec_from_dynamo_source(
+    source: Source, shapes_spec: ShapesSpec | None
+) -> LeafSpec:
+    """Look up the spec for a function input arg from the shapes_spec.
+
+    Only supports ``LocalSource`` with ``is_input=True`` (direct function args).
+    Returns ``TensorSpec``, ``IntVar``, ``int``, or ``None``.
+    """
+    if shapes_spec is None or shapes_spec._params is None:
+        return None
+    if not isinstance(source, LocalSource) or not source.is_input:
+        return None
+    return shapes_spec._params._named_args.get(source.local_name)
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -2316,10 +2332,48 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value: object) -> VariableTracker:
+        # NOTE: DynamicInt (subclass of int) and SymInt inputs never reach here
+        # because ConstantVariable.is_literal() rejects non-exact types.
+        # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
-            if not isinstance(value, int):
-                raise AssertionError(f"Expected int, got {type(value)}")
-            # allowlist has higher precedence over specialization control.
+            # Check for user-provided spec from shapes_spec.
+            if config._shapes_spec is not None:
+                int_spec = lookup_spec_from_dynamo_source(
+                    self.source, config._shapes_spec
+                )
+                if int_spec is None:
+                    # shapes_spec is set but this int has no spec → force static
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, int):
+                    # Explicit static value — verify the actual matches.
+                    if value != int_spec:
+                        raise ValueError(
+                            f"shapes_spec declares {self.source.name} as static "
+                            f"with value {int_spec}, but got {value}"
+                        )
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, IntVar):
+                    # All IntVar specs are unbacked.
+                    result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+                    sym_val = result.sym_num  # type: ignore[attr-defined]
+                    if int_spec.min is not None:
+                        torch._check(sym_val >= int_spec.min)
+                    if int_spec.max is not None:
+                        torch._check(sym_val <= int_spec.max)
+                    if int_spec.optimization_hint is not None:
+                        expr = sym_val.node.expr
+                        sym_val.node.shape_env.var_to_hint_override[expr] = (
+                            int_spec.optimization_hint
+                        )
+                    return result
+                else:
+                    raise ValueError(
+                        f"shapes_spec for {self.source.name}: unexpected value "
+                        f"{int_spec!r} (expected int, IntVar, or None)"
+                    )
+
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
@@ -2440,10 +2494,26 @@ class VariableBuilder:
 
         is_static_input = get_static_address_type(value) is not None
 
-        if not is_static_input and (
-            isinstance(value, torch.nn.Parameter)
-            # mark tensor attributes of nn modules static
-            or (source and source.guard_source.is_unspecialized_nn_module())
+        # When a shapes_spec is provided for this tensor, we must skip the
+        # fast paths below that would freeze the tensor as a graph constant.
+        # Those paths bypass _automatic_dynamic where the spec is applied.
+        # Without this check, specifying TensorSpec on an nn.Parameter would
+        # be silently ignored.
+        # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
+        _tensor_spec = cast(
+            TensorSpec | None,
+            lookup_spec_from_dynamo_source(source, config._shapes_spec),
+        )
+        _has_spec = _tensor_spec is not None
+
+        if (
+            not _has_spec
+            and not is_static_input
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static
+                or (source and source.guard_source.is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
@@ -2462,9 +2532,12 @@ class VariableBuilder:
             is_parameter_freezing() or torch._dynamo.config.prepare_freezing
         )
 
-        if should_install_free_tensor or (
-            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source.is_fsdp_module()
+        if not _has_spec and (
+            should_install_free_tensor
+            or (
+                (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+                and not source.guard_source.is_fsdp_module()
+            )
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2569,7 +2642,7 @@ class VariableBuilder:
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
         example_value = wrap_to_fake_tensor_and_record(
-            value, tx=self.tx, is_tensor=True, source=source
+            value, tx=self.tx, is_tensor=True, source=source, tensor_spec=_tensor_spec
         )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -3925,6 +3998,53 @@ def is_unbacked_source(source_name: str) -> bool:
     return False
 
 
+def _symbolic_context_from_shapes_spec(
+    e: Any,
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
+    shape_env_to_source_to_symbol_cache: dict[Any, Any],
+) -> StatefulSymbolicContext:
+    if tensor_spec is not None and len(tensor_spec) != e.dim():
+        raise ValueError(
+            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
+            f"has {e.dim()} dims"
+        )
+    dynamic_sizes = []
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
+
+    for i in range(e.dim()):
+        if tensor_spec is None:
+            dynamic_sizes.append(DimDynamic.STATIC)
+        else:
+            dim_spec = tensor_spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                dynamic_sizes.append(DimDynamic.STATIC)
+            elif isinstance(dim_spec, IntVar):
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+            elif dim_spec is None:
+                dynamic_sizes.append(DimDynamic.STATIC)
+            else:
+                raise ValueError(
+                    f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
+                    f"(expected int, IntVar, or None)"
+                )
+
+    return StatefulSymbolicContext(
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        view_base_context=view_base_context,
+        tensor_source=source,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+    )
+
+
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -3933,6 +4053,7 @@ def _automatic_dynamic(
     source: Source,
     static_shapes: bool,
     outer_only: bool = False,
+    tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
     # strided NT not supported
     if e.is_nested and not isinstance(
@@ -3995,17 +4116,6 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes and not is_dynamic_source(name):
-        return StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
-            constraint_sizes=[None] * e.dim(),
-            constraint_strides=[None] * e.dim(),
-            view_base_context=view_base_context,
-            tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        )
-
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     from torch.fx.experimental.symbolic_shapes import has_guarding_hint, is_nested_int
@@ -4021,6 +4131,24 @@ def _automatic_dynamic(
 
         return StatefulSymbolicContext(
             dynamic_sizes=[_classify_symint(s) for s in e.size()],
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
+            view_base_context=view_base_context,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        )
+
+    # Fast path: when the tensor must be static (and not in the dynamic-source
+    # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
+    # Important: this must run BEFORE record_automatic_dynamic so that PGO
+    # frame_state is not polluted by sizes of tensors we are forcing static
+    # (e.g. nn.Parameter shapes when force_parameter_static_shapes=True).
+    # Otherwise PGO would later "learn" those dims as dynamic and bypass the
+    # progressive PGO warm-up that consumers (e.g. test_pgo_dynamic_params) rely on.
+    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+        return StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
@@ -4068,11 +4196,21 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
+    if config._shapes_spec is not None:
+        return _symbolic_context_from_shapes_spec(
+            e,
+            source,
+            tensor_spec,
+            view_base_context,
+            shape_env_to_source_to_symbol_cache,
+        )
+
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
     specialize_on = []
+
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
@@ -4232,11 +4370,17 @@ def wrap_to_fake_tensor_and_record(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     _t0 = time.time_ns()
     try:
         return _wrap_to_fake_tensor_and_record_impl(
-            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+            e,
+            tx,
+            source=source,
+            is_tensor=is_tensor,
+            parent_context=parent_context,
+            tensor_spec=tensor_spec,
         )
     finally:
         tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
@@ -4251,6 +4395,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -4266,7 +4411,9 @@ def _wrap_to_fake_tensor_and_record_impl(
         )
 
         if not parent_context:
-            symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
+            symbolic_context = _automatic_dynamic(
+                e, tx, source, static_shapes, tensor_spec=tensor_spec
+            )
         else:
             # Parent contexts are passed in when we are recursively creating
             # fake tensors for subclasses. A better design would be not to create a
@@ -4305,6 +4452,25 @@ def _wrap_to_fake_tensor_and_record_impl(
                     symbolic_context=symbolic_context,
                 )
             )
+        if tensor_spec is not None:
+            for dim_i in range(fake_e.dim()):
+                dim_spec = tensor_spec[dim_i]
+                if dim_spec is None or isinstance(dim_spec, int):
+                    continue
+                if not isinstance(dim_spec, IntVar):
+                    continue
+                size_sym = fake_e.size(dim_i)
+                if not isinstance(size_sym, torch.SymInt):
+                    continue
+                if dim_spec.min is not None:
+                    torch._check(size_sym >= dim_spec.min)
+                if dim_spec.max is not None:
+                    torch._check(size_sym <= dim_spec.max)
+                # Set var_to_hint_override (included in FX cache key)
+                hint = dim_spec.optimization_hint
+                if hint is not None:
+                    expr = size_sym.node.expr
+                    size_sym.node.shape_env.var_to_hint_override[expr] = hint
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
