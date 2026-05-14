@@ -297,6 +297,148 @@ class TestSlotsAttrAssignment(TestCase):
 
         dynamo_testing.standard_test(self, fn, nargs=1)
 
+    def test_direct_dict_write_does_not_shadow_data_descriptor(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(t, obj):
+            obj.__dict__["x"] = 99
+            return t + obj.x + obj.__dict__["x"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, Foo()))
+
+    def test_readonly_property_assignment_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            obj.x = 99
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no setter", compiled_fn, Foo())
+
+    def test_delattr_instance_dict_exposes_non_data_descriptor(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                return 5
+
+        class Foo:
+            x = Descriptor()
+
+            def __init__(self):
+                self.x = 7
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertNotIn("x", compiled_obj.__dict__)
+
+    def test_property_deleter(self):
+        class Foo:
+            def __init__(self):
+                self.deleted = False
+                self._x = 4
+
+            @property
+            def x(self):
+                return self._x
+
+            @x.deleter
+            def x(self):
+                self.deleted = True
+                self._x = 0
+
+        def fn(t, obj):
+            del obj.x
+            return t + obj.x + obj.deleted
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertTrue(compiled_obj.deleted)
+        self.assertEqual(compiled_obj._x, 0)
+
+    def test_property_without_deleter_raises(self):
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(AttributeError, fn, Foo())
+        self.assertRaisesRegex(Exception, "has no deleter", compiled_fn, Foo())
+
+    def test_slot_and_dict_mutation_same_object(self):
+        class Foo:
+            __slots__ = ("x", "__dict__")
+
+        def fn(t, obj):
+            obj.x = 2
+            obj.__dict__["y"] = 3
+            return t + obj.x + obj.__dict__["y"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.x, 2)
+        self.assertEqual(compiled_obj.__dict__["y"], 3)
+
+    def test_dunder_dict_assignment_updates_attribute_lookup(self):
+        class Foo:
+            __slots__ = ("__dict__",)
+
+        def fn(t):
+            obj = Foo()
+            obj.__dict__ = {"y": 2}
+            return t + obj.y + obj.__dict__["y"]
+
+        dynamo_testing.standard_test(self, fn, nargs=1)
+
+    def test_custom_descriptor_shadows_base_slot(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                if obj is None:
+                    return self
+                return obj.y * 2
+
+            def __set__(self, obj, value):
+                obj.y = value + 1
+
+        class Base:
+            __slots__ = ("x", "__dict__")
+
+        class Foo(Base):
+            x = Descriptor()
+
+        def fn(t, obj):
+            obj.x = 4
+            return t + obj.x + obj.y
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.ones(1)
+        compiled_obj = Foo()
+        self.assertEqual(fn(t, Foo()), compiled_fn(t, compiled_obj))
+        self.assertEqual(compiled_obj.y, 5)
+
     def test_slot_assignment_no_recompile_same_type(self):
         # Calling compiled fn repeatedly with the same slotted object type
         # must not trigger recompilation
