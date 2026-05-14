@@ -357,14 +357,15 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
+    @runOnRocmArch(MI200_ARCH)
     @parametrize("batched", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):
         # Regression test for issue #182952. On ROCm, the hipBLASLt path for
         # at::Half had no equivalent of rocBLAS's fp16_alt_impl, so backward
         # fp16 GEMMs silently flushed subnormals to zero. The dispatcher now
-        # routes fp16 backward GEMMs to rocBLAS regardless of the user's
-        # preferred backend.
+        # routes fp16 backward GEMMs to rocBLAS on gfx90a regardless of the
+        # user's preferred backend.
         dtype = torch.float16
         M = K = N = 64
         sub_val = torch.finfo(dtype).tiny / 2
