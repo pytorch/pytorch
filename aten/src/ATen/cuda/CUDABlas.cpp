@@ -889,7 +889,18 @@ void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<fl
 template <>
 void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl, so a
+  // backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
+  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass()) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
       bgemm_internal_cublas<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
     }
@@ -1419,11 +1430,22 @@ void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<floa
 template <>
 void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // hipBLASLt has no equivalent of rocblas_gemm_flags_fp16_alt_impl, so a
+  // backward fp16 GEMM on the hipBLASLt path silently flushes subnormals
+  // (issue #182952). Route fp16 backward GEMMs to rocBLAS so the
+  // ROCmBackwardPassGuard / fp16_alt_impl handling still applies.
+  if (preferred == BlasBackend::Cublaslt &&
+      at::ROCmBackwardPassGuard::is_backward_pass()) {
+    preferred = BlasBackend::Cublas;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     gemm_internal_cublaslt<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
 #endif
