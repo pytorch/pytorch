@@ -137,6 +137,26 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    def test_dynamic_grad_avgpool_gelu_relational_index(self):
+        torch.manual_seed(0)
+        linear = nn.Linear(3, 11)
+        pool1 = nn.AvgPool2d(2)
+        pool2 = nn.AvgPool2d(2)
+        x = torch.randn([16, 16, 9, 3])
+
+        def fn(x):
+            y = linear(x)
+            y = pool1(y)
+            y = pool2(y)
+            y = F.gelu(y, approximate="tanh")
+            return y.mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        actual = torch.compile(torch.func.grad(fn), dynamic=True)(x)
+        self.assertEqual(actual, expected)
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
