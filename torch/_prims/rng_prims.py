@@ -59,7 +59,6 @@ def philox_rand_offset(
     shape: torch.Size,
     device: _device,
 ):
-    throw_on_unsupported_rng_device(device)
     # For impl, look at the function calc_execution_policy in the file
     # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
     # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
@@ -93,7 +92,7 @@ def philox_rand_offset(
         num_groups = min((numel_scalar + group_size - 1) // group_size, hw_max_groups)
         result = ((numel_scalar - 1) // (group_size * num_groups * unroll) + 1) * unroll
     else:
-        raise RuntimeError("Unexpected device type for philox_rand_offset: " + device.type)
+        raise throw_on_unsupported_rng_device(device)
     return torch.scalar_tensor(result, dtype=torch.int64)
 
 
