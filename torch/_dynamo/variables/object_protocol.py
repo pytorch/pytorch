@@ -86,7 +86,7 @@ def vt_identity_compare(
     if (
         istype(left, variables.ExceptionVariable)
         and istype(right, variables.ExceptionVariable)
-        and left.exc_type is not right.exc_type  # type: ignore[attr-defined]
+        and left.exc_type is not right.exc_type
     ):
         return ConstantVariable.create(False)
 

@@ -3,7 +3,7 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch._inductor.heuristics.registry import _CACHE as _HEURISTIC_CACHE
+from torch._inductor.heuristics.template.registry import _HEURISTIC_CACHE
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
