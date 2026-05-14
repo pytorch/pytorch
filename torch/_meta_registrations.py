@@ -1560,7 +1560,7 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
@@ -1610,7 +1610,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
@@ -7920,12 +7920,10 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    if not (
-        len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ):
-        raise AssertionError(
-            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-        )
+    torch._check(
+        len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0,
+        lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
+    )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
@@ -7947,7 +7945,9 @@ def meta_pixel_shuffle(self, upscale_factor):
     out_shape = (*self.shape[:-3], C, Hr, Wr)
 
     out = self.new_empty(out_shape)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    fmt = pick_memory_format()
+    if fmt is not torch.contiguous_format:
+        out = out.to(memory_format=fmt)  # type: ignore[call-overload]
     return out
 
 
