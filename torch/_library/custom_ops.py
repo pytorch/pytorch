@@ -893,7 +893,8 @@ class CustomOpDef:
             raise ValueError(f"Device type '{device_type}' does not support autocast.")
 
         need_register = self._autocast_dtype.get(device_type) is None
-        self._autocast_dtype[device_type] = cast_inputs
+        if need_register:
+            self._autocast_dtype[device_type] = cast_inputs
         autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
         autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
 
