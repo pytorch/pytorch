@@ -2,6 +2,38 @@
 
 # Configs
 
+Some TorchInductor config options (in
+[torch/_inductor/config.py](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py))
+that control top-level autotuning behavior include:
+
+- `max_autotune`: Master switch to enable all autotuning, including template
+  kernels (GEMM, Conv, Attn) and codegen multi-configs. Increases compile time
+  and runtime performance.
+- `max_autotune_gemm`: Enables only GEMM/BMM template autotuning. More granular
+  than `max_autotune`. Increases compile time and GEMM performance.
+- `max_autotune_pointwise`: Adds extra pointwise configs beyond defaults.
+  Increases compile time and pointwise performance.
+- `autotune_pointwise`: Enables multi-config for pointwise operations
+  (1D: 2 configs, 2D: 6 configs, 3D: 7 configs). Increases compile time and
+  pointwise performance.
+- `autotune_local_cache`: Enables local caching of autotune results. Reduces
+  subsequent compile time.
+- `autotune_fallback_to_aten`: Includes ATen (cuBLAS/cuDNN) in autotuning and
+  always benchmarks native PyTorch ops. Increases compile time and provides a
+  baseline.
+- `force_disable_caches`: Disables all caches (for testing). Increases compile
+  time for every compile.
+
+For an in-depth treatment of TorchInductor autotuning (algorithm, backend
+support, examples, Triton autotuning, coordinate descent tuning), see
+[Autotuning](torch.compiler_inductor_autotuning.md).
+
+## CUDA Graphs
+
+For an introduction to CUDA Graphs in TorchInductor, see
+[CUDAGraph Trees](https://docs.pytorch.org/docs/stable/torch.compiler_cudagraph_trees.html)
+and the dedicated [CUDA Graphs](torch.compiler_inductor_cudagraphs.md) page.
+
 ## How to Set Configs
 
 ### config.py

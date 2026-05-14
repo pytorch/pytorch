@@ -21,9 +21,9 @@ TorchInductor applies a series of passes to transform an FX graph into optimized
 executable code:
 
 1. **[Pre-grad passes](torch.compiler_inductor_fx_passes.md)**: Pattern matching and rewrites on high-level Torch IR before autograd.
-2. **AOT Autograd**: Traces forward and backward graphs, functionalizes, normalizes, and decomposes to ATen IR.
+2. **[AOT Autograd](torch.compiler_inductor_decomposition.md)**: Traces forward and backward graphs, functionalizes, normalizes, and decomposes to ATen IR.
 3. **[Joint graph passes](torch.compiler_inductor_fx_passes.md)**: Optimizations on the combined forward-backward graph.
-4. **Partitioner**: Min-cut partitioning of the joint graph into separate forward and backward graphs.
+4. **[Partitioner](https://dev-discuss.pytorch.org/t/min-cut-optimal-recomputation-i-e-activation-checkpointing-with-aotautograd/467)**: Min-cut partitioning of the joint graph into separate forward and backward graphs.
 5. **[Post-grad passes](torch.compiler_inductor_fx_passes.md)**: Final high-level optimizations (dead code elimination, pattern matching) before lowering.
 6. **[Graph lowering](torch.compiler_inductor_ir.md)**: Converts ATen IR into Inductor IR.
 7. **[Scheduling](torch.compiler_inductor_scheduler.md)**: Analyzes dependencies and fuses operations to minimize memory traffic.

@@ -352,3 +352,20 @@ information, and the dynamo C++ guards.
 - The {doc}`Troubleshooting guide <torch.compiler_troubleshooting>` for a
   detailed walkthrough of `tlparse` setup and usage.
 :::
+
+## Operator Decomposition
+
+Operator decomposition refers to replacing a complex or high-level operation
+with an equivalent sequence of simpler operations. Decomposition serves the
+following purposes:
+
+1. **Autograd simplification**: Rather than implementing backward formulas for
+   all high-level operations, we can decompose them into simpler operations
+   that we already have backward formulas for.
+2. **Operator coverage for backends**: By decomposing high-level operations,
+   we can reduce the set of operations backends must support.
+3. **Optimization opportunities**: Decomposing an operation can expose more
+   opportunities for kernel fusion later in the compiler pipeline.
+
+For details on how decomposition is performed, see
+[Operator Decomposition](torch.compiler_inductor_decomposition.md).

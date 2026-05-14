@@ -147,6 +147,29 @@ compiled asynchronously and then benchmarked later.
 Not covered: CUTLASS templates, CPP Codegen, Wrapper code.
 :::
 
+## Autotuning
+
+Autotuning is the process by which TorchInductor automatically searches for the
+best-performing implementation of a given operation on a specific problem size
+and hardware configuration. Performance on modern accelerators depends heavily
+on input shapes, hardware, memory layouts, and backend selection (ATen, Triton,
+cuBLAS), so TorchInductor benchmarks candidate variants and picks the most
+performant option.
+
+There are two different types of autotuning in TorchInductor:
+
+- **Inductor Autotuning** (compile-time):
+  [`autotune_select_algorithm`](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/select_algorithm.py)
+  compares different backends and configs, typically used for
+  matmul / conv / flex attention.
+- **Triton Autotuning** (run-time):
+  [`CachingAutotuner`](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/runtime/triton_heuristics.py)
+  is a modified Triton autotuner used for codegen'd Triton kernels.
+
+For full details — algorithm, backend support, examples, caching, and
+coordinate descent tuning — see
+[Autotuning](torch.compiler_inductor_autotuning.md).
+
 :::{seealso}
 For a guide to profiling generated Inductor kernels, including environment
 variables for unique kernel naming and individual kernel benchmarking, see
