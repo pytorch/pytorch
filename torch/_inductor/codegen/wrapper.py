@@ -215,7 +215,7 @@ TritonGrid = (
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: list[triton.Config],  # type: ignore[name-defined]
+    configs: list[triton.Config],
     grids: list[TritonGrid],
     wrapper: PythonWrapperCodegen | None = None,
     original_fxnode_name: str | None = None,
@@ -340,8 +340,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     # Also include any possible kernel being called indirectly
     import triton
-    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-    from triton.language import constexpr  # type: ignore[name-defined]
+    from triton import JITFunction
+    from triton.language import constexpr
     from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
@@ -575,33 +575,21 @@ class EnterDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            if V.graph.is_dual_wrapper_mode:
-                if self.last_seen_device_guard_index is None:
-                    code.writeline_aot(
-                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                    )
-                    code.writeline_jit(
-                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                    )
-            elif V.graph.aot_mode:
-                # In AOT mode, we have a stream provided as a param. A stream is
-                # associated with a device, so we never expect the device to change.
-                # CUDAStreamGuard sets the stream and the device.
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                    )
-                else:
+            # AOTI stream is bound to a device, so CUDAStreamGuard sets both
+            # stream and device, and the device cannot change later.
+            if self.last_seen_device_guard_index is None:
+                code.writeline_aot(
+                    f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                )
+                code.writeline_jit(
+                    f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
+                )
+            else:
+                if V.graph.aot_mode:
                     assert self.last_seen_device_guard_index == self.device_idx, (
                         "AOTInductor only supports running on one CUDA device"
                     )
-            else:
-                if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                    )
-                else:
-                    code.writeline(f"device_guard.set_index({self.device_idx});")
+                code.writeline_jit(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -1118,7 +1106,7 @@ class MultiOutputLine(WrapperLine):
     indices: Sequence[Any]
 
     def codegen(self, code: IndentedBuffer) -> None:
-        def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
+        def codegen_list_tuple_access(basename, indices):
             if len(indices) > 0:
                 itype, i = indices[0]
                 if issubclass(itype, list):
@@ -1232,10 +1220,11 @@ class AssertSizeStrideLine(WrapperLine):
     name: str
     size: str
     stride: str
+    op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper.write_assert_size_stride(
-            self.name, self.size, self.stride, "input"
+        self.wrapper._codegen_assert_size_stride(
+            code, self.name, self.size, self.stride, self.op_name
         )
 
     @staticmethod
@@ -1706,12 +1695,28 @@ class PythonWrapperCodegen(CodeGen):
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
-                self.writeline(AssertSizeStrideLine(self, name, size, stride))
+                self.write_assert_size_stride(name, size, stride, "input")
 
     def write_assert_size_stride(
         self, name: str, size: str, stride: str, op_name: str
     ) -> None:
-        self.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        """Queue an assert_size_stride for emission during replay."""
+        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
+
+    def _codegen_assert_size_stride(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        size: str,
+        stride: str,
+        op_name: str,
+    ) -> None:
+        """Emit one assert_size_stride line to `code` (replay-phase target).
+
+        Subclasses override to change the emitted form (e.g., C++ assert with
+        an AOTI runtime env guard).
+        """
+        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -2199,7 +2204,7 @@ class PythonWrapperCodegen(CodeGen):
             del async_compile
         """
         )
-        scope = {}  # type: ignore[var-annotated]
+        scope = {}
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
@@ -2920,7 +2925,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg,
-                        1,  # type: ignore[arg-type]
+                        1,
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -3908,7 +3913,7 @@ class PythonWrapperCodegen(CodeGen):
             # `go_outer` manages the top-level logic for generating the final expression.
             # It handles special cases for C++ code generation and adjusts
             # the keypath based on the context (e.g., single vs. multiple outputs).
-            def go_outer():  # type: ignore[no-untyped-def]
+            def go_outer():
                 if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
@@ -4242,7 +4247,7 @@ class PythonWrapperCodegen(CodeGen):
             val = V.graph._shape_env._maybe_evaluate_static(x)
             if val is None:
                 return val
-            return int(val)  # type: ignore[call-overload]
+            return int(val)
         except Exception:
             return None
 

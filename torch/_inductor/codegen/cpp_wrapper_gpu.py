@@ -218,11 +218,9 @@ class DeferredTritonCallWrapper:
             # MultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        # Defer compilation to runtime if autotune_at_compile_time is False.
-        # In JIT mode, lazy compile handles autotuning at runtime.
-        # In AOTI mode, generate_lazy emits separate JIT and AOTI sources via
-        # DualIndentedBuffer.
-        if config.triton.autotune_at_compile_time is False:
+        # Defer compilation to runtime if autotune_at_compile_time is False (JIT only).
+        # AOTI lazy-compile emission is wired up later in the stack.
+        if not V.graph.aot_mode and config.triton.autotune_at_compile_time is False:
             return self.generate_lazy(wrapper)
 
         params = CudaKernelParamCache.get(self.kernel_name)

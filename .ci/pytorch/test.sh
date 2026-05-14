@@ -642,6 +642,15 @@ test_inductor_shard() {
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  # ROCm origami GEMM tests: rocm.origami / max_autotune are read once at config
+  # import (env-var-driven, see torch/_inductor/config.py); without these set
+  # before the process starts, the test_origami.py test class self-skips. Run
+  # only on shard 1 to avoid duplicate execution across shards.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] && [[ "$1" -eq 1 ]]; then
+    TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 \
+      python test/run_test.py --include inductor/test_origami --verbose
+  fi
 }
 
 test_inductor_aoti_cpp() {
@@ -1811,7 +1820,7 @@ build_xla() {
   rm "${XLA_DIR}/torch_patches/.torch_pin" || true
 
   apply_patches
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
@@ -1826,7 +1835,7 @@ test_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # Set LD_LIBRARY_PATH for C++ tests
   export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
