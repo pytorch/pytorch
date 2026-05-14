@@ -322,7 +322,9 @@ def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
     runner = job["runner"]
     job_id = job["job_id"]
     job_prefix = job.get("job_prefix", "test")
-    filename = f"test-reports-{job_prefix}-{config}-{shard}-{num_shards}-{runner}_{job_id}.zip"
+    filename = (
+        f"test-reports-{job_prefix}-{config}-{shard}-{num_shards}-{runner}_{job_id}.zip"
+    )
     return f"{S3_URL}/{REPO}/{run_id}/{attempt}/artifact/{filename}"
 
 
