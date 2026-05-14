@@ -654,7 +654,7 @@ class RNN(RNNBase):
         super().__init__(mode, *args, **kwargs)
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
@@ -663,7 +663,7 @@ class RNN(RNNBase):
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
@@ -671,7 +671,7 @@ class RNN(RNNBase):
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         """
         Runs the forward pass.
         """
@@ -1058,25 +1058,25 @@ class LSTM(RNNBase):
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
         hx: tuple[Tensor, Tensor] | None = None,
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         pass
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
         hx: tuple[Tensor, Tensor] | None = None,
-    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
+    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         self._update_flat_weights()
 
         orig_input = input
@@ -1356,24 +1356,24 @@ class GRU(RNNBase):
         super().__init__("GRU", *args, **kwargs)
 
     @overload  # type: ignore[override]
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: Tensor,
         hx: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:  # noqa: F811
+    ) -> tuple[Tensor, Tensor]:
         pass
 
     @overload
-    @torch._jit_internal._overload_method  # noqa: F811
+    @torch._jit_internal._overload_method
     def forward(
         self,
         input: PackedSequence,
         hx: Tensor | None = None,
-    ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
+    ) -> tuple[PackedSequence, Tensor]:
         pass
 
-    def forward(self, input, hx=None):  # noqa: F811
+    def forward(self, input, hx=None):
         self._update_flat_weights()
 
         orig_input = input

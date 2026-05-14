@@ -22,13 +22,31 @@ struct simd_type<bfloat> {
 } // namespace detail
 
 template <typename T>
-inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_sum(T val) {
   return T(::metal::simd_sum(detail::simd_type_t<T>(val)));
 }
 
+inline float2 simd_sum(float2 val) {
+  return float2(::metal::simd_sum(val.x), ::metal::simd_sum(val.y));
+}
+
 template <typename T>
-inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
+inline ::metal::
+    enable_if_t<!::metal::is_same_v<T, long> && !c10::metal::is_complex_v<T>, T>
+    simd_prod(T val) {
   return T(::metal::simd_product(detail::simd_type_t<T>(val)));
+}
+
+// Complex product reduction via shuffle, using c10::metal::mul for (a+bi)(c+di)
+// Uses simd_shuffle_and_fill_down with identity (1+0i) for inactive lanes.
+inline float2 simd_prod(float2 val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = c10::metal::mul(
+        val, ::metal::simd_shuffle_and_fill_down(val, float2(1, 0), i));
+  }
+  return val;
 }
 
 // Extend simd_broadcast to 64-bit integral types using int2 trick

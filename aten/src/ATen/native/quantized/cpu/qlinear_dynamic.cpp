@@ -366,7 +366,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       w_zero_points.data(),
       /* for dynamic should really be called dequant scale */
       requantization_scales.data(),
-      (uint8_t*)q_input.data_ptr<c10::quint8>(),
+      reinterpret_cast<const uint8_t*>(q_input.const_data_ptr<c10::quint8>()),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       bias_ptr,
@@ -515,7 +515,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
 #ifdef USE_FBGEMM
   // Use FBGEMM's FindMinMax if available since it's faster
   fbgemm::FindMinMax(
-      /*m=*/input_contig.data_ptr<float>(),
+      /*m=*/input_contig.const_data_ptr<float>(),
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
@@ -741,7 +741,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
 #ifdef USE_FBGEMM
     // Use FBGEMM's FindMinMax if available since it's faster
     fbgemm::FindMinMax(
-        /*m=*/input_contig.data_ptr<float>(),
+        /*m=*/input_contig.const_data_ptr<float>(),
         /*min=*/&x_min,
         /*max=*/&x_max,
         /*len=*/input.numel());

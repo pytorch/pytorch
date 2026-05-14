@@ -23,7 +23,7 @@ from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, IO, TYPE_CHECKING
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
@@ -1003,7 +1003,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.device_interface.synchronize()  # shake out any device errors
         self.workspace_size = c_workspace_size.value
         autotuning_log.debug(
-            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
+            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.workspace_size,
             self.kernel_name,
             self.source_file,

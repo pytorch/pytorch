@@ -3,9 +3,9 @@
 import os
 
 import torch
-from torch.testing import make_tensor  # noqa: F401
+from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import highest_precision_float
-from torch.testing._internal.opinfo.core import (  # noqa: F401
+from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     ErrorInput,
     generate_elementwise_binary_tensors,
