@@ -16677,7 +16677,12 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
+               ),
+           ],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
